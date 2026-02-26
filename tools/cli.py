@@ -256,6 +256,39 @@ def character_query_alias(
     character_query(name=name, chapter=chapter, timeline=timeline, novel_id=novel_id)
 
 
+@character_app.command("profile")
+def character_profile(
+    name: str,
+    preview_lines: int = typer.Option(
+        12, "--preview-lines", min=0, help="预览行数，0表示只显示路径"
+    ),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """查看人物动态主档路径和预览。"""
+    manager = _character_manager(Path.cwd(), novel_id)
+    profile_path = manager.get_profile_path(name=name)
+    console.print(f"[cyan]动态档案:[/cyan] {profile_path}")
+    if preview_lines <= 0:
+        return
+
+    lines = profile_path.read_text(encoding="utf-8").splitlines()
+    preview = "\n".join(lines[:preview_lines]).strip()
+    if preview:
+        console.print(preview)
+
+
+@app.command("character-profile")
+def character_profile_alias(
+    name: str,
+    preview_lines: int = typer.Option(
+        12, "--preview-lines", min=0, help="预览行数，0表示只显示路径"
+    ),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """兼容命令：character-profile。"""
+    character_profile(name=name, preview_lines=preview_lines, novel_id=novel_id)
+
+
 @outline_app.command("init")
 @app.command("outline-init")
 def outline_init():

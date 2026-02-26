@@ -103,6 +103,20 @@ def test_character_commands():
         assert "神秘玉佩" in query_result.stdout
         assert "动态档案" in query_result.stdout
 
+        profile_result = run_cli(
+            [
+                "character-profile",
+                "李逍遥",
+                "--preview-lines",
+                "2",
+                "--novel-id",
+                "test_novel",
+            ],
+            project_dir,
+        )
+        assert profile_result.returncode == 0
+        assert "char_001.md" in profile_result.stdout
+
         timeline_result = run_cli(
             ["character-query", "李逍遥", "--timeline", "--novel-id", "test_novel"],
             project_dir,

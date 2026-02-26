@@ -60,6 +60,7 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 - 章节大纲（`outline/chapters/ch_003.md`）
 - 待回收伏笔（优先 DAG，其次大纲标注扫描）
 - 人物当前状态摘要
+- 人物动态主档摘要（`characters/profiles/*.md`）
 - 场景标注摘要（tension/emotion）
 3. Director 生成本轮执行决策
 4. Librarian 生成章节节拍 + 模拟草稿
@@ -85,6 +86,7 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 - `character create`
 - `character mutate`
 - `character query`
+- `character profile`
 - `character snapshot`
 
 ### B. 伏笔系统（Phase 2 核心）

@@ -88,6 +88,9 @@ PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli character mutate 韩�
 PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli character mutate 韩策 \
   --chapter ch_001 --change acquire:残损盟印 --note "关键道具入手" --novel-id my_novel
 
+PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli character profile 韩策 \
+  --novel-id my_novel
+
 PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli simulate chapter \
   --id ch_003 --novel-id my_novel
 ```

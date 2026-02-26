@@ -94,6 +94,8 @@ def test_character_state_manager():
             / "char_001.md"
         )
         assert profile_file.exists()
+        excerpt = manager.get_profile_excerpt(name="李逍遥", max_chars=60)
+        assert "【姓名" in excerpt
 
         manager.apply_mutation(
             name="李逍遥",
@@ -212,6 +214,20 @@ def test_agent_simulator():
             env=env,
         )
 
+        profile_file = (
+            novel_root
+            / "data"
+            / "novels"
+            / "my_novel"
+            / "characters"
+            / "profiles"
+            / "char_001.md"
+        )
+        profile_file.write_text(
+            "# 李逍遥 动态档案\n【特质：九阴凝幽气】\n",
+            encoding="utf-8",
+        )
+
         chapter_file = (
             novel_root
             / "data"
@@ -261,6 +277,7 @@ def test_agent_simulator():
         assert "f001" in report["context"]["foreshadowing"]
         assert "玉佩线索出现" in report["context"]["outline"]
         assert "场景数=1" in report["context"]["scenes"]
+        assert "九阴凝幽气" in report["context"]["characters"]
         assert len(report["chapter_annotations"]["scenes"]) == 1
 
 

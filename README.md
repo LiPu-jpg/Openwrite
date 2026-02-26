@@ -18,6 +18,7 @@
 - Markdown 标记解析：`fs`、`fs-recover`、`char`、`scene`
 - Agent 模拟命令：
   - `python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel`
+  - 自动注入人物动态主档摘要（来自 `characters/profiles/*.md`）
   - 输出草稿到 `data/novels/<novel_id>/manuscript/drafts/`
   - 输出报告到 `logs/simulations/`
 - LoreChecker 结构化检查（第一版）：
@@ -63,6 +64,7 @@ python3 -m tools.cli character create 林月如 --tier 重要配角
 
 ```bash
 python3 -m tools.cli character query 李逍遥
+python3 -m tools.cli character profile 李逍遥
 python3 -m tools.cli character mutate 李逍遥 --chapter ch_001 --note "这一章立下一个性格转折点"
 python3 -m tools.cli character mutate 李逍遥 --chapter ch_002 --change acquire:神秘玉佩 --note "关键道具入手"
 python3 -m tools.cli foreshadowing-statistics

@@ -93,6 +93,36 @@ class CharacterStateManager:
     def _profile_path(self, character_id: str) -> Path:
         return self.profiles_dir / f"{character_id}.md"
 
+    def get_profile_path(
+        self, *, character_id: Optional[str] = None, name: Optional[str] = None
+    ) -> Path:
+        card = self.get_character_card(character_id=character_id, name=name)
+        return self.base_dir / card.dynamic_profile
+
+    def get_profile_excerpt(
+        self,
+        *,
+        character_id: Optional[str] = None,
+        name: Optional[str] = None,
+        max_chars: int = 120,
+    ) -> str:
+        profile_path = self.get_profile_path(character_id=character_id, name=name)
+        if not profile_path.exists():
+            return ""
+        lines = [line.strip() for line in profile_path.read_text(encoding="utf-8").splitlines()]
+        lines = [line for line in lines if line]
+        if not lines:
+            return ""
+        panel_lines = [line for line in lines if "【" in line and "】" in line]
+        if panel_lines:
+            compact_panel = " ".join(panel_lines[:6])
+            return compact_panel[:max_chars]
+
+        compact = " ".join(lines)
+        compact = re.sub(r"[`#>*_-]+", " ", compact)
+        compact = re.sub(r"\s+", " ", compact).strip()
+        return compact[:max_chars]
+
     @staticmethod
     def _profile_template(name: str, character_id: str) -> str:
         return "\n".join(

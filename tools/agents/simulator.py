@@ -149,8 +149,13 @@ class AgentSimulator:
             card = self.manager.get_character_card(character_id=item["id"])
             summary = self.manager.rebuild_state(character_id=item["id"])
             inventory_count = len(summary.items)
+            profile_excerpt = self.manager.get_profile_excerpt(
+                character_id=item["id"], max_chars=80
+            )
+            profile_part = f", 设定={profile_excerpt}" if profile_excerpt else ""
             lines.append(
-                f"{card.static.name}(境界={summary.realm}, 位置={summary.location}, 物品数={inventory_count})"
+                f"{card.static.name}(境界={summary.realm}, 位置={summary.location}, "
+                f"物品数={inventory_count}{profile_part})"
             )
         return "; ".join(lines)
 
