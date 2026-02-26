@@ -52,6 +52,16 @@ def test_character_commands():
             project_dir,
         )
         assert create_result.returncode == 0
+        profile_file = (
+            project_dir
+            / "data"
+            / "novels"
+            / "test_novel"
+            / "characters"
+            / "profiles"
+            / "char_001.md"
+        )
+        assert profile_file.exists()
 
         mutate_result = run_cli(
             [
@@ -91,6 +101,7 @@ def test_character_commands():
         assert query_result.returncode == 0
         assert "李逍遥" in query_result.stdout
         assert "神秘玉佩" in query_result.stdout
+        assert "动态档案" in query_result.stdout
 
         timeline_result = run_cli(
             ["character-query", "李逍遥", "--timeline", "--novel-id", "test_novel"],

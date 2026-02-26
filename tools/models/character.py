@@ -1,4 +1,4 @@
-"""Character and state tracking models."""
+"""Character models: lightweight card + optional detailed markdown profile."""
 
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -34,7 +34,7 @@ class CharacterRelationship(BaseModel):
 
 
 class CharacterState(BaseModel):
-    """Mutable character state at a point in timeline."""
+    """Legacy structured state model (kept for backward compatibility)."""
 
     health: str = Field(default="健康", description="Health status")
     realm: str = Field(default="凡人", description="Realm")
@@ -71,11 +71,56 @@ class StateMutation(BaseModel):
         return self
 
 
+class CharacterSummary(BaseModel):
+    """Lightweight summary shown in character card."""
+
+    realm: str = Field(default="凡人", description="Current realm")
+    location: str = Field(default="未知", description="Current location")
+    statuses: List[str] = Field(default_factory=list, description="Status tags")
+    items: List[str] = Field(default_factory=list, description="Key items")
+    highlights: List[str] = Field(default_factory=list, description="Optional short notes")
+
+
 class CharacterCard(BaseModel):
-    """Character card with mutable and immutable sections."""
+    """Character card: static profile + lightweight summary + dynamic markdown link."""
 
     static: CharacterStatic
-    initial_state: CharacterState = Field(default_factory=CharacterState)
-    current_state: CharacterState = Field(default_factory=CharacterState)
+    summary: CharacterSummary = Field(default_factory=CharacterSummary)
+    dynamic_profile: str = Field(
+        default="", description="Relative path to detailed markdown profile"
+    )
     relationships: List[CharacterRelationship] = Field(default_factory=list)
     current_snapshot: str = Field(default="", description="Latest snapshot file name")
+    initial_state: Optional[CharacterState] = Field(
+        default=None, description="Legacy field (deprecated)"
+    )
+    current_state: Optional[CharacterState] = Field(
+        default=None, description="Legacy field (deprecated)"
+    )
+
+    @model_validator(mode="after")
+    def _migrate_from_legacy_state(self) -> "CharacterCard":
+        state = self.current_state
+        has_summary = (
+            bool(self.summary.statuses)
+            or bool(self.summary.items)
+            or bool(self.summary.highlights)
+            or self.summary.realm != "凡人"
+            or self.summary.location != "未知"
+        )
+        if state is not None and not has_summary:
+            self.summary.realm = state.realm or self.summary.realm
+            self.summary.location = state.location or self.summary.location
+            if state.health and state.health != "健康":
+                self.summary.statuses.append(state.health)
+            if state.mental_state and state.mental_state != "平稳":
+                self.summary.statuses.append(state.mental_state)
+            for flag in state.flags:
+                if flag and flag not in self.summary.statuses:
+                    self.summary.statuses.append(flag)
+            for item, count in state.inventory.items():
+                if count <= 0:
+                    continue
+                item_text = item if count == 1 else f"{item} x{count}"
+                self.summary.items.append(item_text)
+        return self

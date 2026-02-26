@@ -57,3 +57,16 @@ mutations:
     health: 轻伤
     action: health
   note: 城墙混战留下轻伤
+- mutation_id: char_001_0008
+  chapter_id: ch_003
+  timestamp: '2026-02-27T03:17:47.547643'
+  note: 可行性测试重启：韩策确认先查盟印来源，再追沈砚
+- mutation_id: char_001_0009
+  chapter_id: ch_003
+  timestamp: '2026-02-27T03:17:54.438675'
+  action: acquire
+  payload:
+    raw: 雨城旧档案
+    item: 雨城旧档案
+    action: acquire
+  note: 可行性测试：补充一个可追溯道具

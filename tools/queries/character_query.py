@@ -17,11 +17,13 @@ class CharacterQuery:
 
     def get_current_state(self, name: str) -> Dict[str, Any]:
         card = self.manager.get_character_card(name=name)
+        state = self.manager.rebuild_state(character_id=card.static.id)
         return {
             "id": card.static.id,
             "name": card.static.name,
             "tier": card.static.tier,
-            "state": card.current_state.model_dump(),
+            "state": state.model_dump(),
+            "dynamic_profile": card.dynamic_profile,
             "snapshot": card.current_snapshot,
         }
 
@@ -33,6 +35,7 @@ class CharacterQuery:
             "name": card.static.name,
             "until_chapter": until_chapter,
             "state": state.model_dump(),
+            "dynamic_profile": card.dynamic_profile,
         }
 
     def get_timeline(self, name: str) -> List[Dict[str, Any]]:

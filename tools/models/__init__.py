@@ -3,6 +3,7 @@
 from .character import (
     CharacterCard,
     CharacterRelationship,
+    CharacterSummary,
     CharacterState,
     CharacterStatic,
     StateMutation,
@@ -25,6 +26,7 @@ __all__ = [
     "BannedWord",
     "CharacterCard",
     "CharacterRelationship",
+    "CharacterSummary",
     "CharacterState",
     "CharacterStatic",
     "ForeshadowingEdge",

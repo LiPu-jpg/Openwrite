@@ -184,8 +184,9 @@ class LoreCheckerAgent:
                 continue
 
             if action == "use":
-                count = card.current_state.inventory.get(payload, 0)
-                if count <= 0:
+                rebuilt = character_state_manager.rebuild_state(character_id=character_id)
+                normalized = {item.split(" x", 1)[0].strip() for item in rebuilt.items}
+                if payload not in normalized:
                     self._append_issue(
                         f"人物 {card.static.name} 尝试使用不存在/不足物品: {payload}",
                         errors,

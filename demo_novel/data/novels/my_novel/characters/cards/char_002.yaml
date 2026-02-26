@@ -2,28 +2,17 @@ static:
   id: char_002
   name: 沈砚
   aliases: []
-  gender: null
-  age: null
   appearance: ''
   personality: []
   background: ''
   faction: 黑旗盟
   tier: 重要配角
-initial_state:
-  health: 健康
+summary:
   realm: 凡人
-  stamina: 100
-  mental_state: 平稳
   location: 未知
-  inventory: {}
-  flags: []
-current_state:
-  health: 健康
-  realm: 凡人
-  stamina: 100
-  mental_state: 平稳
-  location: 未知
-  inventory: {}
-  flags: []
+  statuses: []
+  items: []
+  highlights: []
+dynamic_profile: profiles/char_002.md
 relationships: []
 current_snapshot: ''

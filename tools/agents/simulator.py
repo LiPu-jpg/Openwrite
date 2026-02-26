@@ -147,10 +147,10 @@ class AgentSimulator:
         lines: List[str] = []
         for item in entries[:limit]:
             card = self.manager.get_character_card(character_id=item["id"])
-            state = card.current_state
-            inventory_count = sum(state.inventory.values()) if state.inventory else 0
+            summary = self.manager.rebuild_state(character_id=item["id"])
+            inventory_count = len(summary.items)
             lines.append(
-                f"{card.static.name}(境界={state.realm}, 位置={state.location}, 物品数={inventory_count})"
+                f"{card.static.name}(境界={summary.realm}, 位置={summary.location}, 物品数={inventory_count})"
             )
         return "; ".join(lines)
 

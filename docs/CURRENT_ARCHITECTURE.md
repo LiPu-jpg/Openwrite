@@ -33,6 +33,7 @@ OpenWrite 现在是一个 **CLI 驱动的本地多 Agent 模拟系统**，核心
   - `tools/graph/foreshadowing_dag.py`
 - 作用：
   - 人物时间线（文本优先，结构化 mutation 可选）
+  - 人物双层档案（简卡 `cards/*.yaml` + 动态主档 `profiles/*.md`）
   - 伏笔 DAG 管理与待回收查询
 
 5. Agent 层（Simulation）
@@ -74,9 +75,10 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 ### A. 人物系统（Phase 3 核心）
 
 - 创建人物卡
+- 动态主档自动创建（Markdown，可自由写作）
 - 记录自由文本时间线（`--note`）
 - 可选记录结构化变更（`acquire/use/move/health/realm/flag`）
-- 时间线重建（按章节回放）
+- 时间线重建（按章节回放简卡摘要）
 - 生成人物卷快照
 
 相关命令：

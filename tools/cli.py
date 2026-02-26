@@ -50,6 +50,7 @@ def _ensure_project_scaffold(project_root: Path, novel_id: str) -> None:
         base / "outline" / "chapters",
         base / "outline" / "snapshots",
         base / "characters" / "cards",
+        base / "characters" / "profiles",
         base / "characters" / "timeline" / "logs",
         base / "characters" / "timeline" / "snapshots",
         base / "foreshadowing" / "logs",
@@ -237,10 +238,11 @@ def character_query(
     )
     state = result["state"]
     console.print(f"[cyan]{result['name']} ({result['id']})[/cyan]")
-    console.print(f"  健康: {state.get('health')}")
     console.print(f"  境界: {state.get('realm')}")
     console.print(f"  位置: {state.get('location')}")
-    console.print(f"  物品: {state.get('inventory') or {}}")
+    console.print(f"  状态标签: {state.get('statuses') or []}")
+    console.print(f"  关键物品: {state.get('items') or []}")
+    console.print(f"  动态档案: {result.get('dynamic_profile') or ''}")
 
 
 @app.command("character-query")

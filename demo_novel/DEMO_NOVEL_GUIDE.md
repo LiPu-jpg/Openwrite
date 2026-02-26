@@ -6,7 +6,7 @@
 
 - `metadata.yaml`：小说元信息
 - `outline/`：总纲、卷纲、章纲（含标注）
-- `characters/`：人物卡、时间线日志、快照
+- `characters/`：人物简卡、动态主档、时间线日志、快照
 - `foreshadowing/dag.yaml`：伏笔 DAG 数据
 - `world/`：势力、地点、境界、事件
 - `style/style_profile.yaml`：文风占位配置
@@ -49,6 +49,32 @@ mutations:
       item: 残损盟印
       action: acquire
     note: 父亲遗物入手
+```
+
+## 人物档案双层结构（推荐）
+
+- 简卡：`characters/cards/char_xxx.yaml`
+- 主档：`characters/profiles/char_xxx.md`
+- 规则：简卡维护“可快速检索的摘要”，主档维护“完整设定与自由书写”
+
+`cards/char_001.yaml` 示例（简化）：
+
+```yaml
+summary:
+  realm: 归元后期
+  location: 未知
+  statuses: [轻伤]
+  items: [残损盟印, 回气丹, 雨城旧档案]
+dynamic_profile: profiles/char_001.md
+```
+
+`profiles/char_001.md` 示例（自由文本）：
+
+```md
+【姓名：韩策】
+【境界：归元后期】
+【状态：轻伤，疑心渐重，盟约压力】
+...（此处可写任意长度与格式）
 ```
 
 ## 快速测试

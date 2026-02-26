@@ -84,6 +84,16 @@ def test_character_state_manager():
         manager = CharacterStateManager(project_dir=project_dir, novel_id="my_novel")
         card = manager.create_character("李逍遥", tier="主角")
         assert card.static.id == "char_001"
+        profile_file = (
+            project_dir
+            / "data"
+            / "novels"
+            / "my_novel"
+            / "characters"
+            / "profiles"
+            / "char_001.md"
+        )
+        assert profile_file.exists()
 
         manager.apply_mutation(
             name="李逍遥",
@@ -104,11 +114,12 @@ def test_character_state_manager():
         )
 
         rebuilt = manager.rebuild_state(name="李逍遥", until_chapter="ch_001")
-        assert rebuilt.inventory["神秘玉佩"] == 1
+        assert "神秘玉佩" in rebuilt.items
         assert rebuilt.location == "未知"
 
         current = manager.rebuild_state(name="李逍遥")
         assert current.location == "青云镇"
+        assert current.realm == "凡人"
         timeline = manager.get_timeline(name="李逍遥")
         assert timeline[-1].action is None
         assert timeline[-1].note == "与旧友在茶馆交换情报"

@@ -11,9 +11,21 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 try:
-    from tools.models.character import CharacterCard, CharacterState, CharacterStatic, StateMutation
+    from tools.models.character import (
+        CharacterCard,
+        CharacterSummary,
+        CharacterState,
+        CharacterStatic,
+        StateMutation,
+    )
 except ImportError:  # pragma: no cover - supports legacy path injection
-    from models.character import CharacterCard, CharacterState, CharacterStatic, StateMutation
+    from models.character import (
+        CharacterCard,
+        CharacterSummary,
+        CharacterState,
+        CharacterStatic,
+        StateMutation,
+    )
 
 
 class CharacterStateManager:
@@ -24,6 +36,7 @@ class CharacterStateManager:
         self.novel_id = novel_id
         self.base_dir = self.project_dir / "data" / "novels" / novel_id / "characters"
         self.cards_dir = self.base_dir / "cards"
+        self.profiles_dir = self.base_dir / "profiles"
         self.logs_dir = self.base_dir / "timeline" / "logs"
         self.snapshots_dir = self.base_dir / "timeline" / "snapshots"
         self.index_file = self.base_dir / "index.yaml"
@@ -38,6 +51,7 @@ class CharacterStateManager:
 
     def _ensure_dirs(self) -> None:
         self.cards_dir.mkdir(parents=True, exist_ok=True)
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.snapshots_dir.mkdir(parents=True, exist_ok=True)
         if not self.index_file.exists():
@@ -76,6 +90,76 @@ class CharacterStateManager:
     def _log_path(self, character_id: str) -> Path:
         return self.logs_dir / f"{character_id}.yaml"
 
+    def _profile_path(self, character_id: str) -> Path:
+        return self.profiles_dir / f"{character_id}.md"
+
+    @staticmethod
+    def _profile_template(name: str, character_id: str) -> str:
+        return "\n".join(
+            [
+                f"# {name} 动态档案",
+                "",
+                f"- 人物ID: `{character_id}`",
+                "- 说明: 这是作者自由书写区，支持任意 Markdown 格式。",
+                "",
+                "## 当前能力与设定（可自由扩展）",
+                "【姓名：】",
+                "【境界：】",
+                "【状态：】",
+                "【武器：】",
+                "【装备：】",
+                "【法宝：】",
+                "【物品：】",
+                "【心法：】",
+                "【特质：】",
+                "【技能：】",
+                "",
+                "## 备注",
+                "- 你可以继续追加任何段落、表格、引用、列表。",
+                "",
+            ]
+        )
+
+    @staticmethod
+    def _normalize_item_name(item: str) -> str:
+        text = item.strip()
+        if " x" in text:
+            return text.split(" x", 1)[0].strip()
+        return text
+
+    @staticmethod
+    def _update_health_statuses(statuses: List[str], health_value: str) -> None:
+        health_candidates = {
+            "健康",
+            "轻伤",
+            "重伤",
+            "濒死",
+            "死亡",
+            "康复",
+        }
+        statuses[:] = [item for item in statuses if item not in health_candidates]
+        if health_value:
+            statuses.append(health_value)
+
+    @classmethod
+    def _summary_from_legacy_state(cls, state: CharacterState) -> CharacterSummary:
+        summary = CharacterSummary(
+            realm=state.realm or "凡人",
+            location=state.location or "未知",
+        )
+        if state.health and state.health != "健康":
+            summary.statuses.append(state.health)
+        if state.mental_state and state.mental_state != "平稳":
+            summary.statuses.append(state.mental_state)
+        for flag in state.flags:
+            if flag and flag not in summary.statuses:
+                summary.statuses.append(flag)
+        for item, count in state.inventory.items():
+            if count <= 0:
+                continue
+            summary.items.append(item if count == 1 else f"{item} x{count}")
+        return summary
+
     @staticmethod
     def _chapter_order(chapter_id: str) -> Tuple[int, str]:
         match = re.search(r"(\d+)", chapter_id)
@@ -105,9 +189,16 @@ class CharacterStateManager:
                 faction=faction,
                 gender=gender,
                 age=age,
-            )
+            ),
+            dynamic_profile=f"profiles/{character_id}.md",
         )
-        self._save_yaml(self._card_path(character_id), card.model_dump())
+        self.save_character_card(card)
+        profile_file = self._profile_path(character_id)
+        if not profile_file.exists():
+            profile_file.write_text(
+                self._profile_template(name=name, character_id=character_id),
+                encoding="utf-8",
+            )
 
         index_data.setdefault("characters", []).append({"id": character_id, "name": name})
         self._save_index(index_data)
@@ -136,10 +227,24 @@ class CharacterStateManager:
         if not path.exists():
             raise FileNotFoundError(f"人物卡不存在: {final_id}")
         data = self._load_yaml(path, {})
-        return CharacterCard.model_validate(data)
+        card = CharacterCard.model_validate(data)
+        if not card.dynamic_profile:
+            card.dynamic_profile = f"profiles/{card.static.id}.md"
+        profile_file = self.base_dir / card.dynamic_profile
+        if not profile_file.exists():
+            profile_file.parent.mkdir(parents=True, exist_ok=True)
+            profile_file.write_text(
+                self._profile_template(name=card.static.name, character_id=card.static.id),
+                encoding="utf-8",
+            )
+        return card
 
     def save_character_card(self, card: CharacterCard) -> None:
-        self._save_yaml(self._card_path(card.static.id), card.model_dump())
+        data = card.model_dump(
+            exclude_none=True,
+            exclude={"initial_state", "current_state"},
+        )
+        self._save_yaml(self._card_path(card.static.id), data)
 
     def _load_mutations(self, character_id: str) -> List[StateMutation]:
         raw = self._load_yaml(self._log_path(character_id), {"mutations": []})
@@ -161,7 +266,7 @@ class CharacterStateManager:
             {"mutations": serialized},
         )
 
-    def _apply_mutation_action(self, state: CharacterState, mutation_expr: str) -> Dict[str, str]:
+    def _apply_mutation_action(self, card: CharacterCard, mutation_expr: str) -> Dict[str, str]:
         if ":" not in mutation_expr:
             raise ValueError(f"mutation 格式错误: {mutation_expr}")
 
@@ -171,30 +276,34 @@ class CharacterStateManager:
         payload: Dict[str, str] = {"raw": payload_text}
 
         if action == "acquire":
-            count = state.inventory.get(payload_text, 0)
-            state.inventory[payload_text] = count + 1
+            existing = {
+                self._normalize_item_name(item): item for item in card.summary.items
+            }
+            if payload_text not in existing:
+                card.summary.items.append(payload_text)
             payload.update({"item": payload_text})
         elif action == "use":
-            count = state.inventory.get(payload_text, 0)
-            if count <= 0:
+            idx = -1
+            for i, item in enumerate(card.summary.items):
+                if self._normalize_item_name(item) == payload_text:
+                    idx = i
+                    break
+            if idx < 0:
                 raise ValueError(f"物品不足，无法使用: {payload_text}")
-            if count == 1:
-                state.inventory.pop(payload_text, None)
-            else:
-                state.inventory[payload_text] = count - 1
+            card.summary.items.pop(idx)
             payload.update({"item": payload_text})
         elif action == "move":
-            state.location = payload_text
+            card.summary.location = payload_text
             payload.update({"location": payload_text})
         elif action == "health":
-            state.health = payload_text
+            self._update_health_statuses(card.summary.statuses, payload_text)
             payload.update({"health": payload_text})
         elif action == "realm":
-            state.realm = payload_text
+            card.summary.realm = payload_text
             payload.update({"realm": payload_text})
         elif action == "flag":
-            if payload_text and payload_text not in state.flags:
-                state.flags.append(payload_text)
+            if payload_text and payload_text not in card.summary.statuses:
+                card.summary.statuses.append(payload_text)
             payload.update({"flag": payload_text})
         else:
             raise ValueError(f"不支持的 mutation action: {action}")
@@ -218,11 +327,11 @@ class CharacterStateManager:
         key = key_by_action.get(action, "")
         return str(payload.get(key, ""))
 
-    def _apply_record_action(self, state: CharacterState, mutation: StateMutation) -> None:
+    def _apply_record_action(self, card: CharacterCard, mutation: StateMutation) -> None:
         if not mutation.action:
             return
         raw = self._payload_raw_value(mutation.action, mutation.payload)
-        self._apply_mutation_action(state, f"{mutation.action}:{raw}")
+        self._apply_mutation_action(card, f"{mutation.action}:{raw}")
 
     def apply_mutation(
         self,
@@ -238,11 +347,10 @@ class CharacterStateManager:
             raise ValueError("至少提供 --change 或 --note/--reason 之一")
 
         card = self.get_character_card(character_id=character_id, name=name)
-        after_state = CharacterState.model_validate(card.current_state.model_dump())
         payload: Dict[str, str] = {}
         action: Optional[str] = None
         if mutation_expr:
-            payload = self._apply_mutation_action(after_state, mutation_expr)
+            payload = self._apply_mutation_action(card, mutation_expr)
             action = payload.get("action")
         timeline_note = note.strip() or reason.strip()
 
@@ -261,7 +369,6 @@ class CharacterStateManager:
         self._save_mutations(card.static.id, mutations)
 
         if mutation_expr:
-            card.current_state = after_state
             self.save_character_card(card)
         return mutation
 
@@ -277,10 +384,15 @@ class CharacterStateManager:
         character_id: Optional[str] = None,
         name: Optional[str] = None,
         until_chapter: Optional[str] = None,
-    ) -> CharacterState:
+    ) -> CharacterSummary:
         card = self.get_character_card(character_id=character_id, name=name)
-        state = CharacterState.model_validate(card.initial_state.model_dump())
+        if card.initial_state is not None:
+            summary = self._summary_from_legacy_state(card.initial_state)
+        else:
+            summary = CharacterSummary()
         mutations = self._load_mutations(card.static.id)
+        if not mutations:
+            return CharacterSummary.model_validate(card.summary.model_dump())
         until_order = self._chapter_order(until_chapter) if until_chapter else None
 
         for mutation in mutations:
@@ -289,13 +401,19 @@ class CharacterStateManager:
                 break
             if mutation.action:
                 try:
-                    self._apply_record_action(state, mutation)
+                    replay_card = CharacterCard(
+                        static=card.static,
+                        summary=summary,
+                        dynamic_profile=card.dynamic_profile,
+                    )
+                    self._apply_record_action(replay_card, mutation)
+                    summary = replay_card.summary
                     continue
                 except ValueError:
                     pass
             if mutation.after_state:
-                state = CharacterState.model_validate(mutation.after_state.model_dump())
-        return state
+                summary = self._summary_from_legacy_state(mutation.after_state)
+        return summary
 
     def create_snapshot(
         self,
@@ -306,7 +424,7 @@ class CharacterStateManager:
         chapter_range: str = "",
     ) -> Path:
         card = self.get_character_card(character_id=character_id, name=name)
-        state = self.rebuild_state(character_id=card.static.id)
+        summary = self.rebuild_state(character_id=card.static.id)
 
         snapshot_file = self.snapshots_dir / f"{card.static.id}_{volume_id}.md"
         content_lines = [
@@ -319,28 +437,26 @@ class CharacterStateManager:
             f"- 章节范围: {chapter_range or '未提供'}",
             f"- 生成时间: {datetime.now().isoformat()}",
             "",
-            "## 当前状态",
-            f"- 健康: {state.health}",
-            f"- 境界: {state.realm}",
-            f"- 体力: {state.stamina}%",
-            f"- 精神: {state.mental_state}",
-            f"- 位置: {state.location}",
+            "## 简卡摘要",
+            f"- 境界: {summary.realm}",
+            f"- 位置: {summary.location}",
+            f"- 动态档案: {card.dynamic_profile or f'profiles/{card.static.id}.md'}",
             "",
-            "## 持有物品",
+            "## 状态标签",
         ]
 
-        if not state.inventory:
+        if not summary.statuses:
             content_lines.append("- 无")
         else:
-            for item, count in sorted(state.inventory.items()):
-                content_lines.append(f"- {item}: {count}")
+            for status in summary.statuses:
+                content_lines.append(f"- {status}")
 
-        content_lines.extend(["", "## 状态标记"])
-        if not state.flags:
+        content_lines.extend(["", "## 关键物品"])
+        if not summary.items:
             content_lines.append("- 无")
         else:
-            for flag in state.flags:
-                content_lines.append(f"- {flag}")
+            for item in summary.items:
+                content_lines.append(f"- {item}")
 
         snapshot_file.write_text("\n".join(content_lines) + "\n", encoding="utf-8")
 

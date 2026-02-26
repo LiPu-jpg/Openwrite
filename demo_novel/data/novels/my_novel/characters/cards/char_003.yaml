@@ -2,28 +2,17 @@ static:
   id: char_003
   name: 顾霜
   aliases: []
-  gender: null
-  age: null
   appearance: ''
   personality: []
   background: ''
   faction: 雨城韩氏
   tier: 重要配角
-initial_state:
-  health: 健康
+summary:
   realm: 凡人
-  stamina: 100
-  mental_state: 平稳
   location: 未知
-  inventory: {}
-  flags: []
-current_state:
-  health: 健康
-  realm: 凡人
-  stamina: 100
-  mental_state: 平稳
-  location: 未知
-  inventory: {}
-  flags: []
+  statuses: []
+  items: []
+  highlights: []
+dynamic_profile: profiles/char_003.md
 relationships: []
 current_snapshot: ''
