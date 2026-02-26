@@ -319,6 +319,7 @@ def test_agent_simulator():
         assert result.draft_file.exists()
         assert result.report_file.exists()
         assert result.passed is True
+        assert result.rewrite_attempts == 0
 
         report = yaml.safe_load(result.report_file.read_text(encoding="utf-8"))
         assert "f001" in report["context"]["foreshadowing"]
@@ -327,6 +328,24 @@ def test_agent_simulator():
         assert "九阴凝幽气" in report["context"]["characters"]
         assert "青云镇" in report["context"]["world"]
         assert len(report["chapter_annotations"]["scenes"]) == 1
+        assert report["lore_checker"]["attempts"][0]["passed"] is True
+
+        rewrite_result = simulator.simulate_chapter(
+            chapter_id="ch_001",
+            objective="推进主线",
+            forbidden=["冲突"],
+            required=[],
+            use_stylist=False,
+            max_rewrites=1,
+        )
+        assert rewrite_result.passed is True
+        assert rewrite_result.rewrite_attempts == 1
+        rewrite_report = yaml.safe_load(
+            rewrite_result.report_file.read_text(encoding="utf-8")
+        )
+        assert len(rewrite_report["lore_checker"]["attempts"]) >= 2
+        assert rewrite_report["lore_checker"]["attempts"][0]["passed"] is False
+        assert rewrite_report["lore_checker"]["attempts"][-1]["passed"] is True
 
 
 def run_all_tests() -> bool:

@@ -262,6 +262,10 @@ def test_simulate_chapter_command():
                 "ch_003",
                 "--objective",
                 "推进主线并保持角色一致性",
+                "--forbidden",
+                "冲突",
+                "--max-rewrites",
+                "1",
                 "--novel-id",
                 "test_novel",
             ],
@@ -270,6 +274,7 @@ def test_simulate_chapter_command():
         assert simulate_result.returncode == 0
         assert "模拟完成" in simulate_result.stdout
         assert "逻辑检查通过" in simulate_result.stdout
+        assert "重写次数" in simulate_result.stdout
 
         draft_file = (
             project_dir

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -39,6 +39,7 @@ class SimulationResult:
     report_file: Path
     errors: List[str]
     warnings: List[str]
+    rewrite_attempts: int = 0
 
 
 class AgentSimulator:
@@ -199,6 +200,7 @@ class AgentSimulator:
         required: Optional[List[str]] = None,
         use_stylist: bool = False,
         strict_lore: bool = False,
+        max_rewrites: int = 0,
     ) -> SimulationResult:
         forbidden = forbidden or []
         required = required or []
@@ -218,15 +220,48 @@ class AgentSimulator:
             context=context,
         )
         draft_text = librarian_output.draft
+        rewrite_logs: List[Dict[str, Any]] = []
+        rewrite_count = 0
 
-        lore_result = self.lore_checker.check_draft(
-            draft=draft_text,
-            forbidden=forbidden,
-            required=required,
-            chapter_annotations=chapter_annotations,
-            character_state_manager=self.manager,
-            strict=strict_lore,
-        )
+        while True:
+            lore_result = self.lore_checker.check_draft(
+                draft=draft_text,
+                forbidden=forbidden,
+                required=required,
+                chapter_annotations=chapter_annotations,
+                character_state_manager=self.manager,
+                strict=strict_lore,
+            )
+            rewrite_logs.append(
+                {
+                    "attempt": rewrite_count,
+                    "passed": lore_result.passed,
+                    "errors": lore_result.errors,
+                    "warnings": lore_result.warnings,
+                }
+            )
+            if lore_result.passed:
+                break
+            if rewrite_count >= max_rewrites:
+                break
+
+            rewrite_count += 1
+            rewritten = self.librarian.rewrite_chapter(
+                chapter_id=chapter_id,
+                objective=objective,
+                context=context,
+                previous_draft=draft_text,
+                forbidden=forbidden,
+                required=required,
+                errors=lore_result.errors,
+                warnings=lore_result.warnings,
+                attempt=rewrite_count,
+            )
+            # Avoid useless loops if rewrite cannot change content.
+            if rewritten.draft == draft_text:
+                break
+            librarian_output = rewritten
+            draft_text = rewritten.draft
 
         style_edits: List[str] = []
         if lore_result.passed and use_stylist:
@@ -248,12 +283,14 @@ class AgentSimulator:
             "librarian": {
                 "beat_count": len(librarian_output.beat_list),
                 "beats": librarian_output.beat_list,
+                "rewrite_count": rewrite_count,
             },
             "lore_checker": {
                 "strict": strict_lore,
                 "passed": lore_result.passed,
                 "errors": lore_result.errors,
                 "warnings": lore_result.warnings,
+                "attempts": rewrite_logs,
             },
             "style": {
                 "enabled": use_stylist,
@@ -275,4 +312,5 @@ class AgentSimulator:
             report_file=report_file,
             errors=lore_result.errors,
             warnings=lore_result.warnings,
+            rewrite_attempts=rewrite_count,
         )

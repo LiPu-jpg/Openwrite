@@ -1,4 +1,4 @@
-"""Librarian agent for chapter draft generation."""
+"""Librarian agent for chapter draft generation and rewrite."""
 
 from dataclasses import dataclass
 from typing import Dict, List
@@ -58,3 +58,45 @@ class LibrarianAgent:
         )
 
         return LibrarianOutput(chapter_id=chapter_id, beat_list=beats, draft="\n".join(lines) + "\n")
+
+    def rewrite_chapter(
+        self,
+        *,
+        chapter_id: str,
+        objective: str,
+        context: Dict[str, str],
+        previous_draft: str,
+        forbidden: List[str],
+        required: List[str],
+        errors: List[str],
+        warnings: List[str],
+        attempt: int,
+    ) -> LibrarianOutput:
+        """Apply lightweight rule-oriented rewrite based on checker feedback."""
+        text = previous_draft
+
+        for token in forbidden:
+            if token:
+                text = text.replace(token, "[已规避词]")
+
+        missing_required = [token for token in required if token and token not in text]
+        if missing_required:
+            text += "\n\n## 规则补写\n"
+            for token in missing_required:
+                text += f"- 已补写要素：{token}\n"
+                text += f"{token}在局势中被明确提及并推动决策。\n"
+
+        feedback = (errors + warnings)[:3]
+        if feedback:
+            sanitized_feedback: List[str] = []
+            for item in feedback:
+                text_item = item
+                for token in forbidden:
+                    if token:
+                        text_item = text_item.replace(token, "[已规避词]")
+                sanitized_feedback.append(text_item)
+            text += "\n\n> 修订记录\n"
+            text += f"> 第{attempt}轮：根据 LoreChecker 反馈修订：{'；'.join(sanitized_feedback)}\n"
+
+        beats = self.generate_beats(chapter_id, context)
+        return LibrarianOutput(chapter_id=chapter_id, beat_list=beats, draft=text)

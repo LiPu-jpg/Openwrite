@@ -51,6 +51,8 @@ OpenWrite 现在是一个 **CLI 驱动的本地多 Agent 模拟系统**，核心
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
 # 严格检查模式（需要时再开）
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-lore
+# Lore失败后自动重写
+python3 -m tools.cli simulate chapter --id ch_003 --forbidden 冲突 --max-rewrites 1 --novel-id my_novel
 ```
 
 执行流程：
@@ -66,7 +68,8 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 3. Director 生成本轮执行决策
 4. Librarian 生成章节节拍 + 模拟草稿
 5. LoreChecker 执行规则检查
-6. 结果落盘：
+6. 若未通过且设置 `--max-rewrites`，Librarian 按规则反馈自动重写并复检
+7. 结果落盘：
 - 草稿：`data/novels/<novel_id>/manuscript/drafts/<chapter_id>_draft.md`
 - 报告：`logs/simulations/<timestamp>_<chapter_id>.yaml`
 
@@ -127,6 +130,7 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 
 - Director：流程路由与说明
 - Librarian：章节节拍 + 草稿生成
+- Librarian 重写器：根据 LoreChecker 反馈进行规则导向重写
 - LoreChecker：逻辑检查
 - Stylist：已接入接口，默认不启用
 
@@ -207,6 +211,9 @@ python3 -m tools.cli world-check --novel-id my_novel
 
 # 模拟一章（默认跳过文风模块）
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
+
+# Lore失败后自动重写一次
+python3 -m tools.cli simulate chapter --id ch_003 --forbidden 冲突 --max-rewrites 1 --novel-id my_novel
 
 # 需要硬校验时
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-lore

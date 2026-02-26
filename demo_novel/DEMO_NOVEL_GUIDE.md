@@ -114,6 +114,9 @@ PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli character profile 韩
 
 PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli simulate chapter \
   --id ch_003 --novel-id my_novel
+
+PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli simulate chapter \
+  --id ch_003 --forbidden 冲突 --max-rewrites 1 --novel-id my_novel
 ```
 
 如果在 `demo_novel/` 目录执行，命令相同，`PYTHONPATH` 仍指向仓库根目录。

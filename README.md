@@ -4,7 +4,7 @@
 
 ## 项目进度看板（截至 2026-02-27）
 
-- 当前阶段：`Phase 3（人物与状态）后期 + Phase 5（Agent模拟）原型`
+- 当前阶段：`Phase 3（人物与状态）后期 + Phase 5（Agent模拟）增强`
 - 已可用主流程：`Director -> Librarian -> LoreChecker` 本地模拟跑通
 - 文风模块：按你的要求，当前流程默认跳过 Stylist，可后续单独接入
 - 现有测试：`python3 -m pytest -q`，当前 `12 passed`
@@ -20,6 +20,7 @@
 - Agent 模拟命令：
   - `python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel`
   - 自动注入人物动态主档摘要（来自 `characters/profiles/*.md`）
+  - 支持 Lore 失败后自动重写（`--max-rewrites`）
   - 输出草稿到 `data/novels/<novel_id>/manuscript/drafts/`
   - 输出报告到 `logs/simulations/`
 - LoreChecker 结构化检查（第一版）：
@@ -73,6 +74,7 @@ python3 -m tools.cli world-relation-add --source faction_shushan --target loc_qi
 python3 -m tools.cli world-check --novel-id my_novel
 python3 -m tools.cli foreshadowing-statistics
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
+python3 -m tools.cli simulate chapter --id ch_003 --forbidden 冲突 --max-rewrites 1 --novel-id my_novel
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-lore
 ```
 
@@ -137,7 +139,7 @@ openwrite/
 - [x] Phase 2: 大纲与伏笔
 - [~] Phase 3: 人物与状态（后期）
 - [~] Phase 4: 世界观图谱（基础版）
-- [~] Phase 5: Agent 模拟（原型已跑通）
+- [~] Phase 5: Agent 模拟（已支持自动重写）
 - [ ] Phase 6: Web 应用
 
 ## 贡献指南

@@ -557,6 +557,7 @@ def simulate_chapter(
     required: list[str] = typer.Option([], "--required", help="必须出现要素，可重复"),
     use_stylist: bool = typer.Option(False, "--use-stylist", help="启用文风处理"),
     strict_lore: bool = typer.Option(False, "--strict-lore", help="启用严格逻辑检查"),
+    max_rewrites: int = typer.Option(0, "--max-rewrites", min=0, help="Lore失败后最多重写次数"),
 ):
     """模拟一章多Agent工作流（默认跳过文风处理）。"""
     final_novel_id = novel_id or _detect_novel_id(Path.cwd())
@@ -568,6 +569,7 @@ def simulate_chapter(
         required=required,
         use_stylist=use_stylist,
         strict_lore=strict_lore,
+        max_rewrites=max_rewrites,
     )
 
     if result.passed:
@@ -577,6 +579,7 @@ def simulate_chapter(
 
     console.print(f"  草稿: {result.draft_file}")
     console.print(f"  报告: {result.report_file}")
+    console.print(f"  重写次数: {result.rewrite_attempts}")
     if result.errors:
         for err in result.errors:
             console.print(f"  [red]错误:[/red] {err}")
