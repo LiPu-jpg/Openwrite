@@ -21,13 +21,32 @@ class LoreCheckerAgent:
 
     SUPPORTED_MUTATIONS = {"acquire", "use", "move", "health", "realm", "flag"}
 
-    def check(self, draft: str, constraints: Dict[str, str]) -> LoreCheckResult:
+    def __init__(self, strict: bool = False):
+        self.strict = strict
+
+    @staticmethod
+    def _append_issue(
+        message: str, errors: List[str], warnings: List[str], strict: bool
+    ) -> None:
+        if strict:
+            errors.append(message)
+            return
+        warnings.append(message)
+
+    def check(
+        self, draft: str, constraints: Dict[str, str], strict: Optional[bool] = None
+    ) -> LoreCheckResult:
         forbidden_raw = constraints.get("forbidden", "")
         required_raw = constraints.get("required", "")
 
         forbidden = [item.strip() for item in forbidden_raw.split("|") if item.strip()]
         required = [item.strip() for item in required_raw.split("|") if item.strip()]
-        return self.check_draft(draft, forbidden=forbidden, required=required)
+        return self.check_draft(
+            draft,
+            forbidden=forbidden,
+            required=required,
+            strict=strict,
+        )
 
     def check_draft(
         self,
@@ -36,9 +55,11 @@ class LoreCheckerAgent:
         required: List[str],
         chapter_annotations: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         character_state_manager: Optional[Any] = None,
+        strict: Optional[bool] = None,
     ) -> LoreCheckResult:
         errors: List[str] = []
         warnings: List[str] = []
+        final_strict = self.strict if strict is None else strict
 
         for token in forbidden:
             if token in draft:
@@ -49,10 +70,19 @@ class LoreCheckerAgent:
                 warnings.append(f"未显式出现必备要素: {token}")
 
         if chapter_annotations:
-            self._check_scene_rules(chapter_annotations, errors, warnings)
+            self._check_scene_rules(
+                chapter_annotations,
+                errors,
+                warnings,
+                strict=final_strict,
+            )
             if character_state_manager is not None:
                 self._check_character_mutations(
-                    chapter_annotations, character_state_manager, errors, warnings
+                    chapter_annotations,
+                    character_state_manager,
+                    errors,
+                    warnings,
+                    strict=final_strict,
                 )
 
         return LoreCheckResult(errors=errors, warnings=warnings)
@@ -62,6 +92,7 @@ class LoreCheckerAgent:
         chapter_annotations: Dict[str, List[Dict[str, Any]]],
         errors: List[str],
         warnings: List[str],
+        strict: bool,
     ) -> None:
         scenes = chapter_annotations.get("scenes", [])
         if not scenes:
@@ -76,10 +107,20 @@ class LoreCheckerAgent:
                 try:
                     tension = int(str(tension_raw))
                 except ValueError:
-                    errors.append(f"场景 tension 非数字: {tension_raw}")
+                    self._append_issue(
+                        f"场景 tension 非数字: {tension_raw}",
+                        errors,
+                        warnings,
+                        strict,
+                    )
                 else:
                     if tension < 1 or tension > 10:
-                        errors.append(f"场景 tension 超出范围(1-10): {tension}")
+                        self._append_issue(
+                            f"场景 tension 超出范围(1-10): {tension}",
+                            errors,
+                            warnings,
+                            strict,
+                        )
                     tensions.append(tension)
             emotion = str(attrs.get("emotion", "")).strip()
             if emotion:
@@ -98,6 +139,7 @@ class LoreCheckerAgent:
         character_state_manager: Any,
         errors: List[str],
         warnings: List[str],
+        strict: bool,
     ) -> None:
         characters = chapter_annotations.get("characters", [])
         for annotation in characters:
@@ -108,16 +150,31 @@ class LoreCheckerAgent:
 
             character_id = str(attrs.get("id") or attrs.get("ref") or "").strip()
             if not character_id:
-                errors.append(f"人物 mutation 缺少 id/ref: {mutation}")
+                self._append_issue(
+                    f"人物 mutation 缺少 id/ref: {mutation}",
+                    errors,
+                    warnings,
+                    strict,
+                )
                 continue
 
             if ":" not in mutation:
-                errors.append(f"人物 mutation 格式错误: {mutation}")
+                self._append_issue(
+                    f"人物 mutation 格式错误: {mutation}",
+                    errors,
+                    warnings,
+                    strict,
+                )
                 continue
             action, payload = [part.strip() for part in mutation.split(":", 1)]
             action = action.lower()
             if action not in self.SUPPORTED_MUTATIONS:
-                errors.append(f"人物 mutation action 不支持: {action}")
+                self._append_issue(
+                    f"人物 mutation action 不支持: {action}",
+                    errors,
+                    warnings,
+                    strict,
+                )
                 continue
 
             try:
@@ -129,6 +186,9 @@ class LoreCheckerAgent:
             if action == "use":
                 count = card.current_state.inventory.get(payload, 0)
                 if count <= 0:
-                    errors.append(
-                        f"人物 {card.static.name} 尝试使用不存在/不足物品: {payload}"
+                    self._append_issue(
+                        f"人物 {card.static.name} 尝试使用不存在/不足物品: {payload}",
+                        errors,
+                        warnings,
+                        strict,
                     )

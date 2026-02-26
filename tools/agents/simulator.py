@@ -185,6 +185,7 @@ class AgentSimulator:
         forbidden: Optional[List[str]] = None,
         required: Optional[List[str]] = None,
         use_stylist: bool = False,
+        strict_lore: bool = False,
     ) -> SimulationResult:
         forbidden = forbidden or []
         required = required or []
@@ -211,6 +212,7 @@ class AgentSimulator:
             required=required,
             chapter_annotations=chapter_annotations,
             character_state_manager=self.manager,
+            strict=strict_lore,
         )
 
         style_edits: List[str] = []
@@ -235,6 +237,7 @@ class AgentSimulator:
                 "beats": librarian_output.beat_list,
             },
             "lore_checker": {
+                "strict": strict_lore,
                 "passed": lore_result.passed,
                 "errors": lore_result.errors,
                 "warnings": lore_result.warnings,

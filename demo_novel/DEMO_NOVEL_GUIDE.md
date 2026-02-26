@@ -26,11 +26,42 @@
 - 人物变更：`<!--char id=char_001 mutation="acquire:残损盟印"--> ... <!--/char-->`
 - 场景标记：`<!--scene id=s_001 tension=6 emotion=压抑--> ... <!--/scene-->`
 
+## 人物时间线格式（文本优先）
+
+- 推荐：`mutation` 只记录 `chapter + note`
+- 可选：需要可回放时再加 `action/payload`
+- 默认不再写入冗长的 `before_state/after_state`
+
+示例：
+
+```yaml
+mutations:
+  - mutation_id: char_001_0001
+    chapter_id: ch_001
+    timestamp: '2026-02-27T03:20:00'
+    note: 初到雨城，确认主线目标是找出盟印来历
+  - mutation_id: char_001_0002
+    chapter_id: ch_001
+    timestamp: '2026-02-27T03:22:00'
+    action: acquire
+    payload:
+      raw: 残损盟印
+      item: 残损盟印
+      action: acquire
+    note: 父亲遗物入手
+```
+
 ## 快速测试
 
 在仓库根目录执行：
 
 ```bash
+PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli character mutate 韩策 \
+  --chapter ch_001 --note "本章对黑旗盟动机产生误判" --novel-id my_novel
+
+PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli character mutate 韩策 \
+  --chapter ch_001 --change acquire:残损盟印 --note "关键道具入手" --novel-id my_novel
+
 PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli simulate chapter \
   --id ch_003 --novel-id my_novel
 ```

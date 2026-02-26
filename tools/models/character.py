@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CharacterStatic(BaseModel):
@@ -46,16 +46,29 @@ class CharacterState(BaseModel):
 
 
 class StateMutation(BaseModel):
-    """A state mutation event."""
+    """Timeline entry with optional structured mutation."""
 
     mutation_id: str = Field(..., description="Mutation ID")
     chapter_id: str = Field(..., description="Chapter where mutation happened")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
-    action: str = Field(..., description="Mutation action, e.g. acquire")
+    action: Optional[str] = Field(default=None, description="Mutation action, e.g. acquire")
     payload: Dict[str, str] = Field(default_factory=dict, description="Action payload")
-    reason: str = Field(default="", description="Reason")
-    before_state: CharacterState = Field(..., description="State before mutation")
-    after_state: CharacterState = Field(..., description="State after mutation")
+    note: str = Field(default="", description="Free-form timeline note")
+    reason: Optional[str] = Field(
+        default=None, description="Deprecated alias kept for old logs"
+    )
+    before_state: Optional[CharacterState] = Field(
+        default=None, description="Deprecated verbose snapshot (legacy)"
+    )
+    after_state: Optional[CharacterState] = Field(
+        default=None, description="Deprecated verbose snapshot (legacy)"
+    )
+
+    @model_validator(mode="after")
+    def _normalize_note(self) -> "StateMutation":
+        if not self.note and self.reason:
+            self.note = self.reason
+        return self
 
 
 class CharacterCard(BaseModel):

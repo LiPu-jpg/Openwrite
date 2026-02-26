@@ -148,9 +148,17 @@ class CharacterStateManager:
         return mutations
 
     def _save_mutations(self, character_id: str, mutations: List[StateMutation]) -> None:
+        serialized = [
+            mutation.model_dump(
+                exclude_none=True,
+                exclude_defaults=True,
+                exclude={"reason", "before_state", "after_state"},
+            )
+            for mutation in mutations
+        ]
         self._save_yaml(
             self._log_path(character_id),
-            {"mutations": [mutation.model_dump() for mutation in mutations]},
+            {"mutations": serialized},
         )
 
     def _apply_mutation_action(self, state: CharacterState, mutation_expr: str) -> Dict[str, str]:
@@ -194,29 +202,57 @@ class CharacterStateManager:
         payload["action"] = action
         return payload
 
+    @staticmethod
+    def _payload_raw_value(action: str, payload: Dict[str, str]) -> str:
+        raw = payload.get("raw")
+        if raw is not None:
+            return str(raw)
+        key_by_action = {
+            "acquire": "item",
+            "use": "item",
+            "move": "location",
+            "health": "health",
+            "realm": "realm",
+            "flag": "flag",
+        }
+        key = key_by_action.get(action, "")
+        return str(payload.get(key, ""))
+
+    def _apply_record_action(self, state: CharacterState, mutation: StateMutation) -> None:
+        if not mutation.action:
+            return
+        raw = self._payload_raw_value(mutation.action, mutation.payload)
+        self._apply_mutation_action(state, f"{mutation.action}:{raw}")
+
     def apply_mutation(
         self,
         *,
         character_id: Optional[str] = None,
         name: Optional[str] = None,
         chapter_id: str,
-        mutation_expr: str,
+        mutation_expr: Optional[str] = None,
+        note: str = "",
         reason: str = "",
     ) -> StateMutation:
-        card = self.get_character_card(character_id=character_id, name=name)
+        if not mutation_expr and not note.strip() and not reason.strip():
+            raise ValueError("至少提供 --change 或 --note/--reason 之一")
 
-        before_state = CharacterState.model_validate(card.current_state.model_dump())
+        card = self.get_character_card(character_id=character_id, name=name)
         after_state = CharacterState.model_validate(card.current_state.model_dump())
-        payload = self._apply_mutation_action(after_state, mutation_expr)
+        payload: Dict[str, str] = {}
+        action: Optional[str] = None
+        if mutation_expr:
+            payload = self._apply_mutation_action(after_state, mutation_expr)
+            action = payload.get("action")
+        timeline_note = note.strip() or reason.strip()
 
         mutation = StateMutation(
             mutation_id=f"{card.static.id}_{len(self._load_mutations(card.static.id)) + 1:04d}",
             chapter_id=chapter_id,
-            action=payload["action"],
+            action=action,
             payload=payload,
-            reason=reason,
-            before_state=before_state,
-            after_state=after_state,
+            note=timeline_note,
+            reason=timeline_note or None,
         )
 
         mutations = self._load_mutations(card.static.id)
@@ -224,8 +260,9 @@ class CharacterStateManager:
         mutations.sort(key=lambda item: self._chapter_order(item.chapter_id))
         self._save_mutations(card.static.id, mutations)
 
-        card.current_state = after_state
-        self.save_character_card(card)
+        if mutation_expr:
+            card.current_state = after_state
+            self.save_character_card(card)
         return mutation
 
     def get_timeline(
@@ -250,7 +287,14 @@ class CharacterStateManager:
             mutation_order = self._chapter_order(mutation.chapter_id)
             if until_order and mutation_order > until_order:
                 break
-            state = CharacterState.model_validate(mutation.after_state.model_dump())
+            if mutation.action:
+                try:
+                    self._apply_record_action(state, mutation)
+                    continue
+                except ValueError:
+                    pass
+            if mutation.after_state:
+                state = CharacterState.model_validate(mutation.after_state.model_dump())
         return state
 
     def create_snapshot(

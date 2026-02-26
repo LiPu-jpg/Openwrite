@@ -7,23 +7,7 @@ mutations:
     raw: 归元后期
     realm: 归元后期
     action: realm
-  reason: 卷初设定
-  before_state:
-    health: 健康
-    realm: 凡人
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory: {}
-    flags: []
-  after_state:
-    health: 健康
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory: {}
-    flags: []
+  note: 卷初设定：韩策修为为归元后期
 - mutation_id: char_001_0002
   chapter_id: ch_001
   timestamp: '2026-02-27T02:42:02.250409'
@@ -32,24 +16,7 @@ mutations:
     raw: 残损盟印
     item: 残损盟印
     action: acquire
-  reason: 父亲遗物
-  before_state:
-    health: 健康
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory: {}
-    flags: []
-  after_state:
-    health: 健康
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-    flags: []
+  note: 父亲遗物入手
 - mutation_id: char_001_0003
   chapter_id: ch_001
   timestamp: '2026-02-27T02:42:02.352865'
@@ -58,27 +25,8 @@ mutations:
     raw: 回气丹
     item: 回气丹
     action: acquire
-  reason: 顾霜补给
-  before_state:
-    health: 健康
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-    flags: []
-  after_state:
-    health: 健康
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-      回气丹: 1
-    flags: []
-- mutation_id: char_001_0006
+  note: 顾霜补给
+- mutation_id: char_001_0004
   chapter_id: ch_002
   timestamp: '2026-02-27T02:42:14.318250'
   action: acquire
@@ -86,27 +34,12 @@ mutations:
     raw: 回气丹
     item: 回气丹
     action: acquire
-  reason: 夜战前补给
-  before_state:
-    health: 轻伤
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-    flags: []
-  after_state:
-    health: 轻伤
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-      回气丹: 1
-    flags: []
-- mutation_id: char_001_0004
+  note: 夜战前补给
+- mutation_id: char_001_0005
+  chapter_id: ch_002
+  timestamp: '2026-02-27T02:45:20.000000'
+  note: 韩策开始怀疑沈砚放任雨城乱局，暂记疑点不下结论
+- mutation_id: char_001_0006
   chapter_id: ch_003
   timestamp: '2026-02-27T02:42:02.456515'
   action: use
@@ -114,27 +47,8 @@ mutations:
     raw: 回气丹
     item: 回气丹
     action: use
-  reason: 战斗负伤后使用
-  before_state:
-    health: 健康
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-      回气丹: 1
-    flags: []
-  after_state:
-    health: 健康
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-    flags: []
-- mutation_id: char_001_0005
+  note: 城墙混战后服药稳住气息
+- mutation_id: char_001_0007
   chapter_id: ch_003
   timestamp: '2026-02-27T02:42:02.559603'
   action: health
@@ -142,22 +56,4 @@ mutations:
     raw: 轻伤
     health: 轻伤
     action: health
-  reason: 城墙混战
-  before_state:
-    health: 健康
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-    flags: []
-  after_state:
-    health: 轻伤
-    realm: 归元后期
-    stamina: 100
-    mental_state: 平稳
-    location: 未知
-    inventory:
-      残损盟印: 1
-    flags: []
+  note: 城墙混战留下轻伤

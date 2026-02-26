@@ -12,7 +12,7 @@
 
 ### 已完成能力
 
-- 人物状态闭环：创建人物、状态变更、时间线重建、卷快照
+- 人物时间线（文本优先）：创建人物、自由备注时间线、可选结构化变更、状态重建、卷快照
 - 伏笔 DAG 基础：节点管理、状态统计、待回收伏笔读取
 - Markdown 标记解析：`fs`、`fs-recover`、`char`、`scene`
 - Agent 模拟命令：
@@ -23,6 +23,7 @@
   - 场景 `tension` 范围检查（1-10）
   - 场景 `emotion` 单一度预警
   - 人物 `mutation` 合法性检查（含 `use` 物品库存预检）
+  - 默认宽松模式（以警告为主），可用 `--strict-lore` 切换严格模式
 
 ### 正在进行
 
@@ -61,8 +62,11 @@ python3 -m tools.cli character create 林月如 --tier 重要配角
 
 ```bash
 python3 -m tools.cli character query 李逍遥
+python3 -m tools.cli character mutate 李逍遥 --chapter ch_001 --note "这一章立下一个性格转折点"
+python3 -m tools.cli character mutate 李逍遥 --chapter ch_002 --change acquire:神秘玉佩 --note "关键道具入手"
 python3 -m tools.cli foreshadowing-statistics
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
+python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-lore
 ```
 
 ## 项目结构
@@ -103,7 +107,8 @@ openwrite/
 - **伏笔追踪**: DAG 结构，权重分级
 
 ### 2. 人物系统
-- **事件溯源**: 所有状态变更可追溯
+- **文本优先**: 以自由文本时间线为主，结构化变更为可选
+- **事件溯源**: 结构化变更可回放重建状态
 - **快照机制**: 每卷结束自动生成快照
 - **Markdown 存储**: 纯文本格式，易于阅读
 

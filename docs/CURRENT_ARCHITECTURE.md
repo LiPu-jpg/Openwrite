@@ -32,7 +32,7 @@ OpenWrite 现在是一个 **CLI 驱动的本地多 Agent 模拟系统**，核心
   - `tools/character_state_manager.py`
   - `tools/graph/foreshadowing_dag.py`
 - 作用：
-  - 人物状态事件溯源（mutation）
+  - 人物时间线（文本优先，结构化 mutation 可选）
   - 伏笔 DAG 管理与待回收查询
 
 5. Agent 层（Simulation）
@@ -48,6 +48,8 @@ OpenWrite 现在是一个 **CLI 驱动的本地多 Agent 模拟系统**，核心
 
 ```bash
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
+# 严格检查模式（需要时再开）
+python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-lore
 ```
 
 执行流程：
@@ -72,7 +74,8 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
 ### A. 人物系统（Phase 3 核心）
 
 - 创建人物卡
-- 记录状态变更（`acquire/use/move/health/realm/flag`）
+- 记录自由文本时间线（`--note`）
+- 可选记录结构化变更（`acquire/use/move/health/realm/flag`）
 - 时间线重建（按章节回放）
 - 生成人物卷快照
 
@@ -122,7 +125,9 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
 - scene 张力全低或全高时给节奏预警
 - scene emotion 过度单一时预警
 - char mutation 格式校验
-- `use:<item>` 时检查人物库存，不足直接报错
+- `use:<item>` 时检查人物库存
+- 默认宽松模式：结构化问题记为 warning，不阻断创作
+- 严格模式：`--strict-lore` 时，结构化问题升级为 error
 
 ---
 
@@ -167,12 +172,18 @@ python3 -m tools.cli init my_novel
 # 创建人物
 python3 -m tools.cli character create 李逍遥 --tier 主角 --novel-id my_novel
 
-# 应用状态变更
-python3 -m tools.cli character mutate 李逍遥 --chapter ch_001 --change acquire:神秘玉佩 --novel-id my_novel
+# 记录文本时间线（推荐）
+python3 -m tools.cli character mutate 李逍遥 --chapter ch_001 --note "这一章形成对黑旗盟的误判" --novel-id my_novel
+
+# 可选：记录结构化变更
+python3 -m tools.cli character mutate 李逍遥 --chapter ch_001 --change acquire:神秘玉佩 --note "关键道具入手" --novel-id my_novel
 
 # 添加伏笔
 python3 -m tools.cli foreshadowing-add f001 --content 玉佩线索 --weight 9 --layer 主线 --target-chapter ch_010 --novel-id my_novel
 
 # 模拟一章（默认跳过文风模块）
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
+
+# 需要硬校验时
+python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-lore
 ```

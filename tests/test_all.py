@@ -97,6 +97,11 @@ def test_character_state_manager():
             mutation_expr="move:青云镇",
             reason="剧情推进",
         )
+        manager.apply_mutation(
+            name="李逍遥",
+            chapter_id="ch_002",
+            note="与旧友在茶馆交换情报",
+        )
 
         rebuilt = manager.rebuild_state(name="李逍遥", until_chapter="ch_001")
         assert rebuilt.inventory["神秘玉佩"] == 1
@@ -104,6 +109,9 @@ def test_character_state_manager():
 
         current = manager.rebuild_state(name="李逍遥")
         assert current.location == "青云镇"
+        timeline = manager.get_timeline(name="李逍遥")
+        assert timeline[-1].action is None
+        assert timeline[-1].note == "与旧友在茶馆交换情报"
 
 
 def test_cli_help():
@@ -141,9 +149,21 @@ def test_lore_checker_structured_rules():
             required=["冲突"],
             chapter_annotations=chapter_annotations,
             character_state_manager=manager,
+            strict=True,
         )
         assert any("tension 超出范围" in msg for msg in result.errors)
         assert any("尝试使用不存在/不足物品" in msg for msg in result.errors)
+
+        non_strict = checker.check_draft(
+            draft="这一段里有冲突",
+            forbidden=[],
+            required=["冲突"],
+            chapter_annotations=chapter_annotations,
+            character_state_manager=manager,
+            strict=False,
+        )
+        assert not non_strict.errors
+        assert any("tension 超出范围" in msg for msg in non_strict.warnings)
 
 
 def test_agent_simulator():

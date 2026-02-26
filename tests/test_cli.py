@@ -70,12 +70,34 @@ def test_character_commands():
         )
         assert mutate_result.returncode == 0
 
+        note_result = run_cli(
+            [
+                "character-mutate",
+                "李逍遥",
+                "--chapter",
+                "ch_001",
+                "--note",
+                "在城门口与守卫短暂对话",
+                "--novel-id",
+                "test_novel",
+            ],
+            project_dir,
+        )
+        assert note_result.returncode == 0
+
         query_result = run_cli(
             ["character-query", "李逍遥", "--novel-id", "test_novel"], project_dir
         )
         assert query_result.returncode == 0
         assert "李逍遥" in query_result.stdout
         assert "神秘玉佩" in query_result.stdout
+
+        timeline_result = run_cli(
+            ["character-query", "李逍遥", "--timeline", "--novel-id", "test_novel"],
+            project_dir,
+        )
+        assert timeline_result.returncode == 0
+        assert "在城门口与守卫短暂对话" in timeline_result.stdout
 
         snapshot_result = run_cli(
             [

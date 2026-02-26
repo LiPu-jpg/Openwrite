@@ -120,21 +120,31 @@ def character_create_alias(
 def character_mutate(
     name: str,
     chapter: str = typer.Option(..., help="章节ID，例如 ch_003"),
-    change: str = typer.Option(..., help="变更表达式，例如 acquire:神秘玉佩"),
-    reason: str = typer.Option("", help="变更原因"),
+    change: Optional[str] = typer.Option(
+        None, help="可选，结构化变更表达式，例如 acquire:神秘玉佩"
+    ),
+    note: str = typer.Option("", help="自由文本备注"),
+    reason: str = typer.Option("", help="兼容旧参数：变更原因"),
     novel_id: Optional[str] = typer.Option(None, help="小说ID"),
 ):
-    """应用人物状态变更。"""
+    """记录人物时间线（文本优先，结构化变更可选）。"""
     manager = _character_manager(Path.cwd(), novel_id)
     mutation = manager.apply_mutation(
         name=name,
         chapter_id=chapter,
         mutation_expr=change,
+        note=note,
         reason=reason,
     )
+    note_text = mutation.note or "-"
+    if mutation.action:
+        console.print(
+            f"[green]时间线已记录:[/green] {mutation.mutation_id} "
+            f"{mutation.action}:{mutation.payload.get('raw', '')} | 备注: {note_text}"
+        )
+        return
     console.print(
-        f"[green]状态变更已记录:[/green] {mutation.mutation_id} "
-        f"{mutation.action}:{mutation.payload.get('raw', '')}"
+        f"[green]时间线已记录:[/green] {mutation.mutation_id} 纯文本备注: {note_text}"
     )
 
 
@@ -142,8 +152,11 @@ def character_mutate(
 def character_mutate_alias(
     name: str,
     chapter: str = typer.Option(..., help="章节ID，例如 ch_003"),
-    change: str = typer.Option(..., help="变更表达式，例如 acquire:神秘玉佩"),
-    reason: str = typer.Option("", help="变更原因"),
+    change: Optional[str] = typer.Option(
+        None, help="可选，结构化变更表达式，例如 acquire:神秘玉佩"
+    ),
+    note: str = typer.Option("", help="自由文本备注"),
+    reason: str = typer.Option("", help="兼容旧参数：变更原因"),
     novel_id: Optional[str] = typer.Option(None, help="小说ID"),
 ):
     """兼容命令：character-mutate。"""
@@ -151,6 +164,7 @@ def character_mutate_alias(
         name=name,
         chapter=chapter,
         change=change,
+        note=note,
         reason=reason,
         novel_id=novel_id,
     )
@@ -205,13 +219,13 @@ def character_query(
         table.add_column("Mutation ID")
         table.add_column("Chapter")
         table.add_column("Action")
-        table.add_column("Reason")
+        table.add_column("Note")
         for row in rows:
             table.add_row(
                 row["mutation_id"],
                 row["chapter_id"],
-                row["action"],
-                row.get("reason", ""),
+                row.get("action") or "-",
+                row.get("note") or row.get("reason") or "",
             )
         console.print(table)
         return
@@ -339,6 +353,7 @@ def simulate_chapter(
     forbidden: list[str] = typer.Option([], "--forbidden", help="禁用词/设定，可重复"),
     required: list[str] = typer.Option([], "--required", help="必须出现要素，可重复"),
     use_stylist: bool = typer.Option(False, "--use-stylist", help="启用文风处理"),
+    strict_lore: bool = typer.Option(False, "--strict-lore", help="启用严格逻辑检查"),
 ):
     """模拟一章多Agent工作流（默认跳过文风处理）。"""
     final_novel_id = novel_id or _detect_novel_id(Path.cwd())
@@ -349,6 +364,7 @@ def simulate_chapter(
         forbidden=forbidden,
         required=required,
         use_stylist=use_stylist,
+        strict_lore=strict_lore,
     )
 
     if result.passed:
