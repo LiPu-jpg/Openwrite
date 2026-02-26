@@ -207,6 +207,54 @@ def test_simulate_chapter_command():
         )
         assert fs_result.returncode == 0
 
+        world_entity_result = run_cli(
+            [
+                "world-entity-add",
+                "loc_qingyun",
+                "青云镇",
+                "--type",
+                "location",
+                "--novel-id",
+                "test_novel",
+            ],
+            project_dir,
+        )
+        assert world_entity_result.returncode == 0
+
+        world_entity_result_2 = run_cli(
+            [
+                "world-entity-add",
+                "faction_shushan",
+                "蜀山派",
+                "--type",
+                "faction",
+                "--novel-id",
+                "test_novel",
+            ],
+            project_dir,
+        )
+        assert world_entity_result_2.returncode == 0
+
+        world_relation_result = run_cli(
+            [
+                "world-relation-add",
+                "--source",
+                "faction_shushan",
+                "--target",
+                "loc_qingyun",
+                "--relation",
+                "protects",
+                "--novel-id",
+                "test_novel",
+            ],
+            project_dir,
+        )
+        assert world_relation_result.returncode == 0
+
+        world_list_result = run_cli(["world-list", "--novel-id", "test_novel"], project_dir)
+        assert world_list_result.returncode == 0
+        assert "青云镇" in world_list_result.stdout
+
         simulate_result = run_cli(
             [
                 "simulate-chapter",
@@ -242,6 +290,7 @@ def test_simulate_chapter_command():
         assert "f001" in report_data["context"]["foreshadowing"]
         assert "主角得到玉佩线索" in report_data["context"]["outline"]
         assert "场景数=1" in report_data["context"]["scenes"]
+        assert "青云镇" in report_data["context"]["world"]
 
 
 if __name__ == "__main__":

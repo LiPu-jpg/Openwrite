@@ -1,0 +1,76 @@
+entities:
+  faction_han:
+    id: faction_han
+    name: 雨城韩氏
+    type: faction
+    description: 雨城本地大族，首卷主角阵营。
+    tags:
+    - 主角方
+    attributes:
+      stance: 守城
+  faction_black_flag:
+    id: faction_black_flag
+    name: 黑旗盟
+    type: faction
+    description: 首卷主要敌对势力。
+    tags:
+    - 反派方
+    attributes:
+      stance: 扩张
+  faction_tianheng:
+    id: faction_tianheng
+    name: 天衡旧盟
+    type: faction
+    description: 旧盟约体系，首卷围绕其裂解推进。
+    tags:
+    - 世界背景
+    attributes: {}
+  loc_rain_city:
+    id: loc_rain_city
+    name: 雨城
+    type: location
+    description: 首卷主要舞台。
+    tags:
+    - 主舞台
+    attributes: {}
+  realm_guiyuan:
+    id: realm_guiyuan
+    name: 归元境
+    type: realm
+    description: 首卷主要战力层级之一。
+    tags: []
+    attributes: {}
+  realm_jindan:
+    id: realm_jindan
+    name: 金丹境
+    type: realm
+    description: 归元之上的境界。
+    tags: []
+    attributes: {}
+relations:
+- source_id: faction_han
+  target_id: loc_rain_city
+  relation: located_in
+  weight: 8
+  note: 雨城韩氏长期经营雨城
+- source_id: faction_black_flag
+  target_id: faction_han
+  relation: hostile_to
+  weight: 9
+  note: 首卷核心冲突
+- source_id: faction_han
+  target_id: faction_tianheng
+  relation: belongs_to
+  weight: 6
+  note: 名义上仍在旧盟架构内
+- source_id: faction_black_flag
+  target_id: faction_tianheng
+  relation: was_member_of
+  weight: 5
+  note: 霍玄当众退出旧盟约
+- source_id: realm_jindan
+  target_id: realm_guiyuan
+  relation: above
+  weight: 10
+  note: 境界层级
+updated_at: '2026-02-27T04:30:00'

@@ -7,13 +7,14 @@
 - 当前阶段：`Phase 3（人物与状态）后期 + Phase 5（Agent模拟）原型`
 - 已可用主流程：`Director -> Librarian -> LoreChecker` 本地模拟跑通
 - 文风模块：按你的要求，当前流程默认跳过 Stylist，可后续单独接入
-- 现有测试：`python3 -m pytest -q`，当前 `11 passed`
+- 现有测试：`python3 -m pytest -q`，当前 `12 passed`
 - 架构说明文档：`docs/CURRENT_ARCHITECTURE.md`
 
 ### 已完成能力
 
 - 人物双层档案：`cards/*.yaml` 简卡 + `profiles/*.md` 动态主档（自由格式）
 - 人物时间线（文本优先）：自由备注时间线、可选结构化变更、摘要重建、卷快照
+- 世界观图谱（基础版）：实体/关系管理、图谱摘要、冲突检查
 - 伏笔 DAG 基础：节点管理、状态统计、待回收伏笔读取
 - Markdown 标记解析：`fs`、`fs-recover`、`char`、`scene`
 - Agent 模拟命令：
@@ -34,7 +35,7 @@
 
 ### 尚未开始或未完成
 
-- 世界观图谱（`Phase 4`）：模型、查询、冲突检查
+- 世界观图谱（`Phase 4`）：复杂规则推理、跨章节冲突检查、可视化
 - 文风迭代闭环（你单独维护的模块）
 - Web 应用（`Phase 6`）：后端 API、前端编辑器、可视化界面
 
@@ -67,6 +68,9 @@ python3 -m tools.cli character query 李逍遥
 python3 -m tools.cli character profile 李逍遥
 python3 -m tools.cli character mutate 李逍遥 --chapter ch_001 --note "这一章立下一个性格转折点"
 python3 -m tools.cli character mutate 李逍遥 --chapter ch_002 --change acquire:神秘玉佩 --note "关键道具入手"
+python3 -m tools.cli world-entity-add faction_shushan 蜀山派 --type faction --novel-id my_novel
+python3 -m tools.cli world-relation-add --source faction_shushan --target loc_qingyun --relation protects --novel-id my_novel
+python3 -m tools.cli world-check --novel-id my_novel
 python3 -m tools.cli foreshadowing-statistics
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-lore
@@ -132,7 +136,7 @@ openwrite/
 - [x] Phase 1: 基础工具
 - [x] Phase 2: 大纲与伏笔
 - [~] Phase 3: 人物与状态（后期）
-- [ ] Phase 4: 世界观图谱
+- [~] Phase 4: 世界观图谱（基础版）
 - [~] Phase 5: Agent 模拟（原型已跑通）
 - [ ] Phase 6: Web 应用
 

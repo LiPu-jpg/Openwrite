@@ -76,6 +76,34 @@ def test_foreshadowing_checker():
         assert "statistics" in results
 
 
+def test_world_graph_manager():
+    from world_graph_manager import WorldGraphManager
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        manager = WorldGraphManager(project_dir=Path(tmpdir), novel_id="my_novel")
+        manager.upsert_entity(
+            entity_id="faction_han",
+            name="雨城韩氏",
+            entity_type="faction",
+            tags=["主角方"],
+        )
+        manager.upsert_entity(
+            entity_id="city_rain",
+            name="雨城",
+            entity_type="location",
+        )
+        manager.add_relation(
+            source_id="faction_han",
+            target_id="city_rain",
+            relation="located_in",
+            weight=5,
+        )
+        summary = manager.summary()
+        assert "雨城韩氏" in summary
+        check = manager.check_conflicts()
+        assert check["is_valid"] is True
+
+
 def test_character_state_manager():
     from character_state_manager import CharacterStateManager
 
@@ -182,6 +210,7 @@ def test_lore_checker_structured_rules():
 def test_agent_simulator():
     from agents.simulator import AgentSimulator
     from graph.foreshadowing_dag import ForeshadowingDAGManager
+    from world_graph_manager import WorldGraphManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
         project_dir = Path(tmpdir)
@@ -260,6 +289,24 @@ def test_agent_simulator():
             created_at="ch_001",
             target_chapter="ch_010",
         )
+        world_manager = WorldGraphManager(project_dir=novel_root, novel_id="my_novel")
+        world_manager.upsert_entity(
+            entity_id="loc_qingyun",
+            name="青云镇",
+            entity_type="location",
+            description="主角早期重要据点",
+        )
+        world_manager.upsert_entity(
+            entity_id="faction_shushan",
+            name="蜀山派",
+            entity_type="faction",
+        )
+        world_manager.add_relation(
+            source_id="faction_shushan",
+            target_id="loc_qingyun",
+            relation="protects",
+            weight=6,
+        )
 
         simulator = AgentSimulator(project_dir=novel_root, novel_id="my_novel")
         result = simulator.simulate_chapter(
@@ -278,6 +325,7 @@ def test_agent_simulator():
         assert "玉佩线索出现" in report["context"]["outline"]
         assert "场景数=1" in report["context"]["scenes"]
         assert "九阴凝幽气" in report["context"]["characters"]
+        assert "青云镇" in report["context"]["world"]
         assert len(report["chapter_annotations"]["scenes"]) == 1
 
 
@@ -285,6 +333,7 @@ def run_all_tests() -> bool:
     test_markdown_parser()
     test_foreshadowing_dag()
     test_foreshadowing_checker()
+    test_world_graph_manager()
     test_character_state_manager()
     test_cli_help()
     test_lore_checker_structured_rules()

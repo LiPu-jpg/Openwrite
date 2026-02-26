@@ -16,19 +16,23 @@ try:
     from tools.character_state_manager import CharacterStateManager
     from tools.graph.foreshadowing_dag import ForeshadowingDAGManager
     from tools.queries.character_query import CharacterQuery
+    from tools.world_graph_manager import WorldGraphManager
 except ImportError:  # pragma: no cover - supports legacy path injection
     from agents.simulator import AgentSimulator
     from character_state_manager import CharacterStateManager
     from graph.foreshadowing_dag import ForeshadowingDAGManager
     from queries.character_query import CharacterQuery
+    from world_graph_manager import WorldGraphManager
 
 
 app = typer.Typer(help="OpenWrite - AI辅助小说创作系统")
 character_app = typer.Typer(help="人物相关命令")
 outline_app = typer.Typer(help="大纲相关命令")
+world_app = typer.Typer(help="世界观图谱命令")
 simulate_app = typer.Typer(help="多Agent模拟命令")
 app.add_typer(character_app, name="character")
 app.add_typer(outline_app, name="outline")
+app.add_typer(world_app, name="world")
 app.add_typer(simulate_app, name="simulate")
 console = Console()
 
@@ -91,6 +95,25 @@ def _foreshadowing_manager(
 ) -> ForeshadowingDAGManager:
     final_novel_id = novel_id or _detect_novel_id(project_dir)
     return ForeshadowingDAGManager(project_dir=project_dir, novel_id=final_novel_id)
+
+
+def _world_manager(project_dir: Path, novel_id: Optional[str]) -> WorldGraphManager:
+    final_novel_id = novel_id or _detect_novel_id(project_dir)
+    return WorldGraphManager(project_dir=project_dir, novel_id=final_novel_id)
+
+
+def _parse_world_attrs(raw_attrs: list[str]) -> dict[str, str]:
+    attrs: dict[str, str] = {}
+    for item in raw_attrs:
+        if "=" not in item:
+            raise typer.BadParameter(f"--attr 参数格式错误: {item}，应为 key=value")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            raise typer.BadParameter(f"--attr key 不能为空: {item}")
+        attrs[key] = value
+    return attrs
 
 
 @character_app.command("create")
@@ -287,6 +310,151 @@ def character_profile_alias(
 ):
     """兼容命令：character-profile。"""
     character_profile(name=name, preview_lines=preview_lines, novel_id=novel_id)
+
+
+@world_app.command("entity-add")
+def world_entity_add(
+    id: str,
+    name: str,
+    type: str = typer.Option("concept", "--type", help="实体类型，如 faction/realm/location"),
+    description: str = typer.Option("", help="实体描述"),
+    tag: list[str] = typer.Option([], "--tag", help="标签，可重复"),
+    attr: list[str] = typer.Option([], "--attr", help="属性 key=value，可重复"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """添加或更新世界观实体。"""
+    manager = _world_manager(Path.cwd(), novel_id)
+    entity = manager.upsert_entity(
+        entity_id=id,
+        name=name,
+        entity_type=type,
+        description=description,
+        tags=tag,
+        attributes=_parse_world_attrs(attr),
+    )
+    console.print(f"[green]世界实体已保存:[/green] {entity.id} ({entity.name})")
+
+
+@app.command("world-entity-add")
+def world_entity_add_alias(
+    id: str,
+    name: str,
+    type: str = typer.Option("concept", "--type", help="实体类型，如 faction/realm/location"),
+    description: str = typer.Option("", help="实体描述"),
+    tag: list[str] = typer.Option([], "--tag", help="标签，可重复"),
+    attr: list[str] = typer.Option([], "--attr", help="属性 key=value，可重复"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """兼容命令：world-entity-add。"""
+    world_entity_add(
+        id=id,
+        name=name,
+        type=type,
+        description=description,
+        tag=tag,
+        attr=attr,
+        novel_id=novel_id,
+    )
+
+
+@world_app.command("relation-add")
+def world_relation_add(
+    source: str = typer.Option(..., "--source", help="源实体ID"),
+    target: str = typer.Option(..., "--target", help="目标实体ID"),
+    relation: str = typer.Option(..., "--relation", help="关系类型"),
+    weight: int = typer.Option(1, "--weight", help="关系权重(1-10)"),
+    note: str = typer.Option("", "--note", help="备注"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """添加世界观关系。"""
+    manager = _world_manager(Path.cwd(), novel_id)
+    created = manager.add_relation(
+        source_id=source,
+        target_id=target,
+        relation=relation,
+        weight=weight,
+        note=note,
+    )
+    console.print(
+        f"[green]世界关系已添加:[/green] "
+        f"{created.source_id}-{created.relation}->{created.target_id}"
+    )
+
+
+@app.command("world-relation-add")
+def world_relation_add_alias(
+    source: str = typer.Option(..., "--source", help="源实体ID"),
+    target: str = typer.Option(..., "--target", help="目标实体ID"),
+    relation: str = typer.Option(..., "--relation", help="关系类型"),
+    weight: int = typer.Option(1, "--weight", help="关系权重(1-10)"),
+    note: str = typer.Option("", "--note", help="备注"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """兼容命令：world-relation-add。"""
+    world_relation_add(
+        source=source,
+        target=target,
+        relation=relation,
+        weight=weight,
+        note=note,
+        novel_id=novel_id,
+    )
+
+
+@world_app.command("list")
+def world_list(
+    type: str = typer.Option("", "--type", help="按实体类型过滤"),
+    relation: str = typer.Option("", "--relation", help="按关系类型过滤"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """列出世界观实体与关系。"""
+    manager = _world_manager(Path.cwd(), novel_id)
+    entities = manager.list_entities(entity_type=type)
+    relations = manager.list_relations(relation=relation)
+
+    entity_table = Table(show_header=True, header_style="bold cyan")
+    entity_table.add_column("ID")
+    entity_table.add_column("Name")
+    entity_table.add_column("Type")
+    entity_table.add_column("Tags")
+    for item in entities:
+        entity_table.add_row(item.id, item.name, item.type, ",".join(item.tags))
+    console.print(entity_table)
+
+    relation_table = Table(show_header=True, header_style="bold magenta")
+    relation_table.add_column("Source")
+    relation_table.add_column("Relation")
+    relation_table.add_column("Target")
+    relation_table.add_column("Weight")
+    for item in relations:
+        relation_table.add_row(
+            item.source_id, item.relation, item.target_id, str(item.weight)
+        )
+    console.print(relation_table)
+
+
+@app.command("world-list")
+def world_list_alias(
+    type: str = typer.Option("", "--type", help="按实体类型过滤"),
+    relation: str = typer.Option("", "--relation", help="按关系类型过滤"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """兼容命令：world-list。"""
+    world_list(type=type, relation=relation, novel_id=novel_id)
+
+
+@world_app.command("check")
+def world_check(novel_id: Optional[str] = typer.Option(None, help="小说ID")):
+    """检查世界观图谱一致性。"""
+    manager = _world_manager(Path.cwd(), novel_id)
+    result = manager.check_conflicts()
+    console.print(result)
+
+
+@app.command("world-check")
+def world_check_alias(novel_id: Optional[str] = typer.Option(None, help="小说ID")):
+    """兼容命令：world-check。"""
+    world_check(novel_id=novel_id)
 
 
 @outline_app.command("init")

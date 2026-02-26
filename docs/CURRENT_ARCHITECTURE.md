@@ -61,6 +61,7 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 - 待回收伏笔（优先 DAG，其次大纲标注扫描）
 - 人物当前状态摘要
 - 人物动态主档摘要（`characters/profiles/*.md`）
+- 世界观图谱摘要（`world/world_graph.yaml`）
 - 场景标注摘要（tension/emotion）
 3. Director 生成本轮执行决策
 4. Librarian 生成章节节拍 + 模拟草稿
@@ -89,7 +90,20 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 - `character profile`
 - `character snapshot`
 
-### B. 伏笔系统（Phase 2 核心）
+### B. 世界观图谱（Phase 4 基础版）
+
+- 世界实体管理（Entity）
+- 世界关系管理（Relation）
+- 图谱摘要生成（供 Agent 上下文注入）
+- 图谱冲突检查（引用缺失/重复关系/境界层级循环）
+
+相关命令：
+- `world entity-add`
+- `world relation-add`
+- `world list`
+- `world check`
+
+### C. 伏笔系统（Phase 2 核心）
 
 - 伏笔节点管理（含权重、层级、目标章节）
 - 状态统计与待回收查询
@@ -101,7 +115,7 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 - `foreshadowing-check`
 - `foreshadowing-statistics`
 
-### C. Markdown 标注解析
+### D. Markdown 标注解析
 
 已解析：
 - `fs` / `伏笔`
@@ -109,7 +123,7 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 - `char`
 - `scene`
 
-### D. Agent 模拟（原型）
+### E. Agent 模拟（原型）
 
 - Director：流程路由与说明
 - Librarian：章节节拍 + 草稿生成
@@ -138,8 +152,8 @@ python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-l
 ## 5. 还没完成（你可直接提需求）
 
 1. 世界观图谱（Phase 4）
-- `tools/models/world.py` 仍为空
-- world 查询与冲突检查未落地
+- 已完成：实体/关系基础管理、冲突检查、模拟上下文注入
+- 待完成：复杂规则推理（克制链、条件触发）、跨章节一致性检查、可视化
 
 2. 大纲深度能力
 - `outline init/create` 仍偏轻量
@@ -184,6 +198,12 @@ python3 -m tools.cli character mutate 李逍遥 --chapter ch_001 --change acquir
 
 # 添加伏笔
 python3 -m tools.cli foreshadowing-add f001 --content 玉佩线索 --weight 9 --layer 主线 --target-chapter ch_010 --novel-id my_novel
+
+# 世界观图谱
+python3 -m tools.cli world-entity-add faction_shushan 蜀山派 --type faction --novel-id my_novel
+python3 -m tools.cli world-entity-add loc_qingyun 青云镇 --type location --novel-id my_novel
+python3 -m tools.cli world-relation-add --source faction_shushan --target loc_qingyun --relation protects --novel-id my_novel
+python3 -m tools.cli world-check --novel-id my_novel
 
 # 模拟一章（默认跳过文风模块）
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel

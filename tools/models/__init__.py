@@ -19,6 +19,7 @@ from .style import (
     StyleProfile,
     StyleQualityMetrics,
 )
+from .world import WorldEntity, WorldGraph, WorldRelation
 
 __all__ = [
     "BannedPhrase",
@@ -41,4 +42,7 @@ __all__ = [
     "StylePositiveFeatures",
     "StyleProfile",
     "StyleQualityMetrics",
+    "WorldEntity",
+    "WorldGraph",
+    "WorldRelation",
 ]

@@ -17,6 +17,7 @@ try:
     from tools.character_state_manager import CharacterStateManager
     from tools.graph.foreshadowing_dag import ForeshadowingDAGManager
     from tools.queries.outline_query import OutlineQuery
+    from tools.world_graph_manager import WorldGraphManager
 except ImportError:  # pragma: no cover - supports legacy path injection
     from agents.director import DirectorAgent
     from agents.librarian import LibrarianAgent
@@ -25,6 +26,7 @@ except ImportError:  # pragma: no cover - supports legacy path injection
     from character_state_manager import CharacterStateManager
     from graph.foreshadowing_dag import ForeshadowingDAGManager
     from queries.outline_query import OutlineQuery
+    from world_graph_manager import WorldGraphManager
 
 
 @dataclass
@@ -53,6 +55,7 @@ class AgentSimulator:
         self.foreshadowing_manager = ForeshadowingDAGManager(
             project_dir=project_dir, novel_id=novel_id
         )
+        self.world_manager = WorldGraphManager(project_dir=project_dir, novel_id=novel_id)
 
         self.director = DirectorAgent()
         self.librarian = LibrarianAgent()
@@ -159,6 +162,9 @@ class AgentSimulator:
             )
         return "; ".join(lines)
 
+    def _world_context(self) -> str:
+        return self.world_manager.summary(max_entities=6, max_relations=8)
+
     def _build_context(
         self,
         chapter_id: str,
@@ -169,10 +175,11 @@ class AgentSimulator:
         character_summary = self._characters_context()
         foreshadowing_summary = self._pending_foreshadowing_context()
         scene_summary = self._scene_context(chapter_annotations)
+        world_summary = self._world_context()
         summary = (
             f"目标:{objective}; 章节:{chapter_id}; 大纲:{outline_summary}; "
             f"人物:{character_summary}; 待回收伏笔:{foreshadowing_summary}; "
-            f"场景标记:{scene_summary}"
+            f"场景标记:{scene_summary}; 世界观:{world_summary}"
         )
         return {
             "summary": summary,
@@ -181,6 +188,7 @@ class AgentSimulator:
             "characters": character_summary,
             "foreshadowing": foreshadowing_summary,
             "scenes": scene_summary,
+            "world": world_summary,
         }
 
     def simulate_chapter(

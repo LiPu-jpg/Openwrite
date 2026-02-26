@@ -8,7 +8,7 @@
 - `outline/`：总纲、卷纲、章纲（含标注）
 - `characters/`：人物简卡、动态主档、时间线日志、快照
 - `foreshadowing/dag.yaml`：伏笔 DAG 数据
-- `world/`：势力、地点、境界、事件
+- `world/`：势力、地点、境界、事件 + `world_graph.yaml`
 - `style/style_profile.yaml`：文风占位配置
 - `manuscript/drafts/`：模拟流程产出的草稿
 
@@ -75,6 +75,27 @@ dynamic_profile: profiles/char_001.md
 【境界：归元后期】
 【状态：轻伤，疑心渐重，盟约压力】
 ...（此处可写任意长度与格式）
+```
+
+## 世界观图谱（基础版）
+
+- 文件：`world/world_graph.yaml`
+- 结构：`entities + relations`
+- 用途：`simulate chapter` 会自动注入图谱摘要
+
+示例命令：
+
+```bash
+PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli world-entity-add faction_shushan 蜀山派 \
+  --type faction --novel-id my_novel
+
+PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli world-entity-add loc_qingyun 青云镇 \
+  --type location --novel-id my_novel
+
+PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli world-relation-add \
+  --source faction_shushan --target loc_qingyun --relation protects --novel-id my_novel
+
+PYTHONPATH=/Users/jiaoziang/Openwrite python3 -m tools.cli world-check --novel-id my_novel
 ```
 
 ## 快速测试
