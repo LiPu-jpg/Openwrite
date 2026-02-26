@@ -7,7 +7,7 @@
 - 当前阶段：`Phase 3（人物与状态）后期 + Phase 5（Agent模拟）原型`
 - 已可用主流程：`Director -> Librarian -> LoreChecker` 本地模拟跑通
 - 文风模块：按你的要求，当前流程默认跳过 Stylist，可后续单独接入
-- 现有测试：`python3 -m pytest -q`，当前 `10 passed`
+- 现有测试：`python3 -m pytest -q`，当前 `11 passed`
 
 ### 已完成能力
 
@@ -18,11 +18,15 @@
   - `python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel`
   - 输出草稿到 `data/novels/<novel_id>/manuscript/drafts/`
   - 输出报告到 `logs/simulations/`
+- LoreChecker 结构化检查（第一版）：
+  - 场景 `tension` 范围检查（1-10）
+  - 场景 `emotion` 单一度预警
+  - 人物 `mutation` 合法性检查（含 `use` 物品库存预检）
 
 ### 正在进行
 
-- 将真实章节大纲与待回收伏笔注入模拟上下文（已接入第一版）
-- LoreChecker 规则从关键词检查升级为结构化一致性检查
+- LoreChecker 规则扩展为跨章节时间线与关系一致性检查
+- 将章节结构化标记接入更细粒度的重写反馈闭环
 
 ### 尚未开始或未完成
 
