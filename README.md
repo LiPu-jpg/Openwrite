@@ -2,6 +2,34 @@
 
 基于 VSCode + OpenCode 环境的多 Agent 协作系统，帮助作者创作长篇小说。
 
+## 项目进度看板（截至 2026-02-27）
+
+- 当前阶段：`Phase 3（人物与状态）后期 + Phase 5（Agent模拟）原型`
+- 已可用主流程：`Director -> Librarian -> LoreChecker` 本地模拟跑通
+- 文风模块：按你的要求，当前流程默认跳过 Stylist，可后续单独接入
+- 现有测试：`python3 -m pytest -q`，当前 `10 passed`
+
+### 已完成能力
+
+- 人物状态闭环：创建人物、状态变更、时间线重建、卷快照
+- 伏笔 DAG 基础：节点管理、状态统计、待回收伏笔读取
+- Markdown 标记解析：`fs`、`fs-recover`、`char`、`scene`
+- Agent 模拟命令：
+  - `python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel`
+  - 输出草稿到 `data/novels/<novel_id>/manuscript/drafts/`
+  - 输出报告到 `logs/simulations/`
+
+### 正在进行
+
+- 将真实章节大纲与待回收伏笔注入模拟上下文（已接入第一版）
+- LoreChecker 规则从关键词检查升级为结构化一致性检查
+
+### 尚未开始或未完成
+
+- 世界观图谱（`Phase 4`）：模型、查询、冲突检查
+- 文风迭代闭环（你单独维护的模块）
+- Web 应用（`Phase 6`）：后端 API、前端编辑器、可视化界面
+
 ## 快速开始
 
 ### 1. 安装依赖
@@ -29,6 +57,7 @@ python3 -m tools.cli character create 林月如 --tier 重要配角
 ```bash
 python3 -m tools.cli character query 李逍遥
 python3 -m tools.cli foreshadowing-statistics
+python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
 ```
 
 ## 项目结构
@@ -88,9 +117,9 @@ openwrite/
 - [x] Phase 0: 架构设计
 - [x] Phase 1: 基础工具
 - [x] Phase 2: 大纲与伏笔
-- [~] Phase 3: 人物与状态（进行中）
+- [~] Phase 3: 人物与状态（后期）
 - [ ] Phase 4: 世界观图谱
-- [ ] Phase 5: Agent 模拟
+- [~] Phase 5: Agent 模拟（原型已跑通）
 - [ ] Phase 6: Web 应用
 
 ## 贡献指南
