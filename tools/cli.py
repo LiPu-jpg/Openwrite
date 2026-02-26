@@ -85,6 +85,13 @@ def _character_manager(project_dir: Path, novel_id: Optional[str]) -> CharacterS
     return CharacterStateManager(project_dir=project_dir, novel_id=final_novel_id)
 
 
+def _foreshadowing_manager(
+    project_dir: Path, novel_id: Optional[str]
+) -> ForeshadowingDAGManager:
+    final_novel_id = novel_id or _detect_novel_id(project_dir)
+    return ForeshadowingDAGManager(project_dir=project_dir, novel_id=final_novel_id)
+
+
 @character_app.command("create")
 def character_create(
     name: str,
@@ -258,9 +265,10 @@ def foreshadowing_add(
     weight: int = 5,
     layer: str = "支线",
     target_chapter: str = "",
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
 ):
     """添加伏笔。"""
-    manager = ForeshadowingDAGManager(Path.cwd())
+    manager = _foreshadowing_manager(Path.cwd(), novel_id)
     created = manager.create_node(
         node_id=id,
         content=content,
@@ -276,9 +284,9 @@ def foreshadowing_add(
 
 
 @app.command("foreshadowing-list")
-def foreshadowing_list():
+def foreshadowing_list(novel_id: Optional[str] = typer.Option(None, help="小说ID")):
     """列出所有伏笔。"""
-    manager = ForeshadowingDAGManager(Path.cwd())
+    manager = _foreshadowing_manager(Path.cwd(), novel_id)
     dag = manager._load_dag()
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("ID")
@@ -294,17 +302,19 @@ def foreshadowing_list():
 
 
 @app.command("foreshadowing-check")
-def foreshadowing_check():
+def foreshadowing_check(novel_id: Optional[str] = typer.Option(None, help="小说ID")):
     """检查伏笔状态。"""
-    manager = ForeshadowingDAGManager(Path.cwd())
+    manager = _foreshadowing_manager(Path.cwd(), novel_id)
     result = manager.validate_dag()
     console.print(result)
 
 
 @app.command("foreshadowing-statistics")
-def foreshadowing_statistics():
+def foreshadowing_statistics(
+    novel_id: Optional[str] = typer.Option(None, help="小说ID")
+):
     """显示伏笔统计。"""
-    manager = ForeshadowingDAGManager(Path.cwd())
+    manager = _foreshadowing_manager(Path.cwd(), novel_id)
     stats = manager.get_statistics()
     console.print(stats)
 

@@ -27,7 +27,8 @@ class MarkdownAnnotationParser:
     )
 
     RECOVER_PATTERN = re.compile(
-        r"\<\!\-\-\s*(回收|recover|rc)\s+(.*?)\-\-\>(.*?)\<\!\-\-\s*\/\s*(回收|recover|rc)\-\-\>",
+        r"\<\!\-\-\s*(回收|recover|rc|fs-recover|fs_recover)\s+(.*?)\-\-\>"
+        r"(.*?)\<\!\-\-\s*\/\s*(回收|recover|rc|fs-recover|fs_recover)\-\-\>",
         re.DOTALL,
     )
 
@@ -54,10 +55,18 @@ class MarkdownAnnotationParser:
         if not attr_str.strip():
             return attributes
 
-        # 键值对解析: key=value 或 key="value" 或 key='value'
-        for match in re.finditer(r'(\w+)\s*=\s*(?:["\']?)([^"\'\s]+)(?:["\']?)', attr_str):
+        # 键值对解析: key=value 或 key="value with space" 或 key='value with space'
+        pattern = r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s]+))'
+        for match in re.finditer(pattern, attr_str):
             key = match.group(1).strip()
-            value = match.group(2).strip('"\'')
+            value = next(
+                (
+                    group.strip()
+                    for group in (match.group(2), match.group(3), match.group(4))
+                    if group is not None
+                ),
+                "",
+            )
             attributes[key] = value
 
         return attributes
@@ -83,13 +92,64 @@ class MarkdownAnnotationParser:
 
         return results
 
+    def parse_recover(self, content: str) -> List[Dict[str, Any]]:
+        """解析回收标记"""
+        results = []
+        for match in self.RECOVER_PATTERN.finditer(content):
+            attr_str = match.group(2)
+            annotation_content = match.group(3)
+            attributes = self.parse_attributes(attr_str)
+            results.append(
+                {
+                    "type": "recover",
+                    "content": annotation_content.strip(),
+                    "attributes": attributes,
+                    "full_match": match.group(0),
+                }
+            )
+        return results
+
+    def parse_characters(self, content: str) -> List[Dict[str, Any]]:
+        """解析人物标记"""
+        results = []
+        for match in self.CHARACTER_PATTERN.finditer(content):
+            attr_str = match.group(2)
+            annotation_content = match.group(3)
+            attributes = self.parse_attributes(attr_str)
+            results.append(
+                {
+                    "type": "character",
+                    "content": annotation_content.strip(),
+                    "attributes": attributes,
+                    "full_match": match.group(0),
+                }
+            )
+        return results
+
+    def parse_scenes(self, content: str) -> List[Dict[str, Any]]:
+        """解析场景标记"""
+        results = []
+        for match in self.SCENE_PATTERN.finditer(content):
+            attr_str = match.group(2)
+            annotation_content = match.group(3)
+            attributes = self.parse_attributes(attr_str)
+            results.append(
+                {
+                    "type": "scene",
+                    "content": annotation_content.strip(),
+                    "attributes": attributes,
+                    "full_match": match.group(0),
+                }
+            )
+        return results
+
     def parse_all(self, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """解析所有标记类型"""
         return {
             "foreshadowings": self.parse_foreshadowing(content),
-            "recovers": [],
-            "characters": [],
-            "scenes": [],
+            "recovers": self.parse_recover(content),
+            "characters": self.parse_characters(content),
+            "scenes": self.parse_scenes(content),
         }
 
 

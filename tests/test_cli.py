@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import yaml
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -116,6 +118,42 @@ def test_simulate_chapter_command():
         )
         assert create_result.returncode == 0
 
+        chapter_file = (
+            project_dir
+            / "data"
+            / "novels"
+            / "test_novel"
+            / "outline"
+            / "chapters"
+            / "ch_003.md"
+        )
+        chapter_file.write_text(
+            "# ch_003\n\n"
+            "<!--fs id=f001 weight=9 layer=主线 target=ch_010-->\n"
+            "主角得到玉佩线索\n"
+            "<!--/fs-->\n",
+            encoding="utf-8",
+        )
+
+        fs_result = run_cli(
+            [
+                "foreshadowing-add",
+                "f001",
+                "--content",
+                "玉佩线索",
+                "--weight",
+                "9",
+                "--layer",
+                "主线",
+                "--target-chapter",
+                "ch_010",
+                "--novel-id",
+                "test_novel",
+            ],
+            project_dir,
+        )
+        assert fs_result.returncode == 0
+
         simulate_result = run_cli(
             [
                 "simulate-chapter",
@@ -130,6 +168,7 @@ def test_simulate_chapter_command():
         )
         assert simulate_result.returncode == 0
         assert "模拟完成" in simulate_result.stdout
+        assert "逻辑检查通过" in simulate_result.stdout
 
         draft_file = (
             project_dir
@@ -144,7 +183,11 @@ def test_simulate_chapter_command():
 
         simulation_log_dir = project_dir / "logs" / "simulations"
         assert simulation_log_dir.exists()
-        assert any(simulation_log_dir.glob("*_ch_003.yaml"))
+        report_files = list(simulation_log_dir.glob("*_ch_003.yaml"))
+        assert report_files
+        report_data = yaml.safe_load(report_files[0].read_text(encoding="utf-8"))
+        assert "f001" in report_data["context"]["foreshadowing"]
+        assert "主角得到玉佩线索" in report_data["context"]["outline"]
 
 
 if __name__ == "__main__":

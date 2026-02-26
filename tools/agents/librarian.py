@@ -30,6 +30,7 @@ class LibrarianAgent:
         beats = self.generate_beats(chapter_id, context)
         character_brief = context.get("characters", "暂无人物状态")
         outline_brief = context.get("outline", "暂无章节大纲")
+        foreshadowing_brief = context.get("foreshadowing", "暂无待回收伏笔")
 
         lines: List[str] = [
             f"# {chapter_id} 章节草稿",
@@ -40,6 +41,7 @@ class LibrarianAgent:
             "## 上下文摘要",
             f"- 章节提要: {outline_brief}",
             f"- 人物状态: {character_brief}",
+            f"- 待回收伏笔: {foreshadowing_brief}",
             "",
             "## 剧情节拍",
         ]

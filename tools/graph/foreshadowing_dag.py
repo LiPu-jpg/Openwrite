@@ -15,10 +15,15 @@ except ImportError:  # pragma: no cover - supports legacy path injection
 class ForeshadowingDAGManager:
     """伏笔 DAG 管理器"""
 
-    def __init__(self, project_dir: Optional[Path] = None):
+    def __init__(self, project_dir: Optional[Path] = None, novel_id: str = "my_novel"):
         self.project_dir = project_dir or self._find_project_dir()
-        self.dag_file = self.project_dir / "data" / "novels" / "my_novel" / "foreshadowing" / "dag.yaml"
-        self.logs_dir = self.project_dir / "data" / "novels" / "my_novel" / "foreshadowing" / "logs"
+        self.novel_id = novel_id
+        self.dag_file = (
+            self.project_dir / "data" / "novels" / self.novel_id / "foreshadowing" / "dag.yaml"
+        )
+        self.logs_dir = (
+            self.project_dir / "data" / "novels" / self.novel_id / "foreshadowing" / "logs"
+        )
 
         # 确保目录存在
         self.dag_file.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +104,7 @@ class ForeshadowingDAGManager:
         if from_node not in dag.nodes:
             print(f"源节点不存在: {from_node}")
             return False
-        if to_node not in dag.nodes:
+        if to_node not in dag.nodes and not to_node.endswith("_recover"):
             print(f"目标节点不存在: {to_node}")
             return False
 
@@ -155,7 +160,9 @@ class ForeshadowingDAGManager:
 
             if from_node not in dag.nodes:
                 errors.append(f"边引用了不存在的源节点: {from_node}")
-            if to_node not in dag.nodes:
+            if to_node not in dag.nodes and not (
+                isinstance(to_node, str) and to_node.endswith("_recover")
+            ):
                 errors.append(f"边引用了不存在的目标节点: {to_node}")
 
         # 检查是否有循环引用

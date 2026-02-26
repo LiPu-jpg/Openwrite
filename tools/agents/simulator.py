@@ -15,12 +15,16 @@ try:
     from tools.agents.lore_checker import LoreCheckerAgent
     from tools.agents.stylist import StylistAgent
     from tools.character_state_manager import CharacterStateManager
+    from tools.graph.foreshadowing_dag import ForeshadowingDAGManager
+    from tools.queries.outline_query import OutlineQuery
 except ImportError:  # pragma: no cover - supports legacy path injection
     from agents.director import DirectorAgent
     from agents.librarian import LibrarianAgent
     from agents.lore_checker import LoreCheckerAgent
     from agents.stylist import StylistAgent
     from character_state_manager import CharacterStateManager
+    from graph.foreshadowing_dag import ForeshadowingDAGManager
+    from queries.outline_query import OutlineQuery
 
 
 @dataclass
@@ -45,6 +49,10 @@ class AgentSimulator:
         self.drafts_dir = self.base_dir / "manuscript" / "drafts"
         self.sim_logs_dir = self.project_dir / "logs" / "simulations"
         self.manager = CharacterStateManager(project_dir=project_dir, novel_id=novel_id)
+        self.outline_query = OutlineQuery(project_dir=project_dir, novel_id=novel_id)
+        self.foreshadowing_manager = ForeshadowingDAGManager(
+            project_dir=project_dir, novel_id=novel_id
+        )
 
         self.director = DirectorAgent()
         self.librarian = LibrarianAgent()
@@ -55,12 +63,44 @@ class AgentSimulator:
         self.sim_logs_dir.mkdir(parents=True, exist_ok=True)
 
     def _outline_context(self, chapter_id: str) -> str:
-        chapter_file = self.base_dir / "outline" / "chapters" / f"{chapter_id}.md"
-        if not chapter_file.exists():
+        chapter_data = self.outline_query.get_chapter(chapter_id)
+        if not chapter_data:
             return "未找到章节大纲文件，使用默认推进策略"
-        content = chapter_file.read_text(encoding="utf-8").strip()
+        content = chapter_data.get("raw_content", "").strip()
         compact = " ".join(content.split())
         return compact[:240] if compact else "章节大纲为空"
+
+    def _pending_foreshadowing_context(self, limit: int = 8) -> str:
+        pending = self.foreshadowing_manager.get_pending_nodes(min_weight=1)
+        if pending:
+            pending.sort(key=lambda item: int(item.get("weight", 0)), reverse=True)
+            lines = []
+            for item in pending[:limit]:
+                node_id = item.get("id", "")
+                weight = item.get("weight", 0)
+                layer = item.get("layer", "")
+                target = item.get("target_chapter") or "未指定"
+                lines.append(
+                    f"{node_id}(权重={weight}, 层级={layer}, 目标={target})"
+                )
+            return "; ".join(lines)
+
+        pending_from_outline = self.outline_query.get_pending_foreshadowings()
+        if pending_from_outline:
+            lines = []
+            for entry in pending_from_outline[:limit]:
+                fs = entry.get("foreshadowing", {})
+                attrs = fs.get("attributes", {})
+                node_id = attrs.get("id", "unknown")
+                weight = attrs.get("weight", "0")
+                layer = attrs.get("layer", "未标注")
+                chapter_id = entry.get("chapter_id", "")
+                lines.append(
+                    f"{node_id}(权重={weight}, 层级={layer}, 创建章节={chapter_id})"
+                )
+            return "; ".join(lines)
+
+        return "暂无待回收伏笔"
 
     def _characters_context(self, limit: int = 5) -> str:
         entries = self.manager.list_characters()
@@ -80,15 +120,17 @@ class AgentSimulator:
     def _build_context(self, chapter_id: str, objective: str) -> Dict[str, str]:
         outline_summary = self._outline_context(chapter_id)
         character_summary = self._characters_context()
+        foreshadowing_summary = self._pending_foreshadowing_context()
         summary = (
             f"目标:{objective}; 章节:{chapter_id}; 大纲:{outline_summary}; "
-            f"人物:{character_summary}"
+            f"人物:{character_summary}; 待回收伏笔:{foreshadowing_summary}"
         )
         return {
             "summary": summary,
             "seed": objective,
             "outline": outline_summary,
             "characters": character_summary,
+            "foreshadowing": foreshadowing_summary,
         }
 
     def simulate_chapter(
@@ -153,6 +195,7 @@ class AgentSimulator:
                 "enabled": use_stylist,
                 "edits": style_edits,
             },
+            "context": context,
             "artifacts": {
                 "draft_file": str(draft_file),
             },

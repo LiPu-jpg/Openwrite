@@ -6,6 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -21,11 +22,16 @@ def test_markdown_parser():
 <!--伏笔 weight=9 id=f001 layer=主线-->
 主角发现了神秘玉佩
 <!--/伏笔-->
+<!--fs-recover ref=f001-->
+玉佩真相揭开
+<!--/fs-recover-->
 """
 
     parser = MarkdownAnnotationParser()
     result = parser.parse_all(sample)
     assert len(result["foreshadowings"]) == 1
+    assert len(result["recovers"]) == 1
+    assert result["recovers"][0]["attributes"]["ref"] == "f001"
     attrs = parser.parse_attributes("weight=9 id=f001 layer=主线")
     assert attrs.get("id") == "f001"
 
@@ -103,6 +109,7 @@ def test_cli_help():
 
 def test_agent_simulator():
     from agents.simulator import AgentSimulator
+    from graph.foreshadowing_dag import ForeshadowingDAGManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
         project_dir = Path(tmpdir)
@@ -135,6 +142,33 @@ def test_agent_simulator():
             env=env,
         )
 
+        chapter_file = (
+            novel_root
+            / "data"
+            / "novels"
+            / "my_novel"
+            / "outline"
+            / "chapters"
+            / "ch_001.md"
+        )
+        chapter_file.write_text(
+            "# ch_001\n\n"
+            "<!--fs id=f001 weight=9 layer=主线 target=ch_010-->\n"
+            "玉佩线索出现\n"
+            "<!--/fs-->\n",
+            encoding="utf-8",
+        )
+
+        dag_manager = ForeshadowingDAGManager(project_dir=novel_root, novel_id="my_novel")
+        dag_manager.create_node(
+            node_id="f001",
+            content="玉佩线索",
+            weight=9,
+            layer="主线",
+            created_at="ch_001",
+            target_chapter="ch_010",
+        )
+
         simulator = AgentSimulator(project_dir=novel_root, novel_id="my_novel")
         result = simulator.simulate_chapter(
             chapter_id="ch_001",
@@ -146,6 +180,10 @@ def test_agent_simulator():
         assert result.draft_file.exists()
         assert result.report_file.exists()
         assert result.passed is True
+
+        report = yaml.safe_load(result.report_file.read_text(encoding="utf-8"))
+        assert "f001" in report["context"]["foreshadowing"]
+        assert "玉佩线索出现" in report["context"]["outline"]
 
 
 def run_all_tests() -> bool:
