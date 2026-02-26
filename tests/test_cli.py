@@ -131,7 +131,13 @@ def test_simulate_chapter_command():
             "# ch_003\n\n"
             "<!--fs id=f001 weight=9 layer=主线 target=ch_010-->\n"
             "主角得到玉佩线索\n"
-            "<!--/fs-->\n",
+            "<!--/fs-->\n"
+            "<!--char id=char_001 mutation=\"acquire:神秘玉佩\"-->\n"
+            "主角收下玉佩\n"
+            "<!--/char-->\n"
+            "<!--scene id=s_003 tension=7 emotion=紧张-->\n"
+            "战斗一触即发\n"
+            "<!--/scene-->\n",
             encoding="utf-8",
         )
 
@@ -188,6 +194,7 @@ def test_simulate_chapter_command():
         report_data = yaml.safe_load(report_files[0].read_text(encoding="utf-8"))
         assert "f001" in report_data["context"]["foreshadowing"]
         assert "主角得到玉佩线索" in report_data["context"]["outline"]
+        assert "场景数=1" in report_data["context"]["scenes"]
 
 
 if __name__ == "__main__":

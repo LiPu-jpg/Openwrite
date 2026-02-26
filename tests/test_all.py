@@ -25,13 +25,23 @@ def test_markdown_parser():
 <!--fs-recover ref=f001-->
 玉佩真相揭开
 <!--/fs-recover-->
+<!--char id=char_001 mutation="acquire:神秘玉佩"-->
+主角收下玉佩
+<!--/char-->
+<!--scene id=s_001 tension=8 emotion=紧张-->
+夜战爆发
+<!--/scene-->
 """
 
     parser = MarkdownAnnotationParser()
     result = parser.parse_all(sample)
     assert len(result["foreshadowings"]) == 1
     assert len(result["recovers"]) == 1
+    assert len(result["characters"]) == 1
+    assert len(result["scenes"]) == 1
     assert result["recovers"][0]["attributes"]["ref"] == "f001"
+    assert result["characters"][0]["attributes"]["mutation"] == "acquire:神秘玉佩"
+    assert result["scenes"][0]["attributes"]["tension"] == "8"
     attrs = parser.parse_attributes("weight=9 id=f001 layer=主线")
     assert attrs.get("id") == "f001"
 
@@ -107,6 +117,35 @@ def test_cli_help():
     assert "OpenWrite" in result.stdout
 
 
+def test_lore_checker_structured_rules():
+    from agents.lore_checker import LoreCheckerAgent
+    from character_state_manager import CharacterStateManager
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        project_dir = Path(tmpdir)
+        manager = CharacterStateManager(project_dir=project_dir, novel_id="my_novel")
+        manager.create_character("李逍遥", tier="主角")
+        checker = LoreCheckerAgent()
+
+        chapter_annotations = {
+            "foreshadowings": [],
+            "recovers": [],
+            "characters": [
+                {"attributes": {"id": "char_001", "mutation": "use:回气丹"}, "content": ""}
+            ],
+            "scenes": [{"attributes": {"id": "s_001", "tension": "11", "emotion": "紧张"}}],
+        }
+        result = checker.check_draft(
+            draft="这一段里有冲突",
+            forbidden=[],
+            required=["冲突"],
+            chapter_annotations=chapter_annotations,
+            character_state_manager=manager,
+        )
+        assert any("tension 超出范围" in msg for msg in result.errors)
+        assert any("尝试使用不存在/不足物品" in msg for msg in result.errors)
+
+
 def test_agent_simulator():
     from agents.simulator import AgentSimulator
     from graph.foreshadowing_dag import ForeshadowingDAGManager
@@ -155,7 +194,13 @@ def test_agent_simulator():
             "# ch_001\n\n"
             "<!--fs id=f001 weight=9 layer=主线 target=ch_010-->\n"
             "玉佩线索出现\n"
-            "<!--/fs-->\n",
+            "<!--/fs-->\n"
+            "<!--char id=char_001 mutation=\"acquire:神秘玉佩\"-->\n"
+            "主角获得新道具\n"
+            "<!--/char-->\n"
+            "<!--scene id=s_001 tension=8 emotion=紧张-->\n"
+            "夜战爆发\n"
+            "<!--/scene-->\n",
             encoding="utf-8",
         )
 
@@ -184,6 +229,8 @@ def test_agent_simulator():
         report = yaml.safe_load(result.report_file.read_text(encoding="utf-8"))
         assert "f001" in report["context"]["foreshadowing"]
         assert "玉佩线索出现" in report["context"]["outline"]
+        assert "场景数=1" in report["context"]["scenes"]
+        assert len(report["chapter_annotations"]["scenes"]) == 1
 
 
 def run_all_tests() -> bool:
@@ -192,6 +239,7 @@ def run_all_tests() -> bool:
     test_foreshadowing_checker()
     test_character_state_manager()
     test_cli_help()
+    test_lore_checker_structured_rules()
     test_agent_simulator()
     return True
 

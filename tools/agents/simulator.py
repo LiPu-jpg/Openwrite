@@ -70,6 +70,43 @@ class AgentSimulator:
         compact = " ".join(content.split())
         return compact[:240] if compact else "章节大纲为空"
 
+    def _chapter_annotations(self, chapter_id: str) -> Dict[str, List[Dict[str, str]]]:
+        chapter_data = self.outline_query.get_chapter(chapter_id) or {}
+        annotations = chapter_data.get("annotations", {})
+        return {
+            "foreshadowings": annotations.get("foreshadowings", []),
+            "recovers": annotations.get("recovers", []),
+            "characters": annotations.get("characters", []),
+            "scenes": annotations.get("scenes", []),
+        }
+
+    def _scene_context(self, chapter_annotations: Dict[str, List[Dict[str, str]]]) -> str:
+        scenes = chapter_annotations.get("scenes", [])
+        if not scenes:
+            return "未标注场景张力/情绪"
+
+        tensions: List[int] = []
+        emotions: List[str] = []
+        for scene in scenes:
+            attrs = scene.get("attributes", {})
+            tension_raw = attrs.get("tension")
+            if tension_raw is not None:
+                try:
+                    tensions.append(int(str(tension_raw)))
+                except ValueError:
+                    pass
+            emotion = str(attrs.get("emotion", "")).strip()
+            if emotion:
+                emotions.append(emotion)
+
+        tension_desc = (
+            f"张力范围={min(tensions)}-{max(tensions)}" if tensions else "张力未标注"
+        )
+        emotion_desc = (
+            f"情绪标签={','.join(sorted(set(emotions)))}" if emotions else "情绪未标注"
+        )
+        return f"场景数={len(scenes)}, {tension_desc}, {emotion_desc}"
+
     def _pending_foreshadowing_context(self, limit: int = 8) -> str:
         pending = self.foreshadowing_manager.get_pending_nodes(min_weight=1)
         if pending:
@@ -117,13 +154,20 @@ class AgentSimulator:
             )
         return "; ".join(lines)
 
-    def _build_context(self, chapter_id: str, objective: str) -> Dict[str, str]:
+    def _build_context(
+        self,
+        chapter_id: str,
+        objective: str,
+        chapter_annotations: Dict[str, List[Dict[str, str]]],
+    ) -> Dict[str, str]:
         outline_summary = self._outline_context(chapter_id)
         character_summary = self._characters_context()
         foreshadowing_summary = self._pending_foreshadowing_context()
+        scene_summary = self._scene_context(chapter_annotations)
         summary = (
             f"目标:{objective}; 章节:{chapter_id}; 大纲:{outline_summary}; "
-            f"人物:{character_summary}; 待回收伏笔:{foreshadowing_summary}"
+            f"人物:{character_summary}; 待回收伏笔:{foreshadowing_summary}; "
+            f"场景标记:{scene_summary}"
         )
         return {
             "summary": summary,
@@ -131,6 +175,7 @@ class AgentSimulator:
             "outline": outline_summary,
             "characters": character_summary,
             "foreshadowing": foreshadowing_summary,
+            "scenes": scene_summary,
         }
 
     def simulate_chapter(
@@ -143,7 +188,8 @@ class AgentSimulator:
     ) -> SimulationResult:
         forbidden = forbidden or []
         required = required or []
-        context = self._build_context(chapter_id, objective)
+        chapter_annotations = self._chapter_annotations(chapter_id)
+        context = self._build_context(chapter_id, objective, chapter_annotations)
 
         decision = self.director.plan(
             objective=objective,
@@ -163,6 +209,8 @@ class AgentSimulator:
             draft=draft_text,
             forbidden=forbidden,
             required=required,
+            chapter_annotations=chapter_annotations,
+            character_state_manager=self.manager,
         )
 
         style_edits: List[str] = []
@@ -196,6 +244,7 @@ class AgentSimulator:
                 "edits": style_edits,
             },
             "context": context,
+            "chapter_annotations": chapter_annotations,
             "artifacts": {
                 "draft_file": str(draft_file),
             },
