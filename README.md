@@ -8,6 +8,7 @@
 - 已可用主流程：`Director -> Librarian -> LoreChecker` 本地模拟跑通
 - 文风模块：按你的要求，当前流程默认跳过 Stylist，可后续单独接入
 - 现有测试：`python3 -m pytest -q`，当前 `11 passed`
+- 架构说明文档：`docs/CURRENT_ARCHITECTURE.md`
 
 ### 已完成能力
 
