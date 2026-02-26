@@ -1,0 +1,26 @@
+# OpenWrite - AI 辅助小说创作系统
+# Python 依赖
+
+# 核心框架
+pydantic>=2.0.0
+typer[cli]>=0.9.0
+pyyaml>=6.0
+
+# Markdown 解析
+markdown-it-py>=3.0.0
+python-frontmatter>=0.2.0
+
+# 图结构
+networkx>=3.0
+numpy>=1.24.0
+
+# 向量计算（后续）
+sentence-transformers>=2.2.0
+
+# 开发工具
+watchfiles>=0.21.0
+rich>=13.0.0
+
+# 测试
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

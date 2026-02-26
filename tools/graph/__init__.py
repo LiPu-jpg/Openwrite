@@ -1,0 +1,1 @@
+"""OpenWrite graph package"""

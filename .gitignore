@@ -1,0 +1,14 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Test/build tooling cache
+.pytest_cache/
+.ruff_cache/
+
+# Local runtime/state
+logs/
+data/
+
+# OS/editor artifacts
+.DS_Store
