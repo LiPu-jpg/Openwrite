@@ -1,0 +1,8 @@
+StyleProfile:
+  base:
+    tense: "过去时"
+    perspective: "第三人称限知"
+    tone: "冷峻权谋"
+    pacing: "张弛有度"
+  notes: >-
+    本示例仅用于结构展示。实际文风迭代由独立模块维护。

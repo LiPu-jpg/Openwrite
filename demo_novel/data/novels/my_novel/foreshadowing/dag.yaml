@@ -1,0 +1,40 @@
+{
+  "nodes": {
+    "f001": {
+      "id": "f001",
+      "content": "残损盟印隐藏第十盟徽记",
+      "weight": 10,
+      "layer": "主线",
+      "status": "埋伏",
+      "created_at": "",
+      "target_chapter": "ch_006",
+      "tags": []
+    },
+    "f002": {
+      "id": "f002",
+      "content": "霍玄密信内容与分城协议",
+      "weight": 7,
+      "layer": "支线",
+      "status": "埋伏",
+      "created_at": "",
+      "target_chapter": "ch_003",
+      "tags": []
+    },
+    "f003": {
+      "id": "f003",
+      "content": "第十盟仍存的历史真相",
+      "weight": 8,
+      "layer": "主线",
+      "status": "埋伏",
+      "created_at": "",
+      "target_chapter": "vol_002",
+      "tags": []
+    }
+  },
+  "edges": [],
+  "status": {
+    "f001": "埋伏",
+    "f002": "埋伏",
+    "f003": "埋伏"
+  }
+}

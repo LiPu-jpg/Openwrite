@@ -1,0 +1,163 @@
+mutations:
+- mutation_id: char_001_0001
+  chapter_id: ch_001
+  timestamp: '2026-02-27T02:42:02.149626'
+  action: realm
+  payload:
+    raw: 归元后期
+    realm: 归元后期
+    action: realm
+  reason: 卷初设定
+  before_state:
+    health: 健康
+    realm: 凡人
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory: {}
+    flags: []
+  after_state:
+    health: 健康
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory: {}
+    flags: []
+- mutation_id: char_001_0002
+  chapter_id: ch_001
+  timestamp: '2026-02-27T02:42:02.250409'
+  action: acquire
+  payload:
+    raw: 残损盟印
+    item: 残损盟印
+    action: acquire
+  reason: 父亲遗物
+  before_state:
+    health: 健康
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory: {}
+    flags: []
+  after_state:
+    health: 健康
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+    flags: []
+- mutation_id: char_001_0003
+  chapter_id: ch_001
+  timestamp: '2026-02-27T02:42:02.352865'
+  action: acquire
+  payload:
+    raw: 回气丹
+    item: 回气丹
+    action: acquire
+  reason: 顾霜补给
+  before_state:
+    health: 健康
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+    flags: []
+  after_state:
+    health: 健康
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+      回气丹: 1
+    flags: []
+- mutation_id: char_001_0006
+  chapter_id: ch_002
+  timestamp: '2026-02-27T02:42:14.318250'
+  action: acquire
+  payload:
+    raw: 回气丹
+    item: 回气丹
+    action: acquire
+  reason: 夜战前补给
+  before_state:
+    health: 轻伤
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+    flags: []
+  after_state:
+    health: 轻伤
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+      回气丹: 1
+    flags: []
+- mutation_id: char_001_0004
+  chapter_id: ch_003
+  timestamp: '2026-02-27T02:42:02.456515'
+  action: use
+  payload:
+    raw: 回气丹
+    item: 回气丹
+    action: use
+  reason: 战斗负伤后使用
+  before_state:
+    health: 健康
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+      回气丹: 1
+    flags: []
+  after_state:
+    health: 健康
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+    flags: []
+- mutation_id: char_001_0005
+  chapter_id: ch_003
+  timestamp: '2026-02-27T02:42:02.559603'
+  action: health
+  payload:
+    raw: 轻伤
+    health: 轻伤
+    action: health
+  reason: 城墙混战
+  before_state:
+    health: 健康
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+    flags: []
+  after_state:
+    health: 轻伤
+    realm: 归元后期
+    stamina: 100
+    mental_state: 平稳
+    location: 未知
+    inventory:
+      残损盟印: 1
+    flags: []

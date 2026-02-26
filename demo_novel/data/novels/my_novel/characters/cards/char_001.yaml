@@ -1,0 +1,31 @@
+static:
+  id: char_001
+  name: 韩策
+  aliases: []
+  gender: null
+  age: null
+  appearance: ''
+  personality: []
+  background: ''
+  faction: 雨城韩氏
+  tier: 主角
+initial_state:
+  health: 健康
+  realm: 凡人
+  stamina: 100
+  mental_state: 平稳
+  location: 未知
+  inventory: {}
+  flags: []
+current_state:
+  health: 轻伤
+  realm: 归元后期
+  stamina: 100
+  mental_state: 平稳
+  location: 未知
+  inventory:
+    残损盟印: 1
+    回气丹: 1
+  flags: []
+relationships: []
+current_snapshot: char_001_vol_001.md
