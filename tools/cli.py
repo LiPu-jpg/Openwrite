@@ -39,11 +39,13 @@ outline_app = typer.Typer(help="大纲相关命令")
 world_app = typer.Typer(help="世界观图谱命令")
 simulate_app = typer.Typer(help="多Agent模拟命令")
 style_app = typer.Typer(help="风格系统命令")
+timeline_app = typer.Typer(help="叙事线可视化命令")
 app.add_typer(character_app, name="character")
 app.add_typer(outline_app, name="outline")
 app.add_typer(world_app, name="world")
 app.add_typer(simulate_app, name="simulate")
 app.add_typer(style_app, name="style")
+app.add_typer(timeline_app, name="timeline")
 console = Console()
 
 
@@ -758,6 +760,101 @@ def style_profile(
         f"意象={metrics.imagery} 角色化={metrics.characterization} "
         f"去AI={metrics.ai_artifact_control}"
     )
+
+
+# ------------------------------------------------------------------
+# 叙事线可视化命令
+# ------------------------------------------------------------------
+
+
+@timeline_app.command("build")
+def timeline_build(
+    novel_id: str = typer.Option("", "--novel-id", help="作品ID（留空自动检测）"),
+):
+    """从现有数据自动聚合生成叙事时间线。"""
+    from tools.narrative_timeline_manager import NarrativeTimelineManager
+
+    project_dir = Path.cwd()
+    if not novel_id:
+        novel_id = _detect_novel_id(project_dir)
+    mgr = NarrativeTimelineManager(project_dir=project_dir, novel_id=novel_id)
+    timeline = mgr.build_from_existing()
+    out = mgr.save(timeline)
+    console.print(f"[green]✓[/green] 叙事时间线已生成: {out}")
+    console.print(f"  叙事线: {len(timeline.threads)} 条")
+    console.print(f"  连接: {len(timeline.links)} 条")
+    console.print(f"  章节: {len(timeline.chapters)} 章")
+
+
+@timeline_app.command("export")
+def timeline_export(
+    novel_id: str = typer.Option("", "--novel-id", help="作品ID（留空自动检测）"),
+    format: str = typer.Option("html", "--format", "-f", help="导出格式: html / yaml / json"),
+    output: str = typer.Option("", "--output", "-o", help="输出路径（留空使用默认）"),
+    chapter_id: str = typer.Option("", "--chapter", help="仅导出指定章节的AI上下文（json格式）"),
+):
+    """导出叙事时间线为 HTML 可视化或结构化数据。"""
+    import json as json_mod
+
+    from tools.narrative_renderer import render_html
+    from tools.narrative_timeline_manager import NarrativeTimelineManager
+
+    project_dir = Path.cwd()
+    if not novel_id:
+        novel_id = _detect_novel_id(project_dir)
+    mgr = NarrativeTimelineManager(project_dir=project_dir, novel_id=novel_id)
+    timeline = mgr.load()
+
+    if not timeline.threads:
+        console.print("[yellow]⚠ 时间线为空，请先运行 timeline build[/yellow]")
+        raise typer.Exit(1)
+
+    # AI 上下文导出（单章节）
+    if chapter_id:
+        ctx = timeline.to_ai_context(chapter_id)
+        out_path = Path(output) if output else (
+            mgr.base_dir / "narrative" / f"context_{chapter_id}.json"
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json_mod.dumps(ctx, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        console.print(f"[green]✓[/green] AI 上下文已导出: {out_path}")
+        return
+
+    # 全量导出
+    fmt = format.lower()
+    if fmt == "html":
+        out_path = Path(output) if output else (
+            mgr.base_dir / "narrative" / "timeline.html"
+        )
+        render_html(timeline, output_path=out_path)
+        console.print(f"[green]✓[/green] HTML 可视化已导出: {out_path}")
+    elif fmt == "yaml":
+        out_path = Path(output) if output else (
+            mgr.base_dir / "narrative" / "timeline.yaml"
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        data = timeline.model_dump(mode="json")
+        out_path.write_text(
+            yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        console.print(f"[green]✓[/green] YAML 已导出: {out_path}")
+    elif fmt == "json":
+        out_path = Path(output) if output else (
+            mgr.base_dir / "narrative" / "timeline.json"
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        data = timeline.model_dump(mode="json")
+        out_path.write_text(
+            json_mod.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        console.print(f"[green]✓[/green] JSON 已导出: {out_path}")
+    else:
+        console.print(f"[red]✗ 不支持的格式: {format}，可选: html / yaml / json[/red]")
+        raise typer.Exit(1)
+
 
 if __name__ == "__main__":
     app()

@@ -195,6 +195,24 @@ class AgentSimulator:
     def _world_context(self) -> str:
         return self.world_manager.summary(max_entities=6, max_relations=8)
 
+    def _narrative_context(self, chapter_id: str) -> str:
+        """加载叙事线上下文（如果已构建 timeline.yaml）。"""
+        try:
+            from tools.narrative_timeline_manager import NarrativeTimelineManager
+            mgr = NarrativeTimelineManager(
+                project_dir=self.project_dir, novel_id=self.novel_id
+            )
+            timeline = mgr.load()
+            if not timeline.threads:
+                return ""
+            import json
+            ctx = timeline.to_ai_context(chapter_id)
+            if not ctx.get("active_threads"):
+                return ""
+            return json.dumps(ctx, ensure_ascii=False)
+        except Exception:
+            return ""
+
     def _build_context(
         self,
         chapter_id: str,
@@ -206,12 +224,16 @@ class AgentSimulator:
         foreshadowing_summary = self._pending_foreshadowing_context()
         scene_summary = self._scene_context(chapter_annotations)
         world_summary = self._world_context()
+
+        # 叙事线上下文（如果已构建）
+        narrative_summary = self._narrative_context(chapter_id)
+
         summary = (
             f"目标:{objective}; 章节:{chapter_id}; 大纲:{outline_summary}; "
             f"人物:{character_summary}; 待回收伏笔:{foreshadowing_summary}; "
             f"场景标记:{scene_summary}; 世界观:{world_summary}"
         )
-        return {
+        ctx: Dict[str, str] = {
             "summary": summary,
             "seed": objective,
             "outline": outline_summary,
@@ -220,6 +242,9 @@ class AgentSimulator:
             "scenes": scene_summary,
             "world": world_summary,
         }
+        if narrative_summary:
+            ctx["narrative"] = narrative_summary
+        return ctx
 
     def simulate_chapter(
         self,
