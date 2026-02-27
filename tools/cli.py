@@ -468,6 +468,142 @@ def world_check_alias(novel_id: Optional[str] = typer.Option(None, help="小说I
     """兼容命令：world-check。"""
     world_check(novel_id=novel_id)
 
+@world_app.command("rules")
+def world_rules(
+    rules_file: str = typer.Option("", "--rules-file", help="规则 YAML 文件路径"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """对世界观图谱执行自定义规则检查。"""
+    from tools.world_rule_engine import WorldRuleEngine
+
+    manager = _world_manager(Path.cwd(), novel_id)
+    graph = manager._load_graph()
+    engine = WorldRuleEngine()
+    if rules_file:
+        loaded = engine.load_rules_from_yaml(Path(rules_file))
+        console.print(f"[cyan]已加载 {loaded} 条规则[/cyan]")
+    else:
+        # 尝试默认路径
+        default_path = manager.world_dir / "rules.yaml"
+        if default_path.exists():
+            loaded = engine.load_rules_from_yaml(default_path)
+            console.print(f"[cyan]已加载 {loaded} 条规则（{default_path}）[/cyan]")
+        else:
+            console.print("[yellow]未找到规则文件，请用 --rules-file 指定或在 world/ 下创建 rules.yaml[/yellow]")
+            return
+    summary = engine.evaluate_summary(graph)
+    if summary["is_valid"]:
+        console.print(f"[green]✓ 规则检查通过[/green]（{summary['total_rules']} 条规则，0 错误）")
+    else:
+        console.print(f"[red]✗ 规则检查未通过[/red]（{summary['errors']} 错误，{summary['warnings']} 警告）")
+    for v in summary["violations"]:
+        color = "red" if v.severity.value == "error" else "yellow"
+        console.print(f"  [{color}][{v.severity.value}][/{color}] {v.message}")
+
+
+@world_app.command("check-advanced")
+def world_check_advanced(
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """跨章节冲突检查（位置矛盾、属性回退、关系冲突、状态跳变、孤立引用）。"""
+    from tools.world_conflict_checker import WorldConflictChecker
+
+    manager = _world_manager(Path.cwd(), novel_id)
+    graph = manager._load_graph()
+    checker = WorldConflictChecker()
+    result = checker.check(graph)
+    stats = result["statistics"]
+    console.print(f"[cyan]跨章节冲突检查[/cyan]（{stats['chapters_checked']} 章节，{stats['total_checks']} 项检查）")
+    if result["is_valid"]:
+        console.print(f"[green]✓ 无冲突[/green]（{stats['total_conflicts']} 条发现）")
+    else:
+        console.print(f"[red]✗ 发现冲突[/red]")
+    for msg in result["errors"]:
+        console.print(f"  [red]错误:[/red] {msg}")
+    for msg in result["warnings"]:
+        console.print(f"  [yellow]警告:[/yellow] {msg}")
+
+
+@world_app.command("extract")
+def world_extract(
+    text_file: str = typer.Option(..., "--file", help="章节文本文件路径"),
+    chapter_id: str = typer.Option("", "--chapter", help="章节ID"),
+    auto_add: bool = typer.Option(False, "--auto-add", help="自动将抽取结果添加到图谱"),
+    use_llm: bool = typer.Option(False, "--use-llm", help="启用LLM抽取"),
+    llm_config_path: Optional[str] = typer.Option(None, "--llm-config", help="LLM配置文件路径"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """从章节文本自动抽取实体和关系。"""
+    from tools.world_entity_extractor import WorldEntityExtractor
+
+    text_path = Path(text_file)
+    if not text_path.is_file():
+        console.print(f"[red]文件不存在:[/red] {text_path}")
+        raise typer.Exit(1)
+    text = text_path.read_text(encoding="utf-8")
+    manager = _world_manager(Path.cwd(), novel_id)
+    existing = [e.name for e in manager.list_entities()]
+
+    llm_client = None
+    router = None
+    if use_llm:
+        from tools.llm.config import load_llm_config
+        from tools.llm.client import LLMClient
+        from tools.llm.router import ModelRouter
+        cfg_path = Path(llm_config_path) if llm_config_path else None
+        llm_cfg = load_llm_config(cfg_path)
+        if llm_cfg.enabled:
+            llm_client = LLMClient(retry_count=llm_cfg.retry_count, retry_delay=llm_cfg.retry_delay)
+            router = ModelRouter(llm_cfg)
+
+    extractor = WorldEntityExtractor(llm_client=llm_client, router=router)
+    result = extractor.extract(text, chapter_id=chapter_id, existing_entities=existing)
+    console.print(f"[green]抽取完成[/green]（方法: {result.method}）")
+    console.print(f"  实体: {len(result.entities)} 个")
+    for e in result.entities:
+        console.print(f"    {e.name} <{e.entity_type}> {e.description}")
+    console.print(f"  关系: {len(result.relations)} 条")
+    for r in result.relations:
+        console.print(f"    {r.source_id} -{r.relation}-> {r.target_id}")
+
+    if auto_add and result.entities:
+        added_e, added_r = 0, 0
+        for e in result.entities:
+            manager.upsert_entity(
+                entity_id=e.id, name=e.name, entity_type=e.entity_type,
+                description=e.description, attributes=e.attributes,
+            )
+            added_e += 1
+        for r in result.relations:
+            try:
+                manager.add_relation(
+                    source_id=r.source_id, target_id=r.target_id,
+                    relation=r.relation, weight=r.weight, note=r.note,
+                )
+                added_r += 1
+            except ValueError:
+                pass  # 源/目标不存在，跳过
+        console.print(f"  [green]已添加到图谱:[/green] {added_e} 实体, {added_r} 关系")
+
+
+@world_app.command("visualize")
+def world_visualize(
+    output: str = typer.Option("", "--output", "-o", help="输出 HTML 路径"),
+    title: str = typer.Option("世界观图谱", "--title", help="图谱标题"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """生成世界观图谱 D3 力导向可视化 HTML。"""
+    from tools.world_graph_renderer import render_world_graph_html
+
+    manager = _world_manager(Path.cwd(), novel_id)
+    graph = manager._load_graph()
+    if not graph.entities:
+        console.print("[yellow]图谱为空，请先添加实体[/yellow]")
+        return
+    out_path = Path(output) if output else (manager.world_dir / "world_graph.html")
+    render_world_graph_html(graph, title=title, output_path=out_path)
+    console.print(f"[green]✓ 可视化已生成:[/green] {out_path}")
+    console.print(f"  实体: {len(graph.entities)} 个，关系: {len(graph.relations)} 条")
 
 @outline_app.command("init")
 @app.command("outline-init")
