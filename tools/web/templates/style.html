@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% set active = "style" %}
+{% block title %}风格系统 — OpenWrite{% endblock %}
+{% block content %}
+<h1>风格系统</h1>
+<div class="info-bar">
+  <span>可用风格: {{ styles | join(", ") if styles else "无" }}</span>
+  <span>可用作品: {{ novels | join(", ") if novels else "无" }}</span>
+</div>
+<div class="style-layers">
+  <div class="layer-card">
+    <h3>通用技法 <span class="layer-tag">craft/</span></h3>
+    <p>场景结构、信息揭示策略、张力模型 — 可选参考</p>
+  </div>
+  <div class="layer-card">
+    <h3>作品风格 <span class="layer-tag">styles/</span></h3>
+    <p>叙述声音、幽默体系、语言偏好、节奏 — 应当遵循</p>
+  </div>
+  <div class="layer-card">
+    <h3>作品设定 <span class="layer-tag">novels/</span></h3>
+    <p>角色一致性、术语、世界观规则 — 不可违反</p>
+  </div>
+</div>
+{% if profile %}
+<h2>风格档案</h2>
+<div class="profile-section">
+  <pre class="profile-summary">{{ profile.summary }}</pre>
+  <div class="metrics-grid">
+    {% for key, val in profile.metrics.items() %}
+    <div class="metric-item">
+      <div class="metric-bar" style="width: {{ val * 10 }}%"></div>
+      <span class="metric-label">{{ key }}: {{ val }}/10</span>
+    </div>
+    {% endfor %}
+  </div>
+  <p>禁用表达数: {{ profile.banned_count }}</p>
+</div>
+{% else %}
+<p class="empty-hint">暂无风格档案，请先运行 <code>style compose</code> 和 <code>style profile</code></p>
+{% endif %}
+{% endblock %}

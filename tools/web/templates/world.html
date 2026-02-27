@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% set active = "world" %}
+{% block title %}世界观 — OpenWrite{% endblock %}
+{% block content %}
+<h1>世界观图谱</h1>
+<div class="info-bar">
+  <span>实体: {{ entity_count }}</span>
+  <span>关系: {{ relation_count }}</span>
+</div>
+<div class="embed-frame">
+  {{ graph_html | safe }}
+</div>
+{% endblock %}

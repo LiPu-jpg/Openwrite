@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% set active = "characters" %}
+{% block title %}人物 — OpenWrite{% endblock %}
+{% block content %}
+<h1>人物档案</h1>
+{% if characters %}
+<div class="card-grid">
+  {% for c in characters %}
+  <div class="char-card">
+    <div class="char-name">{{ c.name }}</div>
+    <div class="char-meta">{{ c.tier }} {% if c.faction %}· {{ c.faction }}{% endif %}</div>
+    {% if c.realm %}<div class="char-attr">境界: {{ c.realm }}</div>{% endif %}
+    {% if c.location %}<div class="char-attr">位置: {{ c.location }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty-hint">暂无人物数据，请先通过 CLI 创建人物</p>
+{% endif %}
+{% endblock %}

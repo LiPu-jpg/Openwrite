@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}OpenWrite{% endblock %}</title>
+<link rel="stylesheet" href="/static/css/main.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+<nav class="sidebar">
+  <div class="logo">OpenWrite</div>
+  <div class="nav-subtitle">{{ novel_id }}</div>
+  <ul class="nav-links">
+    <li><a href="/" class="{% if active == 'dashboard' %}active{% endif %}">仪表盘</a></li>
+    <li><a href="/timeline" class="{% if active == 'timeline' %}active{% endif %}">叙事线</a></li>
+    <li><a href="/world" class="{% if active == 'world' %}active{% endif %}">世界观</a></li>
+    <li><a href="/characters" class="{% if active == 'characters' %}active{% endif %}">人物</a></li>
+    <li><a href="/foreshadowing" class="{% if active == 'foreshadowing' %}active{% endif %}">伏笔</a></li>
+    <li><a href="/style" class="{% if active == 'style' %}active{% endif %}">风格</a></li>
+    <li><a href="/editor" class="{% if active == 'editor' %}active{% endif %}">编辑器</a></li>
+  </ul>
+  <div class="nav-footer">
+    <a href="/api/docs" target="_blank">API 文档</a>
+  </div>
+</nav>
+<main class="content">
+  {% block content %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

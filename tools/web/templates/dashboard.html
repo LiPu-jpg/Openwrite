@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+{% block title %}仪表盘 — OpenWrite{% endblock %}
+{% block content %}
+<h1>项目概览</h1>
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.chapter_count }}</div>
+    <div class="stat-label">章节</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.character_count }}</div>
+    <div class="stat-label">人物</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.entity_count }}</div>
+    <div class="stat-label">世界实体</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.relation_count }}</div>
+    <div class="stat-label">关系</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.foreshadowing_count }}</div>
+    <div class="stat-label">伏笔</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.thread_count }}</div>
+    <div class="stat-label">叙事线</div>
+  </div>
+</div>
+<div class="quick-links">
+  <h2>快速入口</h2>
+  <div class="link-grid">
+    <a href="/timeline" class="link-card">叙事时间线 →</a>
+    <a href="/world" class="link-card">世界观图谱 →</a>
+    <a href="/characters" class="link-card">人物档案 →</a>
+    <a href="/foreshadowing" class="link-card">伏笔管理 →</a>
+    <a href="/style" class="link-card">风格系统 →</a>
+    <a href="/editor" class="link-card">章节编辑器 →</a>
+  </div>
+</div>
+{% endblock %}

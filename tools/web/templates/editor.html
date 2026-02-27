@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set active = "editor" %}
+{% block title %}编辑器 — OpenWrite{% endblock %}
+{% block content %}
+<h1>章节编辑器</h1>
+<div class="editor-layout">
+  <div class="editor-sidebar">
+    <h3>大纲</h3>
+    <ul class="chapter-list">
+      {% for ch in chapters %}
+      <li><a href="#" class="chapter-link" data-id="{{ ch.id }}">{{ ch.name }}</a></li>
+      {% endfor %}
+      {% if not chapters %}
+      <li class="empty-hint">暂无大纲</li>
+      {% endif %}
+    </ul>
+    <h3>草稿</h3>
+    <ul class="chapter-list">
+      {% for d in drafts %}
+      <li><a href="#" class="draft-link" data-id="{{ d.id }}">{{ d.name }}</a></li>
+      {% endfor %}
+      {% if not drafts %}
+      <li class="empty-hint">暂无草稿</li>
+      {% endif %}
+    </ul>
+  </div>
+  <div class="editor-main">
+    <textarea id="editor-area" placeholder="选择章节大纲或草稿开始编辑..."></textarea>
+  </div>
+</div>
+{% endblock %}

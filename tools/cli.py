@@ -992,5 +992,22 @@ def timeline_export(
         raise typer.Exit(1)
 
 
+
+
+@app.command("serve")
+def serve(
+    port: int = typer.Option(8000, "--port", "-p", help="端口号"),
+    host: str = typer.Option("127.0.0.1", "--host", help="绑定地址"),
+    novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+):
+    """启动 OpenWrite Web 可视化面板。"""
+    import uvicorn
+    from tools.web import create_app
+    final_novel_id = novel_id or _detect_novel_id(Path.cwd())
+    web_app = create_app(project_dir=Path.cwd(), novel_id=final_novel_id)
+    console.print(f"[green]✓ OpenWrite Web 启动中[/green] http://{host}:{port}")
+    console.print(f"  作品: {final_novel_id}，API 文档: http://{host}:{port}/api/docs")
+    console.print("  按 Ctrl+C 停止")
+    uvicorn.run(web_app, host=host, port=port, log_level="info")
 if __name__ == "__main__":
     app()

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% set active = "foreshadowing" %}
+{% block title %}伏笔 — OpenWrite{% endblock %}
+{% block content %}
+<h1>伏笔 DAG</h1>
+<div class="info-bar">
+  <span>总数: {{ nodes | length }}</span>
+  {% if stats %}
+  <span>已回收: {{ stats.get("recovered", 0) }}</span>
+  <span>待回收: {{ stats.get("pending", 0) }}</span>
+  {% endif %}
+</div>
+<div id="dag-container" class="embed-frame" style="min-height:500px;background:#0a0a1a;"></div>
+{% if nodes %}
+<table class="data-table">
+  <thead>
+    <tr><th>ID</th><th>层级</th><th>权重</th><th>状态</th><th>内容</th></tr>
+  </thead>
+  <tbody>
+    {% for n in nodes %}
+    <tr>
+      <td>{{ n.id }}</td>
+      <td>{{ n.layer }}</td>
+      <td>{{ n.weight }}</td>
+      <td><span class="status-{{ n.status }}">{{ n.status }}</span></td>
+      <td>{{ n.content[:60] }}{% if n.content|length > 60 %}...{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty-hint">暂无伏笔数据</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+(function() {
+  const nodes = {{ nodes | tojson }};
+  const edges = {{ edges | tojson }};
+  if (!nodes.length) return;
+  const container = document.getElementById("dag-container");
+  const w = container.clientWidth, h = Math.max(500, container.clientHeight);
+  const svg = d3.select(container).append("svg").attr("width", w).attr("height", h);
+  const g = svg.append("g");
+  svg.call(d3.zoom().scaleExtent([0.2, 4]).on("zoom", e => g.attr("transform", e.transform)));
+  const STATUS_COLORS = {planted:"#4ECDC4", growing:"#FFEAA7", recovered:"#96CEB4", abandoned:"#808080"};
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(edges).id(d => d.id).distance(80))
+    .force("charge", d3.forceManyBody().strength(-200))
+    .force("center", d3.forceCenter(w/2, h/2));
+  const link = g.selectAll("line").data(edges).join("line")
+    .attr("stroke", "#555").attr("stroke-width", 1.5).attr("marker-end", "url(#arrow)");
+  svg.append("defs").append("marker").attr("id","arrow").attr("viewBox","0 0 10 10")
+    .attr("refX",20).attr("refY",5).attr("markerWidth",6).attr("markerHeight",6)
+    .attr("orient","auto").append("path").attr("d","M0,0 L10,5 L0,10 Z").attr("fill","#555");
+  const node = g.selectAll("circle").data(nodes).join("circle")
+    .attr("r", d => 6 + d.weight).attr("fill", d => STATUS_COLORS[d.status] || "#AED6F1")
+    .attr("stroke","#fff").attr("stroke-width",1)
+    .call(d3.drag().on("start",(e,d)=>{if(!e.active)sim.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
+      .on("drag",(e,d)=>{d.fx=e.x;d.fy=e.y;}).on("end",(e,d)=>{if(!e.active)sim.alphaTarget(0);d.fx=null;d.fy=null;}));
+  const label = g.selectAll("text").data(nodes).join("text")
+    .text(d => d.id).attr("font-size",10).attr("fill","#c0c0c0").attr("text-anchor","middle").attr("dy",-12);
+  sim.on("tick", () => {
+    link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+    node.attr("cx",d=>d.x).attr("cy",d=>d.y);
+    label.attr("x",d=>d.x).attr("y",d=>d.y);
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% set active = "timeline" %}
+{% block title %}叙事线 — OpenWrite{% endblock %}
+{% block content %}
+<h1>叙事时间线</h1>
+<div class="embed-frame">
+  {{ timeline_html | safe }}
+</div>
+{% endblock %}
