@@ -2,7 +2,13 @@
 {% set active = "foreshadowing" %}
 {% block title %}伏笔 — OpenWrite{% endblock %}
 {% block content %}
-<h1>伏笔 DAG</h1>
+<div class="page-container">
+<div class="page-header">
+  <h1>伏笔 DAG</h1>
+  <div class="page-actions">
+    <button class="btn btn-primary" onclick="showAddForeshadowing()">添加伏笔</button>
+  </div>
+</div>
 <div class="info-bar">
   <span>总数: {{ nodes | length }}</span>
   {% if stats %}
@@ -10,11 +16,11 @@
   <span>待回收: {{ stats.get("pending", 0) }}</span>
   {% endif %}
 </div>
-<div id="dag-container" class="embed-frame" style="min-height:500px;background:#0a0a1a;"></div>
+<div id="dag-container" class="embed-frame" style="min-height:500px;background:var(--bg-base);"></div>
 {% if nodes %}
 <table class="data-table">
   <thead>
-    <tr><th>ID</th><th>层级</th><th>权重</th><th>状态</th><th>内容</th></tr>
+    <tr><th>ID</th><th>层级</th><th>权重</th><th>状态</th><th>内容</th><th>操作</th></tr>
   </thead>
   <tbody>
     {% for n in nodes %}
@@ -24,6 +30,12 @@
       <td>{{ n.weight }}</td>
       <td><span class="status-{{ n.status }}">{{ n.status }}</span></td>
       <td>{{ n.content[:60] }}{% if n.content|length > 60 %}...{% endif %}</td>
+      <td>
+        {% if n.status != 'recovered' and n.status != 'abandoned' %}
+        <button class="btn btn-sm btn-secondary" onclick="setFsStatus('{{ n.id }}', 'recovered')">回收</button>
+        <button class="btn btn-sm btn-danger" onclick="setFsStatus('{{ n.id }}', 'abandoned')">废弃</button>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>
@@ -31,41 +43,116 @@
 {% else %}
 <p class="empty-hint">暂无伏笔数据</p>
 {% endif %}
+
+<!-- 添加伏笔表单 -->
+<div id="fs-form-tpl" style="display:none">
+  <div class="form-group">
+    <label>ID</label>
+    <input class="form-input" name="id" placeholder="fs_001">
+  </div>
+  <div class="form-group">
+    <label>内容</label>
+    <input class="form-input" name="content" placeholder="伏笔内容描述">
+  </div>
+  <div class="form-group">
+    <label>层级</label>
+    <select class="form-input form-select" name="layer">
+      <option value="主线">主线</option>
+      <option value="支线" selected>支线</option>
+      <option value="暗线">暗线</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>权重 (1-10)</label>
+    <input class="form-input" type="number" name="weight" value="5" min="1" max="10">
+  </div>
+  <div class="form-group">
+    <label>目标章节</label>
+    <input class="form-input" name="target_chapter" placeholder="ch_010（可选）">
+  </div>
+</div>
+</div>
 {% endblock %}
+
 {% block scripts %}
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
 (function() {
-  const nodes = {{ nodes | tojson }};
-  const edges = {{ edges | tojson }};
-  if (!nodes.length) return;
-  const container = document.getElementById("dag-container");
-  const w = container.clientWidth, h = Math.max(500, container.clientHeight);
-  const svg = d3.select(container).append("svg").attr("width", w).attr("height", h);
-  const g = svg.append("g");
-  svg.call(d3.zoom().scaleExtent([0.2, 4]).on("zoom", e => g.attr("transform", e.transform)));
-  const STATUS_COLORS = {planted:"#4ECDC4", growing:"#FFEAA7", recovered:"#96CEB4", abandoned:"#808080"};
-  const sim = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(edges).id(d => d.id).distance(80))
-    .force("charge", d3.forceManyBody().strength(-200))
-    .force("center", d3.forceCenter(w/2, h/2));
-  const link = g.selectAll("line").data(edges).join("line")
-    .attr("stroke", "#555").attr("stroke-width", 1.5).attr("marker-end", "url(#arrow)");
-  svg.append("defs").append("marker").attr("id","arrow").attr("viewBox","0 0 10 10")
-    .attr("refX",20).attr("refY",5).attr("markerWidth",6).attr("markerHeight",6)
-    .attr("orient","auto").append("path").attr("d","M0,0 L10,5 L0,10 Z").attr("fill","#555");
-  const node = g.selectAll("circle").data(nodes).join("circle")
-    .attr("r", d => 6 + d.weight).attr("fill", d => STATUS_COLORS[d.status] || "#AED6F1")
-    .attr("stroke","#fff").attr("stroke-width",1)
-    .call(d3.drag().on("start",(e,d)=>{if(!e.active)sim.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
-      .on("drag",(e,d)=>{d.fx=e.x;d.fy=e.y;}).on("end",(e,d)=>{if(!e.active)sim.alphaTarget(0);d.fx=null;d.fy=null;}));
-  const label = g.selectAll("text").data(nodes).join("text")
-    .text(d => d.id).attr("font-size",10).attr("fill","#c0c0c0").attr("text-anchor","middle").attr("dy",-12);
-  sim.on("tick", () => {
-    link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
-    node.attr("cx",d=>d.x).attr("cy",d=>d.y);
-    label.attr("x",d=>d.x).attr("y",d=>d.y);
-  });
+  // D3 DAG 可视化
+  var nodes = {{ nodes | tojson }};
+  var edges = {{ edges | tojson }};
+  if (nodes.length) {
+    var style = getComputedStyle(document.documentElement);
+    var getVar = function(name) { return style.getPropertyValue(name).trim(); };
+    var STATUS_COLORS = {
+      planted: getVar('--blue') || '#78a8e8',
+      growing: getVar('--yellow') || '#e8d48a',
+      recovered: getVar('--green') || '#6ecf8e',
+      abandoned: getVar('--text-dim') || '#6a6a80'
+    };
+    var linkColor = getVar('--border') || '#2a2a3e';
+    var labelColor = getVar('--text-secondary') || '#a0a0b8';
+    var container = document.getElementById("dag-container");
+    var w = container.clientWidth, h = Math.max(500, container.clientHeight);
+    var svg = d3.select(container).append("svg").attr("width", w).attr("height", h);
+    var g = svg.append("g");
+    svg.call(d3.zoom().scaleExtent([0.2, 4]).on("zoom", function(e) { g.attr("transform", e.transform); }));
+    var sim = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(edges).id(function(d) { return d.id; }).distance(80))
+      .force("charge", d3.forceManyBody().strength(-200))
+      .force("center", d3.forceCenter(w/2, h/2));
+    var link = g.selectAll("line").data(edges).join("line")
+      .attr("stroke", linkColor).attr("stroke-width", 1.5).attr("marker-end", "url(#arrow)");
+    svg.append("defs").append("marker").attr("id","arrow").attr("viewBox","0 0 10 10")
+      .attr("refX",20).attr("refY",5).attr("markerWidth",6).attr("markerHeight",6)
+      .attr("orient","auto").append("path").attr("d","M0,0 L10,5 L0,10 Z").attr("fill", linkColor);
+    var node = g.selectAll("circle").data(nodes).join("circle")
+      .attr("r", function(d) { return 6 + d.weight; })
+      .attr("fill", function(d) { return STATUS_COLORS[d.status] || getVar('--accent') || '#d4a574'; })
+      .attr("stroke", getVar('--bg-surface') || '#14141f').attr("stroke-width", 2)
+      .style("cursor", "grab")
+      .call(d3.drag()
+        .on("start", function(e,d) { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+        .on("drag", function(e,d) { d.fx=e.x; d.fy=e.y; })
+        .on("end", function(e,d) { if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }));
+    var label = g.selectAll("text").data(nodes).join("text")
+      .text(function(d) { return d.id; }).attr("font-size",10).attr("fill",labelColor)
+      .attr("text-anchor","middle").attr("dy",-12).style("pointer-events","none");
+    sim.on("tick", function() {
+      link.attr("x1",function(d){return d.source.x;}).attr("y1",function(d){return d.source.y;})
+        .attr("x2",function(d){return d.target.x;}).attr("y2",function(d){return d.target.y;});
+      node.attr("cx",function(d){return d.x;}).attr("cy",function(d){return d.y;});
+      label.attr("x",function(d){return d.x;}).attr("y",function(d){return d.y;});
+    });
+  }
+
+  // 添加伏笔
+  window.showAddForeshadowing = function() {
+    var tpl = document.getElementById('fs-form-tpl');
+    modal('添加伏笔', tpl.innerHTML, function() {
+      var body = document.querySelector('.modal-body');
+      var req = {
+        id: body.querySelector('[name=id]').value,
+        content: body.querySelector('[name=content]').value,
+        layer: body.querySelector('[name=layer]').value,
+        weight: parseInt(body.querySelector('[name=weight]').value) || 5,
+        target_chapter: body.querySelector('[name=target_chapter]').value
+      };
+      if (!req.id) { toast('请输入伏笔 ID', 'error'); return; }
+      api.post('/api/foreshadowing', req).then(function(data) {
+        toast('伏笔已添加: ' + req.id);
+        setTimeout(function() { location.reload(); }, 800);
+      });
+    });
+  };
+
+  // 更新伏笔状态
+  window.setFsStatus = function(nodeId, status) {
+    api.put('/api/foreshadowing/' + nodeId + '/status', { status: status }).then(function() {
+      toast(nodeId + ' -> ' + status);
+      setTimeout(function() { location.reload(); }, 600);
+    });
+  };
 })();
 </script>
 {% endblock %}

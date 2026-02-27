@@ -4,11 +4,11 @@
 
 ## 项目进度看板（截至 2026-02-27）
 
-- 当前阶段：`Phase 6B 完成` — LLM 集成层已实装，所有 Agent 支持 opt-in LLM 模式
-- 主流程：`Director → Librarian → LoreChecker → Stylist(可选) → Reader+StyleDirector(可选)`
+- 当前阶段：`Phase 7 完成` — Web 应用已上线，Markdown 大纲双向同步已实现
+- 主流程：`Director → Writer → Reviewer → User → Stylist(可选)` (Pipeline V2)
 - 风格系统：三层架构（craft/通用技法 → styles/作者风格 → novels/作品设定）已就位
 - LLM 集成：LiteLLM 多模型路由（Opus 4.6 / Kimi K2.5 / MiniMax M2.5 / GLM-4.7 / DeepSeek）
-- 现有测试：`python3 -m pytest -q`，当前 `84 passed`
+- 现有测试：`python3 -m pytest -q`，当前 `230 passed`
 - 架构说明文档：`docs/CURRENT_ARCHITECTURE.md`
 
 ### 已完成能力
@@ -31,6 +31,12 @@
 - Librarian Agent：上下文感知节拍生成、结构化草稿、智能重写
 - ContextCompressor：优先级加权预算分配、句边界截断、跨段去重
 - Reader/Director 风格迭代循环（已完成《术师手册》3批Reader + 1周期Director）
+- Web 应用：FastAPI + Jinja2 + IDE 风格深色主题
+- 四级大纲层级：总纲 → 篇纲 → 节纲 → 章纲（OutlineHierarchy 模型）
+- Markdown 大纲双向同步：outline.md ↔ hierarchy.yaml
+- Pipeline V2：渐进式上下文压缩 + 人工审核环节
+- 文本人物档案：TextCharacterProfile（纯文本描述）
+- LLM 配置 Web UI：/settings 页面管理模型路由
 
 - LLM 集成层：LiteLLM 封装、多模型路由、Prompt 模板、自动 fallback
 - Director/Librarian/LoreChecker/Stylist 均支持 opt-in LLM 模式
@@ -40,7 +46,7 @@
 ### 尚未开始
 
 - 世界观图谱高级功能：复杂规则推理、跨章节冲突检查、可视化
-- Web 应用：后端 API、前端编辑器、可视化界面
+- 大纲管理前端：outline.md 编辑器页面（API 已就绪）
 
 ## 快速开始
 

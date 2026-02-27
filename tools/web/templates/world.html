@@ -2,7 +2,14 @@
 {% set active = "world" %}
 {% block title %}世界观 — OpenWrite{% endblock %}
 {% block content %}
-<h1>世界观图谱</h1>
+<div class="page-container">
+<div class="page-header">
+  <h1>世界观图谱</h1>
+  <div class="page-actions">
+    <button class="btn btn-primary" onclick="showAddEntity()">添加实体</button>
+    <button class="btn btn-secondary" onclick="showAddRelation()">添加关系</button>
+  </div>
+</div>
 <div class="info-bar">
   <span>实体: {{ entity_count }}</span>
   <span>关系: {{ relation_count }}</span>
@@ -10,4 +17,100 @@
 <div class="embed-frame">
   {{ graph_html | safe }}
 </div>
+
+<!-- 添加实体表单 -->
+<div id="entity-form-tpl" style="display:none">
+  <div class="form-group">
+    <label>ID</label>
+    <input class="form-input" name="id" placeholder="faction_001">
+  </div>
+  <div class="form-group">
+    <label>名称</label>
+    <input class="form-input" name="name" placeholder="实体名称">
+  </div>
+  <div class="form-group">
+    <label>类型</label>
+    <select class="form-input form-select" name="type">
+      <option value="faction">势力 faction</option>
+      <option value="realm">境界 realm</option>
+      <option value="location">地点 location</option>
+      <option value="concept" selected>概念 concept</option>
+      <option value="item">物品 item</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>描述</label>
+    <input class="form-input" name="description" placeholder="实体描述（可选）">
+  </div>
+</div>
+
+<!-- 添加关系表单 -->
+<div id="relation-form-tpl" style="display:none">
+  <div class="form-group">
+    <label>源实体 ID</label>
+    <input class="form-input" name="source" placeholder="faction_001">
+  </div>
+  <div class="form-group">
+    <label>目标实体 ID</label>
+    <input class="form-input" name="target" placeholder="faction_002">
+  </div>
+  <div class="form-group">
+    <label>关系类型</label>
+    <input class="form-input" name="relation" placeholder="敌对 / 从属 / 联盟">
+  </div>
+  <div class="form-group">
+    <label>权重 (1-10)</label>
+    <input class="form-input" type="number" name="weight" value="1" min="1" max="10">
+  </div>
+  <div class="form-group">
+    <label>备注</label>
+    <input class="form-input" name="note" placeholder="可选">
+  </div>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  window.showAddEntity = function() {
+    var tpl = document.getElementById('entity-form-tpl');
+    modal('添加世界观实体', tpl.innerHTML, function() {
+      var body = document.querySelector('.modal-body');
+      var req = {
+        id: body.querySelector('[name=id]').value,
+        name: body.querySelector('[name=name]').value,
+        type: body.querySelector('[name=type]').value,
+        description: body.querySelector('[name=description]').value,
+        tags: [],
+        attributes: {}
+      };
+      if (!req.id || !req.name) { toast('ID 和名称必填', 'error'); return; }
+      api.post('/api/world/entities', req).then(function(data) {
+        toast('实体已添加: ' + data.name);
+        setTimeout(function() { location.reload(); }, 800);
+      });
+    });
+  };
+
+  window.showAddRelation = function() {
+    var tpl = document.getElementById('relation-form-tpl');
+    modal('添加世界观关系', tpl.innerHTML, function() {
+      var body = document.querySelector('.modal-body');
+      var req = {
+        source: body.querySelector('[name=source]').value,
+        target: body.querySelector('[name=target]').value,
+        relation: body.querySelector('[name=relation]').value,
+        weight: parseInt(body.querySelector('[name=weight]').value) || 1,
+        note: body.querySelector('[name=note]').value
+      };
+      if (!req.source || !req.target || !req.relation) { toast('源、目标、关系类型必填', 'error'); return; }
+      api.post('/api/world/relations', req).then(function(data) {
+        toast('关系已添加: ' + data.source + ' -> ' + data.target);
+        setTimeout(function() { location.reload(); }, 800);
+      });
+    });
+  };
+})();
+</script>
 {% endblock %}

@@ -1,4 +1,9 @@
-"""Character models: lightweight card + optional detailed markdown profile."""
+"""Character models: lightweight card + optional detailed markdown profile.
+
+新增文本优先人物档案模型（Phase 7 架构重设计）：
+  TextCharacterProfile — 纯文字多段描述，只记录重要角色。
+旧模型保留以兼容现有测试。
+"""
 
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -124,3 +129,61 @@ class CharacterCard(BaseModel):
                 item_text = item if count == 1 else f"{item} x{count}"
                 self.summary.items.append(item_text)
         return self
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 新文本优先人物档案（Phase 7 架构重设计）
+# 用户要求：炮灰不记录，主要角色用多段文字描述
+# 格式：人物名/类型/外貌/性格与说话风格/技能与能力/物品/属性
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TextCharacterProfile(BaseModel):
+    """文本优先人物档案 — 多段自由文字描述，仅记录重要角色。"""
+    id: str = Field(..., description="人物ID")
+    name: str = Field(..., description="人物名")
+    char_type: str = Field(default="配角", description="主角/重要配角/配角")
+    appearance: str = Field(default="", description="外貌（多段文字）")
+    personality_and_voice: str = Field(default="", description="性格与说话风格（多段文字）")
+    skills_and_abilities: str = Field(default="", description="技能与能力（多段文字）")
+    items: str = Field(default="", description="物品（多段文字）")
+    attributes: str = Field(default="", description="属性（多段文字，如境界、阵营等）")
+    notes: str = Field(default="", description="其他备注")
+    faction: str = Field(default="", description="势力")
+    aliases: List[str] = Field(default_factory=list, description="别名")
+
+    def to_context_text(self, max_chars: int = 0) -> str:
+        """生成用于 AI 上下文的纯文本摘要。"""
+        parts: List[str] = [f"【{self.name}】 类型：{self.char_type}"]
+        if self.appearance:
+            parts.append(f"外貌：{self.appearance}")
+        if self.personality_and_voice:
+            parts.append(f"性格与说话风格：{self.personality_and_voice}")
+        if self.skills_and_abilities:
+            parts.append(f"技能与能力：{self.skills_and_abilities}")
+        if self.items:
+            parts.append(f"物品：{self.items}")
+        if self.attributes:
+            parts.append(f"属性：{self.attributes}")
+        if self.notes:
+            parts.append(f"备注：{self.notes}")
+        text = "\n".join(parts)
+        if max_chars and len(text) > max_chars:
+            return text[:max_chars] + "…"
+        return text
+
+    @classmethod
+    def from_legacy_card(cls, card: CharacterCard) -> "TextCharacterProfile":
+        """从旧版 CharacterCard 迁移。"""
+        return cls(
+            id=card.static.id,
+            name=card.static.name,
+            char_type=card.static.tier,
+            appearance=card.static.appearance,
+            personality_and_voice=" ".join(card.static.personality) if card.static.personality else "",
+            items=" ".join(card.summary.items) if card.summary.items else "",
+            attributes=f"境界：{card.summary.realm}" if card.summary.realm != "凡人" else "",
+            faction=card.static.faction,
+            aliases=card.static.aliases,
+        )

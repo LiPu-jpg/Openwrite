@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% set active = "settings" %}
+{% block title %}设置 — OpenWrite{% endblock %}
+{% block content %}
+<div class="page-container">
+  <div class="page-header">
+    <h2>LLM 模型配置</h2>
+    <p class="text-dim">管理 AI 模型路由、API 密钥环境变量和任务类型映射</p>
+  </div>
+
+  <div class="settings-grid">
+    <!-- 全局开关 -->
+    <div class="card">
+      <div class="card-header">
+        <span>全局设置</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="llm-enabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>重试次数</label>
+            <input class="form-input" type="number" id="retry-count" value="2" min="0" max="10">
+          </div>
+          <div class="form-group">
+            <label>重试间隔 (秒)</label>
+            <input class="form-input" type="number" id="retry-delay" value="1.0" min="0" max="30" step="0.5">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 默认路由 -->
+    <div class="card">
+      <div class="card-header"><span>默认路由 (Default)</span></div>
+      <div class="card-body">
+        <div class="route-editor" data-route="default_route">
+          <div class="form-group">
+            <label>模型</label>
+            <input class="form-input" data-field="model" placeholder="deepseek/deepseek-chat">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>API Base</label>
+              <input class="form-input" data-field="api_base" placeholder="留空使用默认">
+            </div>
+            <div class="form-group">
+              <label>API Key 环境变量</label>
+              <input class="form-input" data-field="api_key_env" placeholder="DEEPSEEK_API_KEY">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Max Tokens</label>
+              <input class="form-input" type="number" data-field="max_tokens" value="4096">
+            </div>
+            <div class="form-group">
+              <label>Temperature</label>
+              <input class="form-input" type="number" data-field="temperature" value="0.7" step="0.1" min="0" max="2">
+            </div>
+            <div class="form-group">
+              <label>Timeout (秒)</label>
+              <input class="form-input" type="number" data-field="timeout" value="120">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务路由 -->
+    <div class="card" id="routes-card">
+      <div class="card-header">
+        <span>任务路由</span>
+      </div>
+      <div class="card-body" id="routes-container">
+        <!-- 动态生成 -->
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-actions">
+    <button class="btn btn-secondary" onclick="loadConfig()">重新加载</button>
+    <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var TASK_TYPES = [
+    { key: 'reasoning', label: '调度决策 (Director)', desc: '首选推理强模型' },
+    { key: 'generation', label: '文本生成 (Writer)', desc: '首选长文本模型' },
+    { key: 'review', label: '逻辑审查 (Reviewer)', desc: '首选推理准确模型' },
+    { key: 'style', label: '风格润色 (Stylist)', desc: '首选中文理解好的模型' }
+  ];
+
+  function makeRouteHtml(routeKey, label, desc, data) {
+    var p = (data && data.primary) || {};
+    var fb = (data && data.fallbacks) || [];
+    var html = '<div class="route-section" data-route-key="' + routeKey + '">';
+    html += '<div class="route-title">' + label + '<span class="text-dim" style="margin-left:8px;font-size:12px">' + desc + '</span></div>';
+    html += '<div class="route-editor" data-route="routes.' + routeKey + '">';
+    html += '<div class="route-label">Primary</div>';
+    html += makeModelFields(p, 'primary');
+    for (var i = 0; i < Math.max(fb.length, 1); i++) {
+      var f = fb[i] || {};
+      html += '<div class="route-label">Fallback ' + (i + 1) + '</div>';
+      html += makeModelFields(f, 'fallback_' + i);
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function makeModelFields(m, prefix) {
+    return '<div class="form-row">' +
+      '<div class="form-group"><label>模型</label><input class="form-input" data-prefix="' + prefix + '" data-field="model" value="' + (m.model || '') + '"></div>' +
+      '<div class="form-group"><label>API Base</label><input class="form-input" data-prefix="' + prefix + '" data-field="api_base" value="' + (m.api_base || '') + '"></div>' +
+      '<div class="form-group"><label>Key Env</label><input class="form-input" data-prefix="' + prefix + '" data-field="api_key_env" value="' + (m.api_key_env || '') + '"></div>' +
+      '</div><div class="form-row">' +
+      '<div class="form-group"><label>Max Tokens</label><input class="form-input" type="number" data-prefix="' + prefix + '" data-field="max_tokens" value="' + (m.max_tokens || 4096) + '"></div>' +
+      '<div class="form-group"><label>Temperature</label><input class="form-input" type="number" data-prefix="' + prefix + '" data-field="temperature" value="' + (m.temperature || 0.7) + '" step="0.1"></div>' +
+      '<div class="form-group"><label>Timeout</label><input class="form-input" type="number" data-prefix="' + prefix + '" data-field="timeout" value="' + (m.timeout || 120) + '"></div>' +
+      '</div>';
+  }
+
+  function fillDefaultRoute(data) {
+    var dr = (data && data.default_route && data.default_route.primary) || {};
+    var editor = document.querySelector('.route-editor[data-route="default_route"]');
+    if (!editor) return;
+    var fields = editor.querySelectorAll('[data-field]');
+    fields.forEach(function(f) {
+      var key = f.dataset.field;
+      if (dr[key] !== undefined) f.value = dr[key];
+    });
+  }
+
+  function collectModelFromEditor(editor, prefix) {
+    var m = {};
+    var fields = editor.querySelectorAll('[data-prefix="' + prefix + '"][data-field]');
+    fields.forEach(function(f) {
+      var key = f.dataset.field;
+      var val = f.value.trim();
+      if (f.type === 'number') val = parseFloat(val) || 0;
+      if (val !== '' && val !== 0) m[key] = val;
+    });
+    return m;
+  }
+
+  function collectDefaultRoute() {
+    var editor = document.querySelector('.route-editor[data-route="default_route"]');
+    if (!editor) return {};
+    var m = {};
+    editor.querySelectorAll('[data-field]').forEach(function(f) {
+      var val = f.value.trim();
+      if (f.type === 'number') val = parseFloat(val) || 0;
+      if (val !== '' && val !== 0) m[f.dataset.field] = val;
+    });
+    return { primary: m };
+  }
+
+  function collectRoutes() {
+    var routes = {};
+    document.querySelectorAll('.route-section').forEach(function(sec) {
+      var key = sec.dataset.routeKey;
+      var editor = sec.querySelector('.route-editor');
+      var primary = collectModelFromEditor(editor, 'primary');
+      var fallbacks = [];
+      for (var i = 0; i < 5; i++) {
+        var fb = collectModelFromEditor(editor, 'fallback_' + i);
+        if (fb.model) fallbacks.push(fb);
+      }
+      if (primary.model) {
+        routes[key] = { primary: primary, fallbacks: fallbacks };
+      }
+    });
+    return routes;
+  }
+
+  window.loadConfig = function() {
+    api.get('/api/settings/llm').then(function(data) {
+      document.getElementById('llm-enabled').checked = !!data.enabled;
+      document.getElementById('retry-count').value = data.retry_count || 2;
+      document.getElementById('retry-delay').value = data.retry_delay || 1.0;
+      fillDefaultRoute(data);
+      var container = document.getElementById('routes-container');
+      var html = '';
+      TASK_TYPES.forEach(function(t) {
+        var rd = (data.routes && data.routes[t.key]) || {};
+        html += makeRouteHtml(t.key, t.label, t.desc, rd);
+      });
+      container.innerHTML = html;
+      toast('配置已加载');
+    });
+  };
+
+  window.saveConfig = function() {
+    var payload = {
+      enabled: document.getElementById('llm-enabled').checked,
+      retry_count: parseInt(document.getElementById('retry-count').value) || 2,
+      retry_delay: parseFloat(document.getElementById('retry-delay').value) || 1.0,
+      default_route: collectDefaultRoute(),
+      routes: collectRoutes()
+    };
+    api.put('/api/settings/llm', payload).then(function() {
+      toast('配置已保存');
+    });
+  };
+
+  // 初始加载
+  loadConfig();
+})();
+</script>
+{% endblock %}

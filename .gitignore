@@ -12,3 +12,18 @@ data/
 
 # OS/editor artifacts
 .DS_Store
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+
+# LLM config (may contain API keys)
+llm_config.yaml
+
+# Composed style outputs
+composed/

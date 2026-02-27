@@ -2,19 +2,163 @@
 {% set active = "characters" %}
 {% block title %}人物 — OpenWrite{% endblock %}
 {% block content %}
-<h1>人物档案</h1>
+<div class="page-container">
+<div class="page-header">
+  <h1>人物档案</h1>
+  <div class="page-actions">
+    <button class="btn btn-primary" onclick="showCreateCharacter()">创建人物</button>
+  </div>
+</div>
+
 {% if characters %}
+<div class="char-filters">
+  <button class="filter-btn active" data-filter="all">全部</button>
+  <button class="filter-btn" data-filter="主角">主角</button>
+  <button class="filter-btn" data-filter="重要配角">重要配角</button>
+  <button class="filter-btn" data-filter="配角">配角</button>
+</div>
 <div class="card-grid">
   {% for c in characters %}
-  <div class="char-card">
-    <div class="char-name">{{ c.name }}</div>
-    <div class="char-meta">{{ c.tier }} {% if c.faction %}· {{ c.faction }}{% endif %}</div>
-    {% if c.realm %}<div class="char-attr">境界: {{ c.realm }}</div>{% endif %}
-    {% if c.location %}<div class="char-attr">位置: {{ c.location }}</div>{% endif %}
+  <div class="char-card" data-tier="{{ c.tier }}" data-name="{{ c.name }}" onclick="showCharDetail('{{ c.name }}')">
+    <div class="char-avatar"><span class="avatar-letter">{{ c.name[0] }}</span></div>
+    <div class="char-info">
+      <div class="char-name">{{ c.name }}</div>
+      <div class="char-meta">{{ c.tier }} {% if c.faction %}· {{ c.faction }}{% endif %}</div>
+      {% if c.realm %}<div class="char-attr">境界: {{ c.realm }}</div>{% endif %}
+      {% if c.location %}<div class="char-attr">位置: {{ c.location }}</div>{% endif %}
+    </div>
   </div>
   {% endfor %}
 </div>
 {% else %}
-<p class="empty-hint">暂无人物数据，请先通过 CLI 创建人物</p>
+<div class="empty-state">
+  <h3>暂无人物数据</h3>
+  <p>点击上方"创建人物"按钮添加角色</p>
+</div>
 {% endif %}
+
+<!-- 创建人物表单模板 -->
+<div id="create-char-form" style="display:none">
+  <div class="form-group">
+    <label>名称</label>
+    <input class="form-input" name="name" placeholder="角色名">
+  </div>
+  <div class="form-group">
+    <label>层级</label>
+    <select class="form-input form-select" name="tier">
+      <option value="主角">主角</option>
+      <option value="重要配角">重要配角</option>
+      <option value="配角">配角</option>
+      <option value="普通配角" selected>普通配角</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>势力</label>
+    <input class="form-input" name="faction" placeholder="所属势力（可选）">
+  </div>
+</div>
+
+<!-- 记录变更表单模板 -->
+<div id="mutate-char-form" style="display:none">
+  <div class="form-group">
+    <label>章节 ID</label>
+    <input class="form-input" name="chapter" placeholder="ch_001">
+  </div>
+  <div class="form-group">
+    <label>变更表达式（可选）</label>
+    <input class="form-input" name="change" placeholder="acquire:神秘玉佩">
+  </div>
+  <div class="form-group">
+    <label>备注</label>
+    <input class="form-input" name="note" placeholder="自由文本备注">
+  </div>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  // 筛选
+  document.querySelectorAll('.filter-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      var filter = btn.dataset.filter;
+      document.querySelectorAll('.char-card').forEach(function(card) {
+        var show = filter === 'all' || card.dataset.tier === filter;
+        card.classList.toggle('hidden', !show);
+      });
+    });
+  });
+
+  // 创建人物
+  window.showCreateCharacter = function() {
+    var tpl = document.getElementById('create-char-form');
+    modal('创建人物', tpl.innerHTML, function() {
+      var body = document.querySelector('.modal-body');
+      var req = {
+        name: body.querySelector('[name=name]').value,
+        tier: body.querySelector('[name=tier]').value,
+        faction: body.querySelector('[name=faction]').value
+      };
+      if (!req.name) { toast('请输入角色名', 'error'); return; }
+      api.post('/api/characters', req).then(function(data) {
+        toast('人物已创建: ' + data.name);
+        setTimeout(function() { location.reload(); }, 800);
+      });
+    });
+  };
+
+  // 查看人物详情
+  window.showCharDetail = function(name) {
+    api.get('/api/characters/' + encodeURIComponent(name)).then(function(data) {
+      var state = data.state || {};
+      var timeline = data.timeline || [];
+      var stateInfo = state.state || {};
+      var html = '<div style="margin-bottom:12px">';
+      html += '<p>境界: ' + (stateInfo.realm || '-') + '</p>';
+      html += '<p>位置: ' + (stateInfo.location || '-') + '</p>';
+      html += '<p>状态: ' + JSON.stringify(stateInfo.statuses || []) + '</p>';
+      html += '<p>物品: ' + JSON.stringify(stateInfo.items || []) + '</p>';
+      html += '</div>';
+      if (timeline.length) {
+        html += '<h4>时间线 (' + timeline.length + ')</h4>';
+        html += '<div style="max-height:200px;overflow-y:auto;font-size:12px">';
+        timeline.forEach(function(t) {
+          html += '<div style="padding:4px 0;border-bottom:1px solid var(--border)">';
+          html += '<span style="color:var(--accent)">' + (t.chapter_id || '') + '</span> ';
+          html += (t.action || '备注') + ': ' + (t.note || t.reason || '-');
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      html += '<div style="margin-top:12px"><button class="btn btn-sm btn-secondary" onclick="showMutateChar(\'' + name + '\')">记录变更</button></div>';
+      modal(name + ' — 详情', html, null);
+      var confirmBtn = document.getElementById('modal-confirm');
+      if (confirmBtn) confirmBtn.style.display = 'none';
+    });
+  };
+
+  // 记录变更
+  window.showMutateChar = function(name) {
+    closeModal();
+    var tpl = document.getElementById('mutate-char-form');
+    setTimeout(function() {
+      modal('记录变更 — ' + name, tpl.innerHTML, function() {
+        var body = document.querySelector('.modal-body');
+        var req = {
+          chapter: body.querySelector('[name=chapter]').value,
+          change: body.querySelector('[name=change]').value || null,
+          note: body.querySelector('[name=note]').value
+        };
+        if (!req.chapter) { toast('请输入章节 ID', 'error'); return; }
+        api.put('/api/characters/' + encodeURIComponent(name) + '/mutate', req).then(function(data) {
+          toast('变更已记录: ' + data.mutation_id);
+        });
+      });
+    }, 200);
+  };
+})();
+</script>
 {% endblock %}

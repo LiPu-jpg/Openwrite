@@ -2,7 +2,13 @@
 {% set active = "style" %}
 {% block title %}风格系统 — OpenWrite{% endblock %}
 {% block content %}
-<h1>风格系统</h1>
+<div class="page-container">
+<div class="page-header">
+  <h1>风格系统</h1>
+  <div class="page-actions">
+    <button class="btn btn-primary" onclick="showComposeStyle()">合成风格</button>
+  </div>
+</div>
 <div class="info-bar">
   <span>可用风格: {{ styles | join(", ") if styles else "无" }}</span>
   <span>可用作品: {{ novels | join(", ") if novels else "无" }}</span>
@@ -38,4 +44,39 @@
 {% else %}
 <p class="empty-hint">暂无风格档案，请先运行 <code>style compose</code> 和 <code>style profile</code></p>
 {% endif %}
+
+<!-- 合成风格表单 -->
+<div id="compose-form-tpl" style="display:none">
+  <div class="form-group">
+    <label>作品 ID (novel_id)</label>
+    <input class="form-input" name="novel_id" placeholder="novels/ 下的目录名">
+  </div>
+  <div class="form-group">
+    <label>风格模板 ID (style_id)</label>
+    <input class="form-input" name="style_id" placeholder="styles/ 下的目录名">
+  </div>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  window.showComposeStyle = function() {
+    var tpl = document.getElementById('compose-form-tpl');
+    modal('合成风格', tpl.innerHTML, function() {
+      var body = document.querySelector('.modal-body');
+      var req = {
+        novel_id: body.querySelector('[name=novel_id]').value,
+        style_id: body.querySelector('[name=style_id]').value
+      };
+      if (!req.novel_id || !req.style_id) { toast('作品 ID 和风格模板 ID 必填', 'error'); return; }
+      api.post('/api/style/compose', req).then(function(data) {
+        toast('风格合成完成');
+        setTimeout(function() { location.reload(); }, 800);
+      });
+    });
+  };
+})();
+</script>
 {% endblock %}

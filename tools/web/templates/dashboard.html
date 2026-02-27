@@ -2,30 +2,31 @@
 {% set active = "dashboard" %}
 {% block title %}仪表盘 — OpenWrite{% endblock %}
 {% block content %}
+<div class="page-container">
 <h1>项目概览</h1>
-<div class="stats-grid">
+<div class="stats-grid" id="stats-grid">
   <div class="stat-card">
-    <div class="stat-value">{{ stats.chapter_count }}</div>
+    <div class="stat-value" id="stat-chapters">{{ stats.chapter_count }}</div>
     <div class="stat-label">章节</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">{{ stats.character_count }}</div>
+    <div class="stat-value" id="stat-characters">{{ stats.character_count }}</div>
     <div class="stat-label">人物</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">{{ stats.entity_count }}</div>
+    <div class="stat-value" id="stat-entities">{{ stats.entity_count }}</div>
     <div class="stat-label">世界实体</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">{{ stats.relation_count }}</div>
+    <div class="stat-value" id="stat-relations">{{ stats.relation_count }}</div>
     <div class="stat-label">关系</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">{{ stats.foreshadowing_count }}</div>
+    <div class="stat-value" id="stat-foreshadowing">{{ stats.foreshadowing_count }}</div>
     <div class="stat-label">伏笔</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">{{ stats.thread_count }}</div>
+    <div class="stat-value" id="stat-threads">{{ stats.thread_count }}</div>
     <div class="stat-label">叙事线</div>
   </div>
 </div>
@@ -40,4 +41,23 @@
     <a href="/editor" class="link-card">章节编辑器 →</a>
   </div>
 </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  function refreshStats() {
+    api.get('/api/stats').then(function(data) {
+      document.getElementById('stat-chapters').textContent = data.chapters || 0;
+      document.getElementById('stat-characters').textContent = data.characters || 0;
+      document.getElementById('stat-entities').textContent = data.entities || 0;
+      document.getElementById('stat-relations').textContent = data.relations || 0;
+      document.getElementById('stat-foreshadowing').textContent = data.foreshadowing || 0;
+      document.getElementById('stat-threads').textContent = data.threads || 0;
+    });
+  }
+  setInterval(refreshStats, 30000);
+})();
+</script>
 {% endblock %}
