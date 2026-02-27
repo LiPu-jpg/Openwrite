@@ -38,6 +38,7 @@ class DirectorDecision:
     style_instructions: str = ""
     suggested_strict_lore: bool = False
     priority_elements: List[str] = field(default_factory=list)
+    generation_instructions: str = ""
 
 
 class DirectorAgent:
@@ -349,8 +350,7 @@ class DirectorAgent:
             required_agents.append("stylist")
 
         notes = data.get("notes", [])
-        if data.get("generation_instructions"):
-            notes.append(f"LLM 创作指令: {data['generation_instructions']}")
+        gen_instr = data.get("generation_instructions", "")
 
         return DirectorDecision(
             objective=objective,
@@ -362,4 +362,5 @@ class DirectorAgent:
             style_instructions=data.get("style_instructions", ""),
             suggested_strict_lore=data.get("strict_lore", False),
             priority_elements=data.get("priority_elements", []),
+            generation_instructions=gen_instr,
         )

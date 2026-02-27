@@ -256,6 +256,9 @@ class AgentSimulator:
             use_stylist=use_stylist,
             style_summary=self._style_summary,
         )
+        # Inject Director's generation instructions into context for Librarian
+        if decision.generation_instructions:
+            context['generation_instructions'] = decision.generation_instructions
 
         librarian_output = self.librarian.generate_chapter(
             chapter_id=chapter_id,

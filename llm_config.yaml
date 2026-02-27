@@ -30,13 +30,14 @@ routes:
   # 首选 Opus 4.6（推理强），fallback GLM-4.7 → DeepSeek
   reasoning:
     primary:
-      model: "anthropic/claude-opus-4-20250918"
+      model: "openai/claude-opus-4-20250918"
+      api_base: "https://yunyi.rdzhvip.com/claude/v1"
       api_key_env: "ANTHROPIC_API_KEY"
       max_tokens: 2048
       temperature: 0.3
       timeout: 60
     fallbacks:
-      - model: "openai/glm-4.7"
+      - model: "openai/glm-4-plus"
         api_base: "https://open.bigmodel.cn/api/paas/v4"
         api_key_env: "ZHIPU_API_KEY"
         max_tokens: 2048
@@ -52,14 +53,14 @@ routes:
   # 首选 Kimi K2.5（长文本），fallback MiniMax M2.5 → DeepSeek
   generation:
     primary:
-      model: "openai/k2.5"
+      model: "openai/moonshot-v1-128k"
       api_base: "https://api.moonshot.cn/v1"
       api_key_env: "KIMI_API_KEY"
       max_tokens: 8192
       temperature: 0.8
       timeout: 180
     fallbacks:
-      - model: "openai/m2.5"
+      - model: "openai/MiniMax-M2.5"
         api_base: "https://api.minimax.chat/v1"
         api_key_env: "MINIMAX_API_KEY"
         max_tokens: 8192
@@ -75,13 +76,14 @@ routes:
   # 首选 Opus 4.6（推理准确），fallback GLM-4.7 → DeepSeek
   review:
     primary:
-      model: "anthropic/claude-opus-4-20250918"
+      model: "openai/claude-opus-4-20250918"
+      api_base: "https://yunyi.rdzhvip.com/claude/v1"
       api_key_env: "ANTHROPIC_API_KEY"
       max_tokens: 2048
       temperature: 0.2
       timeout: 90
     fallbacks:
-      - model: "openai/glm-4.7"
+      - model: "openai/glm-4-plus"
         api_base: "https://open.bigmodel.cn/api/paas/v4"
         api_key_env: "ZHIPU_API_KEY"
         max_tokens: 2048
@@ -97,14 +99,14 @@ routes:
   # 首选 Kimi K2.5（中文理解好），fallback MiniMax → DeepSeek
   style:
     primary:
-      model: "openai/k2.5"
+      model: "openai/moonshot-v1-128k"
       api_base: "https://api.moonshot.cn/v1"
       api_key_env: "KIMI_API_KEY"
       max_tokens: 4096
       temperature: 0.5
       timeout: 120
     fallbacks:
-      - model: "openai/m2.5"
+      - model: "openai/MiniMax-M2.5"
         api_base: "https://api.minimax.chat/v1"
         api_key_env: "MINIMAX_API_KEY"
         max_tokens: 4096
