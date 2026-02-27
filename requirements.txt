@@ -14,6 +14,8 @@ python-frontmatter>=0.2.0
 networkx>=3.0
 numpy>=1.24.0
 
+# LLM 集成
+litellm>=1.40.0
 # 向量计算（后续）
 sentence-transformers>=2.2.0
 

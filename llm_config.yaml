@@ -1,0 +1,117 @@
+# OpenWrite LLM 配置
+# API Key 通过环境变量注入，不要在此文件中填写密钥
+#
+# 环境变量设置示例：
+#   export ANTHROPIC_API_KEY="sk-ant-..."
+#   export KIMI_API_KEY="sk-..."
+#   export MINIMAX_API_KEY="..."
+#   export DEEPSEEK_API_KEY="sk-..."
+#   export ZHIPU_API_KEY="..."
+
+# 全局开关 — false 时所有 Agent 使用规则模拟
+enabled: false
+
+# 重试策略
+retry_count: 2
+retry_delay: 1.0
+
+# 默认路由（未匹配任务类型时使用）
+default_route:
+  primary:
+    model: "deepseek/deepseek-chat"
+    api_key_env: "DEEPSEEK_API_KEY"
+    max_tokens: 4096
+    temperature: 0.7
+    timeout: 120
+
+# 按任务类型的模型路由
+routes:
+  # 调度决策：Director 路由分析、上下文压缩决策
+  # 首选 Opus 4.6（推理强），fallback GLM-4.7 → DeepSeek
+  reasoning:
+    primary:
+      model: "anthropic/claude-opus-4-20250918"
+      api_key_env: "ANTHROPIC_API_KEY"
+      max_tokens: 2048
+      temperature: 0.3
+      timeout: 60
+    fallbacks:
+      - model: "openai/glm-4.7"
+        api_base: "https://open.bigmodel.cn/api/paas/v4"
+        api_key_env: "ZHIPU_API_KEY"
+        max_tokens: 2048
+        temperature: 0.3
+        timeout: 60
+      - model: "deepseek/deepseek-chat"
+        api_key_env: "DEEPSEEK_API_KEY"
+        max_tokens: 2048
+        temperature: 0.3
+        timeout: 60
+
+  # 文本生成：Librarian 草稿写作
+  # 首选 Kimi K2.5（长文本），fallback MiniMax M2.5 → DeepSeek
+  generation:
+    primary:
+      model: "openai/k2.5"
+      api_base: "https://api.moonshot.cn/v1"
+      api_key_env: "KIMI_API_KEY"
+      max_tokens: 8192
+      temperature: 0.8
+      timeout: 180
+    fallbacks:
+      - model: "openai/m2.5"
+        api_base: "https://api.minimax.chat/v1"
+        api_key_env: "MINIMAX_API_KEY"
+        max_tokens: 8192
+        temperature: 0.8
+        timeout: 180
+      - model: "deepseek/deepseek-chat"
+        api_key_env: "DEEPSEEK_API_KEY"
+        max_tokens: 8192
+        temperature: 0.8
+        timeout: 180
+
+  # 逻辑审查：LoreChecker 一致性检查
+  # 首选 Opus 4.6（推理准确），fallback GLM-4.7 → DeepSeek
+  review:
+    primary:
+      model: "anthropic/claude-opus-4-20250918"
+      api_key_env: "ANTHROPIC_API_KEY"
+      max_tokens: 2048
+      temperature: 0.2
+      timeout: 90
+    fallbacks:
+      - model: "openai/glm-4.7"
+        api_base: "https://open.bigmodel.cn/api/paas/v4"
+        api_key_env: "ZHIPU_API_KEY"
+        max_tokens: 2048
+        temperature: 0.2
+        timeout: 90
+      - model: "deepseek/deepseek-chat"
+        api_key_env: "DEEPSEEK_API_KEY"
+        max_tokens: 2048
+        temperature: 0.2
+        timeout: 90
+
+  # 风格分析：Stylist 润色 / Reader 抽取 / StyleDirector 分析
+  # 首选 Kimi K2.5（中文理解好），fallback MiniMax → DeepSeek
+  style:
+    primary:
+      model: "openai/k2.5"
+      api_base: "https://api.moonshot.cn/v1"
+      api_key_env: "KIMI_API_KEY"
+      max_tokens: 4096
+      temperature: 0.5
+      timeout: 120
+    fallbacks:
+      - model: "openai/m2.5"
+        api_base: "https://api.minimax.chat/v1"
+        api_key_env: "MINIMAX_API_KEY"
+        max_tokens: 4096
+        temperature: 0.5
+        timeout: 120
+      - model: "deepseek/deepseek-chat"
+        api_key_env: "DEEPSEEK_API_KEY"
+        max_tokens: 4096
+        temperature: 0.5
+        timeout: 120

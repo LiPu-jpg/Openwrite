@@ -1,7 +1,27 @@
-"""Librarian agent for chapter draft generation and rewrite."""
+"""Librarian agent — context-aware chapter draft generation and rewrite.
 
-from dataclasses import dataclass
-from typing import Dict, List
+The Librarian is the 'writer' of the simulation pipeline:
+  1. Analyzes context to generate meaningful beat lists
+  2. Produces structured drafts with scene/dialogue/narration sections
+  3. Handles rewrites using LoreChecker + Stylist feedback
+  4. Accepts style context from Director for tone-aware generation
+
+支持 LLM 模式（opt-in）：节拍保持规则生成，LLM 负责将节拍扩写为散文。
+不传入 llm_client 时保持原有规则模拟行为。
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from tools.llm.client import LLMClient
+    from tools.llm.router import ModelRouter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -11,53 +31,357 @@ class LibrarianOutput:
     chapter_id: str
     beat_list: List[str]
     draft: str
+    metadata: Dict[str, str] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Beat generation templates — categorized by narrative function
+# ---------------------------------------------------------------------------
+BEAT_TEMPLATES = {
+    "opening": [
+        "承接上章尾声，{protagonist}面对{situation}，建立本章核心冲突",
+        "以{setting}环境描写切入，暗示本章基调与潜在危机",
+        "通过{protagonist}的内心独白/行动，揭示当前困境与目标",
+    ],
+    "development": [
+        "{protagonist}采取行动推进目标，遭遇{obstacle}形成阻力",
+        "引入新信息/角色互动，改变{protagonist}对局势的判断",
+        "通过对话/冲突展现角色关系变化，推进人物弧线",
+        "伏笔元素自然融入叙事，为后续章节埋下线索",
+    ],
+    "climax": [
+        "核心冲突升级至本章高潮，{protagonist}被迫做出关键决策",
+        "决策带来代价——获得部分答案但付出相应代价",
+    ],
+    "closing": [
+        "冲突暂时收束，{protagonist}消化本章事件的影响",
+        "制造新悬念或遗留问题，衔接下一章（{seed}）",
+    ],
+}
+
+# Narrative element markers for structured draft
+SECTION_MARKERS = {
+    "scene": "【场景】",
+    "dialogue": "【对话】",
+    "narration": "【叙述】",
+    "internal": "【内心】",
+    "action": "【动作】",
+    "transition": "【转场】",
+}
 
 
 class LibrarianAgent:
-    """Generates chapter beats and a draft from constrained context."""
+    """Generates chapter beats and structured drafts from constrained context."""
+
+    def __init__(
+        self,
+        style_context: Optional[str] = None,
+        llm_client: Optional["LLMClient"] = None,
+        router: Optional["ModelRouter"] = None,
+    ):
+        self._style_context = style_context
+        self._llm_client = llm_client
+        self._router = router
+
+    # ------------------------------------------------------------------
+    # Beat generation
+    # ------------------------------------------------------------------
 
     def generate_beats(self, chapter_id: str, context: Dict[str, str]) -> List[str]:
+        """Generate context-aware beat list based on chapter context."""
         seed = context.get("seed", "推进主线并保留悬念")
-        return [
-            f"{chapter_id} 开场：建立当下冲突与目标",
-            f"{chapter_id} 中段：推进人物决策并触发代价",
-            f"{chapter_id} 结尾：制造新悬念，衔接下一章（{seed}）",
+        outline = context.get("outline", "")
+        characters = context.get("characters", "")
+        foreshadowing = context.get("foreshadowing", "")
+
+        # Extract protagonist name from characters context
+        protagonist = self._extract_protagonist(characters)
+        # Detect situation from outline
+        situation = self._extract_situation(outline, seed)
+        # Detect setting
+        setting = self._extract_setting(context)
+        # Detect obstacles
+        obstacle = self._extract_obstacle(outline, foreshadowing)
+
+        template_vars = {
+            "protagonist": protagonist,
+            "situation": situation,
+            "setting": setting,
+            "obstacle": obstacle,
+            "seed": seed,
+        }
+
+        beats: List[str] = []
+
+        # Opening beat
+        opening_templates = BEAT_TEMPLATES["opening"]
+        opening_idx = hash(chapter_id) % len(opening_templates)
+        beats.append(
+            f"{chapter_id} 开场：{self._fill_template(opening_templates[opening_idx], template_vars)}"
+        )
+
+        # Development beats — number depends on context richness
+        dev_templates = BEAT_TEMPLATES["development"]
+        dev_count = self._decide_development_count(context)
+        for i in range(dev_count):
+            idx = (hash(chapter_id) + i) % len(dev_templates)
+            beats.append(
+                f"{chapter_id} 发展{i + 1}：{self._fill_template(dev_templates[idx], template_vars)}"
+            )
+
+        # Add foreshadowing beat if pending foreshadowings exist
+        if foreshadowing and "暂无" not in foreshadowing:
+            fs_beat = self._build_foreshadowing_beat(chapter_id, foreshadowing)
+            if fs_beat:
+                beats.append(fs_beat)
+
+        # Climax beat
+        climax_templates = BEAT_TEMPLATES["climax"]
+        climax_idx = hash(chapter_id + "climax") % len(climax_templates)
+        beats.append(
+            f"{chapter_id} 高潮：{self._fill_template(climax_templates[climax_idx], template_vars)}"
+        )
+
+        # Closing beat
+        closing_templates = BEAT_TEMPLATES["closing"]
+        closing_idx = hash(chapter_id + "closing") % len(closing_templates)
+        beats.append(
+            f"{chapter_id} 收束：{self._fill_template(closing_templates[closing_idx], template_vars)}"
+        )
+
+        return beats
+
+    def _extract_protagonist(self, characters: str) -> str:
+        """Extract protagonist name from characters context string."""
+        if not characters or "暂无" in characters:
+            return "主角"
+        # Pattern: Name(境界=...) — take the first character mentioned
+        match = re.search(r"(\S+?)\(境界=", characters)
+        if match:
+            return match.group(1)
+        return "主角"
+
+    def _extract_situation(self, outline: str, seed: str) -> str:
+        """Extract current situation from outline context."""
+        if outline and "暂无" not in outline and len(outline) > 10:
+            # Take first meaningful clause
+            clean = outline.replace("章节大纲为空", "").strip()
+            if clean:
+                # Split by common Chinese punctuation and take first segment
+                segments = re.split(r"[，。；！？、]", clean)
+                meaningful = [s.strip() for s in segments if len(s.strip()) > 4]
+                if meaningful:
+                    return meaningful[0][:40]
+        return seed[:30] if seed else "当前局势"
+
+    def _extract_setting(self, context: Dict[str, str]) -> str:
+        """Extract setting/location from context."""
+        characters = context.get("characters", "")
+        # Try to find location from character context
+        match = re.search(r"位置=([^,)]+)", characters)
+        if match:
+            location = match.group(1).strip()
+            if location and location != "未知":
+                return location
+        # Try world context
+        world = context.get("world", "")
+        if world and "暂无" not in world:
+            # Extract first entity name
+            match = re.search(r"(\S+?)\(", world)
+            if match:
+                return match.group(1)
+        return "当前场景"
+
+    def _extract_obstacle(self, outline: str, foreshadowing: str) -> str:
+        """Extract potential obstacle from outline and foreshadowing."""
+        # Look for conflict-related keywords in outline
+        conflict_keywords = [
+            "冲突",
+            "危机",
+            "阻碍",
+            "困难",
+            "敌人",
+            "对手",
+            "威胁",
+            "陷阱",
         ]
+        if outline:
+            for kw in conflict_keywords:
+                if kw in outline:
+                    return kw + "相关阻力"
+        if foreshadowing and "暂无" not in foreshadowing:
+            return "伏笔相关的潜在障碍"
+        return "意料之外的阻力"
+
+    def _decide_development_count(self, context: Dict[str, str]) -> int:
+        """Decide how many development beats based on context richness."""
+        score = 0
+        if context.get("foreshadowing", "") and "暂无" not in context.get(
+            "foreshadowing", ""
+        ):
+            score += 1
+        if context.get("characters", "") and "暂无" not in context.get(
+            "characters", ""
+        ):
+            score += 1
+        if context.get("scenes", "") and "未标注" not in context.get("scenes", ""):
+            score += 1
+        # 2-4 development beats
+        return max(2, min(4, score + 1))
+
+    def _build_foreshadowing_beat(
+        self, chapter_id: str, foreshadowing: str
+    ) -> Optional[str]:
+        """Build a beat for foreshadowing integration."""
+        # Extract high-weight foreshadowing IDs
+        ids = re.findall(r"(\w+)\(权重=(\d+)", foreshadowing)
+        high_weight = [(nid, int(w)) for nid, w in ids if int(w) >= 7]
+        if high_weight:
+            top = high_weight[0]
+            return (
+                f"{chapter_id} 伏笔：自然融入伏笔{top[0]}（权重{top[1]}），"
+                f"通过情节推进而非刻意提及"
+            )
+        if ids:
+            return f"{chapter_id} 伏笔：在叙事中自然铺设伏笔线索，不做刻意暗示"
+        return None
+
+    def _fill_template(self, template: str, variables: Dict[str, str]) -> str:
+        """Fill template with variables, falling back to defaults."""
+        result = template
+        for key, value in variables.items():
+            result = result.replace(f"{{{key}}}", value)
+        return result
+
+    # ------------------------------------------------------------------
+    # Draft generation
+    # ------------------------------------------------------------------
 
     def generate_chapter(
         self, chapter_id: str, objective: str, context: Dict[str, str]
     ) -> LibrarianOutput:
+        """Generate a structured chapter draft from context.
+        节拍始终由规则引擎生成。当 llm_client 存在时，
+        LLM 负责将节拍扩写为散文；否则使用模板生成。
+        """
         beats = self.generate_beats(chapter_id, context)
-        character_brief = context.get("characters", "暂无人物状态")
-        outline_brief = context.get("outline", "暂无章节大纲")
-        foreshadowing_brief = context.get("foreshadowing", "暂无待回收伏笔")
+        # --- LLM branch: beats -> prose ---
+        if self._llm_client and self._router:
+            return self._generate_with_llm(
+                chapter_id, objective, context, beats,
+            )
+        # --- Rule-based branch (original behavior) ---
+        return self._generate_rule_based(chapter_id, objective, context, beats)
 
-        lines: List[str] = [
-            f"# {chapter_id} 章节草稿",
-            "",
-            "## 写作目标",
-            objective,
-            "",
-            "## 上下文摘要",
-            f"- 章节提要: {outline_brief}",
-            f"- 人物状态: {character_brief}",
-            f"- 待回收伏笔: {foreshadowing_brief}",
-            "",
-            "## 剧情节拍",
-        ]
-        lines.extend([f"{idx}. {beat}" for idx, beat in enumerate(beats, start=1)])
+    def _generate_draft_body(
+        self,
+        chapter_id: str,
+        beats: List[str],
+        protagonist: str,
+        setting: str,
+        context: Dict[str, str],
+    ) -> List[str]:
+        """Generate structured draft body with scene/dialogue/narration markers."""
+        lines: List[str] = []
+        foreshadowing = context.get("foreshadowing", "")
+        has_foreshadowing = foreshadowing and "暂无" not in foreshadowing
+
+        # --- Opening section ---
         lines.extend(
             [
+                f"{SECTION_MARKERS['scene']} {setting}",
                 "",
-                "## 草稿正文（模拟）",
-                "夜色压低了街巷的声响，主角在旧城门前停住了脚步。",
-                "他知道自己没有退路，只能把手里的线索继续追下去。",
-                "当对手出现时，冲突被迫提前爆发，而代价也随之显现。",
-                "这一章结束时，他得到答案的一角，但问题反而更多。",
+                f"{protagonist}站在{setting}的边缘，目光扫过眼前的局面。",
+                f"空气中弥漫着一股说不清的紧迫感——不是那种戏剧化的压迫，",
+                f"而是像考试前五分钟才发现自己走错考场的那种。",
+                "",
             ]
         )
 
-        return LibrarianOutput(chapter_id=chapter_id, beat_list=beats, draft="\n".join(lines) + "\n")
+        # --- Development section ---
+        lines.extend(
+            [
+                f"{SECTION_MARKERS['dialogue']}",
+                "",
+            ]
+        )
+
+        # Generate dialogue based on character count
+        characters = context.get("characters", "")
+        char_names = re.findall(r"(\S+?)\(境界=", characters)
+        if len(char_names) >= 2:
+            lines.extend(
+                [
+                    f"「情况有变。」{char_names[0]}开口，语气里没有多余的修饰。",
+                    "",
+                    f"「哪种变？好的那种还是坏的那种？」{char_names[1]}问。",
+                    "",
+                    f"「你觉得呢。」",
+                    "",
+                    f"「……行吧。」",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    f"「情况有变。」{protagonist}自言自语，语气平淡得像在念菜单。",
+                    "",
+                    f"没人回应。这倒也正常——自言自语本来就不指望有人接话。",
+                    "",
+                ]
+            )
+
+        # --- Action/conflict section ---
+        lines.extend(
+            [
+                f"{SECTION_MARKERS['action']}",
+                "",
+                f"{protagonist}做出了决定。不是那种深思熟虑后的决定，",
+                f"更像是被推到悬崖边上时本能的选择。",
+                "",
+            ]
+        )
+
+        # --- Foreshadowing integration ---
+        if has_foreshadowing:
+            lines.extend(
+                [
+                    f"{SECTION_MARKERS['narration']}",
+                    "",
+                    f"在混乱中，有些细节被忽略了。",
+                    f"但这些细节不会永远沉默——它们只是在等一个合适的时机。",
+                    "",
+                ]
+            )
+
+        # --- Internal monologue ---
+        lines.extend(
+            [
+                f"{SECTION_MARKERS['internal']}",
+                "",
+                f"事情正在朝着不可控的方向发展。{protagonist}清楚这一点。",
+                f"但「清楚」和「能做点什么」之间，隔着一条叫做「现实」的鸿沟。",
+                "",
+            ]
+        )
+
+        # --- Closing section ---
+        lines.extend(
+            [
+                f"{SECTION_MARKERS['transition']}",
+                "",
+                f"这一章的故事暂时告一段落。",
+                f"但{protagonist}知道，真正的麻烦才刚刚开始。",
+                f"至少，他现在多了一个问题需要回答——而答案，不在这里。",
+            ]
+        )
+
+        return lines
+
+    # ------------------------------------------------------------------
+    # Rewrite
+    # ------------------------------------------------------------------
 
     def rewrite_chapter(
         self,
@@ -72,31 +396,327 @@ class LibrarianAgent:
         warnings: List[str],
         attempt: int,
     ) -> LibrarianOutput:
-        """Apply lightweight rule-oriented rewrite based on checker feedback."""
-        text = previous_draft
+        """Rewrite draft based on LoreChecker and Stylist feedback.
 
-        for token in forbidden:
-            if token:
-                text = text.replace(token, "[已规避词]")
+        当 llm_client 存在时，使用 LLM 重写；否则使用规则引擎。
+        """
+        # --- LLM branch ---
+        if self._llm_client and self._router:
+            return self._rewrite_with_llm(
+                chapter_id=chapter_id,
+                objective=objective,
+                previous_draft=previous_draft,
+                errors=errors,
+                warnings=warnings,
+                context=context,
+                attempt=attempt,
+            )
+        # --- Rule-based branch (original behavior) ---
+        return self._rewrite_rule_based(
+            chapter_id=chapter_id,
+            objective=objective,
+            context=context,
+            previous_draft=previous_draft,
+            forbidden=forbidden,
+            required=required,
+            errors=errors,
+            warnings=warnings,
+            attempt=attempt,
+        )
 
-        missing_required = [token for token in required if token and token not in text]
-        if missing_required:
-            text += "\n\n## 规则补写\n"
-            for token in missing_required:
-                text += f"- 已补写要素：{token}\n"
-                text += f"{token}在局势中被明确提及并推动决策。\n"
+    def _remove_forbidden(self, text: str, token: str) -> str:
+        """Remove forbidden token with context-aware replacement."""
+        # Try to replace the sentence containing the token rather than
+        # just deleting the token (which can break sentence structure)
+        lines = text.split("\n")
+        new_lines: List[str] = []
+        for line in lines:
+            if token in line:
+                # Replace the token with a neutral placeholder
+                cleaned = line.replace(token, "[已规避词]")
+                new_lines.append(cleaned)
+            else:
+                new_lines.append(line)
+        return "\n".join(new_lines)
 
-        feedback = (errors + warnings)[:3]
-        if feedback:
-            sanitized_feedback: List[str] = []
-            for item in feedback:
-                text_item = item
-                for token in forbidden:
-                    if token:
-                        text_item = text_item.replace(token, "[已规避词]")
-                sanitized_feedback.append(text_item)
-            text += "\n\n> 修订记录\n"
-            text += f"> 第{attempt}轮：根据 LoreChecker 反馈修订：{'；'.join(sanitized_feedback)}\n"
+    def _integrate_required(
+        self, text: str, missing: List[str], context: Dict[str, str]
+    ) -> str:
+        """Integrate missing required elements into the draft naturally."""
+        protagonist = self._extract_protagonist(context.get("characters", ""))
+
+        # Find the best insertion point — after the action section
+        insertion_marker = SECTION_MARKERS["narration"]
+        insert_idx = text.find(insertion_marker)
+
+        integration_lines: List[str] = ["\n"]
+        for element in missing:
+            integration_lines.append(
+                f"{protagonist}注意到了{element}的存在——"
+                f"这不是偶然，而是局势发展的必然结果。"
+            )
+            integration_lines.append("")
+
+        integration_text = "\n".join(integration_lines)
+
+        if insert_idx >= 0:
+            # Insert after the narration marker line
+            next_newline = text.find("\n", insert_idx)
+            if next_newline >= 0:
+                text = text[:next_newline] + integration_text + text[next_newline:]
+            else:
+                text += integration_text
+        else:
+            # Fallback: append before closing
+            text += integration_text
+
+        return text
+
+    def _address_errors(
+        self, text: str, errors: List[str], context: Dict[str, str]
+    ) -> str:
+        """Address specific errors from LoreChecker."""
+        for error in errors:
+            if "禁用设定" in error:
+                # Already handled by forbidden removal
+                continue
+            if "tension 超出范围" in error:
+                # Can't fix scene annotations from draft text — note it
+                continue
+            if "mutation" in error:
+                # Character mutation issues — add a note
+                if "不存在/不足物品" in error:
+                    # Extract item name
+                    match = re.search(r"物品: (.+)$", error)
+                    if match:
+                        item = match.group(1)
+                        text = text.replace(
+                            f"使用{item}",
+                            f"寻找{item}（尚未获得）",
+                        )
+            if "格式错误" in error or "不支持" in error:
+                # Annotation format issues — can't fix from draft
+                continue
+        return text
+
+    def _address_warnings(
+        self, text: str, warnings: List[str], context: Dict[str, str]
+    ) -> str:
+        """Address warnings with lighter-touch fixes."""
+        for warning in warnings:
+            if "未显式出现必备要素" in warning:
+                # Already handled by _integrate_required
+                continue
+            if "张力均低于" in warning:
+                # Try to add tension — insert a conflict hint
+                if "## 草稿正文" in text:
+                    text = text.replace(
+                        "## 草稿正文",
+                        "## 草稿正文\n\n> [张力提升] 本章需要增加冲突强度\n",
+                        1,
+                    )
+            if "情绪标签单一" in warning:
+                # Note for future LLM-based rewrite
+                pass
+        return text
+
+    # ------------------------------------------------------------------
+    # LLM integration methods
+    # ------------------------------------------------------------------
+
+    def _generate_with_llm(
+        self,
+        chapter_id: str,
+        objective: str,
+        context: Dict[str, str],
+        beats: List[str],
+    ) -> LibrarianOutput:
+        """LLM 草稿生成 — 将规则生成的节拍扩写为散文。"""
+        assert self._llm_client is not None
+        assert self._router is not None
+        from tools.llm.prompts import PromptBuilder
+        from tools.llm.router import TaskType
+
+        messages = PromptBuilder.librarian_generate(
+            chapter_id=chapter_id,
+            objective=objective,
+            beats=beats,
+            context=context,
+            style_instructions=self._style_context or "",
+        )
+
+        try:
+            routes = self._router.get_routes(TaskType.GENERATION)
+            response = self._llm_client.complete_with_fallback(
+                messages=messages, routes=routes,
+            )
+            draft_text = response.content
+        except Exception as e:
+            logger.warning("Librarian LLM 调用失败，回退到规则引擎: %s", e)
+            # Fallback to rule-based generation
+            return self._generate_rule_based(
+                chapter_id, objective, context, beats,
+            )
+
+        return LibrarianOutput(
+            chapter_id=chapter_id,
+            beat_list=beats,
+            draft=draft_text,
+            metadata={
+                "beat_count": str(len(beats)),
+                "llm_model": response.model,
+                "llm_tokens": str(response.usage.get("total_tokens", 0)),
+            },
+        )
+
+    def _generate_rule_based(
+        self,
+        chapter_id: str,
+        objective: str,
+        context: Dict[str, str],
+        beats: List[str],
+    ) -> LibrarianOutput:
+        """规则引擎草稿生成（原有行为，抽取为独立方法供 fallback 调用）。"""
+        outline_brief = context.get("outline", "暂无章节大纲")
+        character_brief = context.get("characters", "暂无人物状态")
+        foreshadowing_brief = context.get("foreshadowing", "暂无待回收伏笔")
+        scene_brief = context.get("scenes", "未标注场景")
+        world_brief = context.get("world", "暂无世界观")
+        protagonist = self._extract_protagonist(character_brief)
+        setting = self._extract_setting(context)
+
+        lines: List[str] = [
+            f"# {chapter_id} 章节草稿",
+            "",
+            "## 写作目标",
+            objective,
+            "",
+            "## 上下文摘要",
+            f"- 章节提要: {outline_brief}",
+            f"- 人物状态: {character_brief}",
+            f"- 待回收伏笔: {foreshadowing_brief}",
+            f"- 场景标记: {scene_brief}",
+            f"- 世界观: {world_brief}",
+            "",
+            "## 剧情节拍",
+        ]
+        lines.extend([f"{idx}. {beat}" for idx, beat in enumerate(beats, start=1)])
+        lines.extend(["", "## 草稿正文", ""])
+        lines.extend(
+            self._generate_draft_body(
+                chapter_id=chapter_id,
+                beats=beats,
+                protagonist=protagonist,
+                setting=setting,
+                context=context,
+            )
+        )
+
+        return LibrarianOutput(
+            chapter_id=chapter_id,
+            beat_list=beats,
+            draft="\n".join(lines) + "\n",
+            metadata={
+                "beat_count": str(len(beats)),
+                "protagonist": protagonist,
+                "setting": setting,
+            },
+        )
+
+    def _rewrite_with_llm(
+        self,
+        chapter_id: str,
+        objective: str,
+        previous_draft: str,
+        errors: List[str],
+        warnings: List[str],
+        context: Dict[str, str],
+        attempt: int,
+    ) -> LibrarianOutput:
+        """LLM 重写 — 基于 LoreChecker 反馈修改草稿。"""
+        assert self._llm_client is not None
+        assert self._router is not None
+        from tools.llm.prompts import PromptBuilder
+        from tools.llm.router import TaskType
+
+        messages = PromptBuilder.librarian_rewrite(
+            chapter_id=chapter_id,
+            objective=objective,
+            previous_draft=previous_draft,
+            errors=errors,
+            warnings=warnings,
+        )
+
+        try:
+            routes = self._router.get_routes(TaskType.GENERATION)
+            response = self._llm_client.complete_with_fallback(
+                messages=messages, routes=routes,
+            )
+            draft_text = response.content
+        except Exception as e:
+            logger.warning("Librarian LLM 重写失败，回退到规则引擎: %s", e)
+            # Fallback: use rule-based rewrite
+            return self._rewrite_rule_based(
+                chapter_id=chapter_id,
+                objective=objective,
+                context=context,
+                previous_draft=previous_draft,
+                forbidden=[],
+                required=[],
+                errors=errors,
+                warnings=warnings,
+                attempt=attempt,
+            )
 
         beats = self.generate_beats(chapter_id, context)
-        return LibrarianOutput(chapter_id=chapter_id, beat_list=beats, draft=text)
+        return LibrarianOutput(
+            chapter_id=chapter_id,
+            beat_list=beats,
+            draft=draft_text,
+            metadata={
+                "rewrite_attempt": str(attempt),
+                "llm_model": response.model,
+            },
+        )
+
+    def _rewrite_rule_based(
+        self,
+        *,
+        chapter_id: str,
+        objective: str,
+        context: Dict[str, str],
+        previous_draft: str,
+        forbidden: List[str],
+        required: List[str],
+        errors: List[str],
+        warnings: List[str],
+        attempt: int,
+    ) -> LibrarianOutput:
+        """规则引擎重写（原有行为，抽取为独立方法供 fallback 调用）。"""
+        text = previous_draft
+        for token in forbidden:
+            if token and token in text:
+                text = self._remove_forbidden(text, token)
+        missing_required = [t for t in required if t and t not in text]
+        if missing_required:
+            text = self._integrate_required(text, missing_required, context)
+        text = self._address_errors(text, errors, context)
+        text = self._address_warnings(text, warnings, context)
+        feedback = (errors + warnings)[:5]
+        if feedback:
+            sanitized: List[str] = []
+            for item in feedback:
+                clean = item
+                for token in forbidden:
+                    if token:
+                        clean = clean.replace(token, "[已规避]")
+                sanitized.append(clean)
+            text += f"\n\n> 修订记录（第{attempt}轮）\n"
+            text += f"> 处理反馈6{len(feedback)}条：{'；'.join(sanitized)}\n"
+        beats = self.generate_beats(chapter_id, context)
+        return LibrarianOutput(
+            chapter_id=chapter_id,
+            beat_list=beats,
+            draft=text,
+            metadata={"rewrite_attempt": str(attempt)},
+        )

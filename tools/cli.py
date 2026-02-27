@@ -12,16 +12,24 @@ from rich.console import Console
 from rich.table import Table
 
 try:
+    from tools.agents.reader import ReaderAgent
     from tools.agents.simulator import AgentSimulator
+    from tools.agents.style_director import StyleDirectorAgent
     from tools.character_state_manager import CharacterStateManager
     from tools.graph.foreshadowing_dag import ForeshadowingDAGManager
+    from tools.models.style import StyleProfile
     from tools.queries.character_query import CharacterQuery
+    from tools.utils.style_composer import StyleComposer
     from tools.world_graph_manager import WorldGraphManager
 except ImportError:  # pragma: no cover - supports legacy path injection
+    from agents.reader import ReaderAgent
     from agents.simulator import AgentSimulator
+    from agents.style_director import StyleDirectorAgent
     from character_state_manager import CharacterStateManager
     from graph.foreshadowing_dag import ForeshadowingDAGManager
+    from models.style import StyleProfile
     from queries.character_query import CharacterQuery
+    from utils.style_composer import StyleComposer
     from world_graph_manager import WorldGraphManager
 
 
@@ -30,10 +38,12 @@ character_app = typer.Typer(help="人物相关命令")
 outline_app = typer.Typer(help="大纲相关命令")
 world_app = typer.Typer(help="世界观图谱命令")
 simulate_app = typer.Typer(help="多Agent模拟命令")
+style_app = typer.Typer(help="风格系统命令")
 app.add_typer(character_app, name="character")
 app.add_typer(outline_app, name="outline")
 app.add_typer(world_app, name="world")
 app.add_typer(simulate_app, name="simulate")
+app.add_typer(style_app, name="style")
 console = Console()
 
 
@@ -553,15 +563,37 @@ def simulate_chapter(
     chapter_id: str = typer.Option(..., "--id", help="章节ID，例如 ch_003"),
     objective: str = typer.Option("推进主线并保持角色一致性", help="本章目标"),
     novel_id: Optional[str] = typer.Option(None, help="小说ID"),
+    style_id: str = typer.Option("", "--style-id", help="风格模板ID，例如 术师手册"),
     forbidden: list[str] = typer.Option([], "--forbidden", help="禁用词/设定，可重复"),
     required: list[str] = typer.Option([], "--required", help="必须出现要素，可重复"),
     use_stylist: bool = typer.Option(False, "--use-stylist", help="启用文风处理"),
     strict_lore: bool = typer.Option(False, "--strict-lore", help="启用严格逻辑检查"),
     max_rewrites: int = typer.Option(0, "--max-rewrites", min=0, help="Lore失败后最多重写次数"),
+    use_style_analysis: bool = typer.Option(False, "--style-analysis", help="启用Reader+StyleDirector后处理分析"),
+    use_llm: bool = typer.Option(False, "--use-llm", help="启用LLM模式（需要配置llm_config.yaml）"),
+    llm_config_path: Optional[str] = typer.Option(None, "--llm-config", help="LLM配置文件路径"),
 ):
     """模拟一章多Agent工作流（默认跳过文风处理）。"""
     final_novel_id = novel_id or _detect_novel_id(Path.cwd())
-    simulator = AgentSimulator(project_dir=Path.cwd(), novel_id=final_novel_id)
+    # --- Optional LLM setup ---
+    llm_client = None
+    router = None
+    if use_llm:
+        from tools.llm.config import load_llm_config
+        from tools.llm.client import LLMClient
+        from tools.llm.router import ModelRouter
+        cfg_path = Path(llm_config_path) if llm_config_path else None
+        llm_cfg = load_llm_config(cfg_path)
+        if not llm_cfg.enabled:
+            console.print("[yellow]警告: llm_config.yaml 中 enabled=false，LLM 模式未生效[/yellow]")
+        else:
+            llm_client = LLMClient(retry_count=llm_cfg.retry_count, retry_delay=llm_cfg.retry_delay)
+            router = ModelRouter(llm_cfg)
+            console.print("[cyan]LLM 模式已启用[/cyan]")
+    simulator = AgentSimulator(
+        project_dir=Path.cwd(), novel_id=final_novel_id, style_id=style_id,
+        llm_client=llm_client, router=router,
+    )
     result = simulator.simulate_chapter(
         chapter_id=chapter_id,
         objective=objective,
@@ -570,6 +602,7 @@ def simulate_chapter(
         use_stylist=use_stylist,
         strict_lore=strict_lore,
         max_rewrites=max_rewrites,
+        use_style_analysis=use_style_analysis,
     )
 
     if result.passed:
@@ -586,7 +619,145 @@ def simulate_chapter(
     if result.warnings:
         for warn in result.warnings:
             console.print(f"  [yellow]警告:[/yellow] {warn}")
+    if result.style_analysis:
+        sa = result.style_analysis
+        reader_info = sa.get("reader", {})
+        sd_info = sa.get("style_director", {})
+        console.print("  [cyan]风格分析:[/cyan]")
+        console.print(f"    Reader发现: craft={reader_info.get('craft', 0)} style={reader_info.get('style', 0)} novel={reader_info.get('novel', 0)}")
+        scores = sd_info.get("layer_scores", {})
+        for layer, info in scores.items():
+            console.print(f"    {layer}层: {info.get('score', 0)}/100 (偏差{info.get('deviations', 0)})")
+        if sd_info.get("converged"):
+            console.print("    [green]风格已收敛[/green]")
+        else:
+            console.print(f"    新发现缺口: {sd_info.get('new_gaps', 0)}")
 
+@style_app.command("compose")
+@app.command("style-compose")
+def style_compose(
+    novel_id: str = typer.Option(..., "--novel-id", help="作品设定ID（novels/下的目录名）"),
+    style_id: str = typer.Option(..., "--style-id", help="风格模板ID（styles/下的目录名）"),
+):
+    """合成三层风格文档为最终生成指令。"""
+    composer = StyleComposer(Path.cwd())
+    result = composer.compose(novel_id=novel_id, style_id=style_id, write_output=True)
+    output_path = composer.get_composed_path(novel_id)
+    console.print(f"[green]风格合成完成:[/green] {output_path}")
+    console.print(f"  硬性约束: {len(result.hard_constraints)}字")
+    console.print(f"  风格约束: {len(result.style_constraints)}字")
+    console.print(f"  通用技法: {len(result.craft_reference)}字")
+
+
+@style_app.command("list")
+@app.command("style-list")
+def style_list():
+    """列出可用的风格模板和作品设定。"""
+    composer = StyleComposer(Path.cwd())
+    styles = composer.list_available_styles()
+    novels = composer.list_available_novels()
+    console.print(f"[cyan]可用风格模板:[/cyan] {', '.join(styles) if styles else '(无)'}")
+    console.print(f"[cyan]可用作品设定:[/cyan] {', '.join(novels) if novels else '(无)'}")
+    composed_dir = Path.cwd() / "composed"
+    if composed_dir.is_dir():
+        composed = sorted(f.name for f in composed_dir.glob("*_final.md"))
+        console.print(f"[cyan]已合成文档:[/cyan] {', '.join(composed) if composed else '(无)'}")
+
+@style_app.command("read-batch")
+@app.command("style-read-batch")
+def style_read_batch(
+    text_file: str = typer.Option(..., "--file", help="要分析的文本文件路径"),
+    batch_id: str = typer.Option("batch_001", "--batch-id", help="批次ID"),
+    chunk_range: str = typer.Option("", "--range", help="文本范围描述，如 第1-7章"),
+    style_id: str = typer.Option("", "--style-id", help="风格模板ID"),
+    novel_id: str = typer.Option("", "--novel-id", help="作品ID"),
+):
+    """批量阅读文本并提取三层风格发现。"""
+    text_path = Path(text_file)
+    if not text_path.is_file():
+        console.print(f"[red]文件不存在:[/red] {text_path}")
+        raise typer.Exit(1)
+    text = text_path.read_text(encoding="utf-8")
+    reader = ReaderAgent(
+        project_root=Path.cwd(), style_id=style_id, novel_id=novel_id,
+    )
+    result = reader.read_batch(
+        text=text, batch_id=batch_id, chunk_range=chunk_range,
+    )
+    console.print(f"[green]Reader 分析完成:[/green] {batch_id}")
+    console.print(f"  总发现数: {len(result.findings)}")
+    console.print(f"  通用技法: {len(result.craft_findings)}")
+    console.print(f"  作者风格: {len(result.style_findings)}")
+    console.print(f"  作品设定: {len(result.novel_findings)}")
+    console.print(f"  大纲事件: {len(result.outline_events)}")
+    if result.revision_suggestions:
+        for sug in result.revision_suggestions:
+            console.print(f"  [yellow]建议:[/yellow] {sug}")
+    # Write summary report
+    report_dir = Path.cwd() / "logs" / "reader"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"{batch_id}_report.md"
+    report_path.write_text(result.summary(), encoding="utf-8")
+    console.print(f"  报告: {report_path}")
+
+
+@style_app.command("iterate")
+@app.command("style-iterate")
+def style_iterate(
+    draft_file: str = typer.Option(..., "--draft", help="草稿文件路径"),
+    style_id: str = typer.Option(..., "--style-id", help="风格模板ID"),
+    novel_id: str = typer.Option(..., "--novel-id", help="作品ID"),
+    iteration: int = typer.Option(1, "--iteration", help="迭代轮次"),
+):
+    """对草稿进行风格迭代分析（分层差异检测）。"""
+    draft_path = Path(draft_file)
+    if not draft_path.is_file():
+        console.print(f"[red]草稿文件不存在:[/red] {draft_path}")
+        raise typer.Exit(1)
+    draft = draft_path.read_text(encoding="utf-8")
+    director = StyleDirectorAgent(
+        project_root=Path.cwd(), style_id=style_id, novel_id=novel_id,
+    )
+    result = director.analyze(draft=draft, iteration=iteration)
+    console.print(f"[green]风格迭代分析完成:[/green] 迭代 #{iteration}")
+    console.print(f"  总偏差数: {len(result.deviations)}")
+    for layer_name, score in result.layer_scores.items():
+        console.print(f"  {layer_name}: {score.score}/100")
+    console.print(f"  新风格缺口: {result.new_gaps_found}")
+    console.print(f"  收敛状态: {'[green]已收敛[/green]' if result.converged else '[yellow]未收敛[/yellow]'}")
+    if result.document_updates:
+        console.print(f"  文档更新建议: {len(result.document_updates)}条")
+        for upd in result.document_updates:
+            console.print(f"    [{upd.layer.value}] {upd.action} {upd.file_path}")
+    # Write analysis report
+    report_dir = Path.cwd() / "logs" / "style_iterations"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = report_dir / f"{timestamp}_iter{iteration}_{novel_id}.md"
+    report_path.write_text(result.summary(), encoding="utf-8")
+    console.print(f"  报告: {report_path}")
+
+
+@style_app.command("profile")
+@app.command("style-profile")
+def style_profile(
+    novel_id: str = typer.Option(..., "--novel-id", help="作品ID"),
+    style_id: str = typer.Option("", "--style-id", help="风格模板ID"),
+):
+    """从合成文档加载并显示结构化风格档案。"""
+    profile = StyleProfile.from_project(
+        project_root=Path.cwd(), novel_id=novel_id, style_id=style_id,
+    )
+    console.print(f"[cyan]风格档案: {novel_id}[/cyan]")
+    console.print(profile.to_summary(max_chars=1000))
+    if profile.banned_phrases:
+        console.print(f"  禁用表达数: {len(profile.banned_phrases)}")
+    metrics = profile.quality_metrics
+    console.print(
+        f"  质量指标: 直接性={metrics.directness} 节奏={metrics.rhythm} "
+        f"意象={metrics.imagery} 角色化={metrics.characterization} "
+        f"去AI={metrics.ai_artifact_control}"
+    )
 
 if __name__ == "__main__":
     app()

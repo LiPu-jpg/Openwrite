@@ -1,8 +1,16 @@
-"""Lore checker for timeline/world consistency checks."""
-
+"""Lore checker for timeline/world consistency checks.
+支持 LLM 模式（opt-in）：通过 LLM 进行语义级别的一致性审查。
+LLM 发现的问题默认为 advisory（警告），不阻断流程。
+不传入 llm_client 时保持原有规则模拟行为。
+"""
+import json
+import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+if TYPE_CHECKING:
+    from tools.llm.client import LLMClient
+    from tools.llm.router import ModelRouter
+logger = logging.getLogger(__name__)
 
 @dataclass
 class LoreCheckResult:
@@ -21,8 +29,15 @@ class LoreCheckerAgent:
 
     SUPPORTED_MUTATIONS = {"acquire", "use", "move", "health", "realm", "flag"}
 
-    def __init__(self, strict: bool = False):
+    def __init__(
+        self,
+        strict: bool = False,
+        llm_client: Optional["LLMClient"] = None,
+        router: Optional["ModelRouter"] = None,
+    ):
         self.strict = strict
+        self._llm_client = llm_client
+        self._router = router
 
     @staticmethod
     def _append_issue(
@@ -85,8 +100,88 @@ class LoreCheckerAgent:
                     strict=final_strict,
                 )
 
+        # --- Optional LLM semantic review (advisory only) ---
+        if self._llm_client and self._router:
+            self._llm_review(
+                draft, forbidden, required,
+                final_strict, errors, warnings,
+            )
         return LoreCheckResult(errors=errors, warnings=warnings)
 
+    def _llm_review(
+        self,
+        draft: str,
+        forbidden: List[str],
+        required: List[str],
+        strict: bool,
+        errors: List[str],
+        warnings: List[str],
+    ) -> None:
+        """调用 LLM 进行语义级一致性审查（advisory only）。
+
+        LLM 发现的问题默认追加为 warnings，不阻断流程。
+        仅在 strict=True 且 LLM 明确标记为 error 时才追加到 errors。
+        """
+        from tools.llm.prompts import PromptBuilder
+        from tools.llm.router import TaskType
+
+        # 构建上下文 dict 供 prompt 使用
+        context: Dict[str, str] = {
+            "forbidden": ", ".join(forbidden) if forbidden else "无",
+            "required": ", ".join(required) if required else "无",
+        }
+
+        messages = PromptBuilder.lore_checker_review(
+            draft=draft,
+            context=context,
+            forbidden=forbidden,
+            required=required,
+            strict=strict,
+        )
+
+        try:
+            routes = self._router.get_routes(TaskType.REVIEW)  # type: ignore[union-attr]
+            response = self._llm_client.complete_with_fallback(  # type: ignore[union-attr]
+                messages=messages, routes=routes,
+            )
+            self._parse_llm_findings(response.content, strict, errors, warnings)
+        except Exception as e:
+            logger.warning("LoreChecker LLM 审查失败，跳过语义检查: %s", e)
+
+    @staticmethod
+    def _parse_llm_findings(
+        llm_output: str,
+        strict: bool,
+        errors: List[str],
+        warnings: List[str],
+    ) -> None:
+        """解析 LLM JSON 输出，将发现追加到 errors/warnings。"""
+        import re
+        json_match = re.search(r'```json\s*(.+?)\s*```', llm_output, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            json_str = llm_output.strip()
+
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            logger.warning("LoreChecker LLM 输出 JSON 解析失败，跳过")
+            return
+
+        # LLM errors → advisory warnings by default, errors only in strict mode
+        for item in data.get("errors", []):
+            prefixed = f"[LLM] {item}"
+            if strict:
+                errors.append(prefixed)
+            else:
+                warnings.append(prefixed)
+
+        for item in data.get("warnings", []):
+            warnings.append(f"[LLM] {item}")
+
+        for item in data.get("suggestions", []):
+            warnings.append(f"[LLM建议] {item}")
     def _check_scene_rules(
         self,
         chapter_annotations: Dict[str, List[Dict[str, Any]]],
@@ -192,4 +287,151 @@ class LoreCheckerAgent:
                         errors,
                         warnings,
                         strict,
+                    )
+
+    def check_cross_chapter(
+        self,
+        chapter_id: str,
+        character_state_manager: Optional[Any] = None,
+        foreshadowing_manager: Optional[Any] = None,
+        outline_query: Optional[Any] = None,
+        strict: Optional[bool] = None,
+    ) -> LoreCheckResult:
+        """Cross-chapter timeline and state consistency checks.
+
+        Validates:
+          - Character location continuity (no teleportation without move mutation)
+          - Character inventory consistency (items don't appear/vanish)
+          - Overdue foreshadowing recovery (high-weight foreshadowings past target chapter)
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+        final_strict = self.strict if strict is None else strict
+
+        if character_state_manager is not None:
+            self._check_location_continuity(
+                chapter_id, character_state_manager, errors, warnings, final_strict
+            )
+            self._check_inventory_continuity(
+                chapter_id, character_state_manager, errors, warnings, final_strict
+            )
+
+        if foreshadowing_manager is not None:
+            self._check_overdue_foreshadowing(
+                chapter_id, foreshadowing_manager, errors, warnings, final_strict
+            )
+
+        return LoreCheckResult(errors=errors, warnings=warnings)
+
+    def _check_location_continuity(
+        self,
+        chapter_id: str,
+        csm: Any,
+        errors: List[str],
+        warnings: List[str],
+        strict: bool,
+    ) -> None:
+        """Check that characters don't teleport between chapters."""
+        for entry in csm.list_characters():
+            cid = entry["id"]
+            try:
+                rebuilt = csm.rebuild_state(character_id=cid)
+            except Exception:
+                continue
+            timeline = rebuilt.timeline_entries if hasattr(rebuilt, 'timeline_entries') else []
+            if len(timeline) < 2:
+                continue
+            # Walk timeline looking for location changes without move mutations
+            last_location: Optional[str] = None
+            for te in timeline:
+                te_text = str(te) if not isinstance(te, dict) else te.get('text', str(te))
+                # Detect location from rebuild state
+                if hasattr(rebuilt, 'location') and rebuilt.location:
+                    current_location = rebuilt.location
+                    if last_location and current_location != last_location:
+                        # Check if there's a move mutation in recent timeline
+                        if 'move:' not in te_text.lower():
+                            self._append_issue(
+                                f"角色 {cid} 位置不连续: {last_location} -> {current_location}，"
+                                f"缺少 move mutation",
+                                errors, warnings, strict,
+                            )
+                    last_location = current_location
+                    break  # Only check current state vs last known
+
+    def _check_inventory_continuity(
+        self,
+        chapter_id: str,
+        csm: Any,
+        errors: List[str],
+        warnings: List[str],
+        strict: bool,
+    ) -> None:
+        """Check that character inventories are consistent with mutations."""
+        for entry in csm.list_characters():
+            cid = entry["id"]
+            try:
+                rebuilt = csm.rebuild_state(character_id=cid)
+            except Exception:
+                continue
+            # Check for negative item counts (shouldn't happen)
+            for item in rebuilt.items:
+                if ' x' in item:
+                    name, count_str = item.rsplit(' x', 1)
+                    try:
+                        count = int(count_str.strip())
+                        if count < 0:
+                            self._append_issue(
+                                f"角色 {cid} 物品数量异常: {name} x{count}",
+                                errors, warnings, strict,
+                            )
+                    except ValueError:
+                        pass
+
+    def _check_overdue_foreshadowing(
+        self,
+        chapter_id: str,
+        fsm: Any,
+        errors: List[str],
+        warnings: List[str],
+        strict: bool,
+    ) -> None:
+        """Check for foreshadowings past their target recovery chapter."""
+        try:
+            pending = fsm.get_pending_nodes(min_weight=1)
+        except Exception:
+            return
+        # Extract chapter number from chapter_id (e.g. 'ch_003' -> 3)
+        import re
+        ch_match = re.search(r'(\d+)', chapter_id)
+        if not ch_match:
+            return
+        current_ch_num = int(ch_match.group(1))
+
+        for node in pending:
+            target = node.get('target_chapter', '') or ''
+            target_match = re.search(r'(\d+)', target)
+            if not target_match:
+                continue
+            target_ch_num = int(target_match.group(1))
+            weight = node.get('weight', 0)
+            node_id = node.get('id', 'unknown')
+
+            if current_ch_num > target_ch_num:
+                overdue_by = current_ch_num - target_ch_num
+                if weight >= 8:
+                    self._append_issue(
+                        f"高权重伏笔 {node_id}(权重={weight}) 已超过目标章节 "
+                        f"{target} {overdue_by}章未回收",
+                        errors, warnings, strict,
+                    )
+                elif weight >= 5:
+                    warnings.append(
+                        f"中权重伏笔 {node_id}(权重={weight}) 已超过目标章节 "
+                        f"{target} {overdue_by}章未回收"
+                    )
+                else:
+                    warnings.append(
+                        f"伏笔 {node_id}(权重={weight}) 已超过目标章节 "
+                        f"{target} {overdue_by}章未回收"
                     )

@@ -22,7 +22,7 @@ class ForeshadowingNode(BaseModel):
 
 class ForeshadowingEdge(BaseModel):
     """伏笔 DAG 边"""
-
+    model_config = {"populate_by_name": True}
     from_: str = Field(..., alias="from", description="来源伏笔ID")
     to: str = Field(..., description="目标伏笔ID或回收点")
     type: str = Field(..., description="依赖/强化/反转")

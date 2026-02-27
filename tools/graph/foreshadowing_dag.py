@@ -165,14 +165,37 @@ class ForeshadowingDAGManager:
             ):
                 errors.append(f"边引用了不存在的目标节点: {to_node}")
 
-        # 检查是否有循环引用
-        node_stack = []
+        # 检查是否有循环引用 (DFS-based cycle detection)
+        adjacency: Dict[str, List[str]] = {}
         for edge in dag.edges:
             edge_data = edge if isinstance(edge, dict) else edge.model_dump(by_alias=True)
-            node_stack.append(edge_data["to"])
+            src = edge_data.get("from", "")
+            dst = edge_data.get("to", "")
+            adjacency.setdefault(src, []).append(dst)
 
-        # TODO: 实现完整的循环检测
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color: Dict[str, int] = {nid: WHITE for nid in dag.nodes}
+        # Also include edge-only nodes (e.g. _recover targets)
+        for src, dsts in adjacency.items():
+            color.setdefault(src, WHITE)
+            for dst in dsts:
+                color.setdefault(dst, WHITE)
 
+        def _dfs_cycle(node: str) -> bool:
+            color[node] = GRAY
+            for neighbor in adjacency.get(node, []):
+                if color.get(neighbor, WHITE) == GRAY:
+                    errors.append(f"检测到循环引用: {node} -> {neighbor}")
+                    return True
+                if color.get(neighbor, WHITE) == WHITE:
+                    if _dfs_cycle(neighbor):
+                        return True
+            color[node] = BLACK
+            return False
+
+        for nid in list(color.keys()):
+            if color[nid] == WHITE:
+                _dfs_cycle(nid)
         # 检查主线伏笔是否有目标章节
         for node_id, node_data in dag.nodes.items():
             node = node_data if isinstance(node_data, ForeshadowingNode) else ForeshadowingNode.model_validate(node_data)

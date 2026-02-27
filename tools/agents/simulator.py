@@ -1,18 +1,26 @@
-"""Agent workflow simulator (Director -> Librarian -> LoreChecker)."""
+"""Agent workflow simulator (Director -> Librarian -> LoreChecker).
+支持 LLM 模式（opt-in）：通过 llm_client + router 将 LLM 能力传递给各 Agent。
+不传入 llm_client 时保持原有规则模拟行为。
+"""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import yaml
+if TYPE_CHECKING:
+    from tools.llm.client import LLMClient
+    from tools.llm.router import ModelRouter
 
 try:
     from tools.agents.director import DirectorAgent
     from tools.agents.librarian import LibrarianAgent
     from tools.agents.lore_checker import LoreCheckerAgent
+    from tools.agents.reader import ReaderAgent
+    from tools.agents.style_director import StyleDirectorAgent
     from tools.agents.stylist import StylistAgent
     from tools.character_state_manager import CharacterStateManager
     from tools.graph.foreshadowing_dag import ForeshadowingDAGManager
@@ -22,6 +30,8 @@ except ImportError:  # pragma: no cover - supports legacy path injection
     from agents.director import DirectorAgent
     from agents.librarian import LibrarianAgent
     from agents.lore_checker import LoreCheckerAgent
+    from agents.reader import ReaderAgent
+    from agents.style_director import StyleDirectorAgent
     from agents.stylist import StylistAgent
     from character_state_manager import CharacterStateManager
     from graph.foreshadowing_dag import ForeshadowingDAGManager
@@ -40,14 +50,25 @@ class SimulationResult:
     errors: List[str]
     warnings: List[str]
     rewrite_attempts: int = 0
+    style_analysis: Optional[Dict[str, Any]] = None
 
 
 class AgentSimulator:
     """Runs a local multi-agent simulation pipeline."""
 
-    def __init__(self, project_dir: Path, novel_id: str):
+    def __init__(
+        self,
+        project_dir: Path,
+        novel_id: str,
+        style_id: str = "",
+        llm_client: Optional["LLMClient"] = None,
+        router: Optional["ModelRouter"] = None,
+    ):
         self.project_dir = project_dir
         self.novel_id = novel_id
+        self.style_id = style_id
+        self._llm_client = llm_client
+        self._router = router
         self.base_dir = self.project_dir / "data" / "novels" / novel_id
         self.drafts_dir = self.base_dir / "manuscript" / "drafts"
         self.sim_logs_dir = self.project_dir / "logs" / "simulations"
@@ -58,10 +79,18 @@ class AgentSimulator:
         )
         self.world_manager = WorldGraphManager(project_dir=project_dir, novel_id=novel_id)
 
-        self.director = DirectorAgent()
-        self.librarian = LibrarianAgent()
-        self.lore_checker = LoreCheckerAgent()
-        self.stylist = StylistAgent()
+        self.director = DirectorAgent(llm_client=llm_client, router=router)
+        self.librarian = LibrarianAgent(llm_client=llm_client, router=router)
+        self.lore_checker = LoreCheckerAgent(llm_client=llm_client, router=router)
+        self.stylist = StylistAgent(
+            project_root=project_dir, novel_id=novel_id,
+            llm_client=llm_client, router=router,
+        )
+
+        # Load composed style if available
+        self._style_summary: Optional[str] = None
+        if style_id:
+            self._style_summary = self.stylist.load_composed_style(novel_id)
 
         self.drafts_dir.mkdir(parents=True, exist_ok=True)
         self.sim_logs_dir.mkdir(parents=True, exist_ok=True)
@@ -201,17 +230,31 @@ class AgentSimulator:
         use_stylist: bool = False,
         strict_lore: bool = False,
         max_rewrites: int = 0,
+        use_style_analysis: bool = False,
     ) -> SimulationResult:
         forbidden = forbidden or []
         required = required or []
         chapter_annotations = self._chapter_annotations(chapter_id)
         context = self._build_context(chapter_id, objective, chapter_annotations)
 
+        # Cross-chapter consistency pre-check
+        cross_check = self.lore_checker.check_cross_chapter(
+            chapter_id=chapter_id,
+            character_state_manager=self.manager,
+            foreshadowing_manager=self.foreshadowing_manager,
+            strict=strict_lore,
+        )
+        # Surface cross-chapter warnings in context so Director/Librarian can account for them
+        if cross_check.warnings or cross_check.errors:
+            cross_notes = '; '.join(cross_check.errors + cross_check.warnings)
+            context['cross_chapter'] = cross_notes
+
         decision = self.director.plan(
             objective=objective,
             context=context,
             chapter_id=chapter_id,
             use_stylist=use_stylist,
+            style_summary=self._style_summary,
         )
 
         librarian_output = self.librarian.generate_chapter(
@@ -264,10 +307,20 @@ class AgentSimulator:
             draft_text = rewritten.draft
 
         style_edits: List[str] = []
+        style_score: Dict[str, int] = {}
         if lore_result.passed and use_stylist:
-            style_result = self.stylist.polish(draft_text, banned_phrases=[])
+            style_result = self.stylist.polish(
+                draft_text, banned_phrases=[], novel_id=self.novel_id,
+            )
             draft_text = style_result.text + "\n"
             style_edits = style_result.edits
+            style_score = style_result.score
+        # --- Optional style analysis (Reader + StyleDirector) ---
+        style_analysis_data: Optional[Dict[str, Any]] = None
+        if use_style_analysis and lore_result.passed:
+            style_analysis_data = self._run_style_analysis(
+                draft_text, chapter_id
+            )
 
         draft_file = self.drafts_dir / f"{chapter_id}_draft.md"
         draft_file.write_text(draft_text, encoding="utf-8")
@@ -295,6 +348,12 @@ class AgentSimulator:
             "style": {
                 "enabled": use_stylist,
                 "edits": style_edits,
+                "score": style_score,
+            },
+            "style_analysis": style_analysis_data,
+            "cross_chapter": {
+                "errors": cross_check.errors,
+                "warnings": cross_check.warnings,
             },
             "context": context,
             "chapter_annotations": chapter_annotations,
@@ -305,12 +364,61 @@ class AgentSimulator:
         with report_file.open("w", encoding="utf-8") as handle:
             yaml.safe_dump(report_data, handle, allow_unicode=True, sort_keys=False)
 
+        # Merge cross-chapter warnings into the result
+        all_warnings = lore_result.warnings + cross_check.warnings
+        all_errors = lore_result.errors + cross_check.errors
         return SimulationResult(
             chapter_id=chapter_id,
-            passed=lore_result.passed,
+            passed=lore_result.passed and cross_check.passed,
             draft_file=draft_file,
             report_file=report_file,
-            errors=lore_result.errors,
-            warnings=lore_result.warnings,
+            errors=all_errors,
+            warnings=all_warnings,
             rewrite_attempts=rewrite_count,
+            style_analysis=style_analysis_data,
         )
+
+    def _run_style_analysis(
+        self, draft_text: str, chapter_id: str
+    ) -> Dict[str, Any]:
+        """Run Reader + StyleDirector post-processing on the final draft."""
+        # Reader: extract findings from the draft
+        reader = ReaderAgent(
+            project_root=self.project_dir,
+            style_id=self.style_id,
+            novel_id=self.novel_id,
+        )
+        reader_output = reader.read_batch(
+            text=draft_text,
+            batch_id=f"sim_{chapter_id}",
+            chunk_range=chapter_id,
+        )
+
+        # StyleDirector: diff analysis against composed style
+        style_director = StyleDirectorAgent(
+            project_root=self.project_dir,
+            style_id=self.style_id,
+            novel_id=self.novel_id,
+        )
+        director_output = style_director.analyze(draft=draft_text)
+
+        return {
+            "reader": {
+                "total_findings": len(reader_output.findings),
+                "craft": len(reader_output.craft_findings),
+                "style": len(reader_output.style_findings),
+                "novel": len(reader_output.novel_findings),
+                "outline_events": len(reader_output.outline_events),
+                "revision_suggestions": reader_output.revision_suggestions,
+            },
+            "style_director": {
+                "total_deviations": len(director_output.deviations),
+                "layer_scores": {
+                    k: {"score": v.score, "deviations": v.deviations}
+                    for k, v in director_output.layer_scores.items()
+                },
+                "converged": director_output.converged,
+                "new_gaps": director_output.new_gaps_found,
+                "document_updates": len(director_output.document_updates),
+            },
+        }
