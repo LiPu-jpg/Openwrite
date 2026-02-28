@@ -1,0 +1,112 @@
+# Chapter Writing Workflow
+# 章节写作工作流
+
+name: chapter_writing
+version: 1.0.0
+description: 完整的章节写作流程（Pipeline V2）
+
+# 工作流步骤
+steps:
+  - id: load_context
+    name: 加载上下文
+    description: 从 Director 获取章节所需的全部上下文
+    tools:
+      - query_outline
+      - query_characters
+      - query_foreshadowing
+      - query_world
+      - query_style
+    outputs:
+      - context_package
+    
+  - id: generate_beats
+    name: 生成节拍
+    description: 根据上下文生成剧情节拍列表
+    tool: beat_generator
+    inputs:
+      - chapter_id
+      - context_package
+    outputs:
+      - beat_list
+    
+  - id: generate_draft
+    name: 生成草稿
+    description: 将节拍扩写为结构化草稿
+    tool: draft_generator
+    inputs:
+      - chapter_id
+      - objective
+      - context_package
+      - beat_list
+    outputs:
+      - draft
+    
+  - id: review_draft
+    name: 逻辑审查
+    description: LoreChecker 检查草稿的逻辑一致性
+    tool: lore_checker
+    inputs:
+      - draft
+      - context_package
+    outputs:
+      - review_result
+      - errors
+      - warnings
+    
+  - id: user_review
+    name: 人工审核
+    description: 等待用户审核并确认
+    type: human
+    inputs:
+      - draft
+      - review_result
+    outputs:
+      - user_feedback
+      - approved
+    
+  - id: rewrite_if_needed
+    name: 重写（如需要）
+    description: 根据审查反馈重写草稿
+    condition: "!approved || errors.length > 0"
+    tool: draft_generator
+    inputs:
+      - chapter_id
+      - draft
+      - errors
+      - warnings
+    outputs:
+      - revised_draft
+    max_attempts: 3
+    
+  - id: style_polish
+    name: 风格润色
+    description: Stylist 进行最终风格润色（可选）
+    condition: "user_requests_style_polish"
+    tool: stylist
+    inputs:
+      - draft
+      - style_profile
+    outputs:
+      - final_draft
+    
+  - id: save_draft
+    name: 保存草稿
+    description: 保存最终草稿到文件
+    tool: write_file
+    inputs:
+      - path: "data/novels/{novel_id}/manuscript/{chapter_id}.md"
+      - content: final_draft || draft
+
+# 错误处理
+error_handling:
+  max_retries: 3
+  on_failure:
+    - log_error
+    - save_partial_draft
+    - notify_user
+
+# 配置
+config:
+  use_llm: false  # 是否使用 LLM 扩写
+  style_strict: false  # 是否严格风格检查
+  auto_rewrite: true  # 是否自动重写

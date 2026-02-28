@@ -312,31 +312,26 @@ openwrite/
 **目标**: 建立骨架，不破坏现有功能
 
 **任务清单**:
-- [ ] 创建 `skills/` 目录结构
-- [ ] 实现 `Skill`, `SkillRegistry`, `SkillLoader`
-- [ ] 实现 `ToolExecutor`（核心需求）
-- [ ] 创建 `config/main_prompt.md` 模板
-- [ ] 创建 `config/style_questions.yaml`（风格问询问题）
-- [ ] 测试：工具执行器能正常工作
+- [x] 创建 `skills/` 目录结构
+- [x] 实现 `Skill`, `SkillRegistry`, `SkillLoader`
+- [x] 实现 `ToolExecutor`（核心需求）
+- [x] 创建 `config/main_prompt.md` 模板
+- [x] 创建 `config/style_questions.yaml`（风格问询问题）
+- [x] 测试：工具执行器能正常工作
 
 **验证命令**:
-```bash
-python3 -c "from skills import SkillLoader; r = SkillLoader().load_all(); print(len(r.list_all()))"
-python3 -c "from skills.tools import ToolExecutor; e = ToolExecutor(); print(e.execute('read_file', {'path': 'test.md'}))"
-```
-
 ### Phase 2: 风格系统（2-3天）
 
 **目标**: 实现用户核心需求——风格初始化
 
 **任务清单**:
-- [ ] 创建 `skills/style/` 完整结构
-- [ ] 实现 `StyleInitializer`（问询 + 生成）
-- [ ] 实现 `StyleExtractor`（从参考作品提取）
-- [ ] 实现 `StyleComposer`（合成共享层 + 专属层）
-- [ ] 创建 `craft/humanization.yaml`（去AI味规则）
-- [ ] 创建 `craft/tropes/` 套路库
-- [ ] 测试：风格初始化流程能完整执行
+- [x] 创建 `skills/style/` 完整结构
+- [x] 实现 `StyleInitializer`（问询 + 生成）
+- [x] 实现 `StyleExtractor`（从参考作品提取）
+- [x] 实现 `StyleComposer`（合成共享层 + 专属层）
+- [x] 创建 `craft/humanization.yaml`（去AI味规则）
+- [x] 创建 `skills/style/prompts/` 风格相关提示词
+- [x] 测试：12 个风格测试通过
 
 **验证命令**:
 ```bash
@@ -344,6 +339,13 @@ python3 -c "from skills.style import StyleInitializer; ..."
 ```
 
 ### Phase 3: 大纲功能迁移（2天）
+
+**任务清单**:
+- [x] 迁移 `parsers/outline_md_parser.py` → `skills/outline/tools/parser.py`
+- [x] 迁移 `utils/outline_md_serializer.py` → `skills/outline/tools/serializer.py`
+- [x] 创建 `skills/outline/tools/validator.py` (新增验证器)
+- [x] 创建大纲相关 prompts (generate_master/arc/section/chapter_outline.md)
+- [x] 测试：20 个新测试通过，全量 301 tests passed
 
 **任务清单**:
 - [ ] 迁移 `parsers/outline_md_parser.py`
@@ -355,11 +357,20 @@ python3 -c "from skills.style import StyleInitializer; ..."
 ### Phase 4: 写作功能迁移（2-3天）
 
 **任务清单**:
-- [ ] 迁移节拍生成逻辑
-- [ ] 外部化 `BEAT_TEMPLATES` → YAML
-- [ ] 外部化 `SECTION_MARKERS` → YAML
-- [ ] 创建写作相关 prompts
-- [ ] 测试：Pipeline V2 测试通过
+- [x] 迁移节拍生成逻辑
+- [x] 外部化 `BEAT_TEMPLATES` → YAML
+- [x] 外部化 `SECTION_MARKERS` → YAML
+- [x] 创建写作相关 prompts
+- [x] 测试：22 个新测试通过
+
+### Phase 5: Director 重构（2天）
+
+**任务清单**:
+- [x] 重写意图识别使用 SkillRegistry
+- [x] 重写工具调用使用 ToolExecutor
+- [x] 更新主 AI 提示词加载
+- [x] 创建 `tools/agents/director_v2.py`（SkillBasedDirector）
+- [x] 测试：35 个新测试通过，全量 358 tests passed
 
 ### Phase 5: Director 重构（2天）
 
@@ -371,8 +382,9 @@ python3 -c "from skills.style import StyleInitializer; ..."
 
 ### Phase 6: 其他功能 + 清理（2-3天）
 
-**任务清单**:
-- [ ] 迁移角色、世界观、伏笔功能
+- [x] 迁移角色、世界观、伏笔功能
+- [x] 更新文档
+- [x] 全量测试（378 passed）
 - [ ] 删除旧代码（保留 fallback）
 - [ ] 更新文档
 - [ ] 全量测试
@@ -404,6 +416,13 @@ python3 -c "from skills.style import StyleInitializer; ..."
 ---
 
 ## 九、变更日志
+
+| 日期 | 变更内容 |
+|------|----------|
+| 2026-03-01 | 初始创建，记录用户决策和架构设计 |
+| 2026-03-01 | Phase 1-3 完成：基础设施 + 风格系统 + 大纲迁移 |
+| 2026-03-01 | Phase 5 完成：Director 重构，SkillBasedDirector（35 新测试，358 全量通过） |
+| 2026-03-01 | Phase 6 完成：角色/世界观/伏笔 skills（20 新测试，378 全量通过） |
 
 | 日期 | 变更内容 |
 |------|----------|

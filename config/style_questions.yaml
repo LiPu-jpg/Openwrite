@@ -1,0 +1,118 @@
+# 风格初始化问询问题
+
+# 此配置定义了在创建新项目时，用于生成专属风格的问题。
+
+questions:
+  - id: tone
+    question: "你希望作品的整体基调是什么？"
+    description: "基调决定了叙述的整体感觉"
+    options:
+      - value: "轻松幽默"
+        description: "吐槽、解构、现代感，阅读轻松"
+        style_hints:
+          humor: "high"
+          modern_slang: "high"
+          emotional_depth: "light"
+      - value: "严肃正剧"
+        description: "厚重、深沉、有史诗感"
+        style_hints:
+          humor: "low"
+          modern_slang: "none"
+          emotional_depth: "deep"
+      - value: "悬疑紧张"
+        description: "快节奏、信息差、反转多"
+        style_hints:
+          humor: "low"
+          pacing: "fast"
+          information_density: "high"
+      - value: "温馨治愈"
+        description: "日常感、人情味、慢节奏"
+        style_hints:
+          humor: "medium"
+          pacing: "slow"
+          emotional_depth: "warm"
+      - value: "热血爽文"
+        description: "打脸、升级、爽感为主"
+        style_hints:
+          pacing: "fast"
+          climax_frequency: "high"
+          power_fantasy: "high"
+
+  - id: pacing
+    question: "你偏好的叙事节奏是？"
+    description: "节奏影响段落长度和信息密度"
+    options:
+      - value: "快节奏"
+        description: "短段为主，信息密集，场景切换快"
+        style_hints:
+          paragraph_length: "short"
+          scene_transition: "fast"
+          short_paragraph_ratio: 0.6
+      - value: "中节奏"
+        description: "长短结合，张弛有度"
+        style_hints:
+          paragraph_length: "mixed"
+          scene_transition: "normal"
+          short_paragraph_ratio: 0.4
+      - value: "慢节奏"
+        description: "长段描写，注重氛围和细节"
+        style_hints:
+          paragraph_length: "long"
+          scene_transition: "slow"
+          short_paragraph_ratio: 0.2
+
+  - id: dialogue_ratio
+    question: "对话与描写的比例偏好？"
+    description: "对话多则节奏快，描写多则氛围强"
+    options:
+      - value: "对话为主"
+        description: "通过对话推进剧情，阅读轻松"
+        style_hints:
+          dialogue_ratio: 0.6
+          show_dont_tell: "high"
+      - value: "平衡"
+        description: "对话与描写并重"
+        style_hints:
+          dialogue_ratio: 0.4
+          show_dont_tell: "medium"
+      - value: "描写为主"
+        description: "注重场景和氛围描写"
+        style_hints:
+          dialogue_ratio: 0.25
+          show_dont_tell: "medium"
+
+  - id: reference
+    question: "是否有参考作品风格？（可选）"
+    description: "从已提取的风格中选择参考"
+    options:
+      - value: "无参考"
+        description: "完全根据上述偏好生成"
+        style_hints: {}
+      - value: "术师手册"
+        description: "轻松幽默现代感吐槽"
+        style_hints:
+          reference_style: "术师手册"
+      - value: "自定义参考"
+        description: "提供其他参考文本"
+        style_hints:
+          needs_extraction: true
+
+  - id: special_requirements
+    question: "有其他特殊要求吗？（可选）"
+    description: "自定义约束"
+    type: text
+    placeholder: "如：不要用网络流行语、避免长段落、多用心理描写..."
+    style_hints: {}
+
+# 问题流程
+flow:
+  1. 按顺序提问
+  2. 记录每个答案的 style_hints
+  3. 合并所有 hints
+  4. 如有参考作品，加载并合并
+  5. 生成最终 fingerprint.yaml
+
+# 生成文件路径
+output:
+  path: "novels/{novel_id}/style/fingerprint.yaml"
+  template: "style_fingerprint_template.yaml"
