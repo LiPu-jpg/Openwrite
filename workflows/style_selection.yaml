@@ -1,0 +1,160 @@
+# 文风选择工作流
+# 选择和合成风格文档
+
+workflows:
+  style_selection:
+    name: 文风选择
+    description: 选择作者/作品风格，合成三层风格文档
+    category: style
+    priority: 10
+    version: "1.0"
+    author: system
+    
+    # 触发配置
+    trigger_intents:
+      - style_compose
+      - style_analyze
+    trigger_keywords:
+      - 选择风格
+      - 合成风格
+      - 文风设置
+      - 设置风格
+      - 风格合成
+      - 文风配置
+    
+    # 前置条件
+    requires_novel_id: true
+    requires_outline: false
+    
+    # 入口阶段
+    entry_phase: select
+    
+    # 阶段定义
+    phases:
+      - phase_id: select
+        name: 选择风格
+        description: 选择要使用的风格模板
+        available_tools:
+          - style_query
+        required_tools: []
+        context_keys:
+          - novel_id
+          - available_styles
+          - available_novels
+        user_prompt: |
+          请选择要使用的风格模板。
+          
+          **三层风格架构**：
+          1. 通用技法 (craft/) - 可选参考
+          2. 作者/作品风格 (styles/) - 应当遵循
+          3. 作品设定 (novels/) - 不可违反
+        questions:
+          - "要使用哪个风格模板？"
+          - "是否参考特定作者风格？"
+        auto_advance: false
+        next_phase: preview
+        options:
+          - id: select_existing
+            label: 选择现有风格
+            description: 从已创建的风格模板中选择
+          - id: create_new
+            label: 创建新风格
+            description: 基于 Reader 分析创建新风格
+          - id: no_style
+            label: 不使用风格
+            description: 跳过风格合成
+      
+      - phase_id: preview
+        name: 预览配置
+        description: 预览将要合成的风格内容
+        available_tools:
+          - style_query
+        required_tools: []
+        context_keys:
+          - novel_id
+          - selected_style_id
+          - style_preview
+        user_prompt: |
+          风格预览：
+          
+          **通用技法层** ({craft_count} 条)
+          {craft_summary}
+          
+          **风格层** ({style_count} 条)
+          {style_summary}
+          
+          **设定层** ({novel_count} 条)
+          {novel_summary}
+        questions:
+          - "风格配置是否符合预期？"
+        auto_advance: false
+        next_phase: compose
+        options:
+          - id: confirm
+            label: 确认合成
+            description: 开始合成风格文档
+          - id: adjust
+            label: 调整选择
+            description: 返回上一步调整
+          - id: view_details
+            label: 查看详情
+            description: 查看完整的风格内容
+      
+      - phase_id: compose
+        name: 合成文档
+        description: 合成三层风格文档
+        available_tools:
+          - style_composer
+        required_tools:
+          - style_composer
+        context_keys:
+          - novel_id
+          - style_id
+        user_prompt: |
+          正在合成风格文档...
+          
+          将三层风格合成为最终的生成指令：
+          - 硬性约束（不可违反）
+          - 风格约束（应当遵循）
+          - 通用技法（可选参考）
+        auto_advance: true
+        next_phase: review
+        
+      - phase_id: review
+        name: 审核结果
+        description: 查看合成结果
+        available_tools:
+          - style_profile
+        required_tools: []
+        context_keys:
+          - composed_style
+          - style_profile
+        user_prompt: |
+          风格文档已合成！
+          
+          **合成结果**：
+          - 硬性约束：{hard_constraints} 字
+          - 风格约束：{style_constraints} 字
+          - 通用技法：{craft_reference} 字
+          
+          **质量指标**：
+          - 直接性：{directness}
+          - 节奏：{rhythm}
+          - 意象：{imagery}
+          - 角色化：{characterization}
+          - 去AI：{ai_artifact_control}
+        questions:
+          - "风格文档是否符合预期？"
+          - "需要调整吗？"
+        auto_advance: false
+        next_phase: null
+        options:
+          - id: approve
+            label: 审核通过
+            description: 保存风格配置
+          - id: iterate
+            label: 迭代优化
+            description: 使用 StyleDirector 进行迭代
+          - id: reselect
+            label: 重新选择
+            description: 返回选择其他风格

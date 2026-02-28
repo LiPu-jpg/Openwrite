@@ -1,0 +1,144 @@
+# 大纲修改工作流
+# 修改现有大纲
+
+workflows:
+  outline_modification:
+    name: 大纲修改
+    description: 修改现有大纲，包括调整结构、修改内容、同步更新
+    category: outline
+    priority: 5
+    version: "1.0"
+    author: system
+    
+    # 触发配置
+    trigger_intents:
+      - outline_assist
+    trigger_keywords:
+      - 修改大纲
+      - 调整大纲
+      - 删除篇
+      - 删除节
+      - 删除章
+      - 移动章节
+      - 合并节
+      - 拆分篇
+      - 改一下
+    
+    # 前置条件
+    requires_novel_id: true
+    requires_outline: true
+    
+    # 入口阶段
+    entry_phase: identify
+    
+    # 阶段定义
+    phases:
+      - phase_id: identify
+        name: 识别修改点
+        description: 确定要修改的内容和范围
+        available_tools:
+          - outline_assist
+        required_tools: []
+        context_keys:
+          - novel_id
+          - current_hierarchy
+        user_prompt: |
+          请描述您想修改的大纲内容。
+        questions:
+          - "要修改哪个层级？（总纲/篇纲/节纲/章纲）"
+          - "具体要修改什么内容？"
+          - "是结构调整还是内容修改？"
+        auto_advance: false
+        next_phase: assess
+        options:
+          - id: structure
+            label: 结构调整
+            description: 增删或移动篇/节/章
+          - id: content
+            label: 内容修改
+            description: 修改目标、场景、人物等
+          - id: foreshadowing
+            label: 伏笔调整
+            description: 修改伏笔埋设或回收点
+      
+      - phase_id: assess
+        name: 评估影响
+        description: 分析修改的影响范围
+        available_tools:
+          - outline_assist
+          - lore_checker
+        required_tools:
+          - lore_checker
+        context_keys:
+          - novel_id
+          - modification_plan
+        user_prompt: |
+          正在评估修改的影响范围...
+        questions:
+          - "是否需要同步更新其他层级？"
+          - "是否影响伏笔链？"
+          - "是否影响人物时间线？"
+        auto_advance: true
+        next_phase: confirm
+        
+      - phase_id: confirm
+        name: 确认修改
+        description: 确认修改内容和影响
+        available_tools: []
+        required_tools: []
+        context_keys:
+          - novel_id
+          - impact_assessment
+        user_prompt: |
+          修改影响评估完成。
+          
+          即将执行以下修改：
+        questions:
+          - "确认执行这些修改吗？"
+        auto_advance: false
+        next_phase: execute
+        options:
+          - id: confirm
+            label: 确认执行
+            description: 开始执行修改
+          - id: cancel
+            label: 取消修改
+            description: 放弃本次修改
+          - id: adjust
+            label: 调整方案
+            description: 修改调整方案
+        
+      - phase_id: execute
+        name: 执行修改
+        description: 应用修改到大纲
+        available_tools:
+          - outline_assist
+        required_tools:
+          - outline_assist
+        context_keys:
+          - novel_id
+          - confirmed_modifications
+        user_prompt: |
+          正在执行修改...
+        auto_advance: true
+        next_phase: sync
+        
+      - phase_id: sync
+        name: 同步更新
+        description: 同步相关数据和检查一致性
+        available_tools:
+          - lore_checker
+          - foreshadowing_manager
+          - character_manager
+        required_tools: []
+        context_keys:
+          - novel_id
+          - modifications_applied
+        user_prompt: |
+          修改已应用。正在同步相关数据...
+          
+          - 更新伏笔 DAG
+          - 检查人物时间线
+          - 验证世界观一致性
+        auto_advance: true
+        next_phase: null

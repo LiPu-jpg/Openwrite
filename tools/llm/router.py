@@ -1,10 +1,10 @@
-"""模型路由器 — 根据任务类型选择模型链。
+"""模型路由器 — 根据任务类型从模型池中选择模型链。
 
 任务类型分类：
-- reasoning: 调度决策、路由分析（首选 Opus 4.6）
-- generation: 文本生成、草稿写作（首选 Kimi K2.5 / MiniMax M2.5）
-- review: 逻辑审查、一致性检查（首选 Opus 4.6）
-- style: 风格分析、润色（首选 Kimi K2.5）
+- reasoning: 调度决策、路由分析（Director）
+- generation: 文本生成、草稿写作（Librarian）
+- review: 逻辑审查、一致性检查（LoreChecker）
+- style: 风格分析、润色（Stylist/Reader/StyleDirector）
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from tools.llm.config import LLMConfig, TaskRouteConfig
+from tools.llm.config import LLMConfig, ModelConfig
 
 
 class TaskType(str, Enum):
@@ -25,7 +25,7 @@ class TaskType(str, Enum):
 
 
 class ModelRouter:
-    """根据任务类型从 LLMConfig 中选择模型路由链。
+    """根据任务类型从模型池中选择模型路由链。
 
     用法：
         config = load_llm_config()
@@ -42,19 +42,8 @@ class ModelRouter:
         """LLM 是否全局启用。"""
         return self._config.enabled
 
-    def get_route_config(self, task_type: TaskType) -> TaskRouteConfig:
-        """获取指定任务类型的路由配置。
-
-        Args:
-            task_type: 任务类型枚举
-
-        Returns:
-            TaskRouteConfig，未找到时返回 default_route
-        """
-        return self._config.routes.get(task_type.value, self._config.default_route)
-
     def get_routes(self, task_type: TaskType) -> List[Dict[str, Any]]:
-        """获取指定任务类型的模型路由链（primary + fallbacks）。
+        """获取指定任务类型的模型路由链（按优先级排序）。
 
         返回格式兼容 LLMClient.complete_with_fallback() 的 routes 参数。
 
@@ -64,34 +53,44 @@ class ModelRouter:
         Returns:
             模型路由字典列表，按优先级排序
         """
-        route_config = self.get_route_config(task_type)
+        route_config = self._config.routes.get(task_type.value)
+        if not route_config or not route_config.models:
+            # 无配置时返回空列表，由 LLMClient fallback 到规则引擎
+            return []
+
         routes: List[Dict[str, Any]] = []
+        # 首选模型
+        primary_name = route_config.models[route_config.primary_index]
+        if primary_name in self._config.models:
+            routes.append(self._model_to_dict(self._config.models[primary_name]))
 
-        # Primary
-        routes.append(self._route_to_dict(route_config.primary))
-
-        # Fallbacks
-        for fb in route_config.fallbacks:
-            routes.append(self._route_to_dict(fb))
+        # 备选模型（跳过首选）
+        for i, model_name in enumerate(route_config.models):
+            if i != route_config.primary_index and model_name in self._config.models:
+                routes.append(self._model_to_dict(self._config.models[model_name]))
 
         return routes
 
-    def get_primary_model(self, task_type: TaskType) -> str:
+    def get_primary_model(self, task_type: TaskType) -> Optional[str]:
         """获取指定任务类型的首选模型名。"""
-        route_config = self.get_route_config(task_type)
-        return route_config.primary.model
+        route_config = self._config.routes.get(task_type.value)
+        if not route_config or not route_config.models:
+            return None
+        primary_name = route_config.models[route_config.primary_index]
+        model_cfg = self._config.models.get(primary_name)
+        return model_cfg.model if model_cfg else None
 
     @staticmethod
-    def _route_to_dict(route: Any) -> Dict[str, Any]:
-        """将 ModelRoute 转为 dict，供 LLMClient 使用。"""
+    def _model_to_dict(model: ModelConfig) -> Dict[str, Any]:
+        """将 ModelConfig 转为 dict，供 LLMClient 使用。"""
         result: Dict[str, Any] = {
-            "model": route.model,
-            "max_tokens": route.max_tokens,
-            "temperature": route.temperature,
-            "timeout": route.timeout,
+            "model": model.model,
+            "max_tokens": model.max_tokens,
+            "temperature": model.temperature,
+            "timeout": model.timeout,
         }
-        if route.api_base:
-            result["api_base"] = route.api_base
-        if route.api_key_env:
-            result["api_key_env"] = route.api_key_env
+        if model.api_base:
+            result["api_base"] = model.api_base
+        if model.api_key_env:
+            result["api_key_env"] = model.api_key_env
         return result

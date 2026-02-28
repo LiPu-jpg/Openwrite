@@ -344,18 +344,191 @@
 
     addChatMsg('user', escapeHtml(text));
 
-    // 判断是否是生成指令
-    var isGenerate = /生成|写|创作|草稿|重写|续写/.test(text);
-    if (isGenerate && currentFile) {
-      startPipeline(text);
-    } else if (isGenerate && !currentFile) {
-      // 没选文件，弹参数面板
-      showGenerateModal(text);
-    } else {
-      // 普通消息 — 目前无后端 chat API，给提示
-      addChatMsg('agent', '目前仅支持章节生成指令。请选择一个大纲后输入「生成本章草稿」。', 'director');
+    // ═══ 智能命令路由系统 ═══
+    // 识别用户意图并路由到对应工作流
+    var intent = detectIntent(text);
+    
+    switch(intent) {
+      case 'chapter':
+        if (currentFile) {
+          startPipeline(text);
+        } else {
+          showGenerateModal(text);
+        }
+        break;
+      case 'outline':
+        startOutlineFlow(text);
+        break;
+      case 'analyze':
+        startAnalyzeFlow(text);
+        break;
+      case 'style':
+        startStyleFlow(text);
+        break;
+      case 'lore':
+        startLoreFlow(text);
+        break;
+      case 'help':
+        showHelp();
+        break;
+      default:
+        showHelp();
     }
   };
+
+  // 意图识别函数
+  function detectIntent(text) {
+    if (/生成|写|创作|草稿|重写|续写/.test(text)) return 'chapter';
+    if (/大纲|构思|规划|扩展|目录|总纲|篇纲|节纲|章纲/.test(text)) return 'outline';
+    if (/分析|检查|评估|深入研究|剖析/.test(text)) return 'analyze';
+    if (/风格|文风|风格特征|语言风格/.test(text)) return 'style';
+    if (/逻辑|审查|漏洞|一致性|设定冲突/.test(text)) return 'lore';
+    if (/帮助|怎么用|指令|能用什么/.test(text)) return 'help';
+    return 'unknown';
+  }
+
+  // 大纲工作流
+  function startOutlineFlow(text) {
+    addChatMsg('agent', '正在启动大纲生成工作流...', 'director');
+    setAgentStatus('busy', '生成大纲...');
+    
+    api.post('/api/outline/generate', {
+      instruction: text,
+      novel_id: novelId
+    }).then(function(result) {
+      setAgentStatus('online', '完成');
+      addChatMsg('agent', '大纲已生成！已加载到编辑器。', 'director');
+      if (result.outline_md) {
+        document.getElementById('editor-area').value = result.outline_md;
+        currentFile = { id: 'hierarchy', type: 'outline' };
+        if (currentTab === 'preview') updatePreview();
+      }
+    }).catch(function(err) {
+      setAgentStatus('', '出错');
+      addChatMsg('agent', '大纲生成失败: ' + (err.message || '未知错误'), 'director');
+    });
+  }
+
+  // 文本分析工作流
+  function startAnalyzeFlow(text) {
+    var content = document.getElementById('editor-area').value;
+    if (!content) {
+      addChatMsg('agent', '请先在编辑器中输入或选择要分析的文本。', 'director');
+      return;
+    }
+    
+    addChatMsg('agent', '正在进行文本分析...', 'stylist');
+    setAgentStatus('busy', '分析中...');
+    
+    api.post('/api/analyze/text', {
+      text: content,
+      instruction: text
+      novel_id: novelId
+    }).then(function(result) {
+      setAgentStatus('online', '完成');
+      var html = '<div class="analysis-result">';
+      html += '<h4>分析结果</h4>';
+      if (result.word_count) html += '<p>字数: ' + result.word_count + '</p>';
+      if (result.summary) html += '<p>摘要: ' + result.summary + '</p>';
+      if (result.issues && result.issues.length > 0) {
+        html += '<p>发现的问题:</p><ul>';
+        result.issues.forEach(function(issue) {
+          html += '<li>' + escapeHtml(issue) + '</li>';
+        });
+        html += '</ul>';
+      }
+      html += '</div>';
+      addChatMsg('agent', html, 'stylist');
+    }).catch(function(err) {
+      setAgentStatus('', '出错');
+      addChatMsg('agent', '分析失败: ' + (err.message || '未知错误'), 'stylist');
+    });
+  }
+
+  // 风格分析工作流
+  function startStyleFlow(text) {
+    var content = document.getElementById('editor-area').value;
+    if (!content) {
+      addChatMsg('agent', '请先在编辑器中输入或选择要分析风格的文本。', 'stylist');
+      return;
+    }
+    
+    addChatMsg('agent', '正在提取风格特征...', 'stylist');
+    setAgentStatus('busy', '风格分析...');
+    
+    api.post('/api/analyze/style', {
+      text: content,
+      novel_id: novelId
+    }).then(function(result) {
+      setAgentStatus('online', '完成');
+      var html = '<div class="style-result">';
+      html += '<h4>风格特征</h4>';
+      if (result.voice) html += '<p><strong>叙述声音:</strong> ' + escapeHtml(result.voice) + '</p>';
+      if (result.rhythm) html += '<p><strong>节奏特点:</strong> ' + escapeHtml(result.rhythm) + '</p>';
+      if (result.language) html += '<p><strong>语言风格:</strong> ' + escapeHtml(result.language) + '</p>';
+      if (result.humor) html += '<p><strong>幽默体系:</strong> ' + escapeHtml(result.humor) + '</p>';
+      html += '</div>';
+      addChatMsg('agent', html, 'stylist');
+    }).catch(function(err) {
+      setAgentStatus('', '出错');
+      addChatMsg('agent', '风格分析失败: ' + (err.message || '未知错误'), 'stylist');
+    });
+  }
+
+  // 逻辑审查工作流
+  function startLoreFlow(text) {
+    var content = document.getElementById('editor-area').value;
+    if (!content) {
+      addChatMsg('agent', '请先在编辑器中输入或选择要审查的文本。', 'lore');
+      return;
+    }
+    
+    addChatMsg('agent', '正在进行逻辑一致性审查...', 'lore');
+    setAgentStatus('busy', '审查中...');
+    
+    api.post('/api/analyze/lore', {
+      text: content,
+      novel_id: novelId,
+      chapter_id: currentFile ? currentFile.id : null
+    }).then(function(result) {
+      setAgentStatus('online', '完成');
+      var html = '<div class="lore-result">';
+      var sev = result.severity || 'none';
+      html += '<div class="review-severity ' + sev + '">审查结果: ' + sev.toUpperCase() + '</div>';
+      var items = (result.warnings || []).concat(result.errors || []);
+      if (items.length === 0) {
+        html += '<div class="review-item">✓ 未发现逻辑问题</div>';
+      } else {
+        html += '<p>发现的问题:</p><ul>';
+        items.forEach(function(item) {
+          html += '<li class="review-item">' + escapeHtml(typeof item === 'string' ? item : (item.message || JSON.stringify(item))) + '</li>';
+        });
+        html += '</ul>';
+      }
+      html += '</div>';
+      addChatMsg('agent', html, 'lore');
+    }).catch(function(err) {
+      setAgentStatus('', '出错');
+      addChatMsg('agent', '逻辑审查失败: ' + (err.message || '未知错误'), 'lore');
+    });
+  }
+
+  // 显示帮助信息
+  function showHelp() {
+    addChatMsg('agent', '💡 我可以帮您完成以下任务：', 'director');
+    addChatMsg('system', '<div style="margin:8px 0;padding:12px;background:var(--bg-secondary);border-radius:6px;font-size:13px">' +
+      '<p style="margin:4px 0"><strong>📝 章节生成</strong></p>' +
+      '<p style="margin:4px 0;color:var(--text-dim)">「生成本章草稿」「重写这一段」</p>' +
+      '<p style="margin:12px 0 4px 0"><strong>📋 大纲操作</strong></p>' +
+      '<p style="margin:4px 0;color:var(--text-dim)">「构思大纲」「扩展大纲」「规划剧情」</p>' +
+      '<p style="margin:12px 0 4px 0"><strong>🔍 文本分析</strong></p>' +
+      '<p style="margin:4px 0;color:var(--text-dim)">「分析这段文字」「检查文本质量」</p>' +
+      '<p style="margin:12px 0 4px 0"><strong>🎨 风格分析</strong></p>' +
+      '<p style="margin:4px 0;color:var(--text-dim)">「分析风格」「提取风格特征」</p>' +
+      '<p style="margin:12px 0 4px 0"><strong>✓ 逻辑审查</strong></p>' +
+      '<p style="margin:4px 0;color:var(--text-dim)">「检查逻辑漏洞」「审查一致性」</p>' +
+      '</div>');
+  }
 
   function startPipeline(userText) {
     isBusy = true;

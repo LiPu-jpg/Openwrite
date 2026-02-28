@@ -125,20 +125,54 @@ class StyleComposeRequest(BaseModel):
     style_id: str
 
 
+# ═══ 智能工作流请求模型 ═══
+class OutlineGenerateRequest(BaseModel):
+    instruction: str = ""
+    novel_id: str = ""
+
+
+class TextAnalyzeRequest(BaseModel):
+    text: str
+    instruction: str = ""
+    novel_id: str = ""
+
+
+class StyleAnalyzeRequest(BaseModel):
+    text: str
+    novel_id: str = ""
+
+
+class LoreAnalyzeRequest(BaseModel):
+    text: str
+    novel_id: str = ""
+    chapter_id: str = ""
+
+class WorkflowChatRequest(BaseModel):
+    """工作流聊天请求。"""
+    message: str = Field(..., description="用户消息")
+    session_id: Optional[str] = Field(default=None, description="会话ID")
+    novel_id: Optional[str] = Field(default=None, description="小说ID")
+    context: Optional[Dict[str, Any]] = Field(default=None, description="额外上下文")
+
+
+class WorkflowStartRequest(BaseModel):
+    """启动工作流请求。"""
+    workflow_id: str = Field(..., description="工作流ID")
+    novel_id: Optional[str] = Field(default=None, description="小说ID")
+    initial_message: Optional[str] = Field(default=None, description="初始消息")
+
 # ── Phase 7C-1 请求模型 ──────────────────────────────────────────
 
 class NovelInitRequest(BaseModel):
-    title: str = ""
-    core_theme: str = ""
-    ending_direction: str = ""
-    world_premise: str = ""
+    novel_id: str
+    title: str
+    author: str = "未知作者"
+    target_words: int = 100000
+    theme: str = ""
+    premise: str = ""
     tone: str = ""
-    target_word_count: int = 0
-    key_turns: list[str] = Field(default_factory=list)
-    arc_sketches: list[dict] = Field(default_factory=list)
-    character_sketches: list[dict] = Field(default_factory=list)
-    world_entities: list[dict] = Field(default_factory=list)
-
+    ending: str = ""
+    characters: list[dict] = Field(default_factory=list)
 
 class OutlineArcRequest(BaseModel):
     arc_id: str
@@ -189,9 +223,8 @@ class LLMConfigUpdateRequest(BaseModel):
     enabled: bool = False
     retry_count: int = 2
     retry_delay: float = 1.0
+    models: dict = Field(default_factory=dict)
     routes: dict = Field(default_factory=dict)
-    default_route: dict = Field(default_factory=dict)
-
 
 class TextCharacterRequest(BaseModel):
     name: str
@@ -462,6 +495,18 @@ def create_app(
                 "stats": stats,
                 "novel_id": novel_id,
                 "recent_tasks": _collect_recent_tasks(),
+            },
+        )
+
+
+    @app.get("/chat", response_class=HTMLResponse)
+    async def chat_page(request: Request):
+        """统一对话界面页面。"""
+        return templates.TemplateResponse(
+            "chat.html",
+            {
+                "request": request,
+                "novel_id": novel_id,
             },
         )
 
@@ -1129,27 +1174,69 @@ def create_app(
 
     @app.post("/api/novel/init")
     async def api_novel_init(payload: NovelInitRequest):
-        init = _initializer()
-        result = init.initialize(
+        """初始化小说项目。"""
+        from tools.agents.initializer import NovelInitializer
+        from tools.models.character import TextCharacterProfile
+        
+        # 创建项目目录
+        novel_dir = proj / "data" / "novels" / payload.novel_id
+        if novel_dir.exists():
+            raise HTTPException(status_code=400, detail="项目已存在")
+        
+        novel_dir.mkdir(parents=True, exist_ok=True)
+        (novel_dir / "outline").mkdir(exist_ok=True)
+        (novel_dir / "characters").mkdir(exist_ok=True)
+        (novel_dir / "manuscript").mkdir(exist_ok=True)
+        (novel_dir / "world").mkdir(exist_ok=True)
+        (novel_dir / "foreshadowing").mkdir(exist_ok=True)
+        
+        # 创建总纲
+        from tools.models.outline import MasterOutline, OutlineHierarchy
+        master = MasterOutline(
+            novel_id=payload.novel_id,
             title=payload.title,
-            core_theme=payload.core_theme,
-            ending_direction=payload.ending_direction,
-            world_premise=payload.world_premise,
+            core_theme=payload.theme,
+            ending_direction=payload.ending,
+            world_premise=payload.premise,
             tone=payload.tone,
-            target_word_count=payload.target_word_count,
-            key_turns=payload.key_turns,
-            arc_sketches=payload.arc_sketches,
-            character_sketches=payload.character_sketches,
-            world_entities=payload.world_entities,
+            target_word_count=payload.target_words,
+            key_turns=[],
+            arc_ids=[]
         )
+        hierarchy = OutlineHierarchy(master=master, arcs=[], sections=[], chapters=[])
+        
+        # 保存总纲
+        hierarchy_file = novel_dir / "outline" / "hierarchy.yaml"
+        with hierarchy_file.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(hierarchy.model_dump(), f, allow_unicode=True, sort_keys=False)
+        
+        # 创建角色
+        characters_created = []
+        for char_data in payload.characters:
+            char_id = f"char_{char_data['name']}"
+            profile = TextCharacterProfile(
+                id=char_id,
+                name=char_data['name'],
+                char_type=char_data.get('tier', '普通配角'),
+                appearance=char_data.get('description', ''),
+                personality_and_voice="",
+                skills_and_abilities="",
+                items="",
+                attributes="",
+                notes="",
+                faction="",
+                aliases=[]
+            )
+            char_file = novel_dir / "characters" / f"{char_id}.yaml"
+            with char_file.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(profile.model_dump(), f, allow_unicode=True, sort_keys=False)
+            characters_created.append(char_data['name'])
+        
         return {
-            "success": result.success,
-            "novel_id": result.novel_id,
-            "master_title": result.master_outline.title if result.master_outline else "",
-            "arcs_count": len(result.hierarchy.arcs) if result.hierarchy else 0,
-            "characters_count": len(result.characters),
-            "world_entities_created": result.world_entities_created,
-            "errors": result.errors,
+            "ok": True,
+            "novel_id": payload.novel_id,
+            "title": payload.title,
+            "characters_created": characters_created
         }
 
     # ── Outline Markdown Import/Export API ────────────────────
@@ -1365,19 +1452,123 @@ def create_app(
         ch.target_words = payload.target_words or ch.target_words
         init._save_hierarchy(h)
         return ch.model_dump()
-    @app.delete("/api/outline/chapters/{chapter_id}")
-    async def api_outline_chapter_delete(chapter_id: str):
-        init = _initializer()
-        h = init.load_hierarchy()
-        if h is None or chapter_id not in h.chapters:
-            raise HTTPException(status_code=404, detail="章纲不存在")
-        ch = h.chapters.pop(chapter_id)
-        if ch.section_id and ch.section_id in h.sections:
-            sec = h.sections[ch.section_id]
-            sec.chapter_ids = [c for c in sec.chapter_ids if c != chapter_id]
-        init._save_hierarchy(h)
         return {"ok": True, "deleted": chapter_id}
 
+    # ═══ 智能工作流 API ═══
+    @app.post("/api/outline/generate")
+    async def api_outline_generate(payload: OutlineGenerateRequest):
+        """AI 辅助大纲生成。"""
+        from tools.utils.outline_md_serializer import serialize_outline_md
+        init = _initializer()
+        h = init.load_hierarchy()
+        
+        # 如果没有大纲，创建基础结构
+        if h is None:
+            from tools.models.outline import MasterOutline, OutlineHierarchy
+            h = OutlineHierarchy(
+                master=MasterOutline(
+                    novel_id=payload.novel_id or novel_id,
+                    title="新小说",
+                    core_theme="",
+                    ending_direction="",
+                    world_premise="",
+                    tone="",
+                    target_word_count=100000,
+                    key_turns=[],
+                    arc_ids=[]
+                ),
+                arcs={}, sections={}, chapters={}
+            )
+        
+        # 根据 instruction 生成大纲内容（这里使用规则引擎，未来可接入 LLM）
+        # 目前返回示例大纲结构
+        outline_md = serialize_outline_md(h) if h.master else "# 总纲\n\n暂无内容"
+        
+        # 确保目录存在后再保存
+        init.outline_dir.mkdir(parents=True, exist_ok=True)
+        init._save_hierarchy(h)
+        return {
+            "ok": True,
+            "outline_md": outline_md,
+            "novel_id": h.master.novel_id,
+            "title": h.master.title
+        }
+
+    @app.post("/api/analyze/text")
+    async def api_analyze_text(payload: TextAnalyzeRequest):
+        """文本分析工作流。"""
+        # 简单的文本分析（未来可接入 Stylist Agent）
+        text = payload.text
+        word_count = len(text)
+        char_count = len(text.replace(' ', '').replace('\n', ''))
+        
+        # 检测常见问题
+        issues = []
+        if '...' in text:
+            issues.append("发现省略号，建议使用具体描写")
+        if text.count('！') > 5:
+            issues.append("感叹号过多，建议减少使用")
+        if text.count('？') > 5:
+            issues.append("问号过多，可能对话过于密集")
+        
+        # 生成摘要
+        sentences = [s.strip() for s in text.split('。') if s.strip()]
+        summary = '。'.join(sentences[:3]) + '。' if sentences else ""
+        
+        return {
+            "word_count": word_count,
+            "char_count": char_count,
+            "summary": summary[:200] if summary else "",
+            "issues": issues
+        }
+
+    @app.post("/api/analyze/style")
+    async def api_analyze_style(payload: StyleAnalyzeRequest):
+        """风格分析工作流。"""
+        # 简单的风格分析（未来可接入 Reader Agent）
+        text = payload.text
+        
+        # 检测对话密度
+        dialogue_count = text.count('"') + text.count('"') + text.count("'")
+        dialogue_ratio = dialogue_count / max(len(text), 1) * 100
+        
+        # 检测叙述风格
+        voice = "第三人称" if "他" in text or "她" in text else "未知"
+        
+        # 检测节奏
+        avg_sentence_len = len(text) / max(text.count('。') + text.count('！') + text.count('？'), 1)
+        if avg_sentence_len > 50:
+            rhythm = "舒缓，长句为主"
+        elif avg_sentence_len > 30:
+            rhythm = "中等节奏"
+        else:
+            rhythm = "紧凑，短句为主"
+        
+        return {
+            "voice": voice,
+            "rhythm": rhythm,
+            "dialogue_ratio": round(dialogue_ratio, 1),
+            "language": "现代白话" if not any(c in text for c in "之乎者也") else "半文半白",
+            "humor": "需进一步分析"
+        }
+
+    @app.post("/api/analyze/lore")
+    async def api_analyze_lore(payload: LoreAnalyzeRequest):
+        """逻辑审查工作流。"""
+        from tools.agents.lore_checker import LoreChecker
+        
+        init = _initializer()
+        checker = LoreChecker(init.characters_dir, init.foreshadowing_dir)
+        
+        # 使用 LoreChecker 进行审查
+        result = checker.check_draft(payload.text, strict=False)
+        
+        return {
+            "severity": result.severity,
+            "warnings": result.warnings,
+            "errors": result.errors,
+            "passed": result.severity != "error"
+        }
     # ── Pipeline V2 API ─────────────────────────────────────
     @app.post("/api/v2/pipeline/start")
     async def api_v2_pipeline_start(payload: PipelineV2StartRequest):
@@ -1502,7 +1693,95 @@ def create_app(
     async def api_settings_llm_get():
         cfg_path = proj / "llm_config.yaml"
         if not cfg_path.exists():
-            return {"enabled": False, "retry_count": 2, "retry_delay": 1.0, "routes": {}, "default_route": {}}
+            # 返回预填充的示例配置
+            return {
+                "enabled": False,
+                "retry_count": 2,
+                "retry_delay": 1.0,
+                "models": {
+                    "Claude-Opus-4.6": {
+                        "name": "Claude-Opus-4.6",
+                        "model": "claude-opus-4-6",
+                        "api_base": "https://aws.d68.fun/v1/messages",
+                        "api_key_env": "CLAUDE_API_KEY",
+                        "max_tokens": 80000,
+                        "temperature": 0.7,
+                        "timeout": 120
+                    },
+                    "ChatGPT-5.3": {
+                        "name": "ChatGPT-5.3",
+                        "model": "gpt-5.3-codex",
+                        "api_base": "https://gmn.chuangzuoli.com/v1/responses",
+                        "api_key_env": "CHATGPT_API_KEY",
+                        "max_tokens": 32000,
+                        "temperature": 0.7,
+                        "timeout": 120
+                    },
+                    "Gemini-3-Pro": {
+                        "name": "Gemini-3-Pro",
+                        "model": "gemini-3-pro-preview",
+                        "api_base": "https://new.lemonapi.site/v1/chat/completions",
+                        "api_key_env": "GEMINI_API_KEY",
+                        "max_tokens": 32000,
+                        "temperature": 0.7,
+                        "timeout": 120
+                    },
+                    "GLM-4.7": {
+                        "name": "GLM-4.7",
+                        "model": "glm-4.7",
+                        "api_base": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                        "api_key_env": "GLM_API_KEY",
+                        "max_tokens": 8192,
+                        "temperature": 0.7,
+                        "timeout": 120
+                    },
+                    "Kimi-K2.5": {
+                        "name": "Kimi-K2.5",
+                        "model": "kimi-k2.5",
+                        "api_base": "https://api.moonshot.cn/v1/chat/completions",
+                        "api_key_env": "KIMI_API_KEY",
+                        "max_tokens": 16000,
+                        "temperature": 0.7,
+                        "timeout": 120
+                    },
+                    "DeepSeek": {
+                        "name": "DeepSeek",
+                        "model": "deepseek-chat",
+                        "api_base": "https://api.deepseek.com/v1/chat/completions",
+                        "api_key_env": "DEEPSEEK_API_KEY",
+                        "max_tokens": 8192,
+                        "temperature": 0.7,
+                        "timeout": 120
+                    },
+                    "MiniMax-M2.5": {
+                        "name": "MiniMax-M2.5",
+                        "model": "MiniMax-M2.5",
+                        "api_base": "https://api.minimax.chat/v1/chat/completions",
+                        "api_key_env": "MINIMAX_API_KEY",
+                        "max_tokens": 16000,
+                        "temperature": 0.7,
+                        "timeout": 120
+                    }
+                },
+                "routes": {
+                    "reasoning": {
+                        "models": ["Claude-Opus-4.6", "ChatGPT-5.3", "GLM-4.7"],
+                        "primary_index": 0
+                    },
+                    "generation": {
+                        "models": ["Kimi-K2.5", "MiniMax-M2.5", "ChatGPT-5.3"],
+                        "primary_index": 0
+                    },
+                    "review": {
+                        "models": ["Claude-Opus-4.6", "ChatGPT-5.3", "GLM-4.7"],
+                        "primary_index": 0
+                    },
+                    "style": {
+                        "models": ["Kimi-K2.5", "MiniMax-M2.5", "GLM-4.7"],
+                        "primary_index": 0
+                    }
+                }
+            }
         with cfg_path.open("r", encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
         return raw
@@ -1514,11 +1793,9 @@ def create_app(
             "enabled": payload.enabled,
             "retry_count": payload.retry_count,
             "retry_delay": payload.retry_delay,
+            "models": payload.models,
+            "routes": payload.routes,
         }
-        if payload.default_route:
-            data["default_route"] = payload.default_route
-        if payload.routes:
-            data["routes"] = payload.routes
         with cfg_path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
         return {"ok": True}
@@ -1561,4 +1838,129 @@ def create_app(
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
         return templates.TemplateResponse("settings.html", {"request": request, "novel_id": novel_id})
+
+    # ═════════════════════════════════════════════════════════════════
+    # Workflow API Endpoints
+    # ═════════════════════════════════════════════════════════════════
+
+    @app.get("/api/workflows")
+    async def api_workflows_list():
+        """列出所有可用的工作流。"""
+        from tools.workflow_registry import init_workflows, workflow_registry
+
+        init_workflows()
+        workflows = workflow_registry.list_workflows()
+
+        return {
+            "workflows": [
+                {
+                    "id": w.workflow_id,
+                    "name": w.name,
+                    "description": w.description,
+                    "category": w.category,
+                    "priority": w.priority,
+                    "phases": len(w.phases),
+                    "requires_novel_id": w.requires_novel_id,
+                    "requires_outline": w.requires_outline,
+                }
+                for w in workflows
+            ],
+            "categories": workflow_registry.list_categories(),
+        }
+
+    @app.get("/api/workflows/{workflow_id}")
+    async def api_workflow_get(workflow_id: str):
+        """获取工作流详情。"""
+        from tools.workflow_registry import init_workflows, workflow_registry
+
+        init_workflows()
+        workflow = workflow_registry.get_workflow(workflow_id)
+
+        if not workflow:
+            raise HTTPException(status_code=404, detail="工作流不存在")
+
+        return {
+            "id": workflow.workflow_id,
+            "name": workflow.name,
+            "description": workflow.description,
+            "category": workflow.category,
+            "priority": workflow.priority,
+            "trigger_intents": workflow.trigger_intents,
+            "trigger_keywords": workflow.trigger_keywords,
+            "entry_phase": workflow.entry_phase,
+            "phases": [
+                {
+                    "phase_id": p.phase_id,
+                    "name": p.name,
+                    "description": p.description,
+                    "available_tools": p.available_tools,
+                    "required_tools": p.required_tools,
+                    "context_keys": p.context_keys,
+                    "user_prompt": p.user_prompt,
+                    "questions": p.questions,
+                    "auto_advance": p.auto_advance,
+                    "next_phase": p.next_phase,
+                    "options": p.options,
+                }
+                for p in workflow.phases
+            ],
+            "requires_novel_id": workflow.requires_novel_id,
+            "requires_outline": workflow.requires_outline,
+            "requires_characters": workflow.requires_characters,
+        }
+
+    @app.post("/api/workflows/start")
+    async def api_workflow_start(payload: WorkflowStartRequest):
+        """启动工作流。"""
+        from tools.agents.director import DirectorAgent
+        from tools.workflow_registry import init_workflows, workflow_registry
+
+        init_workflows()
+        workflow = workflow_registry.get_workflow(payload.workflow_id)
+
+        if not workflow:
+            raise HTTPException(status_code=404, detail="工作流不存在")
+
+        # 检查前置条件
+        context = {"novel_id": payload.novel_id}
+        if workflow.requires_novel_id and not payload.novel_id:
+            raise HTTPException(status_code=400, detail="此工作流需要指定小说ID")
+
+        # 创建 Director 并处理请求
+        director = DirectorAgent()
+        initial_message = payload.initial_message or f"开始{workflow.name}"
+
+        response = director.process_request_with_workflow(
+            user_message=initial_message,
+            session_id=None,
+            context=context,
+        )
+
+        return response.model_dump()
+
+    @app.post("/api/chat")
+    async def api_chat(payload: WorkflowChatRequest):
+        """处理聊天请求（工作流驱动）。"""
+        from tools.agents.director import DirectorAgent
+
+        context = payload.context or {}
+        if payload.novel_id:
+            context["novel_id"] = payload.novel_id
+
+        director = DirectorAgent()
+        response = director.process_request_with_workflow(
+            user_message=payload.message,
+            session_id=payload.session_id,
+            context=context,
+        )
+
+        return response.model_dump()
+
+    @app.get("/api/workflows/registry/summary")
+    async def api_workflows_summary():
+        """获取工作流注册表摘要。"""
+        from tools.workflow_registry import init_workflows, workflow_registry
+
+        init_workflows()
+        return workflow_registry.get_workflow_summary()
     return app

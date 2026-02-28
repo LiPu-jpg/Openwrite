@@ -1,13 +1,13 @@
 # OpenWrite - AI 辅助小说创作系统
 
-基于 VSCode + OpenCode 环境的多 Agent 协作系统，帮助作者创作长篇小说。
+基于 Web + CLI 的多 Agent 协作系统，帮助作者创作长篇小说。
 
-## 项目进度看板（截至 2026-02-27）
+## 项目进度看板（截至 2026-02-28）
 
-- 当前阶段：`Phase 7 完成` — Web 应用已上线，Markdown 大纲双向同步已实现
+- 当前阶段：`Phase 7 完成` — Web 应用已上线，多模型池配置系统已实现
 - 主流程：`Director → Writer → Reviewer → User → Stylist(可选)` (Pipeline V2)
 - 风格系统：三层架构（craft/通用技法 → styles/作者风格 → novels/作品设定）已就位
-- LLM 集成：LiteLLM 多模型路由（Opus 4.6 / Kimi K2.5 / MiniMax M2.5 / GLM-4.7 / DeepSeek）
+- LLM 集成：多模型池 + 任务类型路由（支持 6 个预设模型，4 种任务类型）
 - 现有测试：`python3 -m pytest -q`，当前 `230 passed`
 - 架构说明文档：`docs/CURRENT_ARCHITECTURE.md`
 
@@ -36,12 +36,13 @@
 - Markdown 大纲双向同步：outline.md ↔ hierarchy.yaml
 - Pipeline V2：渐进式上下文压缩 + 人工审核环节
 - 文本人物档案：TextCharacterProfile（纯文本描述）
-- LLM 配置 Web UI：/settings 页面管理模型路由
+- 多模型池配置：Web UI 管理 6 个预设模型（Claude/Gemini/GLM/Kimi/DeepSeek/MiniMax）
+- 任务类型路由：reasoning/generation/review/style 四种任务独立配置模型链
+- 小说项目初始化：Web UI 创建项目、设定、角色
 
-- LLM 集成层：LiteLLM 封装、多模型路由、Prompt 模板、自动 fallback
+- LLM 集成层：多模型池 + 任务路由器 + 自动 fallback
 - Director/Librarian/LoreChecker/Stylist 均支持 opt-in LLM 模式
 - LoreChecker LLM 发现默认为 advisory（警告），不阻断流程
-- CLI `--use-llm` 启用 LLM 模式，`--llm-config` 指定配置路径
 
 ### 尚未开始
 
@@ -50,52 +51,109 @@
 
 ## 快速开始
 
-### 1. 安装依赖
+### 方式一：Web 应用（推荐）
+
+#### 1. 启动 Web 服务
+
+```bash
+python3 -m tools.web
+# 访问 http://localhost:8000
+```
+
+#### 2. 配置 LLM 模型（可选）
+
+访问 `/settings` 页面：
+
+**模型池管理**：
+- 系统预填充 6 个模型（Claude Opus 4.6、Gemini 3 Pro、GLM-4.7、Kimi K2.5、DeepSeek、MiniMax M2.5）
+- 填写 API Key 环境变量名（如 `CLAUDE_API_KEY`）
+- 可添加/删除/编辑模型
+
+**任务路由配置**：
+- **reasoning**（Director 调度决策）：推荐 Claude Opus 4.6
+- **generation**（Writer 文本生成）：推荐 Kimi K2.5 或 MiniMax M2.5
+- **review**（Reviewer 逻辑审查）：推荐 Claude Opus 4.6
+- **style**（Stylist 风格润色）：推荐 Kimi K2.5
+- 每个任务可选择多个模型作为备选链
+
+**设置环境变量**：
+```bash
+export CLAUDE_API_KEY=sk-xxx
+export KIMI_API_KEY=sk-yyy
+export GLM_API_KEY=sk-zzz
+# ... 其他模型的 API Key
+```
+
+**保存配置**：
+- 点击"保存配置"按钮
+- 配置持久化到 `llm_config.yaml`
+- 下次打开自动加载
+
+#### 3. 创建小说项目
+
+访问 `/novels/new` 页面：
+
+1. 填写基本信息：
+   - 小说 ID（英文、数字、下划线，如 `my_novel`）
+   - 标题、作者、目标字数
+   - 核心主题、世界前提、基调、结局走向
+
+2. 添加初始角色：
+   - 点击"添加角色"
+   - 填写角色名、类型（主角/重要配角/普通配角/龙套）、简介
+
+3. 点击"创建项目"
+
+#### 4. 开始创作
+
+- **仪表盘** (`/`)：查看项目统计
+- **人物** (`/characters`)：管理角色档案
+- **伏笔** (`/foreshadowing`)：管理伏笔 DAG
+- **世界观** (`/world`)：管理实体和关系
+- **风格** (`/style`)：风格分析和合成
+- **编辑器** (`/editor`)：章节编辑和模拟生成
+
+---
+
+### 方式二：CLI 命令行
+
+#### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 初始化项目
+#### 2. 初始化项目
 
 ```bash
 python3 -m tools.cli init my_novel
 ```
 
-### 3. 创建人物
+#### 3. 创建人物
 
 ```bash
 python3 -m tools.cli character create 李逍遥 --tier 主角
 python3 -m tools.cli character create 林月如 --tier 重要配角
 ```
 
-### 4. 模拟章节生成
+#### 4. 模拟章节生成
 
 ```bash
 # 基础模拟
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel
 # 严格 Lore 检查
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --strict-lore
-# Lore 失败后自动重写
-python3 -m tools.cli simulate chapter --id ch_003 --forbidden 冲突 --max-rewrites 1 --novel-id my_novel
-# 带风格分析的模拟（Reader + StyleDirector 后处理）
-python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --style-id 术师手册 --style-analysis
 # 启用 LLM 模式（需要配置 llm_config.yaml + 环境变量）
 python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --use-llm
-python3 -m tools.cli simulate chapter --id ch_003 --novel-id my_novel --use-llm --llm-config path/to/config.yaml
 ```
 
-### 5. 风格系统
+#### 5. 风格系统
 
 ```bash
 # 合成三层风格文档
 python3 -m tools.cli style compose --novel-id 术师手册 --style-id 术师手册
-# 列出可用风格模板
-python3 -m tools.cli style list
 # 批量阅读原著并提取风格
 python3 -m tools.cli style read-batch --file path/to/text.txt --novel-id 术师手册
-# 风格迭代分析
-python3 -m tools.cli style iterate --draft path/to/draft.md --novel-id 术师手册 --style-id 术师手册
 # 查看结构化风格档案
 python3 -m tools.cli style profile --novel-id 术师手册
 ```
@@ -118,7 +176,7 @@ openwrite/
 │       ├── rhythm.md              # 节奏风格
 │       ├── humor.md               # 幽默体系
 │       ├── dialogue_craft.md      # 对话风格
-│       ├── iteration_log.md       # 迭代记录
+│       ├── iteration_g.md       # 迭代记录
 │       └── reader_notes/          # Reader Agent 完整笔记
 ├── novels/                      # 作品设定（硬性约束）
 │   └── 术师手册/
@@ -142,11 +200,14 @@ openwrite/
 │   ├── models/                    # 数据模型
 │   ├── parsers/                   # Markdown 解析
 │   ├── agents/                    # Agent 模拟
-│   ├── llm/                       # LLM 集成层（LiteLLM 封装、路由、Prompt）
+│   ├── llm/                       # LLM 集成层（多模型池、路由、Prompt）
 │   ├── queries/                   # 查询接口
 │   ├── graph/                     # 图结构
 │   ├── checks/                    # 逻辑检查
-│   └── utils/                     # 工具函数
+│   ├── utils/                     # 工具函数
+│   └── web/                       # Web 应用
+│       ├── templates/             # Jinja2 模板
+│       └── static/                # CSS/JS 静态资源
 ├── docs/
 │   ├── CURRENT_ARCHITECTURE.md    # 架构说明
 │   ├── prompts/                   # Agent Prompt 模板
@@ -156,7 +217,7 @@ openwrite/
 │   │   └── task.md
 │   └── archive/                   # 历史进度报告
 ├── tests/                       # 测试
-├── PLAN.md                      # 完整架构设计
+├── llm_config.yaml              # LLM 配置（自动生成）
 └── requirements.txt
 ```
 
@@ -194,9 +255,9 @@ openwrite/
 - [x] Phase 5: Agent 模拟（全 Agent 实装、跨章节检查、上下文压缩、风格集成）
 - [x] 风格系统：三层架构 + 合成器 + StyleProfile + Reader/Director 迭代循环
 - [x] Phase 6A: Style Skill 打包（.agents/skills/）
-- [x] Phase 6B: LLM 集成（LiteLLM 封装、多模型路由、全 Agent opt-in）
+- [x] Phase 6B: LLM 集成（多模型池、任务路由、全 Agent opt-in）
 - [ ] Phase 6C: 世界图谱高级功能
-- [ ] Phase 7: Web 应用
+- [x] Phase 7: Web 应用（FastAPI + 多模型配置 + 项目初始化）
 
 ## 许可证
 

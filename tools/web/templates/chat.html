@@ -1,0 +1,623 @@
+{% extends "base.html" %}
+{% set active = "chat" %}
+{% block title %}创作助手 — OpenWrite{% endblock %}
+{% block content %}
+<div class="ide-layout">
+  <!-- 左侧资源管理器 -->
+  <div class="ide-explorer" id="ide-explorer">
+    <div class="explorer-header">
+      <span>资源管理器</span>
+      <button class="btn-icon" onclick="toggleAllSections()" title="折叠/展开全部">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+    </div>
+
+    <!-- 大纲 -->
+    <div class="explorer-section" id="sec-outline">
+      <div class="explorer-section-title" onclick="toggleSection('sec-outline')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        大纲 ({{ chapters|length }})
+      </div>
+      <ul class="explorer-list" id="outline-list">
+        {% for ch in chapters %}
+        <li class="explorer-item" data-id="{{ ch.id }}" data-type="chapter" onclick="loadFile(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span class="truncate">{{ ch.name }}</span>
+        </li>
+        {% endfor %}
+        {% if not chapters %}
+        <li class="explorer-item" style="color:var(--text-dim);cursor:default">暂无大纲</li>
+        {% endif %}
+      </ul>
+    </div>
+
+    <!-- 草稿 -->
+    <div class="explorer-section" id="sec-drafts">
+      <div class="explorer-section-title" onclick="toggleSection('sec-drafts')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        草稿 ({{ drafts|length }})
+      </div>
+      <ul class="explorer-list" id="draft-list">
+        {% for d in drafts %}
+        <li class="explorer-item" data-id="{{ d.id }}" data-type="draft" onclick="loadFile(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          <span class="truncate">{{ d.name }}</span>
+        </li>
+        {% endfor %}
+        {% if not drafts %}
+        <li class="explorer-item" style="color:var(--text-dim);cursor:default">暂无草稿</li>
+        {% endif %}
+      </ul>
+    </div>
+
+    <!-- 人物 -->
+    <div class="explorer-section collapsed" id="sec-chars">
+      <div class="explorer-section-title" onclick="toggleSection('sec-chars')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        人物
+      </div>
+      <ul class="explorer-list">
+        {% for c in characters %}
+        <li class="explorer-item" data-id="{{ c.name }}" data-type="character" onclick="loadCharacter(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span class="truncate">{{ c.name }}</span>
+        </li>
+        {% endfor %}
+        {% if not characters %}
+        <li class="explorer-item" style="color:var(--text-dim);cursor:default">暂无人物</li>
+        {% endif %}
+      </ul>
+    </div>
+
+    <!-- 伏笔 -->
+    <div class="explorer-section collapsed" id="sec-fs">
+      <div class="explorer-section-title" onclick="toggleSection('sec-fs')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        伏笔
+      </div>
+      <ul class="explorer-list" id="fs-list">
+        <li class="explorer-item" style="color:var(--text-dim);cursor:default">加载中...</li>
+      </ul>
+    </div>
+
+    <!-- 工作流 -->
+    <div class="explorer-section collapsed" id="sec-workflows">
+      <div class="explorer-section-title" onclick="toggleSection('sec-workflows')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        工作流
+      </div>
+      <ul class="explorer-list" id="workflow-list">
+        <li class="explorer-item" style="color:var(--text-dim);cursor:default">加载中...</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 左侧拖拽手柄 -->
+  <div class="resize-handle" id="resize-left" data-target="ide-explorer"></div>
+
+  <!-- 中间编辑/预览区 -->
+  <div class="ide-editor" id="ide-editor">
+    <div class="editor-tabs" id="editor-tabs">
+      <div class="editor-tab active" data-tab="editor" onclick="switchTab('editor')">
+        <span>内容</span>
+      </div>
+      <div class="editor-tab" data-tab="preview" onclick="switchTab('preview')">
+        <span>预览</span>
+      </div>
+      <div class="editor-tab" data-tab="workflow" onclick="switchTab('workflow')">
+        <span>工作流</span>
+      </div>
+    </div>
+    <div class="editor-toolbar">
+      <span class="editor-status" id="editor-status">未选择内容</span>
+      <div class="spacer"></div>
+      <button class="btn btn-sm btn-secondary" id="btn-save" onclick="saveCurrentContent()" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v10 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+        保存
+      </button>
+    </div>
+    <div class="editor-body">
+      <!-- 编辑区 -->
+      <textarea id="editor-area" placeholder="从左侧选择大纲、草稿或角色查看内容...&#10;&#10;或者在右侧对话框中输入指令，如：&#10;• 写第三章&#10;• 创建大纲&#10;• 修改角色"></textarea>
+      <!-- 预览区 -->
+      <div id="preview-area" class="md-preview hidden"></div>
+      <!-- 工作流状态区 -->
+      <div id="workflow-area" class="workflow-panel hidden">
+        <div class="workflow-panel-header">
+          <h3 id="workflow-title">当前工作流</h3>
+          <span class="workflow-phase-badge" id="workflow-phase-badge">-</span>
+        </div>
+        <div class="workflow-progress-bar">
+          <div class="workflow-progress-fill" id="workflow-progress-fill"></div>
+        </div>
+        <div class="workflow-phase-list" id="workflow-phase-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧拖拽手柄 -->
+  <div class="resize-handle" id="resize-right" data-target="ide-chat"></div>
+
+  <!-- 右侧 AI 对话面板 -->
+  <div class="ide-chat" id="ide-chat">
+    <div class="chat-header">
+      <span>AI 创作助手</span>
+      <div class="chat-header-actions">
+        <button class="btn-icon" onclick="clearChat()" title="清空对话">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 工作流状态指示器 -->
+    <div class="workflow-status-bar" id="workflow-status-bar" style="display:none">
+      <div class="workflow-status-info">
+        <span class="workflow-name" id="active-workflow-name">-</span>
+        <span class="workflow-phase" id="active-workflow-phase">-</span>
+      </div>
+      <div class="workflow-mini-progress">
+        <div class="workflow-mini-fill" id="workflow-mini-fill"></div>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-msg agent">
+        <div class="msg-avatar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        </div>
+        <div class="msg-content">
+          <div class="msg-text">
+            <p>你好！我是 OpenWrite 创作助手。</p>
+            <p>你可以：</p>
+            <ul>
+              <li>📝 <strong>写章节</strong> — 选择大纲后输入「生成草稿」</li>
+              <li>📋 <strong>大纲</strong> — 输入「创建大纲」或「修改大纲」</li>
+              <li>👤 <strong>角色</strong> — 输入「创建角色」或选择左侧角色</li>
+              <li>🔗 <strong>伏笔</strong> — 输入「埋设伏笔」或「回收伏笔」</li>
+              <li>🎨 <strong>风格</strong> — 输入「合成风格」</li>
+            </ul>
+            <p>在下方输入你的指令开始创作！</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 建议操作 -->
+    <div class="chat-suggestions" id="chat-suggestions" style="display:none">
+      <div class="suggestion-chips" id="suggestion-chips"></div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="chat-input-wrapper">
+        <textarea id="chat-input" rows="1" placeholder="输入指令，如：写第三章、创建大纲..." onkeydown="handleChatKey(event)"></textarea>
+        <button class="chat-send-btn" id="chat-send" onclick="sendMessage()" title="发送">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+      <div class="chat-input-hints">
+        <span>Enter 发送</span>
+        <span>Shift+Enter 换行</span>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var sessionId = null;
+  var currentFile = null;
+  var currentTab = 'editor';
+  var isBusy = false;
+
+  var chatMessages = document.getElementById('chat-messages');
+  var chatInput = document.getElementById('chat-input');
+  var chatSend = document.getElementById('chat-send');
+  var editorArea = document.getElementById('editor-area');
+  var previewArea = document.getElementById('preview-area');
+  var workflowArea = document.getElementById('workflow-area');
+  var editorStatus = document.getElementById('editor-status');
+  var btnSave = document.getElementById('btn-save');
+
+  loadWorkflows();
+  loadForeshadowing();
+  initResizeHandles();
+  autoResizeInput();
+
+  window.toggleSection = function(id) {
+    document.getElementById(id).classList.toggle('collapsed');
+  };
+
+  window.toggleAllSections = function() {
+    var sections = document.querySelectorAll('.explorer-section');
+    var allCollapsed = Array.from(sections).every(function(s) { return s.classList.contains('collapsed'); });
+    sections.forEach(function(s) {
+      if (allCollapsed) s.classList.remove('collapsed');
+      else s.classList.add('collapsed');
+    });
+  };
+
+  window.switchTab = function(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.editor-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelector('.editor-tab[data-tab="' + tab + '"]').classList.add('active');
+
+    editorArea.classList.add('hidden');
+    previewArea.classList.add('hidden');
+    workflowArea.classList.add('hidden');
+
+    if (tab === 'editor') {
+      editorArea.classList.remove('hidden');
+    } else if (tab === 'preview') {
+      updatePreview();
+      previewArea.classList.remove('hidden');
+    } else if (tab === 'workflow') {
+      workflowArea.classList.remove('hidden');
+    }
+  };
+
+  function updatePreview() {
+    var text = editorArea.value;
+    if (typeof marked !== 'undefined') {
+      previewArea.innerHTML = marked.parse(text);
+    } else {
+      previewArea.innerHTML = '<pre>' + escapeHtml(text) + '</pre>';
+    }
+  }
+
+  window.loadFile = function(el) {
+    var id = el.dataset.id;
+    var type = el.dataset.type;
+    if (!id) return;
+
+    document.querySelectorAll('.explorer-item').forEach(function(i) { i.classList.remove('active'); });
+    el.classList.add('active');
+
+    var url = type === 'draft' ? '/api/drafts/' + id : '/api/chapters/' + id;
+    api.get(url).then(function(data) {
+      editorArea.value = data.content || '';
+      currentFile = { id: id, type: type };
+      editorStatus.textContent = (type === 'draft' ? '草稿' : '大纲') + ': ' + id;
+      btnSave.style.display = type === 'draft' ? '' : 'none';
+      switchTab('editor');
+    }).catch(function(err) {
+      toast('加载失败: ' + err.message, 'error');
+    });
+  };
+
+  window.loadCharacter = function(el) {
+    var name = el.dataset.id;
+    if (!name) return;
+
+    document.querySelectorAll('.explorer-item').forEach(function(i) { i.classList.remove('active'); });
+    el.classList.add('active');
+
+    api.get('/api/v2/characters').then(function(chars) {
+      var char = chars.find(function(c) { return c.name === name; });
+      if (char) {
+        var content = '# ' + char.name + '\n\n';
+        content += '**类型**: ' + (char.char_type || '-') + '\n\n';
+        content += '**外貌**: ' + (char.appearance || '-') + '\n\n';
+        content += '**性格与声音**: ' + (char.personality_and_voice || '-') + '\n\n';
+        content += '**技能与能力**: ' + (char.skills_and_abilities || '-') + '\n\n';
+        content += '**物品**: ' + (char.items || '-') + '\n\n';
+        content += '**备注**: ' + (char.notes || '-');
+        editorArea.value = content;
+        currentFile = { id: char.id, type: 'character' };
+        editorStatus.textContent = '角色: ' + name;
+        btnSave.style.display = 'none';
+        switchTab('editor');
+      }
+    });
+  };
+
+  window.saveCurrentContent = function() {
+    if (!currentFile || currentFile.type !== 'draft') {
+      toast('只能保存草稿', 'error');
+      return;
+    }
+    var content = editorArea.value;
+    api.put('/api/drafts/' + currentFile.id, { content: content }).then(function() {
+      toast('已保存');
+    }).catch(function(err) {
+      toast('保存失败: ' + err.message, 'error');
+    });
+  };
+
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      saveCurrentContent();
+    }
+  });
+
+  function loadWorkflows() {
+    api.get('/api/workflows').then(function(data) {
+      var list = document.getElementById('workflow-list');
+      list.innerHTML = '';
+      data.workflows.forEach(function(w) {
+        var li = document.createElement('li');
+        li.className = 'explorer-item';
+        li.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
+                       '<span class="truncate">' + escapeHtml(w.name) + '</span>';
+        li.onclick = function() { startWorkflow(w.id); };
+        list.appendChild(li);
+      });
+      if (data.workflows.length === 0) {
+        list.innerHTML = '<li class="explorer-item" style="color:var(--text-dim)">暂无工作流</li>';
+      }
+    });
+  }
+
+  function loadForeshadowing() {
+    api.get('/api/foreshadowing').then(function(data) {
+      var list = document.getElementById('fs-list');
+      list.innerHTML = '';
+      var nodes = data.nodes || [];
+      nodes.slice(0, 10).forEach(function(n) {
+        var li = document.createElement('li');
+        li.className = 'explorer-item';
+        li.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/></svg>' +
+                       '<span class="truncate">' + escapeHtml(n.id) + '</span>';
+        list.appendChild(li);
+      });
+      if (nodes.length === 0) {
+        list.innerHTML = '<li class="explorer-item" style="color:var(--text-dim)">暂无伏笔</li>';
+      }
+    });
+  }
+
+  window.handleChatKey = function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  window.sendMessage = function() {
+    var message = chatInput.value.trim();
+    if (!message || isBusy) return;
+
+    addMessage('user', message);
+    chatInput.value = '';
+    chatInput.style.height = 'auto';
+
+    setBusy(true);
+    showTyping();
+
+    var context = {};
+    if (currentFile) {
+      context.current_file = currentFile;
+    }
+
+    api.post('/api/chat', {
+      message: message,
+      session_id: sessionId,
+      context: context
+    }).then(function(response) {
+      hideTyping();
+      setBusy(false);
+
+      if (response.session_id) sessionId = response.session_id;
+
+      updateWorkflowUI(response);
+      addMessage('agent', response.message, response);
+
+      if (response.tool_result && response.tool_result.content) {
+        editorArea.value = response.tool_result.content;
+        switchTab('editor');
+      }
+
+      showSuggestions(response.suggested_actions);
+    }).catch(function(err) {
+      hideTyping();
+      setBusy(false);
+      addMessage('agent', '抱歉，发生了错误：' + (err.message || '未知错误'));
+    });
+  };
+
+  window.startWorkflow = function(workflowId) {
+    if (isBusy) return;
+
+    setBusy(true);
+    showTyping();
+
+    api.post('/api/workflows/start', { workflow_id: workflowId }).then(function(response) {
+      hideTyping();
+      setBusy(false);
+
+      if (response.session_id) sessionId = response.session_id;
+      updateWorkflowUI(response);
+      addMessage('agent', response.message, response);
+      showSuggestions(response.suggested_actions);
+      switchTab('workflow');
+    }).catch(function(err) {
+      hideTyping();
+      setBusy(false);
+      addMessage('agent', '启动工作流失败：' + (err.message || '未知错误'));
+    });
+  };
+
+  window.clearChat = function() {
+    sessionId = null;
+    chatMessages.innerHTML = '';
+    hideWorkflowBar();
+    hideSuggestions();
+    addMessage('agent', '对话已清空。请告诉我你想做什么？');
+  };
+
+  function addMessage(role, content, response) {
+    var div = document.createElement('div');
+    div.className = 'chat-msg ' + role;
+
+    var avatarSvg = role === 'user'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
+
+    var html = '<div class="msg-avatar">' + avatarSvg + '</div><div class="msg-content">';
+
+    if (response && response.detected_workflow) {
+      html += '<div class="msg-badge">' + escapeHtml(response.detected_workflow) + '</div>';
+    }
+
+    html += '<div class="msg-text">' + renderMarkdown(content) + '</div>';
+
+    if (response && response.follow_up_questions && response.follow_up_questions.length > 0) {
+      html += '<div class="msg-questions">';
+      response.follow_up_questions.forEach(function(q) {
+        html += '<button class="question-btn" onclick="sendQuick(\'' + escapeHtml(q) + '\')">' + escapeHtml(q) + '</button>';
+      });
+      html += '</div>';
+    }
+
+    html += '</div>';
+    div.innerHTML = html;
+    chatMessages.appendChild(div);
+    scrollToBottom();
+  }
+
+  function showTyping() {
+    var div = document.createElement('div');
+    div.className = 'chat-msg agent typing';
+    div.id = 'typing-msg';
+    div.innerHTML = '<div class="msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>' +
+                    '<div class="msg-content"><div class="msg-text"><span class="typing-indicator"><span></span><span></span><span></span></span></div></div>';
+    chatMessages.appendChild(div);
+    scrollToBottom();
+  }
+
+  function hideTyping() {
+    var t = document.getElementById('typing-msg');
+    if (t) t.remove();
+  }
+
+  function updateWorkflowUI(response) {
+    if (response.detected_workflow && response.workflow_state) {
+      document.getElementById('workflow-status-bar').style.display = 'flex';
+      document.getElementById('active-workflow-name').textContent = response.detected_workflow;
+      document.getElementById('active-workflow-phase').textContent = response.current_phase || '-';
+      document.getElementById('workflow-mini-fill').style.width = (response.phase_progress * 100) + '%';
+
+      document.getElementById('workflow-title').textContent = response.detected_workflow;
+      document.getElementById('workflow-phase-badge').textContent = response.current_phase || '-';
+      document.getElementById('workflow-progress-fill').style.width = (response.phase_progress * 100) + '%';
+
+      var phaseList = document.getElementById('workflow-phase-list');
+      if (response.workflow_state && response.workflow_state.phase_history) {
+        phaseList.innerHTML = '<div class="phase-item completed">已完成: ' + response.workflow_state.phase_history.length + ' 个阶段</div>';
+      }
+    } else {
+      hideWorkflowBar();
+    }
+  }
+
+  function hideWorkflowBar() {
+    document.getElementById('workflow-status-bar').style.display = 'none';
+  }
+
+  function showSuggestions(actions) {
+    if (!actions || actions.length === 0) {
+      hideSuggestions();
+      return;
+    }
+    var chips = document.getElementById('suggestion-chips');
+    chips.innerHTML = '';
+    actions.forEach(function(a) {
+      var btn = document.createElement('button');
+      btn.className = 'suggestion-chip';
+      btn.textContent = a.label || a;
+      btn.onclick = function() { sendQuick(a.label || a); };
+      chips.appendChild(btn);
+    });
+    document.getElementById('chat-suggestions').style.display = 'block';
+  }
+
+  function hideSuggestions() {
+    document.getElementById('chat-suggestions').style.display = 'none';
+  }
+
+  window.sendQuick = function(text) {
+    chatInput.value = text;
+    sendMessage();
+  };
+
+  function initResizeHandles() {
+    var leftHandle = document.getElementById('resize-left');
+    var rightHandle = document.getElementById('resize-right');
+    var explorer = document.getElementById('ide-explorer');
+    var chat = document.getElementById('ide-chat');
+
+    var isDragging = false;
+    var currentHandle = null;
+    var startX = 0;
+    var startWidth = 0;
+
+    function onMouseDown(e, handle, panel) {
+      isDragging = true;
+      currentHandle = { handle: handle, panel: panel };
+      startX = e.clientX;
+      startWidth = panel.offsetWidth;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    leftHandle.addEventListener('mousedown', function(e) {
+      onMouseDown(e, leftHandle, explorer);
+    });
+
+    rightHandle.addEventListener('mousedown', function(e) {
+      onMouseDown(e, rightHandle, chat);
+    });
+
+    document.addEventListener('mousemove', function(e) {
+      if (!isDragging) return;
+      var dx = e.clientX - startX;
+      if (currentHandle.handle === leftHandle) {
+        var newWidth = Math.max(180, Math.min(400, startWidth + dx));
+        explorer.style.width = newWidth + 'px';
+      } else {
+        var newWidth = Math.max(280, Math.min(500, startWidth - dx));
+        chat.style.width = newWidth + 'px';
+      }
+    });
+
+    document.addEventListener('mouseup', function() {
+      isDragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+  }
+
+  function autoResizeInput() {
+    chatInput.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+  }
+
+  function setBusy(busy) {
+    isBusy = busy;
+    chatSend.disabled = busy;
+    chatInput.disabled = busy;
+  }
+
+  function scrollToBottom() {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function renderMarkdown(text) {
+    if (typeof marked !== 'undefined') {
+      return marked.parse(text);
+    }
+    return '<p>' + escapeHtml(text).replace(/\n/g, '<br>') + '</p>';
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+})();
+</script>
+{% endblock %}

@@ -13,61 +13,54 @@ import yaml
 from pydantic import BaseModel, Field
 
 
-class ModelRoute(BaseModel):
-    """单个模型路由配置。
+class ModelConfig(BaseModel):
+    """单个模型配置。
 
     Attributes:
-        model: LiteLLM 模型标识符（如 "anthropic/claude-opus-4-20250918"）
-        api_base: OpenAI 兼容端点 URL（用于 Kimi/MiniMax 等）
+        name: 模型显示名称（如 "Claude Opus 4.6"）
+        model: LiteLLM 模型标识符（如 "anthropic/claude-opus-4-6"）
+        api_base: OpenAI 兼容端点 URL
         api_key_env: 环境变量名，运行时读取 API key
         max_tokens: 最大生成 token 数
         temperature: 采样温度
         timeout: 请求超时秒数
     """
 
+    name: str
     model: str
-    api_base: Optional[str] = None
+    api_base: str
     api_key_env: str = ""
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout: int = 120
 
-
 class TaskRouteConfig(BaseModel):
-    """任务类型的模型路由链 — 按优先级尝试，失败自动 fallback。
+    """任务类型的模型路由配置。
 
     Attributes:
-        primary: 首选模型
-        fallbacks: 备选模型列表，按顺序尝试
+        models: 可用模型池（按优先级排序）
+        primary_index: 首选模型在 models 中的索引
     """
 
-    primary: ModelRoute
-    fallbacks: List[ModelRoute] = Field(default_factory=list)
-
+    models: List[str] = Field(default_factory=list)  # 模型名称列表
+    primary_index: int = 0
 
 class LLMConfig(BaseModel):
     """全局 LLM 配置。
 
     Attributes:
         enabled: 全局开关，False 时所有 Agent 使用规则模拟
-        default_route: 未指定任务类型时的默认路由
+        models: 模型池定义（name → ModelConfig）
         routes: 按任务类型的模型路由映射
         retry_count: 单个模型的重试次数
         retry_delay: 重试间隔秒数
     """
 
     enabled: bool = False
-    default_route: TaskRouteConfig = Field(
-        default_factory=lambda: TaskRouteConfig(
-            primary=ModelRoute(
-                model="deepseek/deepseek-chat", api_key_env="DEEPSEEK_API_KEY"
-            )
-        )
-    )
+    models: Dict[str, ModelConfig] = Field(default_factory=dict)
     routes: Dict[str, TaskRouteConfig] = Field(default_factory=dict)
     retry_count: int = 2
     retry_delay: float = 1.0
-
 
 def load_llm_config(config_path: Optional[Path] = None) -> LLMConfig:
     """从 YAML 文件加载 LLM 配置。
@@ -107,29 +100,24 @@ def _parse_config(raw: dict) -> LLMConfig:
     retry_count = raw.get("retry_count", 2)
     retry_delay = raw.get("retry_delay", 1.0)
 
-    # 解析 default_route
-    default_raw = raw.get("default_route", {})
-    default_route = _parse_task_route(default_raw) if default_raw else None
+    # 解析 models 池
+    models: Dict[str, ModelConfig] = {}
+    for model_name, model_raw in raw.get("models", {}).items():
+        # 如果 model_raw 中已有 name 字段，直接使用；否则用 model_name
+        if 'name' in model_raw:
+            models[model_name] = ModelConfig(**model_raw)
+        else:
+            models[model_name] = ModelConfig(name=model_name, **model_raw)
 
     # 解析 routes
     routes: Dict[str, TaskRouteConfig] = {}
     for task_type, route_raw in raw.get("routes", {}).items():
-        routes[task_type] = _parse_task_route(route_raw)
+        routes[task_type] = TaskRouteConfig(**route_raw)
 
-    kwargs: dict = {
-        "enabled": enabled,
-        "retry_count": retry_count,
-        "retry_delay": retry_delay,
-        "routes": routes,
-    }
-    if default_route:
-        kwargs["default_route"] = default_route
-
-    return LLMConfig(**kwargs)
-
-
-def _parse_task_route(raw: dict) -> TaskRouteConfig:
-    """解析单个任务路由配置。"""
-    primary = ModelRoute(**raw.get("primary", {}))
-    fallbacks = [ModelRoute(**fb) for fb in raw.get("fallbacks", [])]
-    return TaskRouteConfig(primary=primary, fallbacks=fallbacks)
+    return LLMConfig(
+        enabled=enabled,
+        models=models,
+        routes=routes,
+        retry_count=retry_count,
+        retry_delay=retry_delay,
+    )

@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+{% block title %}新建小说 — OpenWrite{% endblock %}
+{% block content %}
+<div class="page-container">
+  <div class="page-header">
+    <h2>新建小说项目</h2>
+    <p class="text-dim">初始化小说项目结构、设定和角色</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span>基本信息</span>
+    </div>
+    <div class="card-body">
+      <div class="form-group">
+        <label>小说 ID <span class="text-danger">*</span></label>
+        <input class="form-input" type="text" id="novel-id" placeholder="my_novel（英文、数字、下划线）">
+        <small class="text-dim">用于文件夹命名，创建后不可修改</small>
+      </div>
+
+      <div class="form-group">
+        <label>小说标题 <span class="text-danger">*</span></label>
+        <input class="form-input" type="text" id="novel-title" placeholder="我的小说">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>作者</label>
+          <input class="form-input" type="text" id="novel-author" placeholder="作者名">
+        </div>
+        <div class="form-group">
+          <label>目标字数</label>
+          <input class="form-input" type="number" id="novel-target-words" value="100000" min="0">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>核心主题</label>
+        <textarea class="form-input" id="novel-theme" rows="3" placeholder="小说的核心主题和立意"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>世界前提</label>
+        <textarea class="form-input" id="novel-premise" rows="3" placeholder="故事发生的世界观背景"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>基调</label>
+        <input class="form-input" type="text" id="novel-tone" placeholder="如：轻松幽默、严肃悬疑、热血冒险">
+      </div>
+
+      <div class="form-group">
+        <label>结局走向</label>
+        <textarea class="form-input" id="novel-eng" rows="2" placeholder="预设的结局方向（可选）"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span>初始角色</span>
+      <button class="btn btn-sm" onclick="addCharacter()">+ 添加角色</button>
+    </div>
+    <div class="card-body">
+      <div id="characters-container">
+        <p class="text-dim">点击"添加角色"创建初始角色</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-actions">
+    <button class="btn btn-secondary" onclick="window.location.href='/'">取消</button>
+    <button class="btn btn-primary" onclick="createNovel()">创建项目</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var characterCount = 0;
+
+  window.addCharacter = function() {
+    characterCount++;
+    var container = document.getElementById('characters-container');
+    if (container.querySelector('.text-dim')) {
+      container.innerHTML = '';
+    }
+
+    var html = '<div class="character-form" data-char-index="' + characterCount + '">';
+    html += '<div class="form-row">';
+    html += '<div class="form-group" style="flex:2"><label>角色名</label><input class="form-input" data-field="name" placeholder="角色名"></div>';
+    html += '<div class="form-group"><label>类型</label><select class="form-input" data-field="tier">';
+    html += '<option value="主角">主角</option>';
+    html += '<option value="重要配角">重要配角</option>';
+    html += '<option value="普通配角">普通配角</option>';
+    html += '<option value="龙套">龙套</option>';
+    html += '</select></div>';
+    html += '<div class="form-group" style="flex:0"><button class="btn btn-sm btn-danger" onclick="removeCharacter(' + characterCount + ')">删除</button></div>';
+    html += '</div>';
+    html += '<div class="form-group"><label>简介</label><textarea class="form-input" data-field="description" rows="2" placeholder="角色简介"></textarea></div>';
+    html += '</div>';
+
+    container.insertAdjacentHTML('beforeend', html);
+  };
+
+  window.removeCharacter = function(index) {
+    var form = document.querySelector('.character-form[data-char-index="' + index + '"]');
+    if (form) form.remove();
+
+    var container = document.getElementById('characters-container');
+    if (container.children.length === 0) {
+      container.innerHTML = '<p class="text-dim">点击"添加角色"创建初始角色</p>';
+    }
+  };
+
+  window.createNovel = function() {
+    var novelId = document.getElementById('novel-id').value.trim();
+    var title = document.getElementById('novel-title').value.trim();
+
+    if (!novelId || !title) {
+      alert('请填写小说 ID 和标题');
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(novelId)) {
+      alert('小说 ID 只能包含英文、数字和下划线');
+      return;
+    }
+
+    var characters = [];
+    document.querySelectorAll('.character-form').forEach(function(form) {
+      var name = form.querySelector('[data-field="name"]').value.trim();
+      var tier = form.querySelector('[data-field="tier"]').value;
+      var description = form.querySelector('[data-field="description"]').value.trim();
+      if (name) {
+        characters.push({ name: name, tier: tier, description: description });
+      }
+    });
+
+    var payload = {
+      novel_id: novelId,
+      title: title,
+      author: document.getElementById('novel-author').value.trim() || '未知作者',
+      target_words: parseInt(document.getElementById('novel-target-words').value) || 100000,
+      theme: document.getElementById('novel-theme').value.trim(),
+      premise: document.getElementById('novel-premise').value.trim(),
+      tone: document.getElementById('novel-tone').value.trim(),
+      ending: document.getElementById('novel-ending').value.trim(),
+      characters: characters
+    };
+
+    api.post('/api/novel/init', payload).then(function(data) {
+      toast('项目创建成功！');
+      setTimeout(function() {
+        window.location.href = '/';
+      }, 1500);
+    }).catch(function(err) {
+      alert('创建失败：' + (err.message || '未知错误'));
+    });
+  };
+})();
+</script>
+
+<style>
+.character-form {
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+.character-form:last-child {
+  margin-bottom: 0;
+}
+.text-danger {
+  color: #dc3545;
+}
+</style>
+{% endblock %}

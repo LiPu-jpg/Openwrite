@@ -28,7 +28,7 @@ def test_load_llm_config_missing_file():
 
     config = load_llm_config(Path("/nonexistent/llm_config.yaml"))
     assert config.enabled is False
-    assert config.default_route is not None
+    # 新模型使用 models + routes，不再有 default_route
 
 
 def test_load_llm_config_from_yaml():
@@ -39,28 +39,33 @@ def test_load_llm_config_from_yaml():
         "enabled": True,
         "retry_count": 3,
         "retry_delay": 0.5,
-        "default_route": {
-            "primary": {
+        "models": {
+            "Claude-Opus": {
+                "name": "Claude-Opus",
+                "model": "anthropic/claude-opus-4-20250918",
+                "api_base": "",
+                "api_key_env": "ANTHROPIC_API_KEY",
+                "max_tokens": 2048,
+                "temperature": 0.3,
+            },
+            "DeepSeek": {
+                "name": "DeepSeek",
                 "model": "deepseek/deepseek-chat",
+                "api_base": "",
                 "api_key_env": "DEEPSEEK_API_KEY",
-            }
+            },
+            "GLM": {
+                "name": "GLM",
+                "model": "openai/glm-4.7",
+                "api_base": "https://open.bigmodel.cn/api/paas/v4",
+                "api_key_env": "ZHIPU_API_KEY",
+            },
         },
         "routes": {
             "reasoning": {
-                "primary": {
-                    "model": "anthropic/claude-opus-4-20250918",
-                    "api_key_env": "ANTHROPIC_API_KEY",
-                    "max_tokens": 2048,
-                    "temperature": 0.3,
-                },
-                "fallbacks": [
-                    {
-                        "model": "openai/glm-4.7",
-                        "api_base": "https://open.bigmodel.cn/api/paas/v4",
-                        "api_key_env": "ZHIPU_API_KEY",
-                    }
-                ],
-            }
+                "models": ["Claude-Opus", "GLM"],
+                "primary_index": 0,
+            },
         },
     }
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -70,11 +75,12 @@ def test_load_llm_config_from_yaml():
 
     assert config.enabled is True
     assert config.retry_count == 3
+    assert "Claude-Opus" in config.models
+    assert "GLM" in config.models
     assert "reasoning" in config.routes
     reasoning = config.routes["reasoning"]
-    assert reasoning.primary.model == "anthropic/claude-opus-4-20250918"
-    assert len(reasoning.fallbacks) == 1
-    assert reasoning.fallbacks[0].model == "openai/glm-4.7"
+    assert reasoning.models == ["Claude-Opus", "GLM"]
+    assert reasoning.primary_index == 0
 
 
 # ---------------------------------------------------------------
@@ -84,20 +90,36 @@ def test_load_llm_config_from_yaml():
 
 def test_router_get_routes():
     """路由器按任务类型返回正确的模型链。"""
-    from tools.llm.config import LLMConfig, ModelRoute, TaskRouteConfig
+    from tools.llm.config import LLMConfig, ModelConfig, TaskRouteConfig
     from tools.llm.router import ModelRouter, TaskType
 
     config = LLMConfig(
         enabled=True,
+        models={
+            "Claude-Opus": ModelConfig(
+                name="Claude-Opus",
+                model="anthropic/claude-opus-4-20250918",
+                api_base="",
+            ),
+            "DeepSeek": ModelConfig(
+                name="DeepSeek",
+                model="deepseek/deepseek-chat",
+                api_base="",
+            ),
+            "Kimi": ModelConfig(
+                name="Kimi",
+                model="openai/k2.5",
+                api_base="https://api.moonshot.cn/v1",
+            ),
+        },
         routes={
             "reasoning": TaskRouteConfig(
-                primary=ModelRoute(model="anthropic/claude-opus-4-20250918"),
-                fallbacks=[ModelRoute(model="deepseek/deepseek-chat")],
+                models=["Claude-Opus", "DeepSeek"],
+                primary_index=0,
             ),
             "generation": TaskRouteConfig(
-                primary=ModelRoute(
-                    model="openai/k2.5", api_base="https://api.moonshot.cn/v1"
-                ),
+                models=["Kimi"],
+                primary_index=0,
             ),
         },
     )
@@ -115,20 +137,35 @@ def test_router_get_routes():
 
 
 def test_router_fallback_to_default():
-    """未配置的任务类型回退到 default_route。"""
-    from tools.llm.config import LLMConfig, ModelRoute, TaskRouteConfig
+    """未配置的任务类型返回空列表（新模型行为）。"""
+    from tools.llm.config import LLMConfig, ModelConfig, TaskRouteConfig
     from tools.llm.router import ModelRouter, TaskType
 
     config = LLMConfig(
         enabled=True,
-        default_route=TaskRouteConfig(
-            primary=ModelRoute(model="deepseek/deepseek-chat"),
-        ),
-        routes={},
+        models={
+            "DeepSeek": ModelConfig(
+                name="DeepSeek",
+                model="deepseek/deepseek-chat",
+                api_base="",
+            ),
+        },
+        routes={
+            "reasoning": TaskRouteConfig(
+                models=["DeepSeek"],
+                primary_index=0,
+            ),
+        },
     )
     router = ModelRouter(config)
-    routes = router.get_routes(TaskType.STYLE)
+    # 有配置的任务类型返回路由
+    routes = router.get_routes(TaskType.REASONING)
+    assert len(routes) == 1
     assert routes[0]["model"] == "deepseek/deepseek-chat"
+
+    # 无配置的任务类型返回空列表
+    routes = router.get_routes(TaskType.STYLE)
+    assert len(routes) == 0
 
 
 # ---------------------------------------------------------------

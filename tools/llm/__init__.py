@@ -5,13 +5,13 @@
 """
 
 from tools.llm.client import LLMClient
-from tools.llm.config import LLMConfig, ModelRoute, load_llm_config
+from tools.llm.config import LLMConfig, ModelConfig, load_llm_config
 from tools.llm.router import TaskType, ModelRouter
 
 __all__ = [
     "LLMClient",
     "LLMConfig",
-    "ModelRoute",
+    "ModelConfig",
     "load_llm_config",
     "TaskType",
     "ModelRouter",

@@ -74,6 +74,11 @@ class TestPageRoutes:
         assert resp.status_code == 200
         assert "编辑器" in resp.text
 
+    def test_chat(self, client: TestClient):
+        resp = client.get("/chat")
+        assert resp.status_code == 200
+        assert "创作助手" in resp.text
+
     def test_static_css(self, client: TestClient):
         resp = client.get("/static/css/main.css")
         assert resp.status_code == 200

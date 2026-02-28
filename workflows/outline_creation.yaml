@@ -1,0 +1,171 @@
+# 大纲创作工作流
+# 从零开始创建四级大纲（总纲→篇纲→节纲→章纲）
+
+workflows:
+  outline_creation:
+    name: 大纲创作
+    description: 从零开始创建四级大纲，逐级扩展细节
+    category: outline
+    priority: 10
+    version: "1.0"
+    author: system
+    
+    # 触发配置
+    trigger_intents:
+      - outline_assist
+    trigger_keywords:
+      - 创建大纲
+      - 新建大纲
+      - 从零开始
+      - 构思大纲
+      - 开始写大纲
+    
+    # 前置条件
+    requires_novel_id: true
+    requires_outline: false
+    
+    # 入口阶段
+    entry_phase: master
+    
+    # 阶段定义
+    phases:
+      - phase_id: master
+        name: 总纲构思
+        description: 确定全书核心框架
+        available_tools:
+          - outline_assist
+        required_tools: []
+        context_keys:
+          - novel_id
+        user_prompt: |
+          让我们开始创建大纲。首先需要确定全书的核心框架。
+          
+          请告诉我以下信息：
+        questions:
+          - "书名是什么？"
+          - "核心主题是什么？（一句话概括全书要表达的思想）"
+          - "结局走向是怎样的？（开放式/悲剧/喜剧/反转等）"
+          - "有哪些关键转折点？（3-7个主要剧情转折）"
+        auto_advance: false
+        next_phase: arcs
+        options:
+          - id: provide_basic
+            label: 提供基本信息
+            description: 直接输入书名、主题、结局等
+          - id: ai_suggest
+            label: 让 AI 帮我构思
+            description: 提供创意方向，由 AI 生成建议
+      
+      - phase_id: arcs
+        name: 篇纲规划
+        description: 将全书划分为大剧情弧
+        available_tools:
+          - outline_assist
+        required_tools: []
+        context_keys:
+          - novel_id
+          - master_outline
+        user_prompt: |
+          总纲已确定！现在根据关键转折点划分篇纲。
+          
+          建议将全书划分为 3-5 个篇纲，每个篇纲对应一个完整的矛盾-发展-收束周期。
+        questions:
+          - "全书计划分为几篇？"
+          - "每篇的主要矛盾是什么？"
+          - "每篇的收束方向是什么？"
+        auto_advance: false
+        next_phase: sections
+        options:
+          - id: manual_divide
+            label: 手动划分篇纲
+            description: 自己决定篇纲划分
+          - id: ai_divide
+            label: AI 帮我划分
+            description: 根据关键转折点自动生成篇纲建议
+      
+      - phase_id: sections
+        name: 节纲细化
+        description: 将篇纲细分为情节单元
+        available_tools:
+          - outline_assist
+        required_tools: []
+        context_keys:
+          - novel_id
+          - arcs
+        user_prompt: |
+          篇纲已规划！现在细化每个篇纲下的节纲。
+          
+          建议每篇划分为 2-4 个节纲，每个节纲包含一组相关的关键事件。
+        questions:
+          - "每篇计划分为几节？"
+          - "每节的关键事件是什么？"
+          - "是否有伏笔需要在本节埋设或回收？"
+        auto_advance: false
+        next_phase: chapters
+        options:
+          - id: per_arc
+            label: 逐篇细化
+            description: 一次处理一篇的所有节纲
+          - id: all_at_once
+            label: 一次性细化
+            description: 一次性完成所有篇的节纲
+      
+      - phase_id: chapters
+        name: 章纲编写
+        description: 为每节编写章节目标
+        available_tools:
+          - outline_assist
+        required_tools: []
+        context_keys:
+          - novel_id
+          - sections
+          - characters
+        user_prompt: |
+          节纲已细化！现在为每节编写章纲。
+          
+          建议每节划分为 3-8 章，每章对应一个具体的写作任务（5k-8k字）。
+        questions:
+          - "每节计划几章？"
+          - "每章的写作目标是什么？"
+          - "涉及哪些人物和场景？"
+        auto_advance: false
+        next_phase: review
+        options:
+          - id: per_section
+            label: 逐节编写
+            description: 一次处理一节的所有章纲
+          - id: batch_create
+            label: 批量创建
+            description: AI 批量生成所有章纲
+      
+      - phase_id: review
+        name: 最终审核
+        description: 检查大纲完整性和一致性
+        available_tools:
+          - outline_assist
+          - lore_checker
+        required_tools:
+          - lore_checker
+        context_keys:
+          - novel_id
+          - full_hierarchy
+          - foreshadowing
+          - characters
+        user_prompt: |
+          大纲已完成！进行最终审核。
+          
+          检查以下内容：
+        questions:
+          - "关键转折点是否都有对应的章节？"
+          - "伏笔埋设和回收点是否合理？"
+          - "人物在各章节的分布是否合理？"
+          - "字数预估是否合理？"
+        auto_advance: true
+        next_phase: null
+        options:
+          - id: approve
+            label: 审核通过
+            description: 确认大纲可以开始写作
+          - id: revise
+            label: 需要修改
+            description: 返回某个阶段进行修改

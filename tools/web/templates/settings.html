@@ -5,7 +5,7 @@
 <div class="page-container">
   <div class="page-header">
     <h2>LLM 模型配置</h2>
-    <p class="text-dim">管理 AI 模型路由、API 密钥环境变量和任务类型映射</p>
+    <p class="text-dim">管理 AI 模型池、任务类型路由和 API 密钥环境变量</p>
   </div>
 
   <div class="settings-grid">
@@ -32,50 +32,26 @@
       </div>
     </div>
 
-    <!-- 默认路由 -->
+    <!-- 模型池 -->
     <div class="card">
-      <div class="card-header"><span>默认路由 (Default)</span></div>
+      <div class="card-header">
+        <span>模型池</span>
+        <button class="btn btn-sm" onclick="addModel()">+ 添加模型</button>
+      </div>
       <div class="card-body">
-        <div class="route-editor" data-route="default_route">
-          <div class="form-group">
-            <label>模型</label>
-            <input class="form-input" data-field="model" placeholder="deepseek/deepseek-chat">
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>API Base</label>
-              <input class="form-input" data-field="api_base" placeholder="留空使用默认">
-            </div>
-            <div class="form-group">
-              <label>API Key 环境变量</label>
-              <input class="form-input" data-field="api_key_env" placeholder="DEEPSEEK_API_KEY">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Max Tokens</label>
-              <input class="form-input" type="number" data-field="max_tokens" value="4096">
-            </div>
-            <div class="form-group">
-              <label>Temperature</label>
-              <input class="form-input" type="number" data-field="temperature" value="0.7" step="0.1" min="0" max="2">
-            </div>
-            <div class="form-group">
-              <label>Timeout (秒)</label>
-              <input class="form-input" type="number" data-field="timeout" value="120">
-            </div>
-          </div>
+        <div id="models-container">
+          <!-- 动态生成模型表格 -->
         </div>
       </div>
     </div>
 
     <!-- 任务路由 -->
-    <div class="card" id="routes-card">
+    <div class="card">
       <div class="card-header">
         <span>任务路由</span>
       </div>
       <div class="card-body" id="routes-container">
-        <!-- 动态生成 -->
+        <!-- 动态生成任务路由配置 -->
       </div>
     </div>
   </div>
@@ -91,120 +67,187 @@
 <script>
 (function() {
   var TASK_TYPES = [
-    { key: 'reasoning', label: '调度决策 (Director)', desc: '首选推理强模型' },
-    { key: 'generation', label: '文本生成 (Writer)', desc: '首选长文本模型' },
-    { key: 'review', label: '逻辑审查 (Reviewer)', desc: '首选推理准确模型' },
-    { key: 'style', label: '风格润色 (Stylist)', desc: '首选中文理解好的模型' }
+    { key: 'reasoning', label: '调度决策 (Director)', desc: '推理强模型，推荐 Claude/ChatGPT' },
+    { key: 'generation', label: '文本生成 (Writer)', desc: '长文本模型，推荐 Kimi/MiniMax' },
+    { key: 'review', label: '逻辑审查 (Reviewer)', desc: '推理准确模型，推荐 Claude/ChatGPT' },
+    { key: 'style', label: '风格润色 (Stylist)', desc: '中文理解好的模型，推荐 Kimi/GLM' }
   ];
 
-  function makeRouteHtml(routeKey, label, desc, data) {
-    var p = (data && data.primary) || {};
-    var fb = (data && data.fallbacks) || [];
-    var html = '<div class="route-section" data-route-key="' + routeKey + '">';
-    html += '<div class="route-title">' + label + '<span class="text-dim" style="margin-left:8px;font-size:12px">' + desc + '</span></div>';
-    html += '<div class="route-editor" data-route="routes.' + routeKey + '">';
-    html += '<div class="route-label">Primary</div>';
-    html += makeModelFields(p, 'primary');
-    for (var i = 0; i < Math.max(fb.length, 1); i++) {
-      var f = fb[i] || {};
-      html += '<div class="route-label">Fallback ' + (i + 1) + '</div>';
-      html += makeModelFields(f, 'fallback_' + i);
+  var currentModels = {}; // name -> ModelConfig
+
+  function renderModelsTable() {
+    var container = document.getElementById('models-container');
+    if (Object.keys(currentModels).length === 0) {
+      container.innerHTML = '<p class="text-dim">暂无模型，点击"添加模型"开始配置</p>';
+      return;
     }
-    html += '</div></div>';
-    return html;
+
+    var html = '<table class="models-table"><thead><tr>';
+    html += '<th>名称</th><th>模型标识符</th><th>API Base</th><th>Key Env</th>';
+    html += '<th>Max Tokens</th><th>Temperature</th><th>Timeout</th><th>操作</th>';
+    html += '</tr></thead><tbody>';
+
+    Object.keys(currentModels).forEach(function(name) {
+      var m = currentModels[name];
+      html += '<tr data-model-name="' + name + '">';
+      html += '<td><input class="form-input" data-field="name" value="' + name + '"></td>';
+      html += '<td><input class="form-input" data-field="model" value="' + (m.model || '') + '"></td>';
+      html += '<td><input class="form-input" data-field="api_base" value="' + (m.api_base || '') + '"></td>';
+      html += '<td><input class="form-input" data-field="api_key_env" value="' + (m.api_key_env || '') + '"></td>';
+      html += '<td><input class="form-input" type="number" data-field="max_tokens" value="' + (m.max_tokens || 4096) + '" style="width:80px"></td>';
+      html += '<td><input class="form-input" type="number" data-field="temperature" value="' + (m.temperature || 0.7) + '" step="0.1" style="width:60px"></td>';
+      html += '<td><input class="form-input" type="number" data-field="timeout" value="' + (m.timeout || 120) + '" style="width:60px"></td>';
+      html += '<td><button class="btn btn-sm btn-danger" onclick="deleteModel(\'' + name + '\')">删除</button></td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
   }
 
-  function makeModelFields(m, prefix) {
-    return '<div class="form-row">' +
-      '<div class="form-group"><label>模型</label><input class="form-input" data-prefix="' + prefix + '" data-field="model" value="' + (m.model || '') + '"></div>' +
-      '<div class="form-group"><label>API Base</label><input class="form-input" data-prefix="' + prefix + '" data-field="api_base" value="' + (m.api_base || '') + '"></div>' +
-      '<div class="form-group"><label>Key Env</label><input class="form-input" data-prefix="' + prefix + '" data-field="api_key_env" value="' + (m.api_key_env || '') + '"></div>' +
-      '</div><div class="form-row">' +
-      '<div class="form-group"><label>Max Tokens</label><input class="form-input" type="number" data-prefix="' + prefix + '" data-field="max_tokens" value="' + (m.max_tokens || 4096) + '"></div>' +
-      '<div class="form-group"><label>Temperature</label><input class="form-input" type="number" data-prefix="' + prefix + '" data-field="temperature" value="' + (m.temperature || 0.7) + '" step="0.1"></div>' +
-      '<div class="form-group"><label>Timeout</label><input class="form-input" type="number" data-prefix="' + prefix + '" data-field="timeout" value="' + (m.timeout || 120) + '"></div>' +
-      '</div>';
-  }
+  function renderRoutesConfig() {
+    var container = document.getElementById('routes-container');
+    var html = '';
 
-  function fillDefaultRoute(data) {
-    var dr = (data && data.default_route && data.default_route.primary) || {};
-    var editor = document.querySelector('.route-editor[data-route="default_route"]');
-    if (!editor) return;
-    var fields = editor.querySelectorAll('[data-field]');
-    fields.forEach(function(f) {
-      var key = f.dataset.field;
-      if (dr[key] !== undefined) f.value = dr[key];
+    TASK_TYPES.forEach(function(t) {
+      html += '<div class="route-section" data-task-type="' + t.key + '">';
+      html += '<div class="route-title">' + t.label + ' <span class="text-dim" style="font-size:12px">' + t.desc + '</span></div>';
+      html += '<div class="form-row">';
+      html += '<div class="form-group" style="flex:2"><label>可用模型（按优先级排序）</label>';
+      html += '<select class="form-input" data-field="models" multiple size="4"></select></div>';
+      html += '<div class="form-group" style="flex:1"><label>首选模型索引</label>';
+      html += '<input class="form-input" type="number" data-field="primary_index" value="0" min="0"></div>';
+      html += '</div></div>';
+    });
+
+    container.innerHTML = html;
+
+    // 填充模型选项
+    var modelNames = Object.keys(currentModels);
+    document.querySelectorAll('.route-section select[data-field="models"]').forEach(function(sel) {
+      modelNames.forEach(function(name) {
+        var opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      });
     });
   }
 
-  function collectModelFromEditor(editor, prefix) {
-    var m = {};
-    var fields = editor.querySelectorAll('[data-prefix="' + prefix + '"][data-field]');
-    fields.forEach(function(f) {
-      var key = f.dataset.field;
-      var val = f.value.trim();
-      if (f.type === 'number') val = parseFloat(val) || 0;
-      if (val !== '' && val !== 0) m[key] = val;
+  function collectModels() {
+    var models = {};
+    document.querySelectorAll('.models-table tbody tr').forEach(function(row) {
+      var name = row.querySelector('[data-field="name"]').value.trim();
+      if (!name) return;
+      var m = {};
+      row.querySelectorAll('[data-field]').forEach(function(inp) {
+        var field = inp.dataset.field;
+        if (field === 'name') return;
+        var val = inp.value.trim();
+        if (inp.type === 'number') val = parseFloat(val) || (field === 'max_tokens' ? 4096 : field === 'temperature' ? 0.7 : 120);
+        if (val !== '') m[field] = val;
+      });
+      m.name = name;
+      models[name] = m;
     });
-    return m;
-  }
-
-  function collectDefaultRoute() {
-    var editor = document.querySelector('.route-editor[data-route="default_route"]');
-    if (!editor) return {};
-    var m = {};
-    editor.querySelectorAll('[data-field]').forEach(function(f) {
-      var val = f.value.trim();
-      if (f.type === 'number') val = parseFloat(val) || 0;
-      if (val !== '' && val !== 0) m[f.dataset.field] = val;
-    });
-    return { primary: m };
+    return models;
   }
 
   function collectRoutes() {
     var routes = {};
     document.querySelectorAll('.route-section').forEach(function(sec) {
-      var key = sec.dataset.routeKey;
-      var editor = sec.querySelector('.route-editor');
-      var primary = collectModelFromEditor(editor, 'primary');
-      var fallbacks = [];
-      for (var i = 0; i < 5; i++) {
-        var fb = collectModelFromEditor(editor, 'fallback_' + i);
-        if (fb.model) fallbacks.push(fb);
-      }
-      if (primary.model) {
-        routes[key] = { primary: primary, fallbacks: fallbacks };
+      var taskType = sec.dataset.taskType;
+      var modelsSelect = sec.querySelector('[data-field="models"]');
+      var primaryIndexInput = sec.querySelector('[data-field="primary_index"]');
+      
+      var selectedModels = Array.from(modelsSelect.selectedOptions).map(function(opt) { return opt.value; });
+      var primaryIndex = parseInt(primaryIndexInput.value) || 0;
+
+      if (selectedModels.length > 0) {
+        routes[taskType] = {
+          models: selectedModels,
+          primary_index: Math.min(primaryIndex, selectedModels.length - 1)
+        };
       }
     });
     return routes;
   }
+
+  window.addModel = function() {
+    var name = prompt('输入模型名称（如 "Claude Opus 4.6"）：');
+    if (!name || !name.trim()) return;
+    name = name.trim();
+    if (currentModels[name]) {
+      alert('模型名称已存在');
+      return;
+    }
+    currentModels[name] = {
+      name: name,
+      model: '',
+      api_base: '',
+      api_key_env: '',
+      max_tokens: 4096,
+      temperature: 0.7,
+      timeout: 120
+    };
+    renderModelsTable();
+    renderRoutesConfig();
+  };
+
+  window.deleteModel = function(name) {
+    if (!confirm('确定删除模型 "' + name + '"？')) return;
+    delete currentModels[name];
+    renderModelsTable();
+    renderRoutesConfig();
+  };
 
   window.loadConfig = function() {
     api.get('/api/settings/llm').then(function(data) {
       document.getElementById('llm-enabled').checked = !!data.enabled;
       document.getElementById('retry-count').value = data.retry_count || 2;
       document.getElementById('retry-delay').value = data.retry_delay || 1.0;
-      fillDefaultRoute(data);
-      var container = document.getElementById('routes-container');
-      var html = '';
-      TASK_TYPES.forEach(function(t) {
-        var rd = (data.routes && data.routes[t.key]) || {};
-        html += makeRouteHtml(t.key, t.label, t.desc, rd);
-      });
-      container.innerHTML = html;
+
+      currentModels = data.models || {};
+      renderModelsTable();
+      renderRoutesConfig();
+
+      // 填充路由配置
+      if (data.routes) {
+        Object.keys(data.routes).forEach(function(taskType) {
+          var route = data.routes[taskType];
+          var sec = document.querySelector('.route-section[data-task-type="' + taskType + '"]');
+          if (!sec) return;
+
+          var modelsSelect = sec.querySelector('[data-field="models"]');
+          var primaryIndexInput = sec.querySelector('[data-field="primary_index"]');
+
+          // 选中模型
+          Array.from(modelsSelect.options).forEach(function(opt) {
+            opt.selected = route.models && route.models.indexOf(opt.value) !== -1;
+          });
+
+          primaryIndexInput.value = route.primary_index || 0;
+        });
+      }
+
       toast('配置已加载');
     });
   };
 
   window.saveConfig = function() {
+    var models = collectModels();
+    var routes = collectRoutes();
+
     var payload = {
       enabled: document.getElementById('llm-enabled').checked,
       retry_count: parseInt(document.getElementById('retry-count').value) || 2,
       retry_delay: parseFloat(document.getElementById('retry-delay').value) || 1.0,
-      default_route: collectDefaultRoute(),
-      routes: collectRoutes()
+      models: models,
+      routes: routes
     };
+
     api.put('/api/settings/llm', payload).then(function() {
+      currentModels = models;
       toast('配置已保存');
     });
   };
@@ -213,4 +256,47 @@
   loadConfig();
 })();
 </script>
+
+<style>
+.models-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+.models-table th,
+.models-table td {
+  padding: 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+.models-table th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+  font-size: 13px;
+}
+.models-table input {
+  width: 100%;
+  min-width: 80px;
+}
+.route-section {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+.route-section:last-child {
+  border-bottom: none;
+}
+.route-title {
+  font-weight: 600;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+.btn-danger {
+  background: #dc3545;
+  color: white;
+}
+.btn-danger:hover {
+  background: #c82333;
+}
+</style>
 {% endblock %}
