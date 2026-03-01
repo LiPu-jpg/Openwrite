@@ -5,13 +5,21 @@ workflow_id: chapter_writing
 name: chapter_writing
 version: 1.0.0
 description: 完整的章节写作流程（Pipeline V2）
-# 章节写作工作流
 
-name: chapter_writing
-version: 1.0.0
-description: 完整的章节写作流程（Pipeline V2）
+# 触发条件
+trigger_intents:
+  - write_chapter
+trigger_keywords:
+  - 写章节
+  - 生成章节
+  - 写第
+  - 续写
+  - 草稿
 
-# 工作流步骤
+requires_novel_id: true
+# requires_outline: true  # 暂时禁用，允许无大纲时也能触发
+priority: 10
+
 steps:
   - id: load_context
     name: 加载上下文
