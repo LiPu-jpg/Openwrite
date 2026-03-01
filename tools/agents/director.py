@@ -64,6 +64,8 @@ class DirectorAgent:
     ):
         self._llm_client = llm_client
         self._router = router
+        self._sessions: Dict[str, Any] = {}  # 会话存储
+
     def plan(
         self,
         objective: str,
@@ -1124,10 +1126,6 @@ class DirectorAgent:
             context_loaded=phase_result.get("context_loaded", []),
         )
 
-    # 会话存储（类级别）
-    _sessions: Dict[str, "ConversationSession"] = {}
-    # 会话存储（类级别）
-    _sessions: Dict[str, "ConversationSession"] = {}
 
     def list_sessions(self) -> List[Dict[str, Any]]:
         """列出所有会话。

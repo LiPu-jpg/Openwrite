@@ -51,10 +51,50 @@ class LLMClient:
         self,
         retry_count: int = 2,
         retry_delay: float = 1.0,
+        reconnect_attempts: int = 3,
+        reconnect_delay: float = 5.0,
     ):
         self.retry_count = retry_count
         self.retry_delay = retry_delay
+        self.reconnect_attempts = reconnect_attempts
+        self.reconnect_delay = reconnect_delay
         self._litellm = None
+        self._connection_status: Dict[str, str] = {}  # model -> status (ok/failed/unknown)
+        self._last_error: Optional[str] = None
+
+    @property
+    def connection_status(self) -> Dict[str, str]:
+        """获取各模型的连接状态。"""
+        return self._connection_status.copy()
+
+    @property
+    def last_error(self) -> Optional[str]:
+        """获取最后一次错误信息。"""
+        return self._last_error
+
+    def reset_connection_status(self, model: Optional[str] = None) -> None:
+        """重置连接状态。
+        
+        Args:
+            model: 指定模型，None 表示重置所有
+        """
+        if model:
+            self._connection_status.pop(model, None)
+        else:
+            self._connection_status.clear()
+        self._last_error = None
+
+    def is_model_available(self, model: str) -> bool:
+        """检查模型是否可用。
+        
+        Args:
+            model: 模型标识符
+            
+        Returns:
+            模型是否可用（状态为 ok 或 unknown）
+        """
+        status = self._connection_status.get(model, "unknown")
+        return status in ("ok", "unknown")
 
     def _ensure_litellm(self) -> Any:
         """延迟导入 litellm，避免未安装时影响其他功能。"""
