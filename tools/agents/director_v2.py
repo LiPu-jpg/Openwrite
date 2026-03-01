@@ -145,7 +145,7 @@ class SkillBasedDirector:
 """
 
     # ============================================================
-    # 意图识别（基于 SkillRegistry）
+    # 意图识别（基于 LLM，移除硬匹配）
     # ============================================================
 
     def classify_intent(
@@ -155,7 +155,9 @@ class SkillBasedDirector:
     ) -> "IntentDecision":
         """识别用户意图。
 
-        使用 SkillRegistry.match_trigger() 进行动态匹配。
+        **优先使用 LLM 理解意图，完全移除硬编码关键词匹配。**
+        - 如果有 LLM，使用 LLM 进行意图识别
+        - 如果无 LLM，只保留命令触发器 (/xxx) 作为快捷方式
 
         Args:
             user_message: 用户消息
@@ -171,53 +173,92 @@ class SkillBasedDirector:
         )
 
         context = context or {}
+        skills = list(self.skill_registry._skills.values())
 
-        # 1. 使用 SkillRegistry 匹配
-        matched_skill = self.skill_registry.match_trigger(user_message)
-
-        if matched_skill:
-            # 将 Skill 映射到 TaskIntent
-            intent = self._map_skill_to_intent(matched_skill.name)
-
-            # 计算置信度
-            score = sum(
-                1 for t in matched_skill.triggers if t.lower() in user_message.lower()
-            )
-            # 命令触发器（如 /outline）大幅加分
-            if matched_skill.trigger and user_message.strip().startswith(
-                matched_skill.trigger
-            ):
-                score += 10
-
-            # 只有明确意图才触发工作流
-            # score >= 1 表示至少1个关键词匹配，或使用了命令触发器
-            if score < 1:
-                # 无关键词匹配，使用通用对话
+        # 1. 检查命令触发器（快速路径，不调用 LLM）
+        for skill in skills:
+            if skill.trigger and user_message.strip().startswith(skill.trigger):
+                logger.info(f"命令触发器匹配: {skill.trigger}")
                 return IntentDecision(
-                    intent=TaskIntent.GENERAL_CHAT,
-                    confidence=IntentConfidence.LOW,
-                    confidence_score=0.3,
-                    matched_keywords=matched_skill.triggers[:5],
-                    reasoning=f"匹配关键词不足（score={score}），使用通用对话",
+                    intent=self._map_skill_to_intent(skill.name),
+                    confidence=IntentConfidence.HIGH,
+                    confidence_score=0.95,
+                    matched_keywords=[skill.trigger],
+                    reasoning=f"用户使用了命令触发器 {skill.trigger}",
+                    tool_parameters={"skill": skill.name},
                     entity_references=self._extract_entities(user_message),
                 )
 
-            confidence = (
-                IntentConfidence.HIGH if score >= 3 else IntentConfidence.MEDIUM
-            )
-            confidence_score = min(0.95, 0.5 + score * 0.15)
+        # 2. 使用 LLM 意图识别（如果有 LLM）
+        if self._llm_client and self._router:
+            try:
+                from tools.agents.intent_classifier import LLMIntentClassifier
 
+                classifier = LLMIntentClassifier(
+                    llm_client=self._llm_client,
+                    router=self._router,
+                )
+
+                # 获取对话历史
+                history = []
+                if hasattr(self, '_sessions') and context.get("session_id"):
+                    session = self._sessions.get(context["session_id"])
+                    if session:
+                        history = session.message_history
+
+                result = classifier.classify(
+                    user_message=user_message,
+                    skills=skills,
+                    history=history,
+                    context=context,
+                )
+
+                return IntentDecision(
+                    intent=result["intent"],
+                    confidence=result["confidence"],
+                    confidence_score=result["confidence_score"],
+                    matched_keywords=result.get("entity_references", []),
+                    reasoning=result.get("reasoning", ""),
+                    tool_parameters={"skill": result.get("skill")} if result.get("skill") else {},
+                    entity_references=result.get("entity_references", []),
+                )
+
+            except Exception as e:
+                logger.warning(f"LLM 意图识别失败: {e}")
+                # 继续使用 fallback
+
+        # 3. Fallback: 无 LLM 时使用简化版关键词匹配
+        # 这个 fallback 只作为无 LLM 时的备选方案
+        best_skill = None
+        best_score = 0
+        for skill in skills:
+            score = 0
+            for trigger in skill.triggers:
+                # 使用更严格的匹配：触发词必须完整出现
+                if trigger.lower() in user_message.lower():
+                    # 检查是否是明确请求（而不是提及）
+                    trigger_words = ["创建", "生成", "写", "新建", "添加", "初始化", "修改", "查看", "查询"]
+                    is_request = any(w in user_message for w in trigger_words)
+                    if is_request:
+                        score += 2
+                    else:
+                        score += 1
+            if score > best_score:
+                best_score = score
+                best_skill = skill
+
+        if best_skill and best_score >= 2:
             return IntentDecision(
-                intent=intent,
-                confidence=confidence,
-                confidence_score=confidence_score,
-                matched_keywords=matched_skill.triggers[:5],
-                reasoning=f"匹配到功能模块: {matched_skill.name} (score={score})",
-                tool_parameters={"skill": matched_skill.name},
+                intent=self._map_skill_to_intent(best_skill.name),
+                confidence=IntentConfidence.MEDIUM,
+                confidence_score=0.6,
+                matched_keywords=best_skill.triggers[:3],
+                reasoning=f"Fallback 匹配到功能模块: {best_skill.name}",
+                tool_parameters={"skill": best_skill.name},
                 entity_references=self._extract_entities(user_message),
             )
 
-        # 2. 无匹配时的 fallback
+        # 4. 最终 Fallback: 使用通用对话
         return IntentDecision(
             intent=TaskIntent.GENERAL_CHAT,
             confidence=IntentConfidence.LOW,
