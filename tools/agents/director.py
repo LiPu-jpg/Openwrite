@@ -61,10 +61,16 @@ class DirectorAgent:
         self,
         llm_client: Optional["LLMClient"] = None,
         router: Optional["ModelRouter"] = None,
+        persistence: Optional[Any] = None,
     ):
         self._llm_client = llm_client
         self._router = router
-        self._sessions: Dict[str, Any] = {}  # 会话存储
+        self._sessions: Dict[str, Any] = {}  # 会话存储（内存缓存）
+        self._persistence = persistence
+        if self._persistence is None:
+            from tools.session_persistence import SessionPersistence
+            self._persistence = SessionPersistence()
+        self._persistence = persistence  # 持久化管理器
 
     def plan(
         self,
@@ -762,7 +768,9 @@ class DirectorAgent:
         session.set_workflow_state(workflow_state.model_dump())
         session.add_message("assistant", response.message)
 
-        return response
+        # 10. 持久化保存会话
+        if self._persistence:
+            self._persistence.save_session(session.model_dump())
 
     def _get_or_create_session(
         self,
@@ -785,6 +793,16 @@ class DirectorAgent:
 
         if session_id and session_id in self._sessions:
             return self._sessions[session_id]
+
+        # 尝试从持久化存储加载
+        if session_id and self._persistence:
+            persisted_data = self._persistence.load_session(session_id)
+            if persisted_data:
+                # 从持久化存储恢复会话
+                new_session = ConversationSession(**persisted_data)
+                self._sessions[session_id] = new_session
+                logger.info("从持久化存储恢复会话: %s", session_id)
+                return new_session
 
         # 创建新会话
         new_session = ConversationSession(
@@ -1155,6 +1173,9 @@ class DirectorAgent:
         """
         if session_id in self._sessions:
             del self._sessions[session_id]
+            # 同步删除持久化文件
+            if self._persistence:
+                self._persistence.delete_session(session_id)
             return True
         return False
 
