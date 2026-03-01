@@ -183,22 +183,36 @@ class SkillBasedDirector:
             score = sum(
                 1 for t in matched_skill.triggers if t.lower() in user_message.lower()
             )
+            # 命令触发器（如 /outline）大幅加分
             if matched_skill.trigger and user_message.strip().startswith(
                 matched_skill.trigger
             ):
                 score += 10
 
+            # 只有明确意图才触发工作流
+            # score >= 1 表示至少1个关键词匹配，或使用了命令触发器
+            if score < 1:
+                # 无关键词匹配，使用通用对话
+                return IntentDecision(
+                    intent=TaskIntent.GENERAL_CHAT,
+                    confidence=IntentConfidence.LOW,
+                    confidence_score=0.3,
+                    matched_keywords=matched_skill.triggers[:5],
+                    reasoning=f"匹配关键词不足（score={score}），使用通用对话",
+                    entity_references=self._extract_entities(user_message),
+                )
+
             confidence = (
-                IntentConfidence.HIGH if score >= 2 else IntentConfidence.MEDIUM
+                IntentConfidence.HIGH if score >= 3 else IntentConfidence.MEDIUM
             )
-            confidence_score = min(0.95, 0.5 + score * 0.1)
+            confidence_score = min(0.95, 0.5 + score * 0.15)
 
             return IntentDecision(
                 intent=intent,
                 confidence=confidence,
                 confidence_score=confidence_score,
                 matched_keywords=matched_skill.triggers[:5],
-                reasoning=f"匹配到功能模块: {matched_skill.name}",
+                reasoning=f"匹配到功能模块: {matched_skill.name} (score={score})",
                 tool_parameters={"skill": matched_skill.name},
                 entity_references=self._extract_entities(user_message),
             )
@@ -700,12 +714,9 @@ class SkillBasedDirector:
         from tools.models.intent import DirectorResponse, SuggestedAction
 
         if intent.intent.value == "general_chat":
-            # 生成可用功能列表
-            skills_prompt = self.skill_registry.get_skills_prompt()
-
             return DirectorResponse(
                 success=True,
-                message=f"您好！我是 OpenWrite 的创作助手。\n\n{skills_prompt}\n\n请告诉我您想做什么？",
+                message="您好！我是 OpenWrite 创作助手。\n\n我可以：写章节、创建大纲、管理角色、埋设伏笔。\n\n请告诉我您想做什么？",
                 detected_intent=intent.intent,
                 confidence=intent.confidence_score,
                 session_id=session.session_id,
@@ -717,13 +728,13 @@ class SkillBasedDirector:
                     ),
                     SuggestedAction(
                         action="outline_assist",
-                        label="大纲辅助",
+                        label="创建大纲",
                         description="创建或修改大纲",
                     ),
                     SuggestedAction(
-                        action="style_init",
-                        label="风格初始化",
-                        description="设置作品风格",
+                        action="project_init",
+                        label="初始化项目",
+                        description="初始化新小说项目",
                     ),
                 ],
             )
@@ -735,6 +746,23 @@ class SkillBasedDirector:
                 detected_intent=intent.intent,
                 confidence=intent.confidence_score,
                 session_id=session.session_id,
+            )
+
+        # 项目初始化
+        if intent.intent.value == "project_init":
+            return DirectorResponse(
+                success=True,
+                message="好的，开始项目初始化。\n\n请告诉我小说标题和核心主题，或者说「创建大纲」开始。",
+                detected_intent=intent.intent,
+                confidence=intent.confidence_score,
+                session_id=session.session_id,
+                suggested_actions=[
+                    SuggestedAction(
+                        action="create_outline",
+                        label="创建大纲",
+                        description="从零创建四级大纲",
+                    ),
+                ],
             )
 
         # 其他意图

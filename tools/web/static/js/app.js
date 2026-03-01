@@ -4,7 +4,7 @@
  */
 
 // ── API 封装 ──────────────────────────────────────────────────────
-const api = {
+window.api = {
   async _fetch(url, options = {}) {
     const defaults = {
       headers: { 'Content-Type': 'application/json' },
@@ -21,7 +21,7 @@ const api = {
       }
       return data;
     } catch (e) {
-      toast(e.message || '请求失败', 'error');
+      window.toast(e.message || '请求失败', 'error');
       throw e;
     }
   },
@@ -32,7 +32,7 @@ const api = {
 };
 
 // ── Toast 提示 ─────────────────────────────────────────────────────
-function toast(message, type = 'success', duration = 3000) {
+window.toast = function(message, type = 'success', duration = 3000) {
   const container = document.getElementById('toast-container');
   if (!container) return;
   const el = document.createElement('div');
@@ -44,10 +44,10 @@ function toast(message, type = 'success', duration = 3000) {
     el.classList.remove('show');
     setTimeout(() => el.remove(), 300);
   }, duration);
-}
+};
 
 // ── 模态框 ──────────────────────────────────────────────────────────
-function modal(title, contentHtml, onConfirm) {
+window.modal = function(title, contentHtml, onConfirm) {
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
   overlay.innerHTML = `
@@ -70,18 +70,18 @@ function modal(title, contentHtml, onConfirm) {
       closeModal();
     });
   }
-}
+};
 
-function closeModal() {
+window.closeModal = function() {
   const overlay = document.getElementById('modal-overlay');
   if (overlay) {
     overlay.classList.remove('active');
     overlay.innerHTML = '';
   }
-}
+};
 
 // ── SSE 封装 ────────────────────────────────────────────────────────
-function connectSSE(url, onMessage, onDone) {
+window.connectSSE = function(url, onMessage, onDone) {
   const source = new EventSource(url);
   source.onmessage = (event) => {
     try {
@@ -100,19 +100,19 @@ function connectSSE(url, onMessage, onDone) {
     if (onDone) onDone({ stage: 'error', error: '连接中断' });
   };
   return source;
-}
+};
 
 // ── Markdown 渲染 ───────────────────────────────────────────────────
-function renderMarkdown(text) {
+window.renderMarkdown = function(text) {
   if (typeof marked !== 'undefined') {
     return marked.parse(text);
   }
   // Fallback: 简单转义 + 换行
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>');
-}
+};
 
 // ── 通用表单收集 ────────────────────────────────────────────────────
-function collectFormData(formId) {
+window.collectFormData = function(formId) {
   const form = document.getElementById(formId);
   if (!form) return {};
   const data = {};
@@ -128,7 +128,7 @@ function collectFormData(formId) {
     }
   });
   return data;
-}
+};
 
 // ── 管线进度条 ───────────────────────────────────────────────────────
 const STAGE_LABELS = {
@@ -149,7 +149,7 @@ const STAGE_LABELS = {
   error: '出错',
 };
 
-function updateProgressBar(containerId, data) {
+window.updateProgressBar = function(containerId, data) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const pct = Math.max(0, Math.min(100, data.progress || 0));
@@ -163,4 +163,4 @@ function updateProgressBar(containerId, data) {
   if (data.stage === 'error') {
     container.innerHTML += `<div class="pipeline-error">${data.error || '未知错误'}</div>`;
   }
-}
+};

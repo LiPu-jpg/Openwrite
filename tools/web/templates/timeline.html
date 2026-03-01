@@ -2,10 +2,10 @@
 {% set active = "timeline" %}
 {% block title %}叙事线 — OpenWrite{% endblock %}
 {% block content %}
-<div class="page-container">
-<h1>叙事时间线</h1>
-<div class="embed-frame">
-  {{ timeline_html | safe }}
-</div>
+<div class="page-container timeline-page">
+  <h1>叙事时间线</h1>
+  <div class="embed-frame">
+    {{ timeline_html | safe }}
+  </div>
 </div>
 {% endblock %}

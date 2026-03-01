@@ -1,0 +1,300 @@
+# Outline Creation Workflow
+# 大纲创建工作流 — 四级层级结构（总纲→篇纲→节纲→章纲）
+
+workflow_id: outline_creation
+name: 大纲创建
+description: |
+  从零创建四级大纲结构：
+  1. 总纲（Master）— 全书核心框架、主题、结局方向
+  2. 篇纲（Arc）— 大剧情弧，3-5个
+  3. 节纲（Section）— 情节单元，每篇2-4节
+  4. 章纲（Chapter）— 具体写作任务，每节3-8章
+
+category: outline
+
+# 触发配置
+trigger_intents:
+  - outline_assist
+trigger_keywords:
+  - 创建大纲
+  - 新建大纲
+  - 写大纲
+  - 构思大纲
+  - 规划大纲
+  - 新的大纲
+priority: 10
+
+# 前置条件
+requires_novel_id: true
+requires_outline: false
+
+# 阶段定义
+phases:
+  # ─────────────────────────────────────────────────────────────
+  # Phase 1: 收集总纲信息
+  # ─────────────────────────────────────────────────────────────
+  - phase_id: collect_master
+    name: 收集总纲信息
+    description: 收集全书顶层规划信息
+    user_prompt: |
+      我来帮您创建小说大纲。首先需要确定**总纲**（全书核心框架）。
+      
+      请告诉我以下信息：
+    questions:
+      - 书名是什么？（如：仙逆、斗破苍穹）
+      - 核心主题是什么？（一句话概括全书要表达的主题）
+      - 结局走向是怎样的？（大团圆/悲剧/开放式）
+      - 预计总字数？（如：100万字）
+    available_tools:
+      - read_file
+    auto_advance: false
+    next_phase: generate_master
+
+  - phase_id: generate_master
+    name: 生成总纲
+    description: 根据用户输入生成完整的总纲
+    user_prompt: |
+      好的，我已记录您的总纲信息：
+      - **书名**: {title}
+      - **核心主题**: {core_theme}
+      - **结局走向**: {ending_direction}
+      - **目标字数**: {target_word_count}
+      
+      现在让我生成完整的总纲，包括关键转折点...
+    required_tools:
+      - write_file
+    context_keys:
+      - master_info
+    auto_advance: true
+    next_phase: confirm_master
+
+  - phase_id: confirm_master
+    name: 确认总纲
+    description: 展示总纲并等待用户确认
+    user_prompt: |
+      ## 总纲已生成
+      
+      {master_content}
+      
+      ---
+      请确认总纲是否满意？如有需要可以修改。
+    questions:
+      - 确认总纲？
+    options:
+      - label: 确认，继续规划篇纲
+        value: confirm
+      - label: 需要修改
+        value: modify
+    auto_advance: false
+    conditions:
+      "confirm": plan_arcs
+      "modify": collect_master
+
+  # ─────────────────────────────────────────────────────────────
+  # Phase 2: 规划篇纲
+  # ─────────────────────────────────────────────────────────────
+  - phase_id: plan_arcs
+    name: 规划篇纲
+    description: 基于总纲的关键转折点规划3-5个大剧情弧
+    user_prompt: |
+      总纲已确认！现在进入**篇纲**规划阶段。
+      
+      根据总纲中的{key_turns_count}个关键转折点，我建议将全书分为 **{suggested_arc_count}** 个篇（大剧情弧）。
+      
+      每篇应该有：
+      - 独立的矛盾-发展-收束周期
+      - 明确的主题和情感走向
+      - 合理的字数分配
+      
+      开始规划篇纲...
+    available_tools:
+      - read_file
+      - write_file
+    context_keys:
+      - master
+    auto_advance: true
+    next_phase: review_arcs
+
+  - phase_id: review_arcs
+    name: 审查篇纲
+    description: 展示篇纲结构并等待用户确认
+    user_prompt: |
+      ## 篇纲规划完成
+      
+      {arcs_content}
+      
+      ---
+      请确认篇纲结构是否满意？
+    questions:
+      - 确认篇纲？
+    options:
+      - label: 确认，继续细化节纲
+        value: confirm
+      - label: 调整篇纲数量
+        value: adjust_count
+      - label: 修改某篇内容
+        value: modify
+    auto_advance: false
+    conditions:
+      "confirm": plan_sections
+      "adjust_count": plan_arcs
+      "modify": modify_arc
+
+  - phase_id: modify_arc
+    name: 修改篇纲
+    description: 修改指定篇的内容
+    user_prompt: |
+      请告诉我要修改哪一篇？以及要如何修改？
+    questions:
+      - 要修改哪一篇？（如：第一篇）
+      - 如何修改？
+    auto_advance: false
+    next_phase: review_arcs
+
+  # ─────────────────────────────────────────────────────────────
+  # Phase 3: 细化节纲
+  # ─────────────────────────────────────────────────────────────
+  - phase_id: plan_sections
+    name: 细化节纲
+    description: 为每篇创建2-4个节（情节单元）
+    user_prompt: |
+      篇纲已确认！现在进入**节纲**细化阶段。
+      
+      我将为每篇创建 2-4 个节，每个节是一个较完整的情节单元。
+      
+      开始细化节纲...
+    available_tools:
+      - read_file
+      - write_file
+    context_keys:
+      - master
+      - arcs
+    auto_advance: true
+    next_phase: review_sections
+
+  - phase_id: review_sections
+    name: 审查节纲
+    description: 展示节纲结构并等待用户确认
+    user_prompt: |
+      ## 节纲细化完成
+      
+      {sections_content}
+      
+      ---
+      请确认节纲结构是否满意？
+    questions:
+      - 确认节纲？
+    options:
+      - label: 确认，继续编写章纲
+        value: confirm
+      - label: 需要调整
+        value: modify
+    auto_advance: false
+    conditions:
+      "confirm": plan_chapters
+      "modify": modify_section
+
+  - phase_id: modify_section
+    name: 修改节纲
+    description: 修改指定节的内容
+    user_prompt: |
+      请告诉我要修改哪一节？以及要如何修改？
+    questions:
+      - 要修改哪一节？（如：第一篇第一节）
+      - 如何修改？
+    auto_advance: false
+    next_phase: review_sections
+
+  # ─────────────────────────────────────────────────────────────
+  # Phase 4: 编写章纲
+  # ─────────────────────────────────────────────────────────────
+  - phase_id: plan_chapters
+    name: 编写章纲
+    description: 为每节创建3-8个章（具体写作任务）
+    user_prompt: |
+      节纲已确认！现在进入**章纲**编写阶段。
+      
+      我将为每节创建 3-8 章，每章是一个具体的写作任务（5k-8k字）。
+      
+      开始编写章纲...
+    available_tools:
+      - read_file
+      - write_file
+    context_keys:
+      - master
+      - arcs
+      - sections
+    auto_advance: true
+    next_phase: review_chapters
+
+  - phase_id: review_chapters
+    name: 审查章纲
+    description: 展示章纲结构并等待用户确认
+    user_prompt: |
+      ## 章纲编写完成
+      
+      {chapters_content}
+      
+      ---
+      请确认章纲结构是否满意？
+    questions:
+      - 确认章纲？
+    options:
+      - label: 确认，完成大纲创建
+        value: confirm
+      - label: 需要调整
+        value: modify
+    auto_advance: false
+    conditions:
+      "confirm": complete
+      "modify": modify_chapter
+
+  - phase_id: modify_chapter
+    name: 修改章纲
+    description: 修改指定章的内容
+    user_prompt: |
+      请告诉我要修改哪一章？以及要如何修改？
+    questions:
+      - 要修改哪一章？（如：第一章）
+      - 如何修改？
+    auto_advance: false
+    next_phase: review_chapters
+
+  # ─────────────────────────────────────────────────────────────
+  # Phase 5: 完成
+  # ─────────────────────────────────────────────────────────────
+  - phase_id: complete
+    name: 完成大纲
+    description: 保存完整的大纲层级结构
+    user_prompt: |
+      ## 🎉 大纲创建完成！
+      
+      您的四级大纲已创建完成：
+      
+      - **总纲**: {master_title}
+      - **篇纲**: {arc_count} 篇
+      - **节纲**: {section_count} 节
+      - **章纲**: {chapter_count} 章
+      - **预计字数**: {total_words}
+      
+      大纲文件已保存到：
+      - `data/novels/{novel_id}/outline/hierarchy.yaml`
+      - `data/novels/{novel_id}/outline/outline.md`
+      
+      您可以：
+      - 查看大纲结构
+      - 开始写第一章
+      - 调整大纲细节
+    required_tools:
+      - write_file
+    auto_advance: false
+
+# 入口阶段
+entry_phase: collect_master
+
+# 错误处理
+error_handling:
+  max_retries: 3
+  on_failure:
+    - save_partial_outline
+    - notify_user

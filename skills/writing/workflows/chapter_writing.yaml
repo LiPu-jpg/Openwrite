@@ -1,6 +1,12 @@
 # Chapter Writing Workflow
 # 章节写作工作流
 
+workflow_id: chapter_writing
+name: chapter_writing
+version: 1.0.0
+description: 完整的章节写作流程（Pipeline V2）
+# 章节写作工作流
+
 name: chapter_writing
 version: 1.0.0
 description: 完整的章节写作流程（Pipeline V2）

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import yaml
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -24,6 +26,8 @@ _STATIC_DIR = _WEB_DIR / "static"
 
 _SIM_TASKS: Dict[str, Dict[str, Any]] = {}
 
+# 全局 Director 实例（跨请求保持会话状态）
+_GLOBAL_DIRECTOR = None  # type: Any
 _STATUS_TO_CN = {
     "planted": "埋伏",
     "growing": "待收",
@@ -45,6 +49,13 @@ _STATUS_TO_API = {
 }
 
 
+def _get_global_director() -> Any:
+    """获取全局 Director 实例（单例，跨请求保持会话）。"""
+    global _GLOBAL_DIRECTOR
+    if _GLOBAL_DIRECTOR is None:
+        from tools.agents.director import DirectorAgent
+        _GLOBAL_DIRECTOR = DirectorAgent()
+    return _GLOBAL_DIRECTOR
 class CharacterCreateRequest(BaseModel):
     name: str
     tier: str = "普通配角"
@@ -153,6 +164,14 @@ class WorkflowChatRequest(BaseModel):
     session_id: Optional[str] = Field(default=None, description="会话ID")
     novel_id: Optional[str] = Field(default=None, description="小说ID")
     context: Optional[Dict[str, Any]] = Field(default=None, description="额外上下文")
+
+class ChatStreamRequest(BaseModel):
+    """流式聊天请求。"""
+    message: str = Field(..., description="用户消息")
+    session_id: Optional[str] = Field(default=None, description="会话ID")
+    novel_id: Optional[str] = Field(default=None, description="小说ID")
+    model: str = Field(default="", description="指定模型")
+
 
 
 class WorkflowStartRequest(BaseModel):
@@ -299,6 +318,32 @@ def create_app(
     proj = project_dir or Path.cwd()
 
     app = FastAPI(title="OpenWrite", docs_url="/api/docs")
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+    templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+    # ═════════════════════════════════════════════════════════════════
+    # Lifespan: 启动时预加载 Director（预初始化 LLM、SkillRegistry）
+    # ═════════════════════════════════════════════════════════════════
+    logger = logging.getLogger(__name__)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup
+        try:
+            director = _get_global_director()
+            logger.info("OpenWrite 启动完成: Director 已加载, novel_id=%s", novel_id)
+            # 检查 LLM 配置状态
+            config = load_llm_config()
+            if config.enabled:
+                logger.info("LLM 已启用, 可用模型: %s", list(config.models.keys()))
+            else:
+                logger.info("LLM 未启用, 使用规则引擎模式")
+        except Exception as e:
+            logger.warning("启动时加载 Director 失败: %s", e)
+        yield
+        # Shutdown (if needed)
+
+    app = FastAPI(title="OpenWrite", docs_url="/api/docs", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
@@ -459,8 +504,6 @@ def create_app(
                 progress=100,
             )
 
-    # ── 页面路由 ──────────────────────────────────────────────────
-
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
         """仪表盘首页。"""
@@ -489,13 +532,22 @@ def create_app(
             "chapter_count": chapter_count,
         }
         return templates.TemplateResponse(
+            request,
             "dashboard.html",
             {
-                "request": request,
                 "stats": stats,
                 "novel_id": novel_id,
                 "recent_tasks": _collect_recent_tasks(),
             },
+        )
+
+    @app.get("/novels/new", response_class=HTMLResponse)
+    async def novel_new_page(request: Request):
+        """新建小说项目页面。"""
+        return templates.TemplateResponse(
+            request,
+            "novel_new.html",
+            {},
         )
 
 
@@ -503,9 +555,9 @@ def create_app(
     async def chat_page(request: Request):
         """统一对话界面页面。"""
         return templates.TemplateResponse(
+            request,
             "chat.html",
             {
-                "request": request,
                 "novel_id": novel_id,
             },
         )
@@ -522,9 +574,9 @@ def create_app(
                 "<p>暂无时间线数据，请先运行 <code>timeline build</code></p>"
             )
         return templates.TemplateResponse(
+            request,
             "timeline.html",
             {
-                "request": request,
                 "timeline_html": timeline_html,
                 "novel_id": novel_id,
             },
@@ -540,9 +592,9 @@ def create_app(
         else:
             graph_html = "<p>暂无世界观数据，请先添加实体</p>"
         return templates.TemplateResponse(
+            request,
             "world.html",
             {
-                "request": request,
                 "graph_html": graph_html,
                 "novel_id": novel_id,
                 "entity_count": len(graph.entities),
@@ -586,9 +638,9 @@ def create_app(
                     }
                 )
         return templates.TemplateResponse(
+            request,
             "characters.html",
             {
-                "request": request,
                 "characters": char_data,
                 "novel_id": novel_id,
             },
@@ -616,9 +668,9 @@ def create_app(
             edges_data.append({"source": edge.source, "target": edge.target})
         stats = fs.get_statistics()
         return templates.TemplateResponse(
+            request,
             "foreshadowing.html",
             {
-                "request": request,
                 "nodes": nodes_data,
                 "edges": edges_data,
                 "stats": stats,
@@ -649,9 +701,9 @@ def create_app(
         except Exception:
             pass
         return templates.TemplateResponse(
+            request,
             "style.html",
             {
-                "request": request,
                 "styles": styles,
                 "novels": novels,
                 "profile": profile_data,
@@ -665,9 +717,9 @@ def create_app(
         chapters = _list_markdown_files(_outline_chapters_dir())
         drafts = _list_markdown_files(_drafts_dir())
         return templates.TemplateResponse(
+            request,
             "editor.html",
             {
-                "request": request,
                 "chapters": chapters,
                 "drafts": drafts,
                 "novel_id": novel_id,
@@ -702,6 +754,25 @@ def create_app(
             "chapters": ch_count,
             "recent_tasks": _collect_recent_tasks(),
         }
+
+    @app.get("/api/stats/tokens")
+    async def api_stats_tokens():
+        """获取 token 使用统计。"""
+        from tools.utils.token_tracker import get_global_tracker
+
+        tracker = get_global_tracker()
+        summary = tracker.summary()
+        return {
+            "session_id": summary.session_id,
+            "total_tokens": summary.total_tokens,
+            "total_prompt_tokens": summary.total_prompt_tokens,
+            "total_completion_tokens": summary.total_completion_tokens,
+            "call_count": summary.call_count,
+            "model_breakdown": summary.model_breakdown,
+            "started_at": summary.started_at,
+            "last_activity": summary.last_activity,
+        }
+
 
     @app.get("/api/world/entities")
     async def api_world_entities():
@@ -1837,7 +1908,7 @@ def create_app(
     # ── Settings 页面路由 ─────────────────────────────────────
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
-        return templates.TemplateResponse("settings.html", {"request": request, "novel_id": novel_id})
+        return templates.TemplateResponse(request, "settings.html", {"novel_id": novel_id})
 
     # ═════════════════════════════════════════════════════════════════
     # Workflow API Endpoints
@@ -1867,6 +1938,20 @@ def create_app(
             ],
             "categories": workflow_registry.list_categories(),
         }
+
+    @app.get("/api/workflows/registry/summary")
+    async def api_workflow_registry_summary():
+        """获取工作流注册表摘要。"""
+        from tools.workflow_registry import init_workflows, workflow_registry
+
+        init_workflows()
+        workflows = workflow_registry.list_workflows()
+
+        return {
+            "total_workflows": len(workflows),
+            "categories": workflow_registry.list_categories(),
+        }
+
 
     @app.get("/api/workflows/{workflow_id}")
     async def api_workflow_get(workflow_id: str):
@@ -1912,7 +1997,6 @@ def create_app(
     @app.post("/api/workflows/start")
     async def api_workflow_start(payload: WorkflowStartRequest):
         """启动工作流。"""
-        from tools.agents.director import DirectorAgent
         from tools.workflow_registry import init_workflows, workflow_registry
 
         init_workflows()
@@ -1926,8 +2010,8 @@ def create_app(
         if workflow.requires_novel_id and not payload.novel_id:
             raise HTTPException(status_code=400, detail="此工作流需要指定小说ID")
 
-        # 创建 Director 并处理请求
-        director = DirectorAgent()
+        # 使用全局 Director 实例，保持跨请求会话状态
+        director = _get_global_director()
         initial_message = payload.initial_message or f"开始{workflow.name}"
 
         response = director.process_request_with_workflow(
@@ -1937,17 +2021,16 @@ def create_app(
         )
 
         return response.model_dump()
-
     @app.post("/api/chat")
     async def api_chat(payload: WorkflowChatRequest):
         """处理聊天请求（工作流驱动）。"""
-        from tools.agents.director import DirectorAgent
 
         context = payload.context or {}
         if payload.novel_id:
             context["novel_id"] = payload.novel_id
 
-        director = DirectorAgent()
+        # 使用全局 Director 实例，保持跨请求会话状态
+        director = _get_global_director()
         response = director.process_request_with_workflow(
             user_message=payload.message,
             session_id=payload.session_id,
@@ -1956,11 +2039,70 @@ def create_app(
 
         return response.model_dump()
 
-    @app.get("/api/workflows/registry/summary")
-    async def api_workflows_summary():
-        """获取工作流注册表摘要。"""
-        from tools.workflow_registry import init_workflows, workflow_registry
+    @app.post("/api/chat/stream")
+    async def api_chat_stream(payload: ChatStreamRequest):
+        """流式聊天接口，实时返回生成内容。"""
+        from tools.llm.client import LLMClient
+        from tools.llm.router import ModelRouter
 
-        init_workflows()
-        return workflow_registry.get_workflow_summary()
+        async def generate():
+            client = LLMClient()
+            router = ModelRouter()
+            route = router.get_route("generation")
+            if not route:
+                yield f"event: error\ndata: {{\"error\": \"无可用模型\"}}\n\n"
+                return
+            try:
+                for chunk in client.stream(
+                    messages=[{"role": "user", "content": payload.message}],
+                    model=route.get("model", ""),
+                    api_base=route.get("api_base"),
+                    api_key_env=route.get("api_key_env", ""),
+                ):
+                    yield f"event: chunk\ndata: {{\"content\": {json.dumps(chunk, ensure_ascii=False)}}}\n\n"
+                yield f"event: end\ndata: {{}}\n\n"
+            except Exception as e:
+                yield f"event: error\ndata: {{\"error\": {json.dumps(str(e), ensure_ascii=False)}}}\n\n"
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # 会话管理 API
+
+    @app.get("/api/sessions")
+    async def api_sessions_list():
+        """获取所有会话列表。"""
+        director = _get_global_director()
+        return {"sessions": director.list_sessions()}
+
+    @app.get("/api/sessions/{session_id}")
+    async def api_session_detail(session_id: str):
+        """获取会话详情。"""
+        director = _get_global_director()
+        session = director._sessions.get(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在")
+        return session.model_dump()
+
+    @app.delete("/api/sessions/{session_id}")
+    async def api_session_delete(session_id: str):
+        """删除会话。"""
+        director = _get_global_director()
+        if director.delete_session(session_id):
+            return {"success": True, "message": f"Session {session_id} deleted"}
+        raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在")
+
+    @app.post("/api/sessions/new")
+    async def api_session_create():
+        """创建新会话。"""
+        director = _get_global_director()
+        # 获取当前最新会话或创建新的
+        sessions = director.list_sessions()
+        if sessions:
+            session_id = sessions[-1]["session_id"]
+        return {"session": session.model_dump()}
+
     return app

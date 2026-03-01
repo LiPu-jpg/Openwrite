@@ -295,10 +295,61 @@ class WorkflowRegistry:
 
         total = 0
         for yaml_file in sorted(directory.glob("*.yaml")):
-            total += self.load_from_yaml(yaml_file)
+            total += self.load_single_workflow(yaml_file)
 
         logger.info("Loaded %d total workflows from %s", total, directory)
         return total
+
+    def load_single_workflow(self, path: Path) -> int:
+        """从单个 YAML 文件加载工作流。
+
+        支持两种格式：
+        1. 直接定义工作流（workflow_id 作为顶级键）
+        2. 包装格式（workflows: {id: ...}）
+
+        Args:
+            path: YAML 文件路径
+
+        Returns:
+            加载的工作流数量（0 或 1）
+        """
+        if not path.exists():
+            return 0
+
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        except yaml.YAMLError as e:
+            logger.error("Failed to parse YAML file %s: %s", path, e)
+            return 0
+
+        # 检查是否是包装格式
+        if "workflows" in data:
+            return self.load_from_yaml(path)
+
+        # 直接定义格式 - 检查是否有 workflow_id
+        if "workflow_id" not in data:
+            logger.warning("No workflow_id in %s", path)
+            return 0
+
+        try:
+            # 解析阶段
+            phases = []
+            for phase_data in data.get("phases", []):
+                phases.append(WorkflowPhase(**phase_data))
+
+            # 构建工作流定义
+            workflow_dict = dict(data)
+            workflow_dict["phases"] = phases
+
+            workflow = WorkflowDefinition(**workflow_dict)
+            self.register(workflow)
+            logger.info("Loaded workflow: %s from %s", workflow.workflow_id, path)
+            return 1
+
+        except Exception as e:
+            logger.error("Failed to load workflow from %s: %s", path, e)
+            return 0
 
     def clear(self) -> None:
         """清空所有已注册的工作流。"""
@@ -338,7 +389,10 @@ workflow_registry = WorkflowRegistry()
 def init_workflows(project_dir: Optional[Path] = None) -> int:
     """初始化工作流系统。
 
-    从项目目录和内置目录加载工作流定义。
+    从多个位置加载工作流定义：
+    1. 内置 workflows/ 目录
+    2. skills/*/workflows/ 目录（技能工作流）
+    3. 项目自定义 workflows/ 目录
 
     Args:
         project_dir: 项目目录（可选）
@@ -346,17 +400,29 @@ def init_workflows(project_dir: Optional[Path] = None) -> int:
     Returns:
         加载的工作流总数
     """
-    registry = WorkflowRegistry()
+    # 使用全局注册表
+    registry = workflow_registry
     registry.clear()
 
     total = 0
+    # workflow_registry.py 在 tools/ 下，所以 parent.parent 是项目根目录
+    base_dir = Path(__file__).parent.parent
 
     # 1. 加载内置工作流
-    builtin_dir = Path(__file__).parent.parent.parent / "workflows"
+    builtin_dir = base_dir / "workflows"
     if builtin_dir.exists():
         total += registry.load_from_directory(builtin_dir)
 
-    # 2. 加载项目自定义工作流
+    # 2. 加载技能工作流（skills/*/workflows/）
+    skills_dir = base_dir / "skills"
+    if skills_dir.exists():
+        for skill_dir in skills_dir.iterdir():
+            if skill_dir.is_dir():
+                skill_workflow_dir = skill_dir / "workflows"
+                if skill_workflow_dir.exists():
+                    total += registry.load_from_directory(skill_workflow_dir)
+
+    # 3. 加载项目自定义工作流
     if project_dir:
         project_workflow_dir = project_dir / "workflows"
         if project_workflow_dir.exists():

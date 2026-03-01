@@ -252,8 +252,17 @@
     });
   };
 
-  // 初始加载
-  loadConfig();
+  // 初始加载（等待 app.js 加载完成）
+  document.addEventListener('DOMContentLoaded', function() {
+    if (typeof api !== 'undefined') {
+      loadConfig();
+    } else {
+      // 如果 api 还未定义，稍后重试
+      setTimeout(function() {
+        if (typeof api !== 'undefined') loadConfig();
+      }, 100);
+    }
+  });
 })();
 </script>
 

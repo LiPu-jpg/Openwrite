@@ -99,84 +99,84 @@ const DATA = {data_json};
 _CSS = """\
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #0f0f23;
-  color: #e0e0e0;
+  font-family: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  background: #F5F1E8;
+  color: #1A1A18;
   overflow: hidden;
 }
 #app { display: flex; flex-direction: column; height: 100vh; }
 header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 24px;
-  background: #1a1a3e;
-  border-bottom: 1px solid #2a2a5e;
+  background: #FBF9F4;
+  border-bottom: 1px solid #C8C0B0;
   flex-shrink: 0;
 }
-header h1 { font-size: 18px; font-weight: 600; color: #a0a0ff; }
+header h1 { font-size: 18px; font-weight: 600; color: #2B5A8C; }
 .controls { display: flex; gap: 16px; align-items: center; font-size: 13px; }
 .controls label { cursor: pointer; user-select: none; }
 .controls select, .controls button {
-  background: #2a2a5e; color: #e0e0e0; border: 1px solid #3a3a7e;
-  padding: 4px 10px; border-radius: 4px; font-size: 13px; cursor: pointer;
+  background: #E8E4D9; color: #1A1A18; border: 1px solid #C8C0B0;
+  padding: 4px 10px; border-radius: 2px; font-size: 13px; cursor: pointer;
 }
-.controls button:hover { background: #3a3a7e; }
+.controls button:hover { background: #DDD6C8; }
 #timeline-container { flex: 1; overflow: hidden; position: relative; }
 #timeline-svg { width: 100%; height: 100%; }
 
 /* 泳道 */
 .lane-bg { fill: transparent; }
-.lane-bg:hover { fill: rgba(255,255,255,0.02); }
+.lane-bg:hover { fill: rgba(0,0,0,0.03); }
 .lane-label {
-  font-size: 13px; font-weight: 500; fill: #c0c0c0;
+  font-size: 13px; font-weight: 500; fill: #4A4740;
   dominant-baseline: middle; cursor: default;
 }
 .chapter-label {
-  font-size: 11px; fill: #808080;
+  font-size: 11px; fill: #7A766D;
   text-anchor: middle; dominant-baseline: hanging;
 }
-.chapter-line { stroke: #1e1e4e; stroke-width: 1; stroke-dasharray: 2,4; }
+.chapter-line { stroke: #DDD6C8; stroke-width: 1; stroke-dasharray: 2,4; }
 
 /* 事件节点 */
 .event-node { cursor: pointer; transition: r 0.15s; }
-.event-node:hover { filter: brightness(1.3); }
+.event-node:hover { filter: brightness(0.9); }
 
 /* 连接线 */
-.link-path { fill: none; opacity: 0.6; cursor: pointer; }
+.link-path { fill: none; opacity: 0.7; cursor: pointer; }
 .link-path:hover { opacity: 1; stroke-width: 3 !important; }
-.link-path.converge { stroke: #4ECDC4; }
-.link-path.diverge { stroke: #FF6B6B; }
-.link-path.jump { stroke: #FFEAA7; }
-.link-path.foreshadow { stroke: #DDA0DD; }
-.link-path.reference { stroke: #85C1E9; }
+.link-path.converge { stroke: #2D6A4F; }
+.link-path.diverge { stroke: #8B4049; }
+.link-path.jump { stroke: #8B6B4A; }
+.link-path.foreshadow { stroke: #5C4B6B; }
+.link-path.reference { stroke: #3A6B8C; }
 
 /* Tooltip */
 .tooltip {
   position: fixed; pointer-events: none;
-  background: #1a1a3e; border: 1px solid #3a3a7e;
-  border-radius: 6px; padding: 10px 14px;
+  background: #FBF9F4; border: 1px solid #C8C0B0;
+  border-radius: 2px; padding: 10px 14px;
   font-size: 13px; line-height: 1.5;
   max-width: 320px; z-index: 100;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   opacity: 0; transition: opacity 0.15s;
 }
 .tooltip.visible { opacity: 1; }
-.tooltip .tt-title { font-weight: 600; color: #a0a0ff; margin-bottom: 4px; }
-.tooltip .tt-meta { color: #808080; font-size: 12px; }
+.tooltip .tt-title { font-weight: 600; color: #2B5A8C; margin-bottom: 4px; }
+.tooltip .tt-meta { color: #7A766D; font-size: 12px; }
 
 /* 详情面板 */
 .detail-panel {
   position: fixed; right: 0; top: 0; bottom: 0; width: 340px;
-  background: #1a1a3e; border-left: 1px solid #2a2a5e;
+  background: #FBF9F4; border-left: 1px solid #C8C0B0;
   padding: 20px; overflow-y: auto; z-index: 50;
   transition: transform 0.2s;
 }
 .detail-panel.hidden { transform: translateX(100%); }
 .close-btn {
   position: absolute; top: 10px; right: 14px;
-  background: none; border: none; color: #808080;
+  background: none; border: none; color: #7A766D;
   font-size: 22px; cursor: pointer;
 }
-.close-btn:hover { color: #e0e0e0; }
+.close-btn:hover { color: #1A1A18; }
 
 /* 张力条 */
 .tension-bar {
@@ -185,12 +185,12 @@ header h1 { font-size: 18px; font-weight: 600; color: #a0a0ff; }
 }
 
 /* 线程线 */
-.thread-line { fill: none; stroke-width: 2; opacity: 0.4; }
+.thread-line { fill: none; stroke-width: 2; opacity: 0.5; }
 
 /* 图例 */
 .legend { font-size: 12px; }
-.legend rect { rx: 3; }
-.legend text { fill: #c0c0c0; dominant-baseline: middle; }
+.legend rect { rx: 2; }
+.legend text { fill: #4A4740; dominant-baseline: middle; }
 """
 
 
@@ -447,32 +447,32 @@ _JS = """\
     const linksHtml = relLinks.map(lk => {
       const srcName = threads.find(t => t.id === lk.source_thread)?.name || lk.source_thread;
       const tgtName = threads.find(t => t.id === lk.target_thread)?.name || lk.target_thread;
-      return `<div style="margin:6px 0;padding:6px;background:#0f0f23;border-radius:4px">
+      return `<div style="margin:6px 0;padding:6px;background:#E8E4D9;border-radius:2px">
         <span style="color:${getTypeColor(lk.link_type)}">[${LINK_TYPE_CN[lk.link_type]}]</span>
         ${srcName} (${lk.source_chapter}) → ${tgtName} (${lk.target_chapter || "?"})
-        ${lk.label ? `<div style="color:#808080;font-size:12px">${lk.label}</div>` : ""}
+        ${lk.label ? `<div style="color:#7A766D;font-size:12px">${lk.label}</div>` : ""}
       </div>`;
     }).join("");
 
     content.innerHTML = `
-      <h3 style="color:${thread.color || '#a0a0ff'};margin-bottom:12px">${thread.name}</h3>
+      <h3 style="color:${thread.color || '#2B5A8C'};margin-bottom:12px">${thread.name}</h3>
       <div style="margin-bottom:8px">
         <strong>${event.label}</strong>
-        <span style="color:#808080;margin-left:8px">${event.chapter_id}</span>
+        <span style="color:#7A766D;margin-left:8px">${event.chapter_id}</span>
       </div>
       <div style="margin-bottom:8px">张力: ${event.tension}/10
         <span class="tension-bar" style="width:${event.tension * 10}px;background:${tensionColor(event.tension)}"></span>
       </div>
-      ${event.detail ? `<div style="margin-bottom:12px;color:#c0c0c0">${event.detail}</div>` : ""}
-      ${event.tags.length ? `<div style="margin-bottom:12px">标签: ${event.tags.map(t => `<span style="background:#2a2a5e;padding:2px 8px;border-radius:3px;margin:2px;display:inline-block;font-size:12px">${t}</span>`).join("")}</div>` : ""}
-      ${relLinks.length ? `<h4 style="margin:12px 0 6px;color:#a0a0ff">相关连接 (${relLinks.length})</h4>${linksHtml}` : "<div style='color:#808080;margin-top:12px'>无相关连接</div>"}
+      ${event.detail ? `<div style="margin-bottom:12px;color:#4A4740">${event.detail}</div>` : ""}
+      ${event.tags.length ? `<div style="margin-bottom:12px">标签: ${event.tags.map(t => `<span style="background:#E8E4D9;padding:2px 8px;border-radius:2px;margin:2px;display:inline-block;font-size:12px;color:#4A4740">${t}</span>`).join("")}</div>` : ""}
+      ${relLinks.length ? `<h4 style="margin:12px 0 6px;color:#2B5A8C">相关连接 (${relLinks.length})</h4>${linksHtml}` : "<div style='color:#7A766D;margin-top:12px'>无相关连接</div>"}
     `;
     panel.classList.remove("hidden");
   }
 
   function getTypeColor(type) {
-    const map = { converge:"#4ECDC4", diverge:"#FF6B6B", jump:"#FFEAA7", foreshadow:"#DDA0DD", reference:"#85C1E9" };
-    return map[type] || "#808080";
+    const map = { converge:"#2D6A4F", diverge:"#8B4049", jump:"#8B6B4A", foreshadow:"#5C4B6B", reference:"#3A6B8C" };
+    return map[type] || "#7A766D";
   }
 
   // ---- 控件绑定 ----

@@ -274,7 +274,7 @@ def test_director_context_compression():
 
 
 def test_director_stylist_routing():
-    from agents.director import DirectorAgent
+    from tools.agents.director import DirectorAgent
 
     agent = DirectorAgent()
     context = {

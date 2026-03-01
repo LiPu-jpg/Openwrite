@@ -28,7 +28,7 @@ class ModelConfig(BaseModel):
 
     name: str
     model: str
-    api_base: str
+    api_base: Optional[str] = None  # Optional for LiteLLM-native models
     api_key_env: str = ""
     max_tokens: int = 4096
     temperature: float = 0.7

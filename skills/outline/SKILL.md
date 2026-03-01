@@ -15,6 +15,8 @@ triggers:
   - "大纲结构"
   - "大纲内容"
   - "章节规划"
+  - "大纲辅助"
+  - "大纲"
   - "outline"
 requires:
   - read_file

@@ -313,6 +313,7 @@ class DirectorAgent:
             return self._parse_llm_decision(
                 response.content, objective, chapter_id,
                 use_stylist, compressed, full_summary,
+                style_summary=style_summary,
             )
         except Exception as e:
             logger.warning("Director LLM 调用失败，回退到规则引擎: %s", e)
@@ -329,6 +330,7 @@ class DirectorAgent:
         use_stylist: bool,
         compressed: Dict[str, str],
         full_summary: str,
+        style_summary: Optional[str] = None,
     ) -> DirectorDecision:
         """解析 LLM JSON 输出为 DirectorDecision。"""
         # 提取 JSON 块
@@ -352,6 +354,11 @@ class DirectorAgent:
         notes = data.get("notes", [])
         gen_instr = data.get("generation_instructions", "")
 
+        # 处理 style_instructions：LLM 输出优先，否则使用规则引擎
+        style_instructions = data.get("style_instructions", "")
+        if use_stylist and not style_instructions:
+            style_instructions = self._build_style_instructions(style_summary)
+
         return DirectorDecision(
             objective=objective,
             chapter_id=chapter_id,
@@ -359,7 +366,7 @@ class DirectorAgent:
             context_summary=full_summary[:800],
             notes=notes,
             compressed_context=compressed,
-            style_instructions=data.get("style_instructions", ""),
+            style_instructions=style_instructions,
             suggested_strict_lore=data.get("strict_lore", False),
             priority_elements=data.get("priority_elements", []),
             generation_instructions=gen_instr,
@@ -1119,3 +1126,37 @@ class DirectorAgent:
 
     # 会话存储（类级别）
     _sessions: Dict[str, "ConversationSession"] = {}
+    # 会话存储（类级别）
+    _sessions: Dict[str, "ConversationSession"] = {}
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """列出所有会话。
+        
+        Returns:
+            会话列表，每个会话包含 session_id, novel_id, created_at, updated_at, message_count
+        """
+        return [
+            {
+                "session_id": session.session_id,
+                "novel_id": session.novel_id,
+                "created_at": session.created_at,
+                "updated_at": session.updated_at,
+                "message_count": len(session.message_history),
+            }
+            for session in self._sessions.values()
+        ]
+
+    def delete_session(self, session_id: str) -> bool:
+        """删除指定会话。
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            是否删除成功
+        """
+        if session_id in self._sessions:
+            del self._sessions[session_id]
+            return True
+        return False
+

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class PromptBuilder:
@@ -238,4 +238,191 @@ class PromptBuilder:
         return [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
+        ]
+
+    # ------------------------------------------------------------------
+    # Director 对话 prompts（Web Chat 用）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def director_chat(
+        phase_name: str,
+        phase_description: str,
+        phase_prompt: str,
+        phase_questions: List[str],
+        phase_options: List[Dict[str, str]],
+        user_message: str,
+        context_summary: str = "",
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+    ) -> List[Dict[str, str]]:
+        """构建 Director 工作流对话 prompt。
+
+        在 workflow 阶段内，用 LLM 生成自然语言回复，
+        替代硬编码的 user_prompt 字符串。
+        """
+        system = (
+            "你是 OpenWrite 创作助手，正在引导用户完成小说创作工作流。\n"
+            "当前处于工作流阶段，你的职责是：\n"
+            "1. 根据当前阶段的目标，用自然、友好的语言与用户对话\n"
+            "2. 引导用户提供该阶段所需的信息\n"
+            "3. 如果用户提供了信息，确认并总结，然后引导进入下一步\n"
+            "4. 如果用户的回答不够具体，温和地追问细节\n"
+            "5. 保持专业但不生硬，像一位经验丰富的编辑在和作者讨论\n\n"
+            "重要规则：\n"
+            "- 不要一次性抛出所有问题，根据对话进度逐步引导\n"
+            "- 用户已经回答过的问题不要重复问\n"
+            "- 回复控制在 200 字以内，简洁有力\n"
+            "- 使用 Markdown 格式让回复更易读\n"
+        )
+
+        # 构建阶段上下文
+        phase_info = (
+            f"## 当前阶段：{phase_name}\n"
+            f"{phase_description}\n\n"
+        )
+        if phase_questions:
+            phase_info += "## 本阶段需要收集的信息\n"
+            phase_info += "\n".join(f"- {q}" for q in phase_questions) + "\n\n"
+        if phase_options:
+            phase_info += "## 用户可选的操作\n"
+            for opt in phase_options:
+                phase_info += (
+                    f"- **{opt.get('label', '')}**: {opt.get('description', '')}\n"
+                )
+            phase_info += "\n"
+        if context_summary:
+            phase_info += f"## 项目上下文\n{context_summary}\n\n"
+
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": phase_info + "（以上是阶段背景，请根据这些信息引导对话）",
+            },
+            {
+                "role": "assistant",
+                "content": phase_prompt or f"好的，让我们开始{phase_name}。",
+            },
+        ]
+
+        # 注入历史对话
+        if conversation_history:
+            for msg in conversation_history[-10:]:
+                if msg.get("role") in ("user", "assistant"):
+                    messages.append(msg)
+
+        # 当前用户消息
+        messages.append({"role": "user", "content": user_message})
+
+        return messages
+
+    @staticmethod
+    def director_intent_response(
+        intent: str,
+        user_message: str,
+        context_summary: str = "",
+        available_tools: Optional[List[str]] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+    ) -> List[Dict[str, str]]:
+        """构建 Director 意图响应 prompt。
+
+        无 workflow 匹配时，根据识别到的意图和上下文，
+        用 LLM 生成智能回复（而非硬编码的"请问您具体想做什么"）。
+        """
+        tools_desc = ""
+        if available_tools:
+            tools_desc = (
+                "\n## 你可以调用的工具\n"
+                + "\n".join(f"- {t}" for t in available_tools)
+                + "\n"
+            )
+
+        system = (
+            "你是 OpenWrite 创作助手，一位经验丰富的小说编辑。\n"
+            "用户表达了一个创作意图，但当前没有匹配到具体的工作流。\n"
+            "你的职责是：\n"
+            "1. 确认你理解了用户的意图\n"
+            "2. 根据意图和上下文，给出具体的、可操作的建议\n"
+            "3. 如果缺少关键信息（如项目未选择），明确告知用户下一步\n",
+            "4. 如果可以直接帮助，就直接开始工作\n\n"
+            "回复规则：\n"
+            "- 简洁有力，不超过 200 字\n"
+            "- 给出 1-3 个具体的下一步建议\n"
+            "- 使用 Markdown 格式\n"
+            f"{tools_desc}"
+        )
+
+        context_part = ""
+        if context_summary:
+            context_part = f"\n## 项目上下文\n{context_summary}\n"
+
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": system},
+        ]
+
+        if conversation_history:
+            for msg in conversation_history[-10:]:
+                if msg.get("role") in ("user", "assistant"):
+                    messages.append(msg)
+
+        user_content = (
+            f"## 识别到的意图\n{intent}\n"
+            f"{context_part}"
+            f"## 用户消息\n{user_message}"
+        )
+        messages.append({"role": "user", "content": user_content})
+
+        return messages
+
+    @staticmethod
+    def director_tool_selection(
+        user_message: str,
+        available_tools: List[Dict[str, Any]],
+        context_summary: str,
+    ) -> List[Dict[str, str]]:
+        """Build prompt for LLM-driven tool selection.
+        
+        Args:
+            user_message: 用户输入
+            available_tools: 可用工具列表（OpenAI function schema 格式）
+            context_summary: 上下文摘要
+        
+        Returns:
+            OpenAI format messages
+        """
+        import json
+        
+        tools_json = json.dumps(available_tools, ensure_ascii=False, indent=2)
+        
+        system_prompt = f"""你是 OpenWrite 的主控 Agent。根据用户请求，分析意图并选择合适的工具执行。
+
+## 可用工具
+{tools_json}
+
+## 当前上下文
+{context_summary or "无额外上下文"}
+
+## 输出要求
+你必须输出 JSON 格式，包含以下字段：
+
+```json
+{{
+  "reasoning": "分析用户意图，解释为什么选择这些工具",
+  "selected_tools": [
+    {{"name": "工具名称", "args": {{"参数名": "参数值"}}}}
+  ],
+  "response_to_user": "可选：直接回复用户的话（如无需工具或需要补充说明）"
+}}
+```
+
+## 规则
+1. 如果用户只是闲聊或打招呼，不选择任何工具，直接在 response_to_user 中回复
+2. 根据用户意图选择最相关的工具，不要选择无关工具
+3. 如果需要多个工具，按执行顺序排列
+4. 工具参数根据用户输入合理推断
+5. 确保输出是有效的 JSON"""
+        
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
         ]

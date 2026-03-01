@@ -1,10 +1,16 @@
 """Agent workflow simulator (Director -> Librarian -> LoreChecker).
 支持 LLM 模式（opt-in）：通过 llm_client + router 将 LLM 能力传递给各 Agent。
 不传入 llm_client 时保持原有规则模拟行为。
+
+.. deprecated:: 3.0
+    请使用 PipelineSimulatorV2（tools.agents.pipeline_v2）替代。
+    PipelineSimulatorV2 提供更好的 Human-in-Loop 支持和渐进式压缩。
+    AgentSimulator 将在 v4.0 版本中移除。
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -54,7 +60,11 @@ class SimulationResult:
 
 
 class AgentSimulator:
-    """Runs a local multi-agent simulation pipeline."""
+    """Runs a local multi-agent simulation pipeline.
+    
+    .. deprecated:: 3.0
+        请使用 PipelineSimulatorV2 替代。
+    """
 
     def __init__(
         self,
@@ -64,6 +74,12 @@ class AgentSimulator:
         llm_client: Optional["LLMClient"] = None,
         router: Optional["ModelRouter"] = None,
     ):
+        warnings.warn(
+            "AgentSimulator 已废弃，请使用 PipelineSimulatorV2。"
+            "将在 v4.0 版本中移除。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.project_dir = project_dir
         self.novel_id = novel_id
         self.style_id = style_id
