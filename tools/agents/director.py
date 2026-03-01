@@ -772,6 +772,8 @@ class DirectorAgent:
         if self._persistence:
             self._persistence.save_session(session.model_dump())
 
+        return response
+
     def _get_or_create_session(
         self,
         session_id: Optional[str],
