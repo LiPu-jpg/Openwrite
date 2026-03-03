@@ -1,6 +1,7 @@
 ---
 name: world
 description: 世界观管理功能模块
+trigger: /world
 triggers:
   - "世界观"
   - "世界设定"
@@ -11,6 +12,9 @@ triggers:
   - "世界规则"
   - "设定约束"
   - "冲突检查"
+  - "查看世界观"
+  - "世界观管理"
+  - "世界"
 ---
 
 # World Skill

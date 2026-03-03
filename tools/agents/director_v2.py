@@ -89,7 +89,13 @@ class SkillBasedDirector:
         self._tool_executor = None
         self._main_prompt = None
         self._sessions: Dict[str, Any] = {}
-
+        
+        # Session 持久化目录
+        self._sessions_dir = self.project_root / "data" / "sessions"
+        self._sessions_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 启动时加载持久化的 sessions
+        self._load_sessions()
     # ============================================================
     # 延迟加载属性
     # ============================================================
@@ -145,6 +151,727 @@ class SkillBasedDirector:
 """
 
     # ============================================================
+    # Agentic 能力：LLM 自主生成回复
+    # ============================================================
+
+    def _build_agent_system_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
+        """构建 Director Agent 的系统提示词。
+        
+        Args:
+            context: 上下文数据
+            
+        Returns:
+            系统提示词字符串
+        """
+        context = context or {}
+        
+        # 获取可用功能
+        skills = self.skill_registry.list_all()
+        skills_desc = "\n".join([
+            f"- **{s.name}**: {s.description[:80]}{'...' if len(s.description) > 80 else ''}"
+            for s in skills
+        ])
+        
+        # 获取项目信息
+        project_info = f"小说ID: {self.novel_id or '未设置'}"
+        if self.novel_id:
+            # 尝试获取一些基本信息
+            outline = self.load_context("outline")
+            characters = self.load_context("characters")
+            if outline:
+                project_info += f"\n大纲状态: 已配置"
+            if characters:
+                project_info += f"\n角色数: {characters.count(',') + 1 if ',' in characters else 1}"
+        
+        return f"""# OpenWrite 创作助手
+
+你是 OpenWrite 的核心 AI 助手，帮助用户进行小说创作。
+
+## 当前项目
+{project_info}
+
+## 可用功能
+{skills_desc}
+
+## 你的能力
+
+1. **回答问题**：关于项目、角色、大纲、世界观等
+2. **引导创作**：帮助用户开始写作、创建大纲等
+3. **查询数据**：可以读取项目文件和查询数据
+
+## 回复原则
+
+1. 简洁友好，直接回答用户问题
+2. 如果用户想执行创作任务，引导他们使用相应功能
+3. 如果被问到具体数据（角色、大纲等），说明你可以查询
+4. 不要编造数据，如果不确定就说需要查询
+"""
+
+    def _generate_llm_response(
+        self,
+        user_message: str,
+        session: "ConversationSession",
+        context: Optional[Dict[str, Any]] = None,
+    ) -> "DirectorResponse":
+        """让 LLM 生成回复（支持 Function Calling）。
+        
+        Agentic Loop:
+        1. LLM 决定是否调用工具
+        2. 如果调用工具，执行后继续
+        3. 直到 LLM 生成最终回复
+        
+        Args:
+            user_message: 用户消息
+            session: 会话对象
+            context: 上下文数据
+            
+        Returns:
+            Director 响应
+        """
+        from tools.models.intent import DirectorResponse, TaskIntent
+        from tools.llm.router import TaskType
+        from skills.tools.schemas import DIRECTOR_TOOLS
+        import json
+        
+        if not self._llm_client or not self._router:
+            return self._fallback_welcome_response(session)
+        
+        MAX_ITERATIONS = 10
+        MAX_TOOL_CALLS = 5  # 最多调用 5 次工具
+        tool_call_count = 0
+        
+        try:
+            # 构建系统提示词
+            system_prompt = self._build_agent_system_prompt(context)
+            # 添加工具调用指导
+            system_prompt += """
+
+## 🔴 工具调用规则 [CRITICAL - 必须遵守]
+
+### 什么时候必须调用工具
+
+| 用户请求 | 必须调用的工具 | 示例 |
+|---------|--------------|------|
+| "创建大纲" / "新建大纲" / "写个大纲" | write_file | write_file(path="data/novels/my_novel/outline/hierarchy.yaml", content="...") |
+| "写第X章" / "生成章节" / "开始写作" | call_writer | call_writer(chapter_id="ch_001", objective="推进主线") |
+| "有什么角色" / "角色列表" | query_characters | query_characters() |
+| "大纲是什么" / "查看大纲" | query_outline | query_outline() |
+| "创建角色" / "添加人物" | write_file | write_file(path="data/novels/my_novel/characters/char_xxx.yaml", content="...") |
+| "添加世界观数据" / "创建地点" | write_file | write_file(path="data/novels/my_novel/world/entities.yaml", content="...") |
+
+### 🚫 禁止行为
+
+1. **禁止**只说"我已经创建了X"或"正在为你生成Y"而不实际调用工具
+2. **禁止**在没调用工具的情况下告诉用户"完成了"
+3. **禁止**只返回对话回复而不执行实际操作
+
+### ✅ 正确做法
+
+1. 用户说"创建大纲" → 先调用 write_file → 等待结果 → 根据结果回复
+2. 用户说"写第1章" → 先调用 call_writer → 等待结果 → 根据结果回复
+3. 用户说"有什么角色" → 先调用 query_characters → 根据查询结果回复
+
+### 💡 关键原则
+
+用户期望的是**实际执行**，而不是**描述执行**。
+如果你只是在聊天中说"创建了"，用户看不到任何文件，这是完全错误的！
+"""
+            # 构建消息历史
+            messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+            
+            # 添加对话历史
+            history = session.message_history[-20:]
+            messages.extend(history)
+            
+            # 添加当前用户消息
+            messages.append({"role": "user", "content": user_message})
+            
+            # Agentic Loop
+            routes = self._router.get_routes(TaskType.REASONING)
+            
+            for iteration in range(MAX_ITERATIONS):
+                # 如果已经调用过工具，后续不再传 tools，强制生成回复
+                use_tools = DIRECTOR_TOOLS if tool_call_count < MAX_TOOL_CALLS else None
+                
+                # 调用 LLM
+                response = self._llm_client.complete_with_fallback(
+                    messages=messages,
+                    routes=routes,
+                    tools=use_tools,
+                )
+                
+                # 检查是否有工具调用
+                if response.tool_calls and tool_call_count < MAX_TOOL_CALLS:
+                    tool_call_count += 1
+                    # 处理每个工具调用
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_args_str = tool_call["arguments"]
+                        tool_id = tool_call["id"]
+                        
+                        try:
+                            tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
+                        except json.JSONDecodeError:
+                            tool_args = {}
+                        
+                        # 执行工具
+                        tool_result = self._execute_tool_for_llm(tool_name, tool_args)
+                        
+                        # 添加 assistant 消息（带 tool_calls）
+                        messages.append({
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [{
+                                "id": tool_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": tool_args_str
+                                }
+                            }]
+                        })
+                        
+                        # 添加 tool 结果消息
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "content": json.dumps(tool_result, ensure_ascii=False)
+                        })
+                    
+                    # 继续循环，让 LLM 处理工具结果
+                    continue
+                
+                # 没有工具调用，或已达到工具调用上限，生成最终回复
+                if response.content:
+                    return DirectorResponse(
+                        success=True,
+                        message=response.content,
+                        detected_intent=TaskIntent.GENERAL_CHAT,
+                        confidence=0.9,
+                        session_id=session.session_id,
+                    )
+                else:
+                    # 无内容，继续循环
+                    continue
+            
+            # 达到最大迭代次数，尝试不带 tools 生成最终回复
+            logger.warning("Agentic loop 达到最大迭代次数")
+            
+            try:
+                final_response = self._llm_client.complete_with_fallback(
+                    messages=messages,
+                    routes=routes,
+                    # 不传 tools，强制生成最终回复
+                )
+                if final_response and final_response.content:
+                    return DirectorResponse(
+                        success=True,
+                        message=final_response.content,
+                        detected_intent=TaskIntent.GENERAL_CHAT,
+                        confidence=0.8,
+                        session_id=session.session_id,
+                    )
+            except Exception as e:
+                logger.warning(f"Final response generation failed: {e}")
+            
+            return DirectorResponse(
+                success=True,
+                message="抱歉，处理您的请求时遇到了一些复杂情况。请尝试简化您的问题，或者直接告诉我您想做什么。\n\n您可以尝试：\n• \"写第1章\" - 生成章节\n• \"创建大纲\" - 创建故事大纲\n• \"创建角色\" - 添加角色",
+                detected_intent=TaskIntent.GENERAL_CHAT,
+                confidence=0.5,
+                session_id=session.session_id,
+            )
+            
+        except Exception as e:
+            logger.warning(f"LLM 生成回复失败: {e}")
+            return self._fallback_welcome_response(session)
+
+    def _execute_tool_for_llm(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """执行 LLM 请求的工具调用。
+        
+        支持两种类型：
+        1. ToolExecutor 工具（文件、查询等）
+        2. 子 Agent 调用（Writer, Reviewer, Stylist）
+        
+        Args:
+            tool_name: 工具名称
+            arguments: 工具参数
+            
+        Returns:
+            工具执行结果
+        """
+        from skills.tools.schemas import SUB_AGENT_TOOLS, SKILL_TOOLS
+        
+        # 检查是否是子 Agent 调用
+        if tool_name in SUB_AGENT_TOOLS:
+            return self._execute_sub_agent(tool_name, arguments)
+        
+        # 检查是否是 Skill 调用
+        if tool_name in SKILL_TOOLS:
+            return self._execute_skill_tool(tool_name, arguments)
+        
+        # 普通 ToolExecutor 工具
+        result = self.execute_tool(tool_name, arguments)
+        return result
+    def _execute_sub_agent(self, agent_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """执行子 Agent 调用。
+        
+        Args:
+            agent_name: Agent 名称（call_writer, call_reviewer, call_stylist）
+            arguments: 调用参数
+            
+        Returns:
+            执行结果
+        """
+        try:
+            if agent_name == "call_writer":
+                return self._call_writer(
+                    chapter_id=arguments.get("chapter_id", ""),
+                    objective=arguments.get("objective", ""),
+                    context_keys=arguments.get("context_keys", ["outline", "characters"]),
+                )
+            elif agent_name == "call_reviewer":
+                return self._call_reviewer(
+                    content=arguments.get("content", ""),
+                    check_types=arguments.get("check_types", ["all"]),
+                )
+            elif agent_name == "call_stylist":
+                return self._call_stylist(
+                    content=arguments.get("content", ""),
+                    style_id=arguments.get("style_id"),
+                )
+            else:
+                return {"success": False, "error": f"Unknown sub-agent: {agent_name}"}
+        except Exception as e:
+            logger.warning(f"Sub-agent {agent_name} failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _execute_skill_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """执行 Skill 工具调用。
+        
+        Args:
+            tool_name: 工具名称（目前只有 use_skill）
+            arguments: 调用参数
+            
+        Returns:
+            执行结果
+        """
+        if tool_name != "use_skill":
+            return {"success": False, "error": f"Unknown skill tool: {tool_name}"}
+        
+        skill_name = arguments.get("skill_name")
+        action = arguments.get("action")
+        params = arguments.get("parameters", {})
+        
+        if not skill_name:
+            return {"success": False, "error": "skill_name is required"}
+        
+        if not action:
+            return {"success": False, "error": "action is required"}
+        
+        # 获取 Skill
+        skill = self.skill_registry.get(skill_name)
+        if not skill:
+            return {"success": False, "error": f"Skill not found: {skill_name}"}
+        
+        # 获取 Skill 的指令内容
+        skill_content = skill.content[:2000] if skill.content else "No content available"
+        
+        # 根据 action 执行相应操作
+        try:
+            if action == "query":
+                # 查询 Skill 相关数据
+                return self._query_skill_data(skill_name, params)
+            elif action == "describe":
+                # 返回 Skill 描述
+                return {
+                    "success": True,
+                    "skill_name": skill_name,
+                    "description": skill.description,
+                    "content_preview": skill_content[:500] + "..." if len(skill_content) > 500 else skill_content,
+                    "prompts": skill.list_prompts(),
+                    "workflows": skill.list_workflows(),
+                }
+            else:
+                # 默认返回 Skill 信息
+                return {
+                    "success": True,
+                    "skill_name": skill_name,
+                    "action": action,
+                    "description": skill.description,
+                    "content": skill_content,
+                    "available_prompts": skill.list_prompts(),
+                }
+        except Exception as e:
+            logger.warning(f"Skill tool {skill_name} failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _query_skill_data(self, skill_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """查询 Skill 相关数据。
+        
+        Args:
+            skill_name: Skill 名称
+            params: 查询参数
+            
+        Returns:
+            查询结果
+        """
+        # 根据 Skill 类型查询相应数据
+        if skill_name == "writing":
+            return {
+                "success": True,
+                "data": {
+                    "manuscript": self.load_context("manuscript"),
+                    "style": self.load_context("style"),
+                }
+            }
+        elif skill_name == "outline":
+            return {
+                "success": True,
+                "data": {
+                    "outline": self.load_context("outline"),
+                }
+            }
+        elif skill_name == "character":
+            return {
+                "success": True,
+                "data": {
+                    "characters": self.load_context("characters"),
+                }
+            }
+        elif skill_name == "world":
+            return {
+                "success": True,
+                "data": {
+                    "world": self.load_context("world"),
+                }
+            }
+        elif skill_name == "foreshadowing":
+            return {
+                "success": True,
+                "data": {
+                    "foreshadowing": self.load_context("foreshadowing"),
+                }
+            }
+        elif skill_name == "style":
+            return {
+                "success": True,
+                "data": {
+                    "style": self.load_context("style"),
+                }
+            }
+        else:
+            return {"success": False, "error": f"Unknown skill: {skill_name}"}
+
+    def _call_writer(
+        self,
+        chapter_id: str,
+        objective: str,
+        context_keys: List[str],
+    ) -> Dict[str, Any]:
+        """调用 Writer Agent 生成草稿。
+        
+        Args:
+            chapter_id: 章节ID
+            objective: 写作目标
+            context_keys: 要加载的上下文键
+            
+        Returns:
+            生成结果
+        """
+        from tools.agents.librarian import LibrarianAgent
+        
+        if not chapter_id:
+            return {"success": False, "error": "chapter_id is required"}
+        
+        # 加载上下文
+        context = {}
+        for key in context_keys:
+            value = self.load_context(key)
+            if value:
+                context[key] = value
+        
+        # 创建 Writer
+        writer = LibrarianAgent(
+            llm_client=self._llm_client,
+            router=self._router,
+        )
+        
+        # 生成草稿
+        result = writer.generate_chapter(
+            chapter_id=chapter_id,
+            objective=objective,
+            context=context,
+        )
+        
+        # 提取草稿文本
+        draft_text = result.draft if hasattr(result, 'draft') else str(result)
+        
+        return {
+            "success": True,
+            "chapter_id": chapter_id,
+            "draft": draft_text[:2000] + "..." if len(draft_text) > 2000 else draft_text,
+            "draft_length": len(draft_text),
+        }
+
+    def _call_reviewer(
+        self,
+        content: str,
+        check_types: List[str],
+    ) -> Dict[str, Any]:
+        """调用 Reviewer Agent 进行逻辑检查。
+        
+        Args:
+            content: 要检查的内容
+            check_types: 检查类型
+            
+        Returns:
+            检查结果
+        """
+        from tools.agents.lore_checker import LoreCheckerAgent
+        
+        if not content:
+            return {"success": False, "error": "content is required"}
+        
+        # 创建 Reviewer
+        reviewer = LoreCheckerAgent(
+            llm_client=self._llm_client,
+            router=self._router,
+        )
+        
+        # 执行检查
+        result = reviewer.check_draft(
+            draft=content,
+            forbidden=[],
+            required=[],
+        )
+        
+        return {
+            "success": True,
+            "passed": result.passed,
+            "issues": result.errors + result.warnings,
+            "suggestions": [],
+        }
+
+    def _call_stylist(
+        self,
+        content: str,
+        style_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """调用 Stylist Agent 进行风格润色。
+        
+        Args:
+            content: 要润色的内容
+            style_id: 风格ID
+            
+        Returns:
+            润色结果
+        """
+        from tools.agents.stylist import StylistAgent
+        
+        if not content:
+            return {"success": False, "error": "content is required"}
+        
+        # 创建 Stylist
+        stylist = StylistAgent(
+            llm_client=self._llm_client,
+            router=self._router,
+            project_root=self.project_root,
+            novel_id=self.novel_id or "",
+        )
+        
+        # 执行润色 (polish 接受 text 参数，不是 content)
+        result = stylist.polish(
+            text=content,
+            novel_id=style_id or self.novel_id,
+        )
+        
+        # 提取润色后的文本
+        polished_text = result.polished if hasattr(result, 'polished') else str(result)
+        
+        return {
+            "success": True,
+            "polished": polished_text[:2000] + "..." if len(polished_text) > 2000 else polished_text,
+            "polished_length": len(polished_text),
+        }
+    def _fallback_welcome_response(self, session: "ConversationSession") -> "DirectorResponse":
+        """无 LLM 时的欢迎回复。
+        
+        Args:
+            session: 会话对象
+            
+        Returns:
+            固定的欢迎消息响应
+        """
+        from tools.models.intent import DirectorResponse, SuggestedAction, TaskIntent
+        
+        return DirectorResponse(
+            success=True,
+            message="您好！我是 OpenWrite 创作助手。\n\n我可以：写章节、创建大纲、管理角色、埋设伏笔。\n\n请告诉我您想做什么？",
+            detected_intent=TaskIntent.GENERAL_CHAT,
+            confidence=0.5,
+            session_id=session.session_id,
+            suggested_actions=[
+                SuggestedAction(
+                    action="write_chapter",
+                    label="写章节",
+                    description="根据大纲生成章节内容",
+                ),
+                SuggestedAction(
+                    action="outline_assist",
+                    label="创建大纲",
+                    description="创建或修改大纲",
+                ),
+                SuggestedAction(
+                    action="project_init",
+                    label="初始化项目",
+                    description="初始化新小说项目",
+                ),
+            ],
+        )
+
+
+    def _fallback_help_response(self, session: "ConversationSession") -> "DirectorResponse":
+        """无 LLM 且无 Skill 匹配时的帮助回复。
+        
+        Args:
+            session: 会话对象
+            
+        Returns:
+            帮助消息响应
+        """
+        from tools.models.intent import DirectorResponse, SuggestedAction, TaskIntent
+        
+        return DirectorResponse(
+            success=True,
+            message=("无法识别您的请求。\n\n"
+                     "可用指令：\n"
+                     "- 写章节：\"写第1章\" 或 \"/write\"\n"
+                     "- 大纲：\"创建大纲\" 或 \"/outline\"\n"
+                     "- 角色：\"创建角色\" 或 \"/character\"\n"
+                     "- 世界观：\"查看世界观\" 或 \"/world\"\n"
+                     "- 伏笔：\"伏笔管理\" 或 \"/foreshadowing\"\n"
+                     "- 风格：\"风格分析\" 或 \"/style\"\n"
+                     "- 项目：\"初始化项目\" 或 \"/project\"\n\n"
+                     "请告诉我您想做什么？"),
+            detected_intent=TaskIntent.UNKNOWN,
+            confidence=0.0,
+            session_id=session.session_id,
+        )
+    
+    def _execute_skill_fallback(
+        self,
+        skill: "Skill",
+        user_message: str,
+        session: "ConversationSession",
+        context: Dict[str, Any],
+    ) -> "DirectorResponse":
+        """执行 Skill 的基础响应（无工作流定义时）。
+        
+        Args:
+            skill: 匹配的 Skill
+            user_message: 用户消息
+            session: 会话对象
+            context: 上下文数据
+            
+        Returns:
+            Skill 响应
+        """
+        from tools.models.intent import DirectorResponse, SuggestedAction, TaskIntent
+        from skills.skill import Skill
+        
+        # 获取 Skill 描述和内容
+        skill_desc = skill.description
+        skill_content = skill.content[:500] if skill.content else ""
+        
+        # 构建响应消息
+        message = f"**{skill.name}**\n\n{skill_desc}\n\n"
+        
+        # 添加可用操作提示
+        if skill.list_workflows():
+            message += f"可用工作流: {', '.join(skill.list_workflows())}\n"
+        if skill.list_prompts():
+            message += f"可用提示词: {', '.join(skill.list_prompts())}\n"
+        
+        # 根据 Skill 类型添加特定提示
+        if skill.name == "character":
+            message += "\n您可以：创建角色、查询角色、更新角色状态"
+            suggested_actions = [
+                SuggestedAction(action="create_character", label="创建角色", description="创建新角色"),
+                SuggestedAction(action="query_character", label="查询角色", description="查询现有角色"),
+            ]
+        elif skill.name == "world":
+            message += "\n您可以：添加实体、创建关系、冲突检查"
+            suggested_actions = [
+                SuggestedAction(action="add_entity", label="添加实体", description="添加世界观实体"),
+                SuggestedAction(action="check_conflict", label="冲突检查", description="检查世界观一致性"),
+            ]
+        elif skill.name == "foreshadowing":
+            message += "\n您可以：埋设伏笔、回收伏笔、查看待回收伏笔"
+            suggested_actions = [
+                SuggestedAction(action="plant_foreshadow", label="埋设伏笔", description="埋设新伏笔"),
+                SuggestedAction(action="list_pending", label="待回收伏笔", description="查看待回收伏笔"),
+            ]
+        elif skill.name == "style":
+            message += "\n您可以：初始化风格、合成风格、分析文本"
+            suggested_actions = [
+                SuggestedAction(action="init_style", label="初始化风格", description="初始化作品风格"),
+                SuggestedAction(action="compose_style", label="合成风格", description="合成三层风格"),
+            ]
+        else:
+            suggested_actions = []
+        
+        return DirectorResponse(
+            success=True,
+            message=message,
+            detected_intent=self._map_skill_to_intent(skill.name),
+            detected_workflow=f"{skill.name}_default",
+            confidence=0.8,
+            session_id=session.session_id,
+            suggested_actions=suggested_actions,
+        )
+    
+    def _map_skill_to_intent(self, skill_name: str) -> "TaskIntent":
+        """将 Skill 名称映射到 TaskIntent。
+        
+        Args:
+            skill_name: Skill 名称
+            
+        Returns:
+            对应的 TaskIntent
+        """
+        from tools.models.intent import TaskIntent
+        
+        skill_to_intent = {
+            "writing": TaskIntent.WRITE_CHAPTER,
+            "outline": TaskIntent.OUTLINE_ASSIST,
+            "character": TaskIntent.CHARACTER_CREATE,
+            "world": TaskIntent.LORE_QUERY,
+            "foreshadowing": TaskIntent.FORESHADOW_PLANT,
+            "style": TaskIntent.STYLE_COMPOSE,
+            "project": TaskIntent.PROJECT_INIT,
+        }
+        
+        return skill_to_intent.get(skill_name, TaskIntent.UNKNOWN)
+
+    def _get_default_prompt(self) -> str:
+        """获取默认提示词。"""
+        return """# OpenWrite 创作助手
+
+你是 OpenWrite 写作系统的核心主控。你的任务是：
+1. 理解用户的创作意图
+2. 根据意图选择合适的功能模块
+3. 协调各个子功能完成用户请求
+
+## 工作原则
+
+1. **意图优先**：先理解用户想做什么，再选择功能
+2. **渐进交互**：复杂任务分步完成，每步确认用户意图
+3. **上下文感知**：根据当前小说项目的状态调整行为
+4. **工具查询**：不确定数据时，主动使用工具查询
+"""
+
+    # ============================================================
     # 意图识别（基于 LLM，移除硬匹配）
     # ============================================================
 
@@ -173,6 +900,55 @@ class SkillBasedDirector:
         )
 
         context = context or {}
+        skills = list(self.skill_registry._skills.values())
+
+        # 只使用 LLM 进行意图识别，不做任何关键词/命令匹配
+        if self._llm_client and self._router:
+            try:
+                from tools.agents.intent_classifier import LLMIntentClassifier
+
+                classifier = LLMIntentClassifier(
+                    llm_client=self._llm_client,
+                    router=self._router,
+                )
+
+                # 获取对话历史
+                history = []
+                if hasattr(self, '_sessions') and context.get("session_id"):
+                    session = self._sessions.get(context["session_id"])
+                    if session:
+                        history = session.message_history
+
+                result = classifier.classify(
+                    user_message=user_message,
+                    skills=skills,
+                    history=history,
+                    context=context,
+                )
+
+                return IntentDecision(
+                    intent=result["intent"],
+                    confidence=result["confidence"],
+                    confidence_score=result["confidence_score"],
+                    matched_keywords=result.get("entity_references", []),
+                    reasoning=result.get("reasoning", ""),
+                    tool_parameters={"skill": result.get("skill")} if result.get("skill") else {},
+                    entity_references=result.get("entity_references", []),
+                )
+
+            except Exception as e:
+                logger.warning(f"LLM 意图识别失败: {e}")
+        
+        # 无 LLM 或识别失败：返回 GENERAL_CHAT，让 LLM 直接处理对话
+        logger.info("无 LLM 或意图识别失败，使用 GENERAL_CHAT")
+        return IntentDecision(
+            intent=TaskIntent.GENERAL_CHAT,
+            confidence=IntentConfidence.LOW,
+            confidence_score=0.0,
+            matched_keywords=[],
+            reasoning="",
+            entity_references=self._extract_entities(user_message),
+        )
         skills = list(self.skill_registry._skills.values())
 
         # 1. 检查命令触发器（快速路径，不调用 LLM）
@@ -226,45 +1002,14 @@ class SkillBasedDirector:
             except Exception as e:
                 logger.warning(f"LLM 意图识别失败: {e}")
                 # 继续使用 fallback
-
-        # 3. Fallback: 无 LLM 时使用简化版关键词匹配
-        # 这个 fallback 只作为无 LLM 时的备选方案
-        best_skill = None
-        best_score = 0
-        for skill in skills:
-            score = 0
-            for trigger in skill.triggers:
-                # 使用更严格的匹配：触发词必须完整出现
-                if trigger.lower() in user_message.lower():
-                    # 检查是否是明确请求（而不是提及）
-                    trigger_words = ["创建", "生成", "写", "新建", "添加", "初始化", "修改", "查看", "查询"]
-                    is_request = any(w in user_message for w in trigger_words)
-                    if is_request:
-                        score += 2
-                    else:
-                        score += 1
-            if score > best_score:
-                best_score = score
-                best_skill = skill
-
-        if best_skill and best_score >= 2:
-            return IntentDecision(
-                intent=self._map_skill_to_intent(best_skill.name),
-                confidence=IntentConfidence.MEDIUM,
-                confidence_score=0.6,
-                matched_keywords=best_skill.triggers[:3],
-                reasoning=f"Fallback 匹配到功能模块: {best_skill.name}",
-                tool_parameters={"skill": best_skill.name},
-                entity_references=self._extract_entities(user_message),
-            )
-
-        # 4. 最终 Fallback: 使用通用对话
+        # 3. 无 LLM 可用：返回错误，提示用户配置 LLM 或使用命令触发器
+        logger.warning("LLM 未配置，无法进行意图识别")
         return IntentDecision(
             intent=TaskIntent.GENERAL_CHAT,
             confidence=IntentConfidence.LOW,
-            confidence_score=0.2,
+            confidence_score=0.0,
             matched_keywords=[],
-            reasoning="未匹配到特定功能，使用通用对话",
+            reasoning="LLM 未配置。请配置 LLM 模型（访问 /settings）或使用命令触发器（如 /write, /outline）。",
             entity_references=self._extract_entities(user_message),
         )
 
@@ -451,28 +1196,55 @@ class SkillBasedDirector:
             ConversationSession,
             DirectorResponse,
             SuggestedAction,
+            TaskIntent,
+            IntentConfidence,
+            IntentDecision,
         )
 
         context = context or {}
 
         # 1. 获取/创建会话
+
+
+        # 1. 获取/创建会话
         session = self._get_or_create_session(session_id, context)
         session.add_message("user", user_message)
 
-        # 2. 意图识别
-        intent = self.classify_intent(user_message, context)
+        # 2. 如果有 LLM，完全由 LLM 决定调用哪个工具（关闭硬匹配）
+        if self._llm_client and self._router:
+            # LLM Agentic 模式：让 LLM 自主决定调用哪个 Skill/工具
+            response = self._generate_llm_response(user_message, session, context)
+        else:
+            # 无 LLM 时，使用规则引擎 fallback（硬匹配）
+            matched_skill = self.skill_registry.match_trigger(user_message)
+            
+            if matched_skill:
+                intent = IntentDecision(
+                    intent=self._map_skill_to_intent(matched_skill.name),
+                    confidence=IntentConfidence.HIGH,
+                    confidence_score=0.9,
+                    tool_parameters={"skill": matched_skill.name},
+                    matched_keywords=[matched_skill.name],
+                    reasoning=f"Skill 触发器匹配: {matched_skill.name}",
+                )
+                workflow_info = self._detect_workflow(intent, user_message, context)
+                if workflow_info:
+                    response = self._execute_workflow(workflow_info, user_message, session, intent, context)
+                else:
+                    response = self._execute_skill_fallback(matched_skill, user_message, session, context)
+            else:
+                response = self._fallback_help_response(session)
 
-        # 3. 检测工作流
-        workflow = self._detect_workflow(intent, user_message, context)
+        # 3. 保存 agent 回复到会话
+        if response.message:
+            session.add_message("assistant", response.message)
+            if len(session.message_history) >= 2:
+                self._save_session(session.session_id)
 
-        if not workflow:
-            # 无匹配工作流，使用默认处理
-            return self._process_without_workflow(
-                user_message, session, intent, context
-            )
+        return response
 
-        # 4. 执行工作流
-        return self._execute_workflow(workflow, user_message, session, intent, context)
+    # 向后兼容别名
+    process_request_with_workflow = process_request
 
     def _get_or_create_session(
         self,
@@ -497,6 +1269,8 @@ class SkillBasedDirector:
         )
 
         self._sessions[new_session.session_id] = new_session
+        # 保存到磁盘
+        self._save_session(new_session.session_id)
         return new_session
 
     def _detect_workflow(
@@ -506,6 +1280,9 @@ class SkillBasedDirector:
         context: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
         """检测工作流。
+        
+        只使用 LLM 识别的意图，不使用关键词匹配。
+        如果没有 LLM，返回 None，让 process_request 走 LLM 对话路径。
 
         Args:
             intent: 意图识别结果
@@ -515,12 +1292,11 @@ class SkillBasedDirector:
         Returns:
             工作流定义，无匹配返回 None
         """
-        # 根据意图选择工作流
+        # 只使用 LLM 识别的意图
         skill_name = intent.tool_parameters.get("skill")
         if skill_name:
             skill = self.skill_registry.get(skill_name)
             if skill:
-                # 尝试获取工作流
                 workflow = skill.get_workflow("main")
                 if workflow:
                     return {
@@ -528,8 +1304,6 @@ class SkillBasedDirector:
                         "workflow": workflow,
                         "workflow_id": f"{skill_name}_main",
                     }
-
-                # 使用默认工作流
                 return {
                     "skill": skill,
                     "workflow": None,
@@ -537,7 +1311,6 @@ class SkillBasedDirector:
                 }
 
         return None
-
     def _execute_workflow(
         self,
         workflow_info: Dict[str, Any],
@@ -582,6 +1355,22 @@ class SkillBasedDirector:
             return self._execute_style_workflow(
                 user_message, session, intent, context, skill
             )
+        elif skill.name == "project":
+            return self._execute_project_workflow(
+                user_message, session, intent, context, skill
+            )
+        elif skill.name == "character":
+            return self._execute_character_workflow(
+                user_message, session, intent, context, skill
+            )
+        elif skill.name == "world":
+            return self._execute_world_workflow(
+                user_message, session, intent, context, skill
+            )
+        elif skill.name == "foreshadowing":
+            return self._execute_foreshadowing_workflow(
+                user_message, session, intent, context, skill
+            )
         else:
             # 通用技能响应
             return DirectorResponse(
@@ -599,7 +1388,6 @@ class SkillBasedDirector:
                     )
                 ],
             )
-
     def _execute_writing_workflow(
         self,
         user_message: str,
@@ -656,19 +1444,155 @@ class SkillBasedDirector:
         context: Dict[str, Any],
         skill: "Skill",
     ) -> "DirectorResponse":
-        """执行大纲工作流。"""
+        """执行大纲工作流。
+        
+        支持的操作：
+        - 创建大纲：从零创建四级大纲
+        - 修改大纲：修改现有大纲
+        - 查看大纲：查看大纲结构
+        """
         from tools.models.intent import DirectorResponse, SuggestedAction
-
-        # 加载大纲
+        
+        # 加载现有大纲
         outline = self.load_context("outline")
-
-        message = "大纲管理\n\n"
-        message += f"当前状态：{outline or '暂无大纲'}\n\n"
-        message += "请选择操作：\n"
-        message += "1. 创建大纲\n"
-        message += "2. 修改大纲\n"
-        message += "3. 查看大纲结构\n"
-
+        
+        # 获取工作流状态
+        workflow_state = session.workflow_context.get("outline_workflow", {})
+        current_phase = workflow_state.get("phase", "menu")
+        
+        # 根据当前阶段和用户输入决定下一步
+        user_lower = user_message.lower().strip()
+        
+        # 如果是新会话或用户想看菜单
+        if current_phase == "menu" or user_lower in ["大纲", "大纲管理", "outline"]:
+            # 检查是否已有大纲
+            if outline:
+                message = f"大纲管理\n\n当前已有大纲，请选择操作：\n\n"
+                message += f"当前大纲：{outline[:200]}...\n\n" if len(outline) > 200 else f"当前大纲：{outline}\n\n"
+            else:
+                message = "大纲管理\n\n当前暂无大纲，请选择操作：\n\n"
+            
+            message += "1. 创建大纲 — 从零创建四级大纲（总纲→篇纲→节纲→章纲）\n"
+            if outline:
+                message += "2. 修改大纲 — 修改现有大纲\n"
+                message += "3. 查看大纲 — 查看完整大纲结构\n"
+            
+            return DirectorResponse(
+                success=True,
+                message=message,
+                detected_intent=intent.intent,
+                detected_workflow="outline_manage",
+                confidence=intent.confidence_score,
+                session_id=session.session_id,
+                reasoning="大纲管理菜单",
+                suggested_actions=[
+                    SuggestedAction(
+                        action="start_create_outline",
+                        label="创建新大纲",
+                        description="从零开始创建四级大纲",
+                    ),
+                ] + ([
+                    SuggestedAction(
+                        action="view_outline",
+                        label="查看现有大纲",
+                        description="查看当前大纲结构",
+                    ),
+                ] if outline else []),
+            )
+        
+        # 用户想创建大纲
+        if "创建" in user_message or "新建" in user_message or user_lower == "1":
+            # 进入创建流程
+            session.workflow_context["outline_workflow"] = {"phase": "collect_master"}
+            
+            message = "## 创建大纲\n\n"
+            message += "我来帮您创建四级大纲：\n\n"
+            message += "**第一步：确定总纲**\n\n"
+            message += "请告诉我以下信息：\n"
+            message += "- **书名**：小说的名称\n"
+            message += "- **核心主题**：一句话概括全书主题\n"
+            message += "- **结局走向**：大团圆/悲剧/开放式\n"
+            message += "- **预计字数**：如 100 万字\n"
+            
+            return DirectorResponse(
+                success=True,
+                message=message,
+                detected_intent=intent.intent,
+                detected_workflow="outline_create",
+                confidence=intent.confidence_score,
+                session_id=session.session_id,
+                reasoning="开始创建大纲，收集总纲信息",
+            )
+        
+        # 用户想查看大纲
+        if "查看" in user_message or "结构" in user_message or user_lower == "3":
+            if outline:
+                message = f"## 大纲结构\n\n{outline}"
+            else:
+                message = "暂无大纲，请先创建大纲。"
+            
+            return DirectorResponse(
+                success=True,
+                message=message,
+                detected_intent=intent.intent,
+                detected_workflow="outline_view",
+                confidence=intent.confidence_score,
+                session_id=session.session_id,
+                reasoning="查看大纲结构",
+            )
+        
+        # 用户想修改大纲
+        if "修改" in user_message or "调整" in user_message or user_lower == "2":
+            if not outline:
+                message = "暂无大纲，请先创建大纲。"
+            else:
+                message = "## 修改大纲\n\n"
+                message += "请告诉我您想修改哪部分？\n"
+                message += "- 总纲（书名、主题、结局）\n"
+                message += "- 篇纲（大剧情弧）\n"
+                message += "- 节纲（情节单元）\n"
+                message += "- 章纲（具体章节）\n"
+            
+            return DirectorResponse(
+                success=True,
+                message=message,
+                detected_intent=intent.intent,
+                detected_workflow="outline_modify",
+                confidence=intent.confidence_score,
+                session_id=session.session_id,
+                reasoning="修改大纲",
+            )
+        
+        # 如果正在创建大纲流程中，处理用户输入
+        if current_phase == "collect_master":
+            # 保存用户输入的总纲信息
+            session.workflow_context["outline_workflow"]["master_input"] = user_message
+            session.workflow_context["outline_workflow"]["phase"] = "confirm_master"
+            
+            message = f"## 确认总纲信息\n\n"
+            message += f"您提供的信息：\n\n{user_message}\n\n"
+            message += "---\n"
+            message += "请确认是否正确？如需修改请直接告诉我。"
+            
+            return DirectorResponse(
+                success=True,
+                message=message,
+                detected_intent=intent.intent,
+                detected_workflow="outline_create",
+                confidence=intent.confidence_score,
+                session_id=session.session_id,
+                reasoning="确认总纲信息",
+                suggested_actions=[
+                    SuggestedAction(
+                        action="confirm_master",
+                        label="确认，继续规划篇纲",
+                        description="确认总纲，进入篇纲规划",
+                    ),
+                ],
+            )
+        
+        # 默认返回菜单
+        message = "请选择大纲操作：创建大纲 / 修改大纲 / 查看大纲"
         return DirectorResponse(
             success=True,
             message=message,
@@ -676,26 +1600,8 @@ class SkillBasedDirector:
             detected_workflow="outline_manage",
             confidence=intent.confidence_score,
             session_id=session.session_id,
-            reasoning="大纲工作流已启动",
-            suggested_actions=[
-                SuggestedAction(
-                    action="create_outline",
-                    label="创建大纲",
-                    description="从零创建四级大纲",
-                ),
-                SuggestedAction(
-                    action="modify_outline",
-                    label="修改大纲",
-                    description="修改现有大纲",
-                ),
-                SuggestedAction(
-                    action="view_outline",
-                    label="查看大纲",
-                    description="查看大纲结构",
-                ),
-            ],
+            reasoning="大纲管理",
         )
-
     def _execute_style_workflow(
         self,
         user_message: str,
@@ -744,6 +1650,184 @@ class SkillBasedDirector:
             ],
         )
 
+    def _execute_project_workflow(
+        self,
+        user_message: str,
+        session: "ConversationSession",
+        intent: "IntentDecision",
+        context: Dict[str, Any],
+        skill: "Skill",
+    ) -> "DirectorResponse":
+        """执行项目管理工作流。"""
+        from tools.models.intent import DirectorResponse, SuggestedAction
+        
+        # 检查项目状态
+        project_status = "未初始化"
+        if self.novel_id:
+            outline = self.load_context("outline")
+            characters = self.load_context("characters")
+            if outline:
+                project_status = "已配置（有大纲）"
+            elif characters:
+                project_status = "已配置（有角色）"
+            else:
+                project_status = "已初始化（空）"
+        
+        message = f"项目管理\n\n"
+        message += f"当前项目：{self.novel_id or '未设置'}\n"
+        message += f"状态：{project_status}\n\n"
+        message += "请选择操作：\n"
+        message += "1. 初始化新项目\n"
+        message += "2. 查看项目状态\n"
+        message += "3. 配置 LLM\n"
+        
+        return DirectorResponse(
+            success=True,
+            message=message,
+            detected_intent=intent.intent,
+            detected_workflow="project_manage",
+            confidence=intent.confidence_score,
+            session_id=session.session_id,
+            reasoning="项目管理工作流已启动",
+            suggested_actions=[
+                SuggestedAction(
+                    action="init_project",
+                    label="初始化项目",
+                    description="创建新的小说项目",
+                ),
+                SuggestedAction(
+                    action="view_status",
+                    label="查看状态",
+                    description="查看当前项目状态",
+                ),
+            ],
+        )
+
+    def _execute_character_workflow(
+        self,
+        user_message: str,
+        session: "ConversationSession",
+        intent: "IntentDecision",
+        context: Dict[str, Any],
+        skill: "Skill",
+    ) -> "DirectorResponse":
+        """执行角色管理工作流。"""
+        from tools.models.intent import DirectorResponse, SuggestedAction
+        
+        characters = self.load_context("characters")
+        
+        message = "角色管理\n\n"
+        message += f"当前状态：{characters or '暂无角色'}\n\n"
+        message += "请选择操作：\n"
+        message += "1. 创建角色\n"
+        message += "2. 查看角色\n"
+        message += "3. 修改角色\n"
+        
+        return DirectorResponse(
+            success=True,
+            message=message,
+            detected_intent=intent.intent,
+            detected_workflow="character_manage",
+            confidence=intent.confidence_score,
+            session_id=session.session_id,
+            reasoning="角色管理工作流已启动",
+            suggested_actions=[
+                SuggestedAction(
+                    action="create_character",
+                    label="创建角色",
+                    description="添加新角色",
+                ),
+                SuggestedAction(
+                    action="list_characters",
+                    label="查看角色",
+                    description="查看所有角色",
+                ),
+            ],
+        )
+
+    def _execute_world_workflow(
+        self,
+        user_message: str,
+        session: "ConversationSession",
+        intent: "IntentDecision",
+        context: Dict[str, Any],
+        skill: "Skill",
+    ) -> "DirectorResponse":
+        """执行世界观管理工作流。"""
+        from tools.models.intent import DirectorResponse, SuggestedAction
+        
+        world = self.load_context("world")
+        
+        message = "世界观管理\n\n"
+        message += f"当前状态：{world or '暂无世界观设定'}\n\n"
+        message += "请选择操作：\n"
+        message += "1. 添加实体\n"
+        message += "2. 查看世界观\n"
+        message += "3. 检查冲突\n"
+        
+        return DirectorResponse(
+            success=True,
+            message=message,
+            detected_intent=intent.intent,
+            detected_workflow="world_manage",
+            confidence=intent.confidence_score,
+            session_id=session.session_id,
+            reasoning="世界观管理工作流已启动",
+            suggested_actions=[
+                SuggestedAction(
+                    action="add_entity",
+                    label="添加实体",
+                    description="添加地点、势力、物品等",
+                ),
+                SuggestedAction(
+                    action="view_world",
+                    label="查看世界观",
+                    description="查看所有世界观设定",
+                ),
+            ],
+        )
+
+    def _execute_foreshadowing_workflow(
+        self,
+        user_message: str,
+        session: "ConversationSession",
+        intent: "IntentDecision",
+        context: Dict[str, Any],
+        skill: "Skill",
+    ) -> "DirectorResponse":
+        """执行伏笔管理工作流。"""
+        from tools.models.intent import DirectorResponse, SuggestedAction
+        
+        foreshadowing = self.load_context("foreshadowing")
+        
+        message = "伏笔管理\n\n"
+        message += f"当前状态：{foreshadowing or '暂无伏笔'}\n\n"
+        message += "请选择操作：\n"
+        message += "1. 添加伏笔\n"
+        message += "2. 查看伏笔\n"
+        message += "3. 检查伏笔状态\n"
+        
+        return DirectorResponse(
+            success=True,
+            message=message,
+            detected_intent=intent.intent,
+            detected_workflow="foreshadowing_manage",
+            confidence=intent.confidence_score,
+            session_id=session.session_id,
+            reasoning="伏笔管理工作流已启动",
+            suggested_actions=[
+                SuggestedAction(
+                    action="add_foreshadowing",
+                    label="添加伏笔",
+                    description="埋设新伏笔",
+                ),
+                SuggestedAction(
+                    action="list_foreshadowing",
+                    label="查看伏笔",
+                    description="查看所有伏笔",
+                ),
+            ],
+        )
     def _process_without_workflow(
         self,
         user_message: str,
@@ -751,73 +1835,21 @@ class SkillBasedDirector:
         intent: "IntentDecision",
         context: Dict[str, Any],
     ) -> "DirectorResponse":
-        """无工作流时的默认处理。"""
+        """无工作流时的默认处理 - 所有请求都走 LLM。"""
         from tools.models.intent import DirectorResponse, SuggestedAction
 
-        if intent.intent.value == "general_chat":
-            return DirectorResponse(
-                success=True,
-                message="您好！我是 OpenWrite 创作助手。\n\n我可以：写章节、创建大纲、管理角色、埋设伏笔。\n\n请告诉我您想做什么？",
-                detected_intent=intent.intent,
-                confidence=intent.confidence_score,
-                session_id=session.session_id,
-                suggested_actions=[
-                    SuggestedAction(
-                        action="write_chapter",
-                        label="写章节",
-                        description="根据大纲生成章节内容",
-                    ),
-                    SuggestedAction(
-                        action="outline_assist",
-                        label="创建大纲",
-                        description="创建或修改大纲",
-                    ),
-                    SuggestedAction(
-                        action="project_init",
-                        label="初始化项目",
-                        description="初始化新小说项目",
-                    ),
-                ],
-            )
-
-        if intent.intent.value == "help":
-            return DirectorResponse(
-                success=True,
-                message=self._get_help_message(),
-                detected_intent=intent.intent,
-                confidence=intent.confidence_score,
-                session_id=session.session_id,
-            )
-
-        # 项目初始化
-        if intent.intent.value == "project_init":
-            return DirectorResponse(
-                success=True,
-                message="好的，开始项目初始化。\n\n请告诉我小说标题和核心主题，或者说「创建大纲」开始。",
-                detected_intent=intent.intent,
-                confidence=intent.confidence_score,
-                session_id=session.session_id,
-                suggested_actions=[
-                    SuggestedAction(
-                        action="create_outline",
-                        label="创建大纲",
-                        description="从零创建四级大纲",
-                    ),
-                ],
-            )
-
-        # 其他意图
+        # 有 LLM 时，直接让 LLM 处理所有请求
+        if self._llm_client and self._router:
+            return self._generate_llm_response(user_message, session, context)
+        
+        # 无 LLM 时返回提示
         return DirectorResponse(
             success=True,
-            message=f"我理解您想要{intent.intent.value}。请问您具体想做什么？",
+            message="LLM 未配置。请在 /settings 页面配置 API Key 后重试。",
             detected_intent=intent.intent,
             confidence=intent.confidence_score,
             session_id=session.session_id,
-            follow_up_questions=intent.matched_keywords
-            if intent.matched_keywords
-            else ["请提供更多细节"],
         )
-
     def _extract_chapter_id(self, text: str) -> Optional[str]:
         """从文本中提取章节 ID。
 
@@ -934,10 +1966,8 @@ class SkillBasedDirector:
         notes: List[str] = []
         priority_elements: List[str] = []
 
-        # 检测严格模式
-        suggested_strict = self._should_strict_lore(objective, context)
-        if suggested_strict:
-            notes.append("检测到高风险章节内容，建议启用严格逻辑检查")
+        # 检测严格模式 - 不再硬编码判断严格模式，由子 agent 自行决定
+        suggested_strict = False
 
         # 检测重点要素
         priority_elements = self._extract_priority_elements(objective, context)
@@ -953,7 +1983,7 @@ class SkillBasedDirector:
 
         # 伏笔提醒
         foreshadowing_text = context.get("foreshadowing", "")
-        if foreshadowing_text and "暂无" not in foreshadowing_text:
+        if foreshadowing_text and len(foreshadowing_text) > 10:
             pending_count = foreshadowing_text.count(";") + 1
             notes.append(f"有{pending_count}条待回收伏笔，Librarian 应考虑自然融入")
 
@@ -1020,26 +2050,7 @@ class SkillBasedDirector:
         result = compressor.compress(compressible)
         return result.sections
 
-    def _should_strict_lore(self, objective: str, context: Dict[str, str]) -> bool:
-        """判断是否需要严格逻辑检查。"""
-        high_risk_keywords = [
-            "战斗",
-            "死亡",
-            "死斗",
-            "决斗",
-            "突破",
-            "晋级",
-            "关键",
-            "转折",
-            "高潮",
-            "揭秘",
-            "真相",
-            "伏笔回收",
-            "回收",
-            "时间线",
-        ]
-        combined = objective + " " + context.get("outline", "")
-        return any(kw in combined for kw in high_risk_keywords)
+
 
     def _extract_priority_elements(
         self, objective: str, context: Dict[str, str]
@@ -1047,9 +2058,9 @@ class SkillBasedDirector:
         """提取重点要素。"""
         elements: List[str] = []
 
-        # 伏笔
+        # 伏笔 - 直接检查是否有内容
         foreshadowing = context.get("foreshadowing", "")
-        if foreshadowing and "暂无" not in foreshadowing:
+        if foreshadowing and len(foreshadowing) > 10:  # 有实际内容
             ids = re.findall(r"(\w+)\(权重=(\d+)", foreshadowing)
             high_weight = [nid for nid, w in ids if int(w) >= 7]
             if high_weight:
@@ -1057,14 +2068,14 @@ class SkillBasedDirector:
 
         # 角色
         characters = context.get("characters", "")
-        if characters and "暂无" not in characters:
+        if characters and len(characters) > 10:
             names = re.findall(r"(\S+?)\(境界=", characters)
             if names:
                 elements.append(f"涉及角色: {', '.join(names[:4])}")
 
         # 场景
         scenes = context.get("scenes", "")
-        if scenes and "未标注" not in scenes:
+        if scenes and len(scenes) > 5 and "未标注" not in scenes:
             elements.append(f"场景要求: {scenes}")
 
         return elements
@@ -1186,7 +2197,88 @@ class SkillBasedDirector:
             priority_elements=data.get("priority_elements", []),
             generation_instructions=data.get("generation_instructions", ""),
         )
+    # ============================================================
+    # Session Management (向后兼容)
+    # ============================================================
 
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """列出所有会话。
+        
+        Returns:
+            会话列表，每个会话包含 session_id, novel_id, created_at, updated_at, message_count
+        """
+        return [
+            {
+                "session_id": session.session_id,
+                "novel_id": session.novel_id,
+                "created_at": session.created_at,
+                "updated_at": session.updated_at,
+                "message_count": len(session.message_history),
+            }
+            for session in self._sessions.values()
+        ]
+
+    def delete_session(self, session_id: str) -> bool:
+        """删除指定会话。
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            是否删除成功
+        """
+        if session_id in self._sessions:
+            del self._sessions[session_id]
+            # 同时删除持久化文件
+            self._delete_session_file(session_id)
+            return True
+        return False
+
+    def _load_sessions(self) -> None:
+        """启动时加载持久化的 sessions。"""
+        import json
+        
+        if not self._sessions_dir.exists():
+            return
+        
+        for session_file in self._sessions_dir.glob("*.json"):
+            try:
+                with open(session_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                from tools.models.intent import ConversationSession
+                session = ConversationSession(**data)
+                self._sessions[session.session_id] = session
+                
+            except Exception as e:
+                logger.warning(f"Failed to load session {session_file}: {e}")
+        
+        logger.info(f"Loaded {len(self._sessions)} sessions from disk")
+
+    def _save_session(self, session_id: str) -> None:
+        """保存 session 到磁盘。"""
+        import json
+        
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+        
+        session_file = self._sessions_dir / f"{session_id}.json"
+        try:
+            with open(session_file, "w", encoding="utf-8") as f:
+                json.dump(session.model_dump(), f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save session {session_id}: {e}")
+
+    def _delete_session_file(self, session_id: str) -> None:
+        """删除 session 文件。"""
+        session_file = self._sessions_dir / f"{session_id}.json"
+        if session_file.exists():
+            session_file.unlink()
+
+# ============================================================
+# 向后兼容：DirectorAgent 别名
+# ============================================================
 
 # ============================================================
 # 向后兼容：DirectorAgent 别名

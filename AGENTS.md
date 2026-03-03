@@ -25,7 +25,7 @@ CLI + Web 驱动的多 Agent 协作小说创作系统。Python + Pydantic + Fast
 # 安装依赖
 pip install -r requirements.txt
 
-# 运行全部测试（378 tests expected）
+# 运行全部测试（384 tests expected）
 python3 -m pytest -q
 
 # 运行单个测试文件
@@ -59,9 +59,9 @@ OpenWrite/
 ├── tools/                       # Python 源码
 │   ├── cli.py                   # CLI 入口（Typer app）
 │   │
-│   ├── agents/                  # Agent 实现（~8000 行）
+│   ├── agents/                  # Agent 实现（~6600 行）
 │   │   ├── director.py          # DirectorAgent（1906 行）
-│   │   ├── director_v2.py       # SkillBasedDirector（1142 行）
+│   │   ├── director_v2.py       # SkillBasedDirector（1958 行）
 │   │   ├── librarian.py         # LibrarianAgent（770 行）
 │   │   ├── lore_checker.py      # LoreCheckerAgent（461 行）
 │   │   ├── stylist.py           # StylistAgent（548 行）
@@ -77,7 +77,7 @@ OpenWrite/
 │   │   ├── style.py             # StyleProfile, VoicePattern
 │   │   ├── context_package.py   # GenerationContext
 │   │   ├── workflow.py          # WorkflowDefinition, WorkflowPhase
-│   │   └── intent.py            # IntentDecision, DirectorResponse
+│   │   └── intent.py            # IntentDecision, DirectorResponse, ConversationSession
 │   │
 │   ├── llm/                     # LLM 集成层（~1500 行）
 │   │   ├── client.py            # LLMClient（331 行）
@@ -131,8 +131,9 @@ OpenWrite/
 │   ├── world/
 │   ├── foreshadowing/
 │   └── manuscript/
+├── data/sessions/               # 会话持久化数据
 ├── docs/                        # 文档
-└── tests/                       # pytest 测试（16 文件，378 测试）
+└── tests/                       # pytest 测试（16 文件，384 测试）
 ```
 
 ---
@@ -232,7 +233,7 @@ Stylist (风格润色，可选)
 | Agent | 职责 | 文件 | 行数 |
 |-------|------|------|------|
 | DirectorAgent | 主控导演、上下文压缩、路由、风格感知指令 | `director.py` | 1906 |
-| SkillBasedDirector | 基于 Skill 的主控 Agent（新架构） | `director_v2.py` | 1142 |
+| SkillBasedDirector | 基于 Skill 的主控 Agent（新架构） | `director_v2.py` | 1958 |
 | LibrarianAgent | 上下文感知节拍生成、结构化草稿、智能重写 | `librarian.py` | 770 |
 | LoreCheckerAgent | 逻辑审查 + 跨章节一致性 | `lore_checker.py` | 461 |
 | StylistAgent | AI 痕迹检测、节奏验证、声音一致性 | `stylist.py` | 548 |
@@ -292,7 +293,7 @@ skills/
 | 路由 | 功能 | 模板 |
 |------|------|------|
 | `/` | 仪表盘 | `dashboard.html` |
-| `/chat` | 统一对话界面 | `chat.html` |
+| `/chat` | 统一对话界面（支持会话历史管理） | `chat.html` |
 | `/novels/new` | 新建项目 | `novel_new.html` |
 | `/outline` | 大纲编辑器 | `outline_editor.html` |
 | `/editor` | 章节编辑器 + AI 助手 | `editor.html` |
@@ -307,12 +308,50 @@ skills/
 
 - **Workflow API** (5): 工作流列表、详情、启动、对话、注册表摘要
 - **Pipeline V2 API** (4): 启动、状态、SSE 流、批准
+- **Session API** (4): 会话列表、详情、删除、新建
 - **Outline API** (15): 完整的 CRUD + 导入导出
 - **Character API** (10): CRUD + 时间线 + 快照
 - **World API** (8): 实体、关系、冲突检查
 - **Foreshadowing API** (8): DAG 管理、状态统计
 - **Style API** (6): 合成、分析、档案
 - **Settings API** (5): LLM 配置管理
+
+---
+
+## 会话管理系统
+
+### 会话生命周期
+
+```
+用户发送消息
+    │
+    ▼
+process_request() 
+    │
+    ├─ 获取/创建 session
+    ├─ 添加用户消息 (role: user)
+    ├─ 意图识别 + 工作流执行
+    ├─ 添加 agent 回复 (role: assistant)
+    │
+    └─ 检查是否需要保存
+        │
+        ├─ message_history >= 2 → 保存到 data/sessions/{id}.json
+        └─ message_history < 2 → 仅内存，不持久化
+```
+
+### 会话数据模型
+
+```python
+class ConversationSession(BaseModel):
+    session_id: str
+    novel_id: Optional[str] = None
+    context_data: Dict[str, Any] = {}
+    workflow_context: Dict[str, Any] = {}
+    message_history: List[Dict[str, str]] = []
+    max_history: int = 20
+    created_at: str
+    updated_at: str
+```
 
 ---
 
@@ -373,7 +412,7 @@ export MINIMAX_API_KEY=sk-xxx
 
 | 指标 | 数值 |
 |------|------|
-| 测试总数 | 378 |
+| 测试总数 | 384 |
 | 测试文件 | 16 |
 | Skip/xfail | 0 |
 
@@ -394,7 +433,7 @@ export MINIMAX_API_KEY=sk-xxx
 
 ## 注意事项
 
-- 修改 Agent 后**必须**运行 `python3 -m pytest -q` 确认 378 tests 全部通过
+- 修改 Agent 后**必须**运行 `python3 -m pytest -q` 确认 384 tests 全部通过
 - 不要删除或修改 `craft/`、`styles/`、`novels/` 下的 `.md` 数据文件
 - CLI 命令注册在 `tools/cli.py` 的 Typer sub-app 中
 - Web API 端点在 `tools/web/__init__.py`
@@ -406,13 +445,13 @@ export MINIMAX_API_KEY=sk-xxx
 
 ## 项目状态
 
-- **当前阶段**: Phase 7 完成 + Skill 架构重构完成
-- **生产级完备性**: 92%
+- **当前阶段**: Phase 7+ 完成 + Web 对话功能优化
+- **生产级完备性**: 93%
 - **主流程**: `Director → Writer → Reviewer → User → Stylist(可选)` (Pipeline V2)
 - **风格系统**: 三层架构已就位
 - **LLM 集成**: 多模型池 + 任务类型路由
-- **现有测试**: 378 passed，0 skipped
+- **现有测试**: 384 passed，0 skipped
 
 ---
 
-*最后更新: 2026-03-02（第四期报告）*
+*最后更新: 2026-03-02（第五期报告）*

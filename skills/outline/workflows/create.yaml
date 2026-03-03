@@ -25,7 +25,7 @@ trigger_keywords:
 priority: 10
 
 # 前置条件
-requires_novel_id: true
+requires_novel_id: false  # 允许无项目时也能创建大纲
 requires_outline: false
 
 # 阶段定义

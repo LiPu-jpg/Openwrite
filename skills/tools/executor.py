@@ -185,7 +185,8 @@ class ToolExecutor:
             ValueError: novel_id 未设置
         """
         if not self.novel_id:
-            raise ValueError("novel_id not set")
+            return {"error": "请先设置项目。在对话中告诉我你想创建的小说名称，我来帮你初始化项目。"}
+            return {"message": "请先设置项目。告诉我你想创建的小说名称，我来帮你初始化项目。"}
         
         path = self.project_root / "data" / "novels" / self.novel_id
         for part in parts:
@@ -196,6 +197,22 @@ class ToolExecutor:
     # ============================================================
     
     def _read_file(self, path: str, encoding: str = "utf-8") -> str:
+        """读取文件内容。
+        
+        Args:
+            path: 文件路径（相对于项目根目录）
+            encoding: 文件编码
+            
+        Returns:
+            文件内容或错误提示
+        """
+        try:
+            full_path = self._resolve_path(path)
+            if not full_path.exists():
+                return f"文件不存在: {path}。需要先创建。"
+            return full_path.read_text(encoding=encoding)
+        except Exception as e:
+            return f"读取文件失败: {str(e)}"
         """读取文件内容。
         
         Args:
@@ -396,9 +413,8 @@ class ToolExecutor:
                     
                     results.append({
                         "file": str(file_path.relative_to(self.project_root)),
-                        "matches": matches[:max_context],
+                        "matches": matches[:2],
                     })
-                    
                     if len(results) >= max_results:
                         return results
         
@@ -515,15 +531,74 @@ class ToolExecutor:
             arc_id: 篇章ID（可选）
             
         Returns:
-            大纲数据
+            统一格式: {"success": bool, "data": dict/None, "message": str}
         """
         if not self.novel_id:
-            raise ValueError("novel_id not set")
+            return {
+                "success": False,
+                "data": None,
+                "message": "请先设置项目。告诉我你想创建的小说名称，我来帮你初始化项目。"
+            }
         
         outline_path = self._novel_data_path("outline", "hierarchy.yaml")
         
         if not outline_path.exists():
-            return {"error": "Outline not found", "path": str(outline_path)}
+            return {
+                "success": True,
+                "data": None,
+                "message": "暂无大纲，可以创建新大纲。告诉我你想创建什么样的故事？"
+            }
+        
+        import yaml
+        
+        with outline_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        
+        # 如果指定了章节，只返回该章节
+        if chapter_id:
+            chapters = data.get("chapters", {})
+            if chapter_id in chapters:
+                return {"success": True, "data": {"chapter": chapters[chapter_id]}}
+            return {
+                "success": False,
+                "data": None,
+                "message": f"章节 {chapter_id} 不存在"
+            }
+        
+        # 如果指定了篇章，只返回该篇章
+        if arc_id:
+            arcs = data.get("arcs", {})
+            if arc_id in arcs:
+                return {"success": True, "data": {"arc": arcs[arc_id]}}
+            return {
+                "success": False,
+                "data": None,
+                "message": f"篇章 {arc_id} 不存在"
+            }
+        
+        return {"success": True, "data": data}
+
+    def _query_characters(
+        self,
+        chapter_id: Optional[str] = None,
+        arc_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """查询大纲数据。
+        
+        Args:
+            chapter_id: 章节ID（可选）
+            arc_id: 篇章ID（可选）
+            
+        Returns:
+            大纲数据
+        """
+        if not self.novel_id:
+            return {"message": "请先设置项目。告诉我你想创建的小说名称，我来帮你初始化项目。"}
+        
+        outline_path = self._novel_data_path("outline", "hierarchy.yaml")
+        
+        if not outline_path.exists():
+            return {"message": "暂无大纲，可以创建新大纲。告诉我你想创建什么样的故事？"}
         
         import yaml
         
@@ -535,16 +610,16 @@ class ToolExecutor:
             chapters = data.get("chapters", {})
             if chapter_id in chapters:
                 return {"chapter": chapters[chapter_id]}
-            return {"error": f"Chapter not found: {chapter_id}"}
+            return {"message": f"章节 {chapter_id} 不存在"}
         
         # 如果指定了篇章，只返回该篇章
         if arc_id:
             arcs = data.get("arcs", {})
             if arc_id in arcs:
                 return {"arc": arcs[arc_id]}
-            return {"error": f"Arc not found: {arc_id}"}
+            return {"message": f"篇章 {arc_id} 不存在"}
         
-        return data
+
     
     def _query_characters(
         self,
@@ -561,7 +636,7 @@ class ToolExecutor:
             角色数据
         """
         if not self.novel_id:
-            raise ValueError("novel_id not set")
+            return {"message": "请先设置项目。告诉我你想创建的小说名称，我来帮你初始化项目。"}
         
         chars_dir = self._novel_data_path("characters", "text_profiles")
         
@@ -612,7 +687,7 @@ class ToolExecutor:
             世界观数据
         """
         if not self.novel_id:
-            raise ValueError("novel_id not set")
+            return {"message": "请先设置项目。告诉我你想创建的小说名称，我来帮你初始化项目。"}
         
         world_path = self._novel_data_path("world", "graph.yaml")
         
@@ -657,7 +732,7 @@ class ToolExecutor:
             伏笔数据
         """
         if not self.novel_id:
-            raise ValueError("novel_id not set")
+            return {"message": "请先设置项目。告诉我你想创建的小说名称，我来帮你初始化项目。"}
         
         fs_path = self._novel_data_path("foreshadowing", "dag.yaml")
         
@@ -702,7 +777,7 @@ class ToolExecutor:
             草稿数据
         """
         if not self.novel_id:
-            raise ValueError("novel_id not set")
+            return {"message": "请先设置项目。告诉我你想创建的小说名称，我来帮你初始化项目。"}
         
         manuscript_dir = self._novel_data_path("manuscript")
         
@@ -749,7 +824,7 @@ class ToolExecutor:
             风格数据
         """
         if not self.novel_id:
-            raise ValueError("novel_id not set")
+            return {"message": "请先设置项目。告诉我你想创建的小说名称，我来帮你初始化项目。"}
         
         style_dir = self._novel_data_path("style")
         

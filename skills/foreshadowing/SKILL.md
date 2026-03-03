@@ -1,6 +1,26 @@
 ---
 name: foreshadowing
 description: 伏笔管理功能模块
+trigger: /foreshadowing
+triggers:
+  - "伏笔"
+  - "埋伏笔"
+  - "回收伏笔"
+  - "伏笔回收"
+  - "伏笔状态"
+  - "伏笔列表"
+  - "待回收伏笔"
+  - "伏笔依赖"
+  - "伏笔管理"
+  - "伏笔系统"
+---
+name: foreshadowing
+description: 伏笔管理功能模块
+trigger: /foreshadowing
+triggers:
+  - "伏笔"
+name: foreshadowing
+description: 伏笔管理功能模块
 triggers:
   - "伏笔"
   - "埋伏笔"

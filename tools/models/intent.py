@@ -154,6 +154,18 @@ class DirectorResponse(BaseModel):
     工作流驱动的 Director 返回的标准化响应。
     """
 
+    # Pydantic 配置：将 Enum 序列化为其值
+    model_config = {"use_enum_values": True}
+
+    # 基础信息
+    success: bool = Field(default=True, description="是否成功")
+    message: str = Field(default="", description="主要响应消息")
+    error: str = Field(default="", description="错误信息（如果有）")
+    """Director 统一响应格式。
+
+    工作流驱动的 Director 返回的标准化响应。
+    """
+
     # 基础信息
     success: bool = Field(default=True, description="是否成功")
     message: str = Field(default="", description="主要响应消息")

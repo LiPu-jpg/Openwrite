@@ -19,7 +19,7 @@ models:
     timeout: 120
     name: DeepSeek
   GLM-4-Plus:
-    model: glm-4.7
+    model: openai/glm-4.7
     api_base: https://open.bigmodel.cn/api/paas/v4
     api_key_env: GLM_API_KEY
     max_tokens: 8192
@@ -32,7 +32,7 @@ routes:
     - Kimi-K2.5
     - DeepSeek
     - GLM-4-Plus
-    primary_index: 1
+    primary_index: 0
   generation:
     models:
     - Kimi-K2.5

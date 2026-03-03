@@ -1,10 +1,13 @@
 ---
 name: character
 description: 角色管理功能模块
+trigger: /character
 triggers:
   - "创建角色"
   - "添加角色"
   - "新建人物"
+  - "创建人物"
+  - "添加人物"
   - "查询角色"
   - "获取角色信息"
   - "角色关系"
@@ -12,6 +15,8 @@ triggers:
   - "角色时间线"
   - "人物状态历史"
   - "更新角色状态"
+  - "角色"
+  - "人物"
 ---
 
 # Character Skill

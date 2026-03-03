@@ -339,6 +339,7 @@ def _make_mock_client_and_router(response_content: str):
     mock_client.complete_with_fallback.return_value = LLMResponse(
         content=response_content,
         model="test/model",
+        tool_calls=None,
     )
     mock_router = MagicMock()
     mock_router.get_routes.return_value = [
@@ -349,7 +350,7 @@ def _make_mock_client_and_router(response_content: str):
 
 def test_director_llm_branch():
     """Director 在有 llm_client 时走 LLM 分支。"""
-    from tools.agents.director import DirectorAgent
+    from tools.agents.director_v2 import DirectorAgent
 
     llm_response = json.dumps(
         {
@@ -375,7 +376,7 @@ def test_director_llm_branch():
 
 def test_director_llm_fallback_on_error():
     """Director LLM 调用失败时回退到规则引擎。"""
-    from tools.agents.director import DirectorAgent
+    from tools.agents.director_v2 import DirectorAgent
 
     mock_client = MagicMock()
     mock_client.complete_with_fallback.side_effect = RuntimeError("LLM down")
@@ -482,7 +483,7 @@ def test_stylist_llm_fallback_on_error():
 
 def test_agents_without_llm_unchanged():
     """不传入 llm_client 时，所有 Agent 保持原有规则行为。"""
-    from tools.agents.director import DirectorAgent
+    from tools.agents.director_v2 import DirectorAgent
     from tools.agents.librarian import LibrarianAgent
     from tools.agents.lore_checker import LoreCheckerAgent
     from tools.agents.stylist import StylistAgent

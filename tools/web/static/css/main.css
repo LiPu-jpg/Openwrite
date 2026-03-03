@@ -656,6 +656,38 @@ textarea.form-input {
   box-shadow: 2px 0 8px rgba(0,0,0,0.03);
 }
 
+.ide-explorer .explorer-header {
+  flex-shrink: 0;
+}
+
+.ide-explorer .explorer-section {
+  flex-shrink: 0;
+}
+
+/* 会话历史区域可滚动 */
+.ide-explorer #sec-sessions {
+  flex-shrink: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ide-explorer #sec-sessions .explorer-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+  width: var(--sidebar-w);
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 2px 0 8px rgba(0,0,0,0.03);
+}
+
 .explorer-header {
   padding: 14px 18px;
   font-size: 13px;
@@ -932,7 +964,7 @@ textarea.form-input {
 }
 
 .chat-msg {
-  max-width: 95%;
+  max-width: 88%;
   padding: 6px 10px;
   font-size: 13px;
   line-height: 1.6;
@@ -940,6 +972,8 @@ textarea.form-input {
   background: transparent;
   border: none;
   box-shadow: none;
+  position: relative;
+  margin-top: 16px;
 }
 
 .chat-msg.user {
@@ -947,24 +981,47 @@ textarea.form-input {
   color: var(--accent);
 }
 
+.chat-msg.user .msg-header {
+  position: absolute;
+  right: 0;
+  top: -14px;
+}
+
 .chat-msg.agent {
   align-self: flex-start;
   color: var(--text);
 }
 
-.chat-msg .msg-meta {
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-bottom: 4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-sans);
+.chat-msg.agent .msg-header {
+  position: absolute;
+  left: 0;
+  top: -14px;
 }
 
-.chat-msg.agent .msg-meta { color: var(--text-dim); }
-.chat-msg.user .msg-meta { color: var(--accent); opacity: 0.7; }
+.chat-msg .msg-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 
+.chat-msg .msg-avatar {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.chat-msg .msg-avatar svg {
+  width: 100%;
+  height: 100%;
+}
+
+.chat-msg .msg-role {
+  display: none;
+}
+
+.chat-msg .msg-meta {
+  display: none;
+}
 /* Agent Badge (Typewriter Style) */
 .msg-agent-badge {
   padding: 3px 10px;

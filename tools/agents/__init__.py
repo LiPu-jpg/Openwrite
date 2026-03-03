@@ -1,6 +1,6 @@
 """Agent layer package."""
 
-from .director import DirectorAgent
+from .director_v2 import DirectorAgent, SkillBasedDirector
 from .librarian import LibrarianAgent
 from .lore_checker import LoreCheckerAgent
 from .reader import ReaderAgent

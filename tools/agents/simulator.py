@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from tools.llm.router import ModelRouter
 
 try:
-    from tools.agents.director import DirectorAgent
+    from tools.agents.director_v2 import DirectorAgent
     from tools.agents.librarian import LibrarianAgent
     from tools.agents.lore_checker import LoreCheckerAgent
     from tools.agents.reader import ReaderAgent
@@ -33,7 +33,7 @@ try:
     from tools.queries.outline_query import OutlineQuery
     from tools.world_graph_manager import WorldGraphManager
 except ImportError:  # pragma: no cover - supports legacy path injection
-    from agents.director import DirectorAgent
+    from agents.director_v2 import DirectorAgent
     from agents.librarian import LibrarianAgent
     from agents.lore_checker import LoreCheckerAgent
     from agents.reader import ReaderAgent
@@ -43,7 +43,6 @@ except ImportError:  # pragma: no cover - supports legacy path injection
     from graph.foreshadowing_dag import ForeshadowingDAGManager
     from queries.outline_query import OutlineQuery
     from world_graph_manager import WorldGraphManager
-
 
 @dataclass
 class SimulationResult:

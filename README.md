@@ -4,12 +4,12 @@
 
 ## 项目进度看板（截至 2026-03-02）
 
-- **当前阶段**: `Phase 7 完成 + Skill 架构重构完成`
-- **生产级完备性**: 92%
+- **当前阶段**: `Phase 7+ 完成 + Web 对话功能优化`
+- **生产级完备性**: 93%
 - **主流程**: `Director → Writer → Reviewer → User → Stylist(可选)` (Pipeline V2)
 - **风格系统**: 三层架构（craft/通用技法 → styles/作者风格 → novels/作品设定）已就位
 - **LLM 集成**: 多模型池 + 任务类型路由（支持 6 个预设模型，4 种任务类型）
-- **现有测试**: `python3 -m pytest -q`，当前 **378 passed**，0 skipped
+- **现有测试**: `python3 -m pytest -q`，当前 **384 passed**，0 skipped
 - **架构说明文档**: `docs/CURRENT_ARCHITECTURE.md`、`AGENTS.md`
 
 ### 已完成能力
@@ -18,13 +18,13 @@
 - ✅ Skill 模块系统 — 7 个功能模块（outline/writing/style/character/foreshadowing/world/project）
 - ✅ SkillBasedDirector — 基于 Skill 的主控 Agent，动态意图匹配 + 工作流驱动
 - ✅ Pipeline V2 — 渐进式上下文压缩 + 人工审核环节
-- ✅ 统一对话界面 — `/chat` 页面，支持工作流对话
+- ✅ 统一对话界面 — `/chat` 页面，支持工作流对话 + 会话历史管理
 - ✅ LLM 集成层 — 多模型池 + 任务路由器 + 自动 fallback
 - ✅ Tool Schema 生成 — OpenAI-compatible schemas
 
-**Agent 实现**（10 个 Agent，~8000 行代码）：
+**Agent 实现**（10 个 Agent，~6600 行代码）：
 - ✅ DirectorAgent — 主控导演、上下文压缩、路由、风格感知指令
-- ✅ SkillBasedDirector — 基于 Skill 的新架构主控
+- ✅ SkillBasedDirector — 基于 Skill 的新架构主控（1958 行）
 - ✅ LibrarianAgent — 上下文感知节拍生成、结构化草稿、智能重写
 - ✅ LoreCheckerAgent — 逻辑审查（宽松/严格双模式）+ 跨章节一致性
 - ✅ StylistAgent — AI 痕迹检测、节奏验证、声音一致性
@@ -49,7 +49,7 @@
 - ✅ Reader/Director 风格迭代循环
 
 **Web 应用**（11 模板，67+ API）：
-- ✅ 统一对话界面 `/chat`
+- ✅ 统一对话界面 `/chat` — 支持会话历史管理、切换、删除
 - ✅ 章节编辑器 `/editor` + AI 助手
 - ✅ LLM 配置 `/settings`
 - ✅ 人物管理 `/characters`
@@ -57,6 +57,12 @@
 - ✅ 世界观图谱 `/world`
 - ✅ 风格分析 `/style`
 - ✅ 新建项目 `/novels/new`
+
+**会话管理**：
+- ✅ 会话持久化 — 有实际对话的会话保存到磁盘
+- ✅ 空会话过滤 — 无对话内容的会话不持久化
+- ✅ 会话切换 — 点击历史会话可加载完整对话
+- ✅ 会话删除 — 支持删除指定会话
 
 ### 待改进项
 
@@ -119,6 +125,7 @@ export MINIMAX_API_KEY=sk-bbb
 - 自动意图识别 + Skill 匹配
 - 工作流驱动执行
 - 支持大纲管理、章节写作、风格分析等
+- **会话历史管理**：左侧显示历史会话，点击可切换，支持删除
 
 #### 4. 创建小说项目
 
@@ -195,9 +202,9 @@ OpenWrite/
 │
 ├── tools/                       # Python 源码
 │   ├── cli.py                   # CLI 入口
-│   ├── agents/                  # Agent 实现（~8000 行）
+│   ├── agents/                  # Agent 实现（~6600 行）
 │   │   ├── director.py          # DirectorAgent（1906 行）
-│   │   ├── director_v2.py       # SkillBasedDirector（1142 行）
+│   │   ├── director_v2.py       # SkillBasedDirector（1958 行）
 │   │   ├── librarian.py         # LibrarianAgent（770 行）
 │   │   ├── lore_checker.py      # LoreCheckerAgent（461 行）
 │   │   ├── stylist.py           # StylistAgent（548 行）
@@ -268,7 +275,7 @@ OpenWrite/
 │   │   ├── foreshadowing/
 │   │   └── manuscript/
 │   ├── reference_books/         # 参考原著分块
-│   └── sessions/                # 会话数据
+│   └── sessions/                # 会话数据（仅持久化有对话的会话）
 │
 ├── docs/                        # 文档
 │   ├── CURRENT_ARCHITECTURE.md  # 架构说明
@@ -277,13 +284,14 @@ OpenWrite/
 │   ├── workflows/               # 工作流文档
 │   └── archive/                 # 历史进度报告
 │
-├── tests/                       # pytest 测试（16 文件，378 测试）
+├── tests/                       # pytest 测试（16 文件，384 测试）
 │
 └── 报告文件
     ├── 第一期报告.md
     ├── 第二期报告.md
     ├── 第三期报告.md
-    └── 第四期报告.md
+    ├── 第四期报告.md
+    └── 第五期报告.md
 ```
 
 ---
@@ -307,7 +315,7 @@ OpenWrite/
 | Agent | 职责 | 代码量 |
 |--------|------|--------|
 | DirectorAgent | 主控导演、上下文压缩、路由、风格感知指令 | 1906 行 |
-| SkillBasedDirector | 基于 Skill 的主控 Agent（新架构） | 1142 行 |
+| SkillBasedDirector | 基于 Skill 的主控 Agent（新架构） | 1958 行 |
 | LibrarianAgent | 上下文感知节拍生成、结构化草稿、智能重写 | 770 行 |
 | LoreCheckerAgent | 逻辑审查 + 跨章节一致性 | 461 行 |
 | StylistAgent | AI 痕迹检测、节奏验证、声音一致性 | 548 行 |
@@ -347,6 +355,7 @@ OpenWrite/
 - [x] Phase 6B: LLM 集成（多模型池、任务路由）
 - [x] Phase 7: Web 应用（FastAPI + 多模型配置）
 - [x] Phase 7+: Skill 架构重构（SkillBasedDirector + 统一对话界面）
+- [x] Phase 7++: 会话管理优化（历史切换、删除、空会话过滤）
 - [ ] Phase 8: 稳定化与优化（流式响应、性能优化）
 - [ ] Phase 9: 高级功能（世界图谱可视化、插件系统）
 
@@ -356,7 +365,7 @@ OpenWrite/
 
 ```bash
 # 运行测试
-python3 -m pytest -q                    # 全部测试（378 expected）
+python3 -m pytest -q                    # 全部测试（384 expected）
 python3 -m pytest tests/test_workflow.py -v  # 单文件
 python3 -m pytest --cov=tools           # 带覆盖率
 
@@ -383,4 +392,4 @@ MIT License
 
 ---
 
-*最后更新: 2026-03-02（第四期报告）*
+*最后更新: 2026-03-02（第五期报告）*

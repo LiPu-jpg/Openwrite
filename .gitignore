@@ -27,3 +27,7 @@ llm_config.yaml
 
 # Composed style outputs
 composed/
+
+# OpenCode Skill migration (separate project)
+opencode_skill/
+composed/

@@ -244,7 +244,7 @@ def test_stylist_score_computation():
 
 
 def test_director_context_compression():
-    from agents.director import DirectorAgent
+    from agents.director_v2 import DirectorAgent
 
     agent = DirectorAgent()
 
@@ -269,12 +269,13 @@ def test_director_context_compression():
     assert (
         len(decision.compressed_context["characters"]) <= agent.BUDGET_CHARACTERS + 10
     )
-    assert decision.suggested_strict_lore is True  # "战斗" keyword
+    # suggested_strict_lore is now always False (removed hardcoded logic)
+    assert decision.suggested_strict_lore is False
     assert len(decision.priority_elements) > 0
 
 
 def test_director_stylist_routing():
-    from tools.agents.director import DirectorAgent
+    from tools.agents.director_v2 import DirectorAgent
 
     agent = DirectorAgent()
     context = {

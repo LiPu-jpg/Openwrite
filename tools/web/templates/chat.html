@@ -1,10 +1,71 @@
 {% extends "base.html" %}
 {% set active = "chat" %}
 {% block title %}创作助手 — OpenWrite{% endblock %}
+{% block head %}
+<style>
+.project-selector-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-secondary) 100%);
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 0;
+}
+.project-selector-bar label {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.project-selector-bar select {
+  flex: 1;
+  max-width: 200px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: 'Noto Sans SC', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.project-selector-bar select:hover {
+  border-color: var(--accent-primary);
+}
+.project-selector-bar select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+.project-selector-bar .current-project-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--accent-primary);
+  color: white;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.project-selector-bar .current-project-badge svg {
+  width: 14px;
+  height: 14px;
+}
+</style>
+{% endblock %}
 {% block content %}
 <div class="ide-layout">
   <!-- 左侧资源管理器 -->
   <div class="ide-explorer" id="ide-explorer">
+    <!-- 顶部项目选择器 -->
+    <div class="project-selector-bar">
+      <label for="project-select">项目:</label>
+      <select id="project-select" onchange="switchProject(this.value)">
+        <option value="{{ novel_id }}" selected>{{ novel_id }}</option>
+      </select>
+    </div>
     <div class="explorer-header">
       <span>资源管理器</span>
       <button class="btn-icon" onclick="toggleAllSections()" title="折叠/展开全部">
@@ -175,7 +236,7 @@
 
     <div class="chat-messages" id="chat-messages">
       <div class="chat-msg agent">
-        <div class="msg-content">
+        <div class="msg-bubble">
           <div class="msg-text">
             <p>你好！我可以帮你写章节、创建大纲、管理角色和伏笔。</p>
             <p>输入指令开始，如「写第三章」「创建大纲」。</p>
@@ -307,18 +368,66 @@
   // ═══════════════════════════════════════════════════════════════
   // 初始化（在 DOM 和 app.js 加载后执行）
   // ═══════════════════════════════════════════════════════════════
+  // 项目选择器功能
+  // ═══════════════════════════════════════════════════════════════
+
+  function loadProjects() {
+    api.get('/api/novels').then(function(data) {
+      var select = document.getElementById('project-select');
+      select.innerHTML = '';
+      var novels = data.novels || [];
+      novels.forEach(function(n) {
+        var option = document.createElement('option');
+        option.value = n.id;
+        option.textContent = n.name;
+        if (n.id === novelId) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+      // 如果 localStorage 有保存的项目，尝试选中
+      var savedProject = localStorage.getItem('openwrite_selected_project');
+      if (savedProject && novels.some(function(n) { return n.id === savedProject; })) {
+        select.value = savedProject;
+      }
+    }).catch(function(err) {
+      console.error('加载项目列表失败:', err);
+    });
+  }
+
+  window.switchProject = function(projectId) {
+    if (projectId === novelId) return;
+    
+    // 保存到 localStorage
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('openwrite_selected_project', projectId);
+    }
+    
+    // 刷新页面并切换项目
+    window.location.href = '/chat?novel_id=' + encodeURIComponent(projectId);
+  };
+
+  // 页面加载时检查 localStorage 并加载项目
+  var savedProject = null;
+  if (typeof localStorage !== 'undefined') {
+    savedProject = localStorage.getItem('openwrite_selected_project');
+  }
+  // 等待 DOM 和 app.js 加载完成后再执行
   document.addEventListener('DOMContentLoaded', function() {
-    // 等待 app.js 完全加载
-    if (typeof api !== 'undefined') {
-      loadWorkflows();
-      loadForeshadowing();
-      loadSessions();  // 加载会话列表
+    if (savedProject && savedProject !== novelId) {
+      // 切换到保存的项目
+      window.location.href = '/chat?novel_id=' + encodeURIComponent(savedProject);
+    } else {
+      // 加载项目列表
+      loadProjects();
+      // 加载会话列表
+      loadSessions();
     }
   });
 
-  // ═════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
   // 会话管理
-  // ═════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
 
   function loadSessions() {
     api.get('/api/sessions').then(function(data) {
@@ -348,9 +457,9 @@
     });
   }
 
-  function deleteSession(sessionIdToDelete) {
+  window.deleteSession = function(sessionIdToDelete) {
     if (!confirm('确定要删除此会话吗？')) return;
-    api.delete('/api/sessions/' + sessionIdToDelete).then(function(result) {
+    api.del('/api/sessions/' + sessionIdToDelete).then(function(result) {
       if (result.success) {
         toast('会话已删除');
         // 如果删除的是当前会话，清空聊天
@@ -367,7 +476,7 @@
     });
   }
 
-  function switchSession(newSessionId) {
+  window.switchSession = function(newSessionId) {
     sessionId = newSessionId;
     chatMessages.innerHTML = '';
     // 加载会话历史
@@ -390,9 +499,7 @@
     var avatarSvg = role === 'user'
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
       : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
-    var html = '<div class="msg-avatar">' + avatarSvg + '</div><div class="msg-content">';
-    html += '<div class="msg-text">' + renderMarkdown(content) + '</div>';
-    html += '</div>';
+    var html = '<div class="msg-bubble"><div class="msg-text">' + renderMarkdown(content) + '</div></div>';
     div.innerHTML = html;
     chatMessages.appendChild(div);
   }
@@ -524,23 +631,7 @@
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
       : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
 
-    var html = '<div class="msg-avatar">' + avatarSvg + '</div><div class="msg-content">';
-
-    if (response && response.detected_workflow) {
-      html += '<div class="msg-badge">' + escapeHtml(response.detected_workflow) + '</div>';
-    }
-
-    html += '<div class="msg-text">' + renderMarkdown(content) + '</div>';
-
-    if (response && response.follow_up_questions && response.follow_up_questions.length > 0) {
-      html += '<div class="msg-questions">';
-      response.follow_up_questions.forEach(function(q) {
-        html += '<button class="question-btn" onclick="sendQuick(\'' + escapeHtml(q) + '\')">' + escapeHtml(q) + '</button>';
-      });
-      html += '</div>';
-    }
-
-    html += '</div>';
+    var html = '<div class="msg-bubble"><div class="msg-text">' + renderMarkdown(content) + '</div></div>';
     div.innerHTML = html;
     chatMessages.appendChild(div);
     scrollToBottom();
@@ -550,8 +641,7 @@
     var div = document.createElement('div');
     div.className = 'chat-msg agent typing';
     div.id = 'typing-msg';
-    div.innerHTML = '<div class="msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>' +
-                    '<div class="msg-content"><div class="msg-text"><span class="typing-indicator"><span></span><span></span><span></span></span></div></div>';
+    div.innerHTML = '<div class="msg-bubble"><div class="msg-text"><span class="typing-indicator"><span></span><span></span><span></span></span></div></div>';
     chatMessages.appendChild(div);
     scrollToBottom();
   }

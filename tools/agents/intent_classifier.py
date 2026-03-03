@@ -43,13 +43,13 @@ INTENT_CLASSIFICATION_PROMPT = """# 意图识别任务
 请分析用户的真实意图，返回 JSON 格式的结果：
 
 ```json
-{
+{{
   "intent": "功能名称或 general_chat",
   "confidence": 0.0-1.0,
   "reasoning": "为什么选择这个意图",
   "entity_references": ["提取的实体引用"],
   "should_confirm": true/false
-}
+}}
 ```
 
 ### 意图判断规则
@@ -177,7 +177,11 @@ class LLMIntentClassifier:
         try:
             if self._llm_client and self._router:
                 # 使用 LLM
-                routes = self._router.get_routes("reasoning")
+                from tools.llm.router import TaskType
+                routes = self._router.get_routes(TaskType.REASONING)
+            if self._llm_client and self._router:
+                # 使用 LLM
+                routes = self._router.get_routes(TaskType.REASONING)
                 response = self._llm_client.complete_with_fallback(
                     messages=[{"role": "user", "content": prompt}],
                     routes=routes,
@@ -190,9 +194,8 @@ class LLMIntentClassifier:
             # 解析 LLM 输出
             result = self._parse_llm_output(llm_output, skills)
             return result
-
         except Exception as e:
-            logger.warning(f"LLM 意图识别失败: {e}")
+            logger.warning(f"LLM 意图识别失败: {type(e).__name__}: {repr(e)}")
             return self._fallback_classification(user_message, skills)
 
     def _parse_llm_output(self, llm_output: str, skills: List[Any]) -> Dict[str, Any]:
@@ -218,7 +221,8 @@ class LLMIntentClassifier:
 
         try:
             data = json.loads(json_str)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON 解析失败: {e}, 原始输出前200字符: {llm_output[:200]}")
             logger.warning(f"JSON 解析失败: {llm_output[:100]}")
             return {
                 "intent": TaskIntent.GENERAL_CHAT,
@@ -261,17 +265,12 @@ class LLMIntentClassifier:
         self, user_message: str, skills: List[Any]
     ) -> Dict[str, Any]:
         """Fallback 分类（无 LLM 时使用）。
-
-        Args:
-            user_message: 用户消息
-            skills: 可用的功能模块
-
-        Returns:
-            意图分类结果
+        
+        只保留命令触发器匹配，其他情况返回错误提示。
         """
         from tools.models.intent import IntentConfidence, TaskIntent
 
-        # 简单的命令检测
+        # 1. 命令触发器匹配（不需要 LLM）
         for skill in skills:
             if skill.trigger and user_message.strip().startswith(skill.trigger):
                 return {
@@ -284,12 +283,12 @@ class LLMIntentClassifier:
                     "should_confirm": False,
                 }
 
-        # 无匹配，使用通用对话
+        # 2. 无 LLM 且无命令触发器：返回需要配置 LLM 的提示
         return {
             "intent": TaskIntent.GENERAL_CHAT,
             "confidence": IntentConfidence.LOW,
-            "confidence_score": 0.3,
-            "reasoning": "无 LLM 可用，默认使用通用对话",
+            "confidence_score": 0.0,
+            "reasoning": "LLM 未配置或连接失败。请配置 LLM 模型（访问 /settings 页面）或使用命令触发器（如 /write, /outline, /style 等）。",
             "entity_references": [],
             "should_confirm": False,
         }

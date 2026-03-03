@@ -53,8 +53,26 @@ def _get_global_director() -> Any:
     """获取全局 Director 实例（单例，跨请求保持会话）。"""
     global _GLOBAL_DIRECTOR
     if _GLOBAL_DIRECTOR is None:
-        from tools.agents.director import DirectorAgent
-        _GLOBAL_DIRECTOR = DirectorAgent()
+        from tools.agents.director_v2 import DirectorAgent
+        from tools.llm.client import LLMClient
+        from tools.llm.router import ModelRouter
+        from tools.llm.config import load_llm_config
+        
+        # 尝试加载 LLM 配置
+        llm_client = None
+        router = None
+        llm_cfg = load_llm_config(None)
+        if llm_cfg and llm_cfg.enabled:
+            llm_client = LLMClient(
+                retry_count=llm_cfg.retry_count,
+                retry_delay=llm_cfg.retry_delay,
+            )
+            router = ModelRouter(llm_cfg)
+        
+        _GLOBAL_DIRECTOR = DirectorAgent(
+            llm_client=llm_client,
+            router=router,
+        )
     return _GLOBAL_DIRECTOR
 class CharacterCreateRequest(BaseModel):
     name: str
@@ -291,6 +309,38 @@ def _list_markdown_files(directory: Path) -> list[dict[str, str]]:
     if not directory.exists():
         return []
     return [{"id": item.stem, "name": item.stem} for item in sorted(directory.glob("*.md"))]
+
+
+def _list_chapters_from_hierarchy(novel_dir: Path) -> list[dict[str, str]]:
+    """从 hierarchy.yaml 读取章节列表。"""
+    hierarchy_file = novel_dir / "outline" / "hierarchy.yaml"
+    if not hierarchy_file.exists():
+        return []
+    
+    try:
+        with hierarchy_file.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        
+        chapters = []
+        # 支持两种格式：chapters 列表 或 chapters 字典
+        raw_chapters = data.get("chapters", [])
+        if isinstance(raw_chapters, list):
+            for ch in raw_chapters:
+                if isinstance(ch, dict) and "id" in ch:
+                    chapters.append({
+                        "id": ch["id"],
+                        "name": ch.get("title", ch["id"])
+                    })
+        elif isinstance(raw_chapters, dict):
+            for ch_id, ch_data in raw_chapters.items():
+                if isinstance(ch_data, dict):
+                    chapters.append({
+                        "id": ch_id,
+                        "name": ch_data.get("title", ch_id)
+                    })
+        return chapters
+    except Exception:
+        return []
 
 
 def create_app(
@@ -552,16 +602,37 @@ def create_app(
 
 
     @app.get("/chat", response_class=HTMLResponse)
-    async def chat_page(request: Request):
-        """统一对话界面页面。"""
+    async def chat_page(request: Request, novel_id_param: Optional[str] = None):
+        """统一对话界面页面。支持通过 novel_id 参数切换项目。"""
+        # 使用传入的 novel_id 或默认值
+        current_novel_id = novel_id_param or novel_id
+        
+        # 动态加载侧边栏数据（使用当前 novel_id）
+        outline_chapters_dir = proj / "data" / "novels" / current_novel_id / "outline" / "chapters"
+        manuscript_dir = proj / "data" / "novels" / current_novel_id / "manuscript"
+        drafts_dir = manuscript_dir / "drafts"
+        drafts_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 先尝试从 chapters 目录读取，如果没有则从 hierarchy.yaml 读取
+        chapters = _list_markdown_files(outline_chapters_dir)
+        if not chapters:
+            chapters = _list_chapters_from_hierarchy(proj / "data" / "novels" / current_novel_id)
+        drafts = _list_markdown_files(drafts_dir)
+        
+        # 加载角色
+        chars_mgr = CharacterStateManager(project_dir=proj, novel_id=current_novel_id)
+        characters = chars_mgr.list_characters()
+        
         return templates.TemplateResponse(
             request,
             "chat.html",
             {
-                "novel_id": novel_id,
+                "novel_id": current_novel_id,
+                "chapters": chapters,
+                "drafts": drafts,
+                "characters": characters,
             },
         )
-
     @app.get("/timeline", response_class=HTMLResponse)
     async def timeline_page(request: Request):
         """叙事时间线页面。"""
@@ -725,8 +796,27 @@ def create_app(
                 "novel_id": novel_id,
             },
         )
+    def _list_novels() -> list[dict[str, str]]:
+        """列出所有可用的小说项目。"""
+        novels_dir = proj / "data" / "novels"
+        if not novels_dir.exists():
+            return [{"id": novel_id, "name": novel_id, "is_default": True}]
+        novels = []
+        for item in novels_dir.iterdir():
+            if item.is_dir():
+                novels.append({
+                    "id": item.name,
+                    "name": item.name,
+                    "is_default": item.name == novel_id
+                })
+        if not novels:
+            novels = [{"id": novel_id, "name": novel_id, "is_default": True}]
+        return novels
 
-    # ── REST API ──────────────────────────────────────────────────
+    @app.get("/api/novels")
+    async def api_novels_list():
+        """列出所有可用的小说项目。"""
+        return {"novels": _list_novels(), "current": novel_id}
 
     @app.get("/api/stats")
     async def api_stats():

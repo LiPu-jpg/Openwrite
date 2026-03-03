@@ -27,13 +27,14 @@ class LLMResponse:
         model: 实际使用的模型标识符
         usage: token 用量统计
         raw: 原始响应对象（调试用）
+        tool_calls: 工具调用列表（Function Calling 时）
     """
 
     content: str
     model: str
     usage: Dict[str, int] = field(default_factory=dict)
     raw: Optional[Any] = None
-
+    tool_calls: Optional[List[Dict[str, Any]]] = None
 
 class LLMClient:
     """LiteLLM 封装客户端。
@@ -183,11 +184,25 @@ class LLMClient:
                         ),
                         "total_tokens": getattr(response.usage, "total_tokens", 0),
                     }
+                # 提取 tool_calls（如果有）
+                tool_calls = None
+                message = response.choices[0].message
+                if hasattr(message, 'tool_calls') and message.tool_calls:
+                    tool_calls = [
+                        {
+                            "id": tc.id,
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        }
+                        for tc in message.tool_calls
+                    ]
+                
                 return LLMResponse(
                     content=content,
                     model=model,
                     usage=usage,
                     raw=response,
+                    tool_calls=tool_calls,
                 )
             except Exception as e:
                 last_error = e
