@@ -24,6 +24,7 @@ import yaml
 from .frontmatter import render_toml_front_matter
 from .llm.client import LLMClient, LLMConfig, LLMResponse, Message
 from .shared_documents import render_indexed_document
+from .resource_resolver import ResourceResolver
 
 
 def build_style_manifest(project_root: Path, novel_id: str, style_id: str) -> dict[str, Any]:
@@ -323,11 +324,11 @@ def _collect_consistency_source_bound(project_root: Path, novel_id: str, style_i
 
 
 def _collect_banned_phrases(project_root: Path) -> list[str]:
-    humanization_path = Path(project_root) / "craft" / "humanization.yaml"
-    if not humanization_path.exists():
+    text = ResourceResolver(project_root).read_text("craft", "humanization.yaml")
+    if not text:
         return []
     try:
-        data = yaml.safe_load(humanization_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except Exception:
         return []
     phrases = data.get("banned_phrases", [])
@@ -365,10 +366,9 @@ def _collect_fingerprint_rules(project_root: Path, novel_id: str) -> list[str]:
 
 
 def _collect_craft_headings(project_root: Path, filename: str) -> list[str]:
-    path = Path(project_root) / "craft" / filename
-    if not path.exists():
+    text = ResourceResolver(project_root).read_text("craft", filename)
+    if not text:
         return []
-    text = path.read_text(encoding="utf-8")
     results: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()

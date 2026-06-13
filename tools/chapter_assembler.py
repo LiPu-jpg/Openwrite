@@ -30,6 +30,8 @@ from tools.source_sync import ensure_runtime_fresh
 from tools.style_synthesizer import render_style_manifest_summary
 from tools.story_planning import StoryPlanningStore
 from tools.truth_manager import TruthFilesManager
+from tools.resource_resolver import ResourceResolver
+from tools.language import current_language, load_language_prompt
 
 
 ROLE_SYSTEM_PROMPTS: Dict[str, str] = {
@@ -54,6 +56,19 @@ ROLE_SYSTEM_PROMPTS: Dict[str, str] = {
         "禁止新增未发生事件。"
     ),
 }
+
+
+def role_system_prompts(project_root: Path) -> Dict[str, str]:
+    if current_language() != "vi":
+        return dict(ROLE_SYSTEM_PROMPTS)
+
+    return {
+        "director": load_language_prompt("vi", "director", project_root),
+        "context_engineer": load_language_prompt("vi", "context_engineer", project_root),
+        "writer": load_language_prompt("vi", "writer", project_root),
+        "continuity_reviewer": load_language_prompt("vi", "reviewer", project_root),
+        "state_settler": load_language_prompt("vi", "state_settler", project_root),
+    }
 
 
 @dataclass
@@ -93,82 +108,145 @@ class ChapterAssemblyPacket:
 
     def to_markdown(self) -> str:
         parts: List[str] = []
+        is_vi = current_language() == "vi"
 
-        parts.append("## 系统提示词（按职责）")
+        if is_vi:
+            parts.append("## Hệ thống Prompt (Theo vai trò)")
+        else:
+            parts.append("## 系统提示词（按职责）")
+            
         for role, prompt in self.system_prompts.items():
             parts.append(f"### {role}\n{prompt}")
 
-        parts.append("## 故事背景")
-        parts.append(self.story_background or "（暂无）")
+        if is_vi:
+            parts.append("## Bối cảnh câu chuyện")
+            parts.append(self.story_background or "（Chưa có）")
+        else:
+            parts.append("## 故事背景")
+            parts.append(self.story_background or "（暂无）")
 
-        parts.append("## 历史篇梗概")
+        if is_vi:
+            parts.append("## Tóm tắt các arc trước")
+        else:
+            parts.append("## 历史篇梗概")
+            
         if self.historical_arc_summaries:
             for arc in self.historical_arc_summaries:
                 parts.append(f"### {arc.title} ({arc.arc_id})\n{arc.summary}")
         else:
-            parts.append("（暂无）")
+            parts.append("（Chưa có）" if is_vi else "（暂无）")
 
-        parts.append("## 当前篇各节梗概")
+        if is_vi:
+            parts.append("## Tóm tắt các chương trong arc hiện tại")
+        else:
+            parts.append("## 当前篇各节梗概")
+            
         if self.current_arc_sections:
             for sec in self.current_arc_sections:
-                chars = "、".join(sec.involved_characters) if sec.involved_characters else "无"
-                concepts = "、".join(sec.involved_concepts) if sec.involved_concepts else "无"
-                parts.append(
-                    f"### {sec.title} ({sec.section_id})\n"
-                    f"涉及人物：{chars}\n"
-                    f"涉及概念：{concepts}\n\n"
-                    f"{sec.summary}"
-                )
+                if is_vi:
+                    chars = "、".join(sec.involved_characters) if sec.involved_characters else "Không"
+                    concepts = "、".join(sec.involved_concepts) if sec.involved_concepts else "Không"
+                    parts.append(
+                        f"### {sec.title} ({sec.section_id})\n"
+                        f"Nhân vật liên quan: {chars}\n"
+                        f"Khái niệm liên quan: {concepts}\n\n"
+                        f"{sec.summary}"
+                    )
+                else:
+                    chars = "、".join(sec.involved_characters) if sec.involved_characters else "无"
+                    concepts = "、".join(sec.involved_concepts) if sec.involved_concepts else "无"
+                    parts.append(
+                        f"### {sec.title} ({sec.section_id})\n"
+                        f"涉及人物：{chars}\n"
+                        f"涉及概念：{concepts}\n\n"
+                        f"{sec.summary}"
+                    )
         else:
-            parts.append("（暂无）")
+            parts.append("（Chưa có）" if is_vi else "（暂无）")
 
-        parts.append("## 上一章正文")
-        parts.append(self.previous_chapter_content or "（暂无）")
+        if is_vi:
+            parts.append("## Nội dung chương trước")
+            parts.append(self.previous_chapter_content or "（Chưa có）")
+            parts.append("## Trạng thái nhân vật chính")
+            parts.append(self.protagonist_state or "（Chưa có）")
+            parts.append("## Tệp sự thật hiện tại")
+            parts.append(f"### current_state.md\n{self.current_state or '（Chưa có）'}")
+            parts.append(f"### ledger.md\n{self.ledger or '（Chưa có）'}")
+            parts.append(f"### relationships.md\n{self.relationships or '（Chưa có）'}")
+            parts.append("## Tài liệu nhân vật")
+        else:
+            parts.append("## 上一章正文")
+            parts.append(self.previous_chapter_content or "（暂无）")
+            parts.append("## 主角状态")
+            parts.append(self.protagonist_state or "（暂无）")
+            parts.append("## 运行态真相文件")
+            parts.append(f"### current_state.md\n{self.current_state or '（暂无）'}")
+            parts.append(f"### ledger.md\n{self.ledger or '（暂无）'}")
+            parts.append(f"### relationships.md\n{self.relationships or '（暂无）'}")
+            parts.append("## 人物文档")
 
-        parts.append("## 主角状态")
-        parts.append(self.protagonist_state or "（暂无）")
-
-        parts.append("## 运行态真相文件")
-        parts.append(f"### current_state.md\n{self.current_state or '（暂无）'}")
-        parts.append(f"### ledger.md\n{self.ledger or '（暂无）'}")
-        parts.append(f"### relationships.md\n{self.relationships or '（暂无）'}")
-
-        parts.append("## 人物文档")
         if self.character_documents:
             for name, content in self.character_documents.items():
                 parts.append(f"### {name}\n{content}")
         else:
-            parts.append("（暂无）")
+            parts.append("（Chưa có）" if is_vi else "（暂无）")
 
-        parts.append("## 风格文档")
+        if is_vi:
+            parts.append("## Tài liệu phong cách")
+        else:
+            parts.append("## 风格文档")
+            
         if self.style_documents:
             for key, content in self.style_documents.items():
                 parts.append(f"### {key}\n{content}")
         else:
-            parts.append("（暂无）")
+            parts.append("（Chưa có）" if is_vi else "（暂无）")
 
-        parts.append("## 概念文档")
+        if is_vi:
+            parts.append("## Tài liệu khái niệm")
+        else:
+            parts.append("## 概念文档")
+            
         if self.concept_documents:
             for key, content in self.concept_documents.items():
                 parts.append(f"### {key}\n{content}")
         else:
-            parts.append("（暂无）")
+            parts.append("（Chưa có）" if is_vi else "（暂无）")
 
-        parts.append("## Agent 权限矩阵")
+        if is_vi:
+            parts.append("## Ma trận phân quyền Agent")
+        else:
+            parts.append("## Agent 权限矩阵")
+            
         for name, spec in self.agent_specs.items():
-            parts.append(
-                f"### {name}\n"
-                f"职责：{spec.get('role', '')}\n"
-                f"必需：{spec.get('required', False)}\n"
-                f"可读：{', '.join(spec.get('can_read', [])) or '无'}\n"
-                f"可写：{', '.join(spec.get('can_write', [])) or '无'}\n"
-                f"禁止：{', '.join(spec.get('forbidden', [])) or '无'}"
-            )
+            if is_vi:
+                parts.append(
+                    f"### {name}\n"
+                    f"Vai trò: {spec.get('role', '')}\n"
+                    f"Bắt buộc: {spec.get('required', False)}\n"
+                    f"Có thể đọc: {', '.join(spec.get('can_read', [])) or 'Không'}\n"
+                    f"Có thể ghi: {', '.join(spec.get('can_write', [])) or 'Không'}\n"
+                    f"Cấm: {', '.join(spec.get('forbidden', [])) or 'Không'}"
+                )
+            else:
+                parts.append(
+                    f"### {name}\n"
+                    f"职责：{spec.get('role', '')}\n"
+                    f"必需：{spec.get('required', False)}\n"
+                    f"可读：{', '.join(spec.get('can_read', [])) or '无'}\n"
+                    f"可写：{', '.join(spec.get('can_write', [])) or '无'}\n"
+                    f"禁止：{', '.join(spec.get('forbidden', [])) or '无'}"
+                )
 
         if self.redundant_agents:
-            parts.append("## 冗余 Agent（默认不启用）")
-            for name, spec in self.redundant_agents.items():
-                parts.append(f"### {name}\n{spec.get('role', '')}")
+            if is_vi:
+                parts.append("## Agent dự phòng (Mặc định không bật)")
+                for name, spec in self.redundant_agents.items():
+                    parts.append(f"### {name}\n{spec.get('role', '')}")
+            else:
+                parts.append("## 冗余 Agent（默认不启用）")
+                for name, spec in self.redundant_agents.items():
+                    parts.append(f"### {name}\n{spec.get('role', '')}")
 
         return "\n\n".join(parts)
 
@@ -186,6 +264,7 @@ class ChapterAssemblerV2:
         self.runtime_root = self.novel_root / "data"
         self.story_planning_store = StoryPlanningStore(self.project_root, self.novel_id)
         self.truth_manager = TruthFilesManager(self.project_root, self.novel_id)
+        self.resources = ResourceResolver(self.project_root)
 
     def assemble(self, chapter_id: str) -> ChapterAssemblyPacket:
         ensure_runtime_fresh(self.project_root, self.novel_id)
@@ -196,7 +275,7 @@ class ChapterAssemblerV2:
         packet = ChapterAssemblyPacket(
             novel_id=self.novel_id,
             chapter_id=chapter_id,
-            system_prompts=dict(ROLE_SYSTEM_PROMPTS),
+            system_prompts=role_system_prompts(self.project_root),
             current_state=truth.current_state,
             ledger=truth.ledger,
             relationships=truth.relationships,
@@ -507,11 +586,18 @@ class ChapterAssemblerV2:
         if fingerprint.exists():
             docs["work.fingerprint"] = self._load_text(fingerprint)
 
-        craft_dir = self.project_root / "craft"
-        if craft_dir.exists():
-            for p in sorted(craft_dir.glob("*")):
-                if p.suffix in {".md", ".yaml", ".yml"}:
-                    docs[f"craft.{p.stem}"] = self._load_text(p)
+        craft_files = [
+            "ai_patterns.yaml",
+            "dialogue_craft.md",
+            "humanization.yaml",
+            "rhythm_craft.md",
+            "scene_craft.md"
+        ]
+        for filename in craft_files:
+            text = self.resources.read_text("craft", filename)
+            if text:
+                stem = Path(filename).stem
+                docs[f"craft.{stem}"] = text
 
         style_name = self.style_id or self.novel_id
         source_dir = self.runtime_root / "sources" / style_name / "style"

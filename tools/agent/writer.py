@@ -27,6 +27,7 @@ from typing import Optional, List
 
 from .base import BaseAgent, AgentContext
 from ..llm import Message, LLMResponse
+from ..language import current_language, load_language_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,12 @@ class WriterAgent(BaseAgent):
         parts = []
 
         # 基本角色指导
-        parts.append("""你是一位专业的小说作家，擅长创作引人入胜的故事。
+        language = current_language()
+        if language == "vi":
+            prompt = load_language_prompt("vi", "writer", Path(self.ctx.project_root))
+            parts.append(prompt)
+        else:
+            parts.append("""你是一位专业的小说作家，擅长创作引人入胜的故事。
 写作风格要求：
 - 生动具体的描写，避免抽象概括
 - 对话自然，符合角色性格
@@ -207,49 +213,82 @@ class WriterAgent(BaseAgent):
     ) -> str:
         """构建创意写作用户提示"""
         parts = []
+        is_vi = current_language() == "vi"
 
         # 章节信息
-        parts.append(f"# 第{chapter_number}章写作任务\n")
-        parts.append(f"目标字数：约{target_words}字\n")
+        if is_vi:
+            parts.append(f"# Nhiệm vụ viết chương {chapter_number}\n")
+            parts.append(f"Số chữ mục tiêu: Khoảng {target_words} chữ\n")
+        else:
+            parts.append(f"# 第{chapter_number}章写作任务\n")
+            parts.append(f"目标字数：约{target_words}字\n")
 
         # 大纲
         if context.get("outline"):
-            parts.append(f"## 本章大纲\n{context['outline']}\n")
+            if is_vi:
+                parts.append(f"## Đề cương chương này\n{context['outline']}\n")
+            else:
+                parts.append(f"## 本章大纲\n{context['outline']}\n")
 
         # 章节目标
         if context.get("chapter_goals"):
             goals = "\n".join(f"- {g}" for g in context["chapter_goals"])
-            parts.append(f"## 章节目标\n{goals}\n")
+            if is_vi:
+                parts.append(f"## Mục tiêu chương\n{goals}\n")
+            else:
+                parts.append(f"## 章节目标\n{goals}\n")
 
         # 戏剧位置
         if context.get("dramatic_context"):
-            parts.append(f"## 戏剧位置\n{context['dramatic_context']}\n")
+            if is_vi:
+                parts.append(f"## Vị trí kịch tính\n{context['dramatic_context']}\n")
+            else:
+                parts.append(f"## 戏剧位置\n{context['dramatic_context']}\n")
 
         # 角色
         if context.get("active_characters"):
-            chars = "\n\n".join(
-                f"### {c['name']}\n{c.get('description', '暂无描述')}"
-                for c in context["active_characters"]
-            )
-            parts.append(f"## 本章出场角色\n{chars}\n")
+            if is_vi:
+                chars = "\n\n".join(
+                    f"### {c['name']}\n{c.get('description', 'Chưa có mô tả')}"
+                    for c in context["active_characters"]
+                )
+                parts.append(f"## Nhân vật xuất hiện trong chương\n{chars}\n")
+            else:
+                chars = "\n\n".join(
+                    f"### {c['name']}\n{c.get('description', '暂无描述')}"
+                    for c in context["active_characters"]
+                )
+                parts.append(f"## 本章出场角色\n{chars}\n")
 
         # 伏笔
         if context.get("foreshadowing"):
             pending = context["foreshadowing"].get("pending", [])
             if pending:
                 hooks = "\n".join(f"- {h['content']}" for h in pending[:5])
-                parts.append(f"## 待回收伏笔（选择性埋设）\n{hooks}\n")
+                if is_vi:
+                    parts.append(f"## Phục bút chờ thu hồi (chọn lọc)\n{hooks}\n")
+                else:
+                    parts.append(f"## 待回收伏笔（选择性埋设）\n{hooks}\n")
 
         # 真相文件
         if context.get("current_state"):
-            parts.append(f"## 世界当前状态\n{context['current_state'][:500]}\n")
+            if is_vi:
+                parts.append(f"## Trạng thái thế giới hiện tại\n{context['current_state'][:500]}\n")
+            else:
+                parts.append(f"## 世界当前状态\n{context['current_state'][:500]}\n")
 
         if context.get("recent_chapters"):
-            parts.append(f"## 前文内容\n{context['recent_chapters'][:1000]}\n")
+            if is_vi:
+                parts.append(f"## Nội dung các chương trước\n{context['recent_chapters'][:1000]}\n")
+            else:
+                parts.append(f"## 前文内容\n{context['recent_chapters'][:1000]}\n")
 
         # 外部上下文
         if context.get("external_context"):
-            parts.append(f"## 额外要求\n{context['external_context']}\n")
+            if is_vi:
+                parts.append(f"## Yêu cầu bổ sung\n{context['external_context']}\n")
+            else:
+                parts.append(f"## 额外要求\n{context['external_context']}\n")
 
         return "\n".join(parts)
 
@@ -315,7 +354,37 @@ class WriterAgent(BaseAgent):
         content: str,
     ) -> str:
         """2a: 观察者 - 从章节中提取关键事实"""
-        system_prompt = """你是一位细心的观察者，负责从小说章节中提取关键信息。
+        is_vi = current_language() == "vi"
+        
+        if is_vi:
+            system_prompt = """Bạn là một người quan sát tỉ mỉ, chịu trách nhiệm trích xuất các thông tin chính từ chương truyện.
+
+Trích xuất các loại thông tin sau:
+1. Thay đổi trạng thái nhân vật (cảm xúc, năng lực, mối quan hệ)
+2. Vật phẩm nhận được/mất đi/chuyển giao
+3. Thay đổi địa điểm
+4. Sự kiện quan trọng
+5. Đặt/thu hồi phục bút
+6. Thay đổi chỉ số (tiền bạc, cấp độ, v.v.)
+7. Nhân vật mới xuất hiện
+8. Điểm chính của cuộc hội thoại
+
+Yêu cầu định dạng:
+- Mỗi thông tin một dòng
+- Sử dụng ngôn ngữ đánh dấu ngắn gọn
+- Ghi rõ nguồn thông tin (vị trí trong chương)
+
+Giữ thái độ khách quan, không thêm suy đoán của bạn."""
+
+            user_prompt = f"""Trích xuất các sự kiện chính từ chương sau:
+
+Tiêu đề chương: {title}
+Nội dung chương:
+{content[:3000]}
+
+Vui lòng trích xuất tất cả các sự kiện chính:"""
+        else:
+            system_prompt = """你是一位细心的观察者，负责从小说章节中提取关键信息。
 
 提取以下类型的信息：
 1. 角色状态变化（情绪、能力、关系）
@@ -334,7 +403,7 @@ class WriterAgent(BaseAgent):
 
 保持客观，不要添加你的推测。"""
 
-        user_prompt = f"""从以下章节中提取关键事实：
+            user_prompt = f"""从以下章节中提取关键事实：
 
 章节标题：{title}
 章节内容：
@@ -362,7 +431,55 @@ class WriterAgent(BaseAgent):
         observations: str,
     ) -> dict:
         """2b: 结算者 - 将观察结果合并到真相文件"""
-        system_prompt = """你是一位细心的编辑，负责将章节中的变化合并到世界观状态中。
+        is_vi = current_language() == "vi"
+        
+        if is_vi:
+            system_prompt = """Bạn là một biên tập viên tỉ mỉ, chịu trách nhiệm hợp nhất các thay đổi trong chương vào trạng thái thế giới.
+
+Dựa trên kết quả quan sát, hãy cập nhật các tệp sự thật sau:
+1. current_state.md - Trạng thái thế giới hiện tại
+2. ledger.md - Sổ cái tài nguyên (nếu có hệ thống chỉ số)
+3. relationships.md - Mối quan hệ nhân vật
+4. (Tùy chọn) foreshadowing/dag.yaml - Trạng thái phục bút (chỉ để gợi ý, không lưu trong lần xuất này)
+5. (Tùy chọn) hierarchy.yaml / compressed/*.md - Tóm tắt chương (chỉ để gợi ý, không lưu trong lần xuất này)
+
+Nguyên tắc:
+- Chỉ ghi lại những thay đổi khách quan, không tạo nội dung mới
+- Giữ ngắn gọn, mỗi tệp cập nhật không quá 200 chữ
+- Sử dụng định dạng Markdown để xuất
+- Chỉ xuất các trường thực sự có thay đổi
+
+Định dạng xuất:
+```yaml
+state_updates:
+  current_state: |
+    [Trạng thái thế giới cập nhật]
+  ledger: |
+    [Sổ cái tài nguyên cập nhật]
+  relationships: |
+    [Mối quan hệ nhân vật cập nhật]
+
+# Trường tương thích (Tùy chọn, đồng nghĩa với ledger/relationships)
+# particle_ledger: |
+# character_matrix: |
+
+Lưu ý: Các tài liệu bên ngoài và giao diện chung lấy current_state / ledger / relationships làm chuẩn,
+bí danh lịch sử chỉ dùng để tương thích đầu vào của hệ thống cũ.
+```"""
+
+            user_prompt = f"""Dựa trên kết quả quan sát sau, hãy cập nhật các tệp sự thật:
+
+Số chương: {chapter_number}
+Tiêu đề chương: {title}
+Kết quả quan sát:
+{observations}
+
+Trạng thái tệp sự thật hiện tại:
+{self._format_truth_files(context)}
+
+Vui lòng xuất các tệp sự thật đã được cập nhật:"""
+        else:
+            system_prompt = """你是一位细心的编辑，负责将章节中的变化合并到世界观状态中。
 
 根据观察结果，更新以下真相文件：
 1. current_state.md - 世界当前状态
@@ -382,9 +499,9 @@ class WriterAgent(BaseAgent):
 state_updates:
   current_state: |
     [更新的世界状态]
-    ledger: |
+  ledger: |
     [更新的资源账本]
-    relationships: |
+  relationships: |
     [更新的角色关系]
 
 # 兼容字段（可选，同义于 ledger/relationships）
@@ -395,7 +512,7 @@ state_updates:
 历史别名仅用于兼容旧链路输入。
 ```"""
 
-        user_prompt = f"""根据以下观察结果，更新真相文件：
+            user_prompt = f"""根据以下观察结果，更新真相文件：
 
 章节编号：{chapter_number}
 章节标题：{title}

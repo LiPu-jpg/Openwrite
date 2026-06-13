@@ -32,6 +32,7 @@ from models.context_package import (
     ForeshadowingState,
     WorldRules,
 )
+from .resource_resolver import ResourceResolver
 from .truth_manager import TruthFilesManager
 from .frontmatter import parse_toml_front_matter
 from .outline_cache import deserialize_outline_hierarchy
@@ -82,7 +83,7 @@ class ContextBuilder:
         self.ref_style_dir = (
             self.data_dir / "sources" / reference_style / "style" if reference_style else None
         )
-        self.craft_dir = project_root / "craft"
+        self.resources = ResourceResolver(project_root)
 
         # 真相文件管理器
         self.truth_manager = TruthFilesManager(project_root, novel_id)
@@ -578,9 +579,6 @@ class ContextBuilder:
         """加载通用写作技法"""
         rules: List[str] = []
 
-        if not self.craft_dir.exists():
-            return rules
-
         # 加载 craft/ 下的技法文件
         craft_files = [
             "dialogue_craft.md",
@@ -589,9 +587,8 @@ class ContextBuilder:
         ]
 
         for filename in craft_files:
-            path = self.craft_dir / filename
-            if path.exists():
-                text = self._load_text(path)
+            text = self.resources.read_text("craft", filename)
+            if text:
                 # 提取二级标题作为规则
                 headings = re.findall(r"^##\s+(.+)$", text, re.MULTILINE)
                 rules.extend(headings[:5])  # 每个文件最多5条
@@ -692,9 +689,9 @@ class ContextBuilder:
         banned: List[str] = []
 
         # 从 humanization.yaml 加载
-        human_path = self.craft_dir / "humanization.yaml"
-        if human_path.exists():
-            data = self._load_yaml(human_path)
+        text = self.resources.read_text("craft", "humanization.yaml")
+        if text:
+            data = yaml.safe_load(text) or {}
             # 提取禁用词
             phrases = data.get("banned_phrases", [])
             banned.extend([p.get("phrase", p) if isinstance(p, dict) else p for p in phrases[:30]])

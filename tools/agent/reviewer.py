@@ -19,6 +19,9 @@ from typing import Optional
 
 from .base import BaseAgent, AgentContext
 from ..llm import Message, LLMResponse
+import yaml
+from pathlib import Path
+from tools.resource_resolver import ResourceResolver
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,10 @@ class ReviewerAgent(BaseAgent):
             context=writing_context,
         )
     """
+
+    def __init__(self, ctx: AgentContext):
+        super().__init__(ctx)
+        self.resources = ResourceResolver(Path(self.ctx.project_root))
 
     # 33维度映射
     DIMENSION_MAP = {
@@ -257,13 +264,9 @@ class ReviewerAgent(BaseAgent):
         issues = []
 
         try:
-            import yaml
-            from pathlib import Path
-
-            yaml_path = Path(__file__).parent.parent.parent / "craft" / "ai_patterns.yaml"
-            if yaml_path.exists():
-                with open(yaml_path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
+            text = self.resources.read_text("craft", "ai_patterns.yaml")
+            if text:
+                data = yaml.safe_load(text)
 
                 # 检查禁用词
                 banned = data.get("banned_patterns", [])
