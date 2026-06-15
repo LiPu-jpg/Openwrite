@@ -1,0 +1,68 @@
+name: Publish Docker Image
+
+on:
+  push:
+    branches:
+      - feature/smart-story-adapter
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: openwrite
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:feature-smart-story-adapter \
+            -t ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            .
+
+      - name: Push Docker image to GHCR
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }} --all-tags
+
+      - name: Cleanup old GHCR images
+        run: |
+          set -euo pipefail
+          OWNER="${{ github.repository_owner }}"
+          IMAGE="${{ env.IMAGE_NAME }}"
+
+          # Detect whether owner is a user or organization
+          if gh api "/users/${OWNER}/packages/container/${IMAGE}/versions" --paginate > /dev/null 2>&1; then
+            API_BASE="/users/${OWNER}"
+          else
+            API_BASE="/orgs/${OWNER}"
+          fi
+
+          echo "Using API base: ${API_BASE}"
+
+          # Sort by updated_at descending, skip 3 most recent, delete the rest
+          VERSION_IDS=$(gh api "${API_BASE}/packages/container/${IMAGE}/versions" --paginate \
+            | jq -r 'sort_by(.updated_at) | reverse | .[3:][] | .id')
+
+          if [ -n "$VERSION_IDS" ]; then
+            echo "$VERSION_IDS" | xargs -I {} gh api --method DELETE "${API_BASE}/packages/container/${IMAGE}/versions/{}" || true
+          else
+            echo "No old versions to clean up"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
