@@ -9,6 +9,7 @@ dependencies = [
     "openai>=1.0",
     "anthropic>=0.18",
     "prompt_toolkit>=3.0",
+    "httpx>=0.27,<1.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -25,6 +26,7 @@ dev = [
 
 [project.scripts]
 openwrite = "tools.cli:main"
+smart-story-openwrite-adapter = "tools.smart_story_adapter.cli:main"
 
 [tool.mypy]
 python_version = "3.10"
