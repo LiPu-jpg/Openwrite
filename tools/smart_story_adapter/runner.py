@@ -63,10 +63,12 @@ class SmartStoryAdapterRunner:
             self._progress("succeeded", 100, "Completed.", commit_sha=final_commit, output_ids=output_ids)
             return 0
         except AdapterError as exc:
+            import sys
+            print(f"AdapterError: {exc}", file=sys.stderr)
             try:
                 self._progress("failed", 100, exc.user_message, failure_category=exc.failure_category, user_message=exc.user_message)
-            except Exception:
-                pass  # Best-effort: don't let progress reporting mask the original error
+            except Exception as report_exc:
+                print(f"Failed to report error to backend: {report_exc}", file=sys.stderr)
             return 1
 
     def _novel_id(self) -> str:
