@@ -10,7 +10,8 @@ def main() -> int:
     try:
         config = AdapterConfig.from_env(os.environ)
     except ConfigError as exc:
-        print(str(exc))
+        import sys
+        print(f"ConfigError: {exc}", file=sys.stderr)
         return 78
 
     return SmartStoryAdapterRunner(config).run()
