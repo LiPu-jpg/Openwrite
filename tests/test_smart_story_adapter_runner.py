@@ -57,7 +57,7 @@ def test_runner_reports_progress_imports_draft_and_succeeds(tmp_path: Path) -> N
     )
 
     assert runner.run() == 0
-    assert [item["status"] for item in mcp.progress] == ["started", "running", "submitting", "succeeded"]
+    assert [item["status"] for item in mcp.progress] == ["preparing", "running", "submitting", "succeeded"]
     assert len(mcp.imports) == 1
     assert mcp.imports[0]["output_key"] == "chapter-number-1"
 

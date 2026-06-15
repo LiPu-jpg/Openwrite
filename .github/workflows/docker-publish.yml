@@ -15,19 +15,21 @@ permissions:
 
 jobs:
   build-and-push:
-    runs-on: [ self-hosted, staging, frontend ]
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Check Docker and PATH
+        run: |
+          echo "PATH is: $PATH"
+          which docker || echo "docker not found in PATH"
+          docker --version || echo "docker command failed"
+
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Build Docker image
         run: |

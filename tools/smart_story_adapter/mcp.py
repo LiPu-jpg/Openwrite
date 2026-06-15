@@ -46,12 +46,12 @@ class McpClient:
         except ValueError:
             if response.status_code >= 400:
                 raise AdapterError(
-                    f"MCP call {name} failed with HTTP {response.status_code}",
+                    f"MCP call {name} failed with HTTP {response.status_code}: {response.text[:200]}",
                     "mcp_submission_failed",
                     "Không thể gửi kết quả AI về Smart Story.",
                 )
             raise AdapterError(
-                f"MCP call {name} failed: Invalid JSON response",
+                f"MCP call {name} failed: Invalid JSON response (HTTP {response.status_code}, body={response.text[:200]!r})",
                 "mcp_submission_failed",
                 "Không thể đọc kết quả từ Smart Story.",
             )

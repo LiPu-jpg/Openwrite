@@ -38,7 +38,7 @@ class SmartStoryAdapterRunner:
 
     def run(self) -> int:
         try:
-            self._progress("started", 1, "Adapter started.")
+            self._progress("preparing", 1, "Adapter started.")
             self.git_ops.clone_or_fetch(
                 self.workspace,
                 self.config.git_clone_url,
@@ -63,7 +63,10 @@ class SmartStoryAdapterRunner:
             self._progress("succeeded", 100, "Completed.", commit_sha=final_commit, output_ids=output_ids)
             return 0
         except AdapterError as exc:
-            self._progress("failed", 100, exc.user_message, failure_category=exc.failure_category, user_message=exc.user_message)
+            try:
+                self._progress("failed", 100, exc.user_message, failure_category=exc.failure_category, user_message=exc.user_message)
+            except Exception:
+                pass  # Best-effort: don't let progress reporting mask the original error
             return 1
 
     def _novel_id(self) -> str:
