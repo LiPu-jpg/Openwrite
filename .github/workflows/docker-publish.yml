@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build-and-push:
-    runs-on: macos-26
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
 
     steps:
