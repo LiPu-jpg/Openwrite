@@ -30,6 +30,8 @@ class GitOps:
         else:
             self.run_command(["git", "fetch", "origin", branch], workspace)
         self.run_command(["git", "checkout", branch], workspace)
+        self.run_command(["git", "config", "user.name", username], workspace)
+        self.run_command(["git", "config", "user.email", f"{username}@smart-story.ai"], workspace)
 
     def verify_commit(self, workspace: Path, expected_sha: str | None) -> None:
         if not expected_sha:

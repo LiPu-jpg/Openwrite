@@ -39,6 +39,8 @@ def test_git_ops_runs_clone_checkout_commit_and_push(tmp_path: Path) -> None:
     ops.push(tmp_path / "workspace", "main")
 
     assert ["git", "checkout", "main"] in calls
+    assert ["git", "config", "user.name", "agent"] in calls
+    assert ["git", "config", "user.email", "agent@smart-story.ai"] in calls
     assert ["git", "add", "-A"] in calls
     assert ["git", "commit", "-m", "Smart Story run 10"] in calls
     assert ["git", "push", "origin", "main"] in calls
