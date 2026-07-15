@@ -124,7 +124,10 @@ class ReviewerAgent(BaseAgent):
         all_issues = []
 
         # ── 规则类检查（零 LLM 成本）─
-        rule_issues = self._rule_based_check(content)
+        rule_issues = self._rule_based_check(
+            content,
+            target_words=int(context.get("target_words") or 0),
+        )
         all_issues.extend(rule_issues)
 
         # ── AI 痕迹检测（统计方法）─
@@ -153,9 +156,29 @@ class ReviewerAgent(BaseAgent):
             score=score,
         )
 
-    def _rule_based_check(self, content: str) -> list[ReviewIssue]:
+    def _rule_based_check(
+        self, content: str, target_words: int = 0
+    ) -> list[ReviewIssue]:
         """基于规则的检查（零 LLM 成本）"""
         issues = []
+
+        if target_words > 0:
+            actual_words = len(re.findall(r"[\u4e00-\u9fff]", content))
+            minimum_words = int(target_words * 0.7)
+            maximum_words = int(target_words * 1.3)
+            if actual_words < minimum_words or actual_words > maximum_words:
+                issues.append(
+                    ReviewIssue(
+                        severity="warning",
+                        category="目标字数偏差",
+                        description=(
+                            f"正文约{actual_words}个中文字符，目标为{target_words}，"
+                            "偏差超过30%"
+                        ),
+                        suggestion="删减重复动作与支线，或补足关键场景，使篇幅回到目标区间",
+                        dimension=7,
+                    )
+                )
 
         # 检查段落长度均匀度（dim 20）
         paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
@@ -311,7 +334,7 @@ class ReviewerAgent(BaseAgent):
 
         system_prompt = """你是一位专业的小说编辑，负责审核章节内容的质量。
 
-审核维度：
+核心审核维度：
 1. OOC检查 - 角色行为是否符合性格设定
 2. 时间线检查 - 事件顺序是否合理
 3. 设定冲突 - 是否与世界观设定矛盾
@@ -322,6 +345,11 @@ class ReviewerAgent(BaseAgent):
 8. 视角一致性 - 是否保持叙事视角统一
 9. 配角降智 - 配角是否被强行降智
 10. 台词失真 - 对话是否不符合角色性格
+11. 大纲偏离 - 是否完成本章目标与戏剧位置
+12. 作者意图 - 是否违背整本书的长期承诺
+13. 创作罗盘 - 是否违反当前阶段必须保留/必须避免项
+14. 关系连续性 - 人物关系变化是否有铺垫
+15. AI痕迹 - 是否存在过度总结、均匀段落或公式化转折
 
 输出格式：
 ```json
@@ -342,11 +370,32 @@ class ReviewerAgent(BaseAgent):
 章节内容：
 {content[:4000]}
 
+作者意图：
+{context.get("author_intent", "无")[:1200]}
+
+当前创作罗盘：
+{context.get("creative_focus", "无")[:1200]}
+
+本章大纲与目标：
+{context.get("outline", "无")[:2500]}
+
+目标字数：
+{context.get("target_words", "未指定")}
+
 角色设定：
-{context.get("character_profiles", "无")}
+{context.get("character_profiles", "无")[:2500]}
 
 当前世界状态：
 {context.get("current_state", "无")[:500]}
+
+当前人物关系：
+{context.get("relationships", "无")[:800]}
+
+风格约束：
+{context.get("style_profile", "无")[:1000]}
+
+上一章衔接：
+{context.get("recent_chapters", "无")[:1000]}
 
 请进行审核："""
 

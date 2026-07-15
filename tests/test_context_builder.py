@@ -296,6 +296,40 @@ summary = "普通程序员觉醒术法后被迫在两个世界夹缝求生。"
         assert profiles[0].character_id == "chen_ming"
         assert profiles[0].name == "陈明"
 
+    def test_generation_context_uses_estimated_words_and_infers_mentioned_character(
+        self, builder, project_dir
+    ):
+        root, novel_id = project_dir
+        novel_root = root / "data" / "novels" / novel_id
+        (novel_root / "src" / "outline.md").write_text(
+            """# 测试小说
+
+## 第一篇
+### 第一节
+#### 第一章：第十三秒
+> 预估字数: 800
+> 内容焦点: 沈砚在雨夜修复一盒异常磁带。
+""",
+            encoding="utf-8",
+        )
+        (novel_root / "src" / "characters" / "shen_yan.md").write_text(
+            """+++
+id = "shen_yan"
+name = "沈砚"
+tier = "主角"
+summary = "谨慎的磁带修复师。"
++++
+
+# 沈砚
+""",
+            encoding="utf-8",
+        )
+
+        context = builder.build_generation_context("ch_001")
+
+        assert context.target_words == 800
+        assert [profile.name for profile in context.active_characters] == ["沈砚"]
+
 
 # ── Chapter index parsing ────────────────────────────────────
 

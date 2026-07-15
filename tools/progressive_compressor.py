@@ -207,7 +207,7 @@ class ProgressiveCompressor:
         self.recent_text_min = recent_text_min
         self.recent_text_max = recent_text_max
         self.base_dir = self.project_dir / "data" / "novels" / novel_id
-        self.compression_dir = self.base_dir / "compressed"
+        self.compression_dir = self.base_dir / "data" / "compressed"
         self.compression_dir.mkdir(parents=True, exist_ok=True)
 
     # ── 节级压缩 ──────────────────────────────────────────────────

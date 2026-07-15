@@ -12,9 +12,9 @@ from .book_state import BookStage, BookState, BookStateStore
 from .react import OPENWRITE_TOOLS, ReActAgent, ToolDefinition
 from .toolkits import DANTE_DIRECT_TOOLKIT
 from .session_state import DanteSessionState, SessionStateStore, SessionTurn
+from .tool_layers import build_dante_tool_layers
 from ..goethe import build_prompt_session, is_exit_command
 from ..llm import LLMClient, LLMConfig, Message
-from ..cli import build_dante_tool_layers
 
 DEFAULT_DANTE_SYSTEM_PROMPT = (
     "你是 OpenWrite 的 Dante，长期会话正文创作 Agent。"
@@ -258,6 +258,28 @@ class DanteChatAgent:
                 print(f"\n🤖 Dante: {response_text}")
             self.session_store.save(self._require_session_state())
             turns_processed += 1
+
+    def respond(self, user_input: str) -> str:
+        """Process one persisted Dante turn for non-terminal clients."""
+        text = str(user_input or "").strip()
+        if not text:
+            raise ValueError("消息不能为空")
+        if self.session_state is None or self.book_state is None:
+            self.startup()
+        self._append_user_turn(text)
+        state = self._require_session_state()
+        state.last_action = "chat"
+        self.session_store.save(state)
+        try:
+            response_text = self._run_react_agent(self._get_react_agent(), text)
+        except Exception:
+            state.last_action = "react_error"
+            self.session_store.save(state)
+            raise
+        if response_text:
+            self._append_assistant_turn(response_text)
+        self.session_store.save(self._require_session_state())
+        return response_text
 
     def _build_default_llm_client(self) -> LLMClient:
         return LLMClient(LLMConfig.from_env())

@@ -132,7 +132,10 @@ class WriterAgent(BaseAgent):
             state_updates=settlement_result["state_updates"],
             chapter_summary=settlement_result["chapter_summary"],
             validation_issues=all_issues,
-            token_usage=creative_result.get("usage", {}) | settlement_result.get("usage", {}),
+            token_usage=self._merge_usage(
+                creative_result.get("usage", {}),
+                settlement_result.get("usage", {}),
+            ),
         )
 
     async def _creative_write(
@@ -210,7 +213,22 @@ class WriterAgent(BaseAgent):
 
         # 章节信息
         parts.append(f"# 第{chapter_number}章写作任务\n")
-        parts.append(f"目标字数：约{target_words}字\n")
+        minimum_words = max(1, int(target_words * 0.8))
+        maximum_words = max(minimum_words, int(target_words * 1.2))
+        parts.append(
+            f"目标字数：约{target_words}字；正文必须控制在"
+            f"{minimum_words}-{maximum_words}个中文字符内。达到上限时优先收束情节，"
+            "不要用额外支线扩写。\n"
+        )
+
+        if context.get("author_intent"):
+            parts.append(f"## 作者意图（长期约束）\n{context['author_intent']}\n")
+
+        if context.get("creative_focus"):
+            parts.append(
+                "## 创作罗盘（本次最高优先级）\n"
+                f"{context['creative_focus']}\n"
+            )
 
         # 大纲
         if context.get("outline"):
@@ -247,6 +265,9 @@ class WriterAgent(BaseAgent):
         if context.get("recent_chapters"):
             parts.append(f"## 前文内容\n{context['recent_chapters'][:1000]}\n")
 
+        if context.get("chapter_summaries"):
+            parts.append(f"## 历史章节记忆\n{context['chapter_summaries'][:4000]}\n")
+
         # 外部上下文
         if context.get("external_context"):
             parts.append(f"## 额外要求\n{context['external_context']}\n")
@@ -256,9 +277,14 @@ class WriterAgent(BaseAgent):
     def _parse_creative_output(self, content: str, chapter_number: int, usage: dict) -> dict:
         """解析创意写作输出"""
         # 尝试提取标题
-        title_match = re.search(r"#+\s*第?\s*\d+\s*章?\s*[:：]?\s*(.+)", content)
+        title_match = re.search(
+            r"^#{1,6}\s*第\s*[0-9零〇一二三四五六七八九十百千两]+\s*章"
+            r"\s*[:：\-—]?\s*(.*?)\s*$",
+            content,
+            re.MULTILINE,
+        )
         if title_match:
-            title = title_match.group(1).strip()
+            title = title_match.group(1).strip() or f"第{chapter_number}章"
             body = content[title_match.end() :].strip()
         else:
             title = f"第{chapter_number}章"
@@ -284,12 +310,13 @@ class WriterAgent(BaseAgent):
     ) -> dict:
         """Phase 2: 状态结算"""
         # 2a. Observer: 提取事实
-        observations = await self._observe_facts(
+        observation_result = await self._observe_facts(
             context=context,
             chapter_number=chapter_number,
             title=title,
             content=content,
         )
+        observations = observation_result["content"]
 
         # 2b. Settler: 合并状态
         settlement = await self._settle(
@@ -304,7 +331,10 @@ class WriterAgent(BaseAgent):
             "observations": observations,
             "state_updates": settlement.get("state_updates", {}),
             "chapter_summary": settlement.get("chapter_summary", ""),
-            "usage": settlement.get("usage", {}),
+            "usage": self._merge_usage(
+                observation_result.get("usage", {}),
+                settlement.get("usage", {}),
+            ),
         }
 
     async def _observe_facts(
@@ -313,7 +343,7 @@ class WriterAgent(BaseAgent):
         chapter_number: int,
         title: str,
         content: str,
-    ) -> str:
+    ) -> dict:
         """2a: 观察者 - 从章节中提取关键事实"""
         system_prompt = """你是一位细心的观察者，负责从小说章节中提取关键信息。
 
@@ -351,7 +381,7 @@ class WriterAgent(BaseAgent):
             max_tokens=4096,
         )
 
-        return response.content
+        return {"content": response.content, "usage": response.usage or {}}
 
     async def _settle(
         self,
@@ -382,10 +412,12 @@ class WriterAgent(BaseAgent):
 state_updates:
   current_state: |
     [更新的世界状态]
-    ledger: |
+  ledger: |
     [更新的资源账本]
-    relationships: |
+  relationships: |
     [更新的角色关系]
+chapter_summary: |
+  [用80-150字概括本章发生的关键事件、选择、关系变化和未决悬念]
 
 # 兼容字段（可选，同义于 ledger/relationships）
 # particle_ledger: |
@@ -416,7 +448,12 @@ state_updates:
             max_tokens=8192,
         )
 
-        return self._parse_settlement(response.content, context)
+        return self._parse_settlement(
+            response.content,
+            context,
+            usage=response.usage or {},
+            observations=observations,
+        )
 
     def _format_truth_files(self, context: dict) -> str:
         """格式化真相文件"""
@@ -442,36 +479,88 @@ state_updates:
                 f"## hierarchy.yaml / compressed/*.md（摘要）\n{context['chapter_summaries'][:500]}\n"
             )
 
+        if context.get("active_characters"):
+            character_parts = []
+            for item in context["active_characters"]:
+                if isinstance(item, dict):
+                    name = str(item.get("name") or "角色").strip()
+                    description = str(item.get("description") or "").strip()
+                    character_parts.append(f"### {name}\n{description}")
+                elif hasattr(item, "to_context_text"):
+                    character_parts.append(item.to_context_text(max_chars=1200))
+            if character_parts:
+                parts.append(
+                    "## 角色正典（不得改写身份与关系）\n"
+                    + "\n\n".join(character_parts)[:4000]
+                    + "\n"
+                )
+
         return "\n".join(parts) if parts else "（无现有真相文件）"
 
-    def _parse_settlement(self, content: str, context: dict) -> dict:
+    def _parse_settlement(
+        self,
+        content: str,
+        context: dict,
+        *,
+        usage: dict | None = None,
+        observations: str = "",
+    ) -> dict:
         """解析结算输出"""
         result = {
             "state_updates": {},
             "chapter_summary": "",
+            "usage": dict(usage or {}),
         }
-
-        # 简单解析 YAML 格式
-        import re
 
         yaml_match = re.search(r"```yaml\s*\n(.*?)\n```", content, re.DOTALL)
         if yaml_match:
             yaml_content = yaml_match.group(1)
-            # 解析 current_state / ledger / relationships 及其兼容别名。
-            field_patterns = {
-                "current_state": r"current_state:\s*\|?\s*\n(.*?)(?=\n\w|$)",
-                "ledger": r"ledger:\s*\|?\s*\n(.*?)(?=\n\w|$)",
-                "particle_ledger": r"particle_ledger:\s*\|?\s*\n(.*?)(?=\n\w|$)",
-                "relationships": r"relationships:\s*\|?\s*\n(.*?)(?=\n\w|$)",
-                "character_matrix": r"character_matrix:\s*\|?\s*\n(.*?)(?=\n\w|$)",
-            }
+            try:
+                import yaml
 
-            for field, pattern in field_patterns.items():
-                match = re.search(pattern, yaml_content, re.DOTALL)
-                if match and match.group(1).strip():
-                    result["state_updates"][field] = match.group(1).strip()
+                payload = yaml.safe_load(yaml_content) or {}
+            except Exception:
+                payload = {}
+            if isinstance(payload, dict):
+                updates = payload.get("state_updates", {})
+                if isinstance(updates, dict):
+                    aliases = {
+                        "particle_ledger": "ledger",
+                        "character_matrix": "relationships",
+                    }
+                    for field, value in updates.items():
+                        canonical = aliases.get(str(field), str(field))
+                        if canonical not in {"current_state", "ledger", "relationships"}:
+                            continue
+                        text = str(value or "").strip()
+                        if text:
+                            result["state_updates"][canonical] = text
+                result["chapter_summary"] = str(
+                    payload.get("chapter_summary") or ""
+                ).strip()
+
+        if not result["chapter_summary"] and observations:
+            compact = " ".join(
+                line.strip("- ")
+                for line in observations.splitlines()
+                if line.strip()
+            )
+            result["chapter_summary"] = compact[:500]
 
         return result
+
+    @staticmethod
+    def _merge_usage(*usages: dict) -> dict:
+        merged: dict = {}
+        for usage in usages:
+            if not isinstance(usage, dict):
+                continue
+            for key, value in usage.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    merged[key] = merged.get(key, 0) + value
+                elif key not in merged and value is not None:
+                    merged[key] = value
+        return merged
 
     def _post_write_validation(self, content: str) -> list:
         """Phase 1.5: 后置验证（零 LLM 成本）

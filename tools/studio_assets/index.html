@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>OpenWrite Studio</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#workspace-main">跳到正文</a>
+  <div id="app" class="app" aria-busy="true">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <img src="/brand/logo.svg" alt="OpenWrite" class="brand-logo">
+        <span class="brand-divider" aria-hidden="true"></span>
+        <div class="book-identity">
+          <strong id="book-title">载入中</strong>
+          <span id="book-location">OpenWrite Studio</span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="save-state" class="save-state" aria-live="polite">已保存</span>
+        <button id="inspector-toggle" class="quiet-button mobile-only" type="button" aria-expanded="false">创作罗盘</button>
+        <button id="theme-toggle" class="icon-button" type="button" aria-label="切换明暗主题" title="切换明暗主题">◐</button>
+        <button id="write-open" class="primary-button" type="button">写下一章</button>
+      </div>
+    </header>
+
+    <div class="workspace-shell">
+      <aside class="sidebar" aria-label="作品导航">
+        <nav class="view-nav" aria-label="工作区">
+          <button class="nav-item active" type="button" data-view="dashboard"><span>D</span>总览</button>
+          <button class="nav-item" type="button" data-view="chapters"><span>M</span>正文</button>
+          <button class="nav-item" type="button" data-view="story"><span>S</span>故事</button>
+          <button class="nav-item" type="button" data-view="characters"><span>C</span>人物</button>
+          <button class="nav-item" type="button" data-view="world"><span>W</span>世界</button>
+          <button class="nav-item" type="button" data-view="agents"><span>A</span>AI 协作</button>
+          <button class="nav-item" type="button" data-view="continuity"><span>Q</span>连续性</button>
+          <button class="nav-item" type="button" data-view="tools"><span>T</span>工具箱</button>
+        </nav>
+        <div class="sidebar-divider"></div>
+        <div class="document-heading">
+          <span id="document-group-title">最近章节</span>
+          <span id="document-count">0</span>
+        </div>
+        <div id="document-list" class="document-list" role="list"></div>
+        <div class="sidebar-footer">
+          <a class="export-link" href="/api/export?format=md">导出 MD</a>
+          <a class="export-link" href="/api/export?format=txt">导出 TXT</a>
+        </div>
+      </aside>
+
+      <main id="workspace-main" class="main-panel" tabindex="-1">
+        <section id="dashboard-view" class="dashboard-view" aria-labelledby="dashboard-title">
+          <div class="section-title-row">
+            <div>
+              <p class="eyebrow">WORKSPACE</p>
+              <h1 id="dashboard-title">小说总览</h1>
+            </div>
+            <button id="model-state" class="status-pill" type="button" title="配置当前 Studio 会话的模型">模型未配置</button>
+          </div>
+
+          <div class="metric-grid" aria-label="写作统计">
+            <article class="metric"><span>正文</span><strong id="metric-words">0</strong><small>字</small></article>
+            <article class="metric"><span>章节</span><strong id="metric-chapters">0</strong><small>章</small></article>
+            <article class="metric"><span>人物</span><strong id="metric-characters">0</strong><small>人</small></article>
+            <article class="metric"><span>待处理伏笔</span><strong id="metric-hooks">0</strong><small>条</small></article>
+          </div>
+
+          <section class="progress-band" aria-labelledby="progress-title">
+            <div class="progress-copy">
+              <div>
+                <p class="eyebrow">MANUSCRIPT</p>
+                <h2 id="progress-title">全书进度</h2>
+              </div>
+              <strong id="progress-percent">0%</strong>
+            </div>
+            <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="progress-fill"></span>
+            </div>
+            <div class="progress-meta">
+              <span id="progress-current">0 字</span>
+              <span id="progress-target">目标未设置</span>
+            </div>
+          </section>
+
+          <div class="dashboard-columns">
+            <section class="dashboard-section" aria-labelledby="readiness-title">
+              <div class="subsection-heading">
+                <h2 id="readiness-title">创作资产</h2>
+                <span id="readiness-score">0 / 6</span>
+              </div>
+              <div id="readiness-list" class="readiness-list"></div>
+            </section>
+            <section class="dashboard-section" aria-labelledby="recent-title">
+              <div class="subsection-heading">
+                <h2 id="recent-title">最近章节</h2>
+                <button class="text-button" type="button" data-switch-view="chapters">查看全部</button>
+              </div>
+              <div id="recent-chapters" class="recent-chapters"></div>
+            </section>
+          </div>
+
+          <section class="next-action-band" aria-labelledby="next-action-title">
+            <div>
+              <p class="eyebrow">NEXT</p>
+              <h2 id="next-action-title">下一步</h2>
+            </div>
+            <div id="next-actions" class="next-actions"></div>
+          </section>
+        </section>
+
+        <section id="editor-view" class="editor-view" hidden aria-labelledby="editor-title">
+          <div class="editor-toolbar">
+            <div class="editor-title-block">
+              <p id="editor-path" class="editor-path"></p>
+              <input id="editor-title" class="editor-title" aria-label="文档标题" readonly>
+            </div>
+            <div class="editor-actions">
+              <span id="editor-word-count">0 字</span>
+              <button id="reload-document" class="quiet-button" type="button">重新载入</button>
+              <button id="review-document" class="quiet-button" type="button" hidden>审稿</button>
+              <button id="save-document" class="primary-button" type="button" disabled>保存</button>
+            </div>
+          </div>
+          <textarea id="document-editor" class="document-editor" spellcheck="false" aria-label="Markdown 文档正文"></textarea>
+        </section>
+
+        <section id="agents-view" class="workspace-view" hidden aria-labelledby="agents-title">
+          <div class="section-title-row workspace-view-header">
+            <div>
+              <p class="eyebrow">LONG SESSION</p>
+              <h1 id="agents-title">AI 协作</h1>
+              <p class="section-description">Goethe 整理可写资产，Dante 持续推进正文。对话与工作记忆会写入项目，下次打开仍可继续。</p>
+            </div>
+            <div class="segmented" role="group" aria-label="选择协作 Agent">
+              <button class="segment active" type="button" data-agent="goethe">Goethe · 规划</button>
+              <button class="segment" type="button" data-agent="dante">Dante · 正文</button>
+            </div>
+          </div>
+          <div id="chat-log" class="chat-log" aria-live="polite">
+            <article class="chat-message assistant"><strong>OpenWrite</strong><p>选择 Agent 后直接描述目标。规划阶段先找 Goethe，已有可写大纲时切换到 Dante。</p></article>
+          </div>
+          <form id="chat-form" class="chat-composer">
+            <label for="chat-input">本轮目标</label>
+            <textarea id="chat-input" rows="4" maxlength="12000" placeholder="例如：检查现有资产，帮我把第一篇推进到可写状态。" required></textarea>
+            <div class="composer-actions">
+              <span id="chat-status" role="status"></span>
+              <button id="chat-submit" class="primary-button" type="submit">发送给 Goethe</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="continuity-view" class="workspace-view" hidden aria-labelledby="continuity-title">
+          <div class="section-title-row workspace-view-header">
+            <div>
+              <p class="eyebrow">CONTINUITY</p>
+              <h1 id="continuity-title">连续性控制台</h1>
+              <p class="section-description">查看真相文件、伏笔与章节 workflow。这里展示运行态，不替代 `src/` 中的人工确认真源。</p>
+            </div>
+            <button id="continuity-refresh" class="quiet-button" type="button">刷新</button>
+          </div>
+          <div class="truth-grid">
+            <article class="tool-card"><h2>当前状态</h2><pre id="truth-current">载入中…</pre></article>
+            <article class="tool-card"><h2>资源账本</h2><pre id="truth-ledger">载入中…</pre></article>
+            <article class="tool-card"><h2>人物关系</h2><pre id="truth-relationships">载入中…</pre></article>
+          </div>
+          <div class="continuity-grid">
+            <section class="tool-card">
+              <div class="subsection-heading"><h2>待处理伏笔</h2><span id="foreshadow-count">0</span></div>
+              <div id="foreshadow-list" class="operation-list"></div>
+              <form id="foreshadow-form" class="compact-form">
+                <label for="foreshadow-id">新增伏笔 ID</label>
+                <input id="foreshadow-id" required placeholder="hook_clock_001">
+                <label for="foreshadow-content">内容</label>
+                <textarea id="foreshadow-content" rows="3" required></textarea>
+                <div class="form-grid two">
+                  <label>权重<input id="foreshadow-weight" type="number" min="1" max="10" value="5"></label>
+                  <label>目标章节<input id="foreshadow-target" placeholder="ch_010"></label>
+                </div>
+                <button class="primary-button" type="submit">加入伏笔</button>
+              </form>
+            </section>
+            <section class="tool-card">
+              <div class="subsection-heading"><h2>活动 Workflow</h2><span id="workflow-count">0</span></div>
+              <div id="workflow-list" class="operation-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tools-view" class="workspace-view" hidden aria-labelledby="tools-title">
+          <div class="section-title-row workspace-view-header">
+            <div>
+              <p class="eyebrow">OPERATIONS</p>
+              <h1 id="tools-title">小说工具箱</h1>
+              <p class="section-description">导入旧稿、同步真源、检查上下文、创建资产，以及管理风格/设定来源包。</p>
+            </div>
+          </div>
+          <div class="tool-grid">
+            <section class="tool-card">
+              <h2>项目检查与同步</h2>
+              <div id="diagnostic-list" class="operation-list"></div>
+              <button id="sync-project" class="primary-button" type="button">同步 src → data</button>
+              <p id="sync-status" class="form-status" role="status"></p>
+            </section>
+            <section class="tool-card">
+              <h2>检查章节上下文</h2>
+              <form id="context-form" class="compact-form">
+                <label for="context-chapter">章节 ID</label>
+                <input id="context-chapter" value="next" placeholder="next 或 ch_001">
+                <button class="quiet-button" type="submit">组装 canonical packet</button>
+              </form>
+              <p id="context-meta" class="form-status"></p>
+              <pre id="context-preview" class="context-preview">尚未组装</pre>
+            </section>
+            <section class="tool-card">
+              <h2>导入已有正文</h2>
+              <form id="import-form" class="compact-form">
+                <label for="import-file">TXT / Markdown 文件</label>
+                <input id="import-file" type="file" accept=".txt,.md,.markdown" required>
+                <div class="form-grid two">
+                  <label>目标篇<input id="import-arc" value="arc_001" pattern="arc_[0-9]+"></label>
+                  <label>起始章节<input id="import-start" type="number" min="1" placeholder="自动追加"></label>
+                </div>
+                <label class="check-row"><input id="import-force" type="checkbox">允许覆盖已有章节</label>
+                <button class="primary-button" type="submit">导入正文</button>
+              </form>
+              <p id="import-status" class="form-status" role="status"></p>
+            </section>
+            <section class="tool-card">
+              <h2>新建小说资产</h2>
+              <form id="create-document-form" class="compact-form">
+                <label for="create-kind">文档类型</label>
+                <select id="create-kind"><option value="character">人物档案</option><option value="world">世界设定</option></select>
+                <label for="create-name">名称</label>
+                <input id="create-name" maxlength="80" required>
+                <label for="create-description">一句话说明</label>
+                <textarea id="create-description" rows="3"></textarea>
+                <button class="primary-button" type="submit">创建并打开</button>
+              </form>
+              <p id="create-status" class="form-status" role="status"></p>
+            </section>
+            <section class="tool-card tool-card-wide">
+              <div class="subsection-heading"><h2>风格与设定来源包</h2><span id="source-count">0</span></div>
+              <form id="source-form" class="compact-form source-form">
+                <div class="form-grid two">
+                  <label>来源 ID<input id="source-id" required placeholder="reference_01"></label>
+                  <label>提取重点<select id="source-focus"><option value="style">写作风格</option><option value="setting">世界设定</option></select></label>
+                </div>
+                <label for="source-file">来源文件（也可直接粘贴）</label>
+                <input id="source-file" type="file" accept=".txt,.md,.markdown">
+                <textarea id="source-content" rows="7" placeholder="粘贴你有权使用的样文或设定材料"></textarea>
+                <button id="source-extract" class="primary-button" type="submit">提取来源包</button>
+              </form>
+              <p id="source-status" class="form-status" role="status"></p>
+              <div id="source-list" class="source-list"></div>
+              <pre id="source-report" class="context-preview">选择“审阅”后在这里显示来源报告</pre>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <aside id="inspector" class="inspector" aria-label="创作罗盘">
+        <div class="inspector-header">
+          <div>
+            <p class="eyebrow">COMPASS</p>
+            <h2>创作罗盘</h2>
+          </div>
+          <button id="inspector-close" class="icon-button mobile-only" type="button" aria-label="关闭创作罗盘">×</button>
+        </div>
+        <form id="focus-form" class="focus-form">
+          <label for="focus-goal">当前阶段目标</label>
+          <textarea id="focus-goal" rows="4" required></textarea>
+          <label for="focus-keep">必须保留</label>
+          <textarea id="focus-keep" rows="4"></textarea>
+          <label for="focus-avoid">必须避免</label>
+          <textarea id="focus-avoid" rows="4"></textarea>
+          <label for="focus-notes">写作备注</label>
+          <textarea id="focus-notes" rows="3"></textarea>
+          <button class="primary-button full-button" type="submit">更新罗盘</button>
+        </form>
+        <div class="inspector-divider"></div>
+        <dl class="project-facts">
+          <div><dt>当前篇</dt><dd id="fact-arc">-</dd></div>
+          <div><dt>下一章</dt><dd id="fact-chapter">-</dd></div>
+          <div><dt>阶段</dt><dd id="fact-stage">-</dd></div>
+          <div><dt>设定文档</dt><dd id="fact-world">0</dd></div>
+          <div><dt>模型 Tokens</dt><dd id="fact-tokens">0</dd></div>
+          <div><dt>审稿均分</dt><dd id="fact-review-score">-</dd></div>
+        </dl>
+      </aside>
+    </div>
+  </div>
+
+  <dialog id="write-dialog" class="write-dialog">
+    <form id="write-form" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">DANTE PIPELINE</p>
+          <h2>写下一章</h2>
+        </div>
+        <button id="write-close" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <label for="write-guidance">本章要求</label>
+      <textarea id="write-guidance" rows="6"></textarea>
+      <label for="write-words">目标字数</label>
+      <input id="write-words" type="number" min="200" max="12000" step="100" value="3000" inputmode="numeric">
+      <div class="dialog-actions">
+        <button id="write-cancel" class="quiet-button" type="button">取消</button>
+        <button id="write-submit" class="primary-button" type="submit">开始写作</button>
+      </div>
+      <p id="write-progress" class="write-progress" role="status" aria-live="polite"></p>
+    </form>
+  </dialog>
+
+  <dialog id="model-dialog" class="write-dialog">
+    <form id="model-form" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">SESSION MODEL</p>
+          <h2>配置模型连接</h2>
+        </div>
+        <button id="model-close" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <p class="dialog-note">配置只保存在当前 Studio 服务进程，不写入项目或浏览器存储。</p>
+      <label for="model-provider">提供方</label>
+      <select id="model-provider"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option><option value="custom">自定义兼容端点</option></select>
+      <label for="model-base-url">Base URL</label>
+      <input id="model-base-url" type="url" placeholder="https://api.deepseek.com">
+      <label for="model-name">模型名称</label>
+      <input id="model-name" required placeholder="deepseek-chat">
+      <label for="model-api-key">API Key</label>
+      <input id="model-api-key" type="password" autocomplete="off" placeholder="留空则沿用当前服务配置">
+      <label for="model-api-format">API 格式</label>
+      <select id="model-api-format"><option value="chat">Chat Completions</option><option value="responses">Responses</option></select>
+      <div class="dialog-actions">
+        <button id="model-cancel" class="quiet-button" type="button">取消</button>
+        <button id="model-submit" class="primary-button" type="submit">应用到当前会话</button>
+      </div>
+      <p id="model-progress" class="write-progress" role="status"></p>
+    </form>
+  </dialog>
+
+  <dialog id="project-dialog" class="write-dialog setup-dialog">
+    <form id="project-form" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">NEW NOVEL</p>
+          <h2>创建第一本小说</h2>
+        </div>
+      </div>
+      <p class="dialog-note">Studio 会在当前目录创建单一真源、运行态、手稿和长期记忆结构。</p>
+      <label for="project-title">书名</label>
+      <input id="project-title" required maxlength="120" placeholder="雾城来信">
+      <label for="project-id">小说 ID</label>
+      <input id="project-id" required minlength="2" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]+" placeholder="mist_city">
+      <button id="project-submit" class="primary-button" type="submit">创建小说工作区</button>
+      <p id="project-progress" class="write-progress" role="status"></p>
+    </form>
+  </dialog>
+
+  <dialog id="review-dialog" class="write-dialog review-dialog">
+    <div class="review-dialog-content">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">REVIEW</p>
+          <h2>章节审稿</h2>
+        </div>
+        <button id="review-close" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <div id="review-loading" class="review-loading" role="status">正在执行规则检查与深度审稿…</div>
+      <div id="review-result" hidden>
+        <div class="review-score-row">
+          <div><strong id="review-score">0</strong><span>/ 100</span></div>
+          <span id="review-verdict" class="status-pill"></span>
+        </div>
+        <p id="review-summary" class="review-summary"></p>
+        <div id="review-issues" class="review-issues"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

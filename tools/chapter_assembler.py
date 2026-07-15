@@ -23,6 +23,7 @@ import yaml
 
 from models.outline import OutlineHierarchy, OutlineNode, OutlineNodeType
 from tools.agent_policy import get_default_agent_specs, get_redundant_agent_specs
+from tools.frontmatter import parse_toml_front_matter
 from tools.outline_cache import deserialize_outline_hierarchy
 from tools.outline_parser import OutlineMdParser
 from tools.shared_documents import render_indexed_document, resolve_shared_document_path
@@ -76,7 +77,10 @@ class SectionSummary:
 class ChapterAssemblyPacket:
     novel_id: str
     chapter_id: str
+    target_words: int = 0
     system_prompts: Dict[str, str] = field(default_factory=dict)
+    author_intent: str = ""
+    creative_focus: str = ""
     story_background: str = ""
     historical_arc_summaries: List[ArcSummary] = field(default_factory=list)
     current_arc_sections: List[SectionSummary] = field(default_factory=list)
@@ -97,6 +101,12 @@ class ChapterAssemblyPacket:
         parts.append("## 系统提示词（按职责）")
         for role, prompt in self.system_prompts.items():
             parts.append(f"### {role}\n{prompt}")
+
+        parts.append("## 作者意图")
+        parts.append(self.author_intent or "（暂无）")
+
+        parts.append("## 创作罗盘（当前最高优先级）")
+        parts.append(self.creative_focus or "（暂无）")
 
         parts.append("## 故事背景")
         parts.append(self.story_background or "（暂无）")
@@ -197,6 +207,8 @@ class ChapterAssemblerV2:
             novel_id=self.novel_id,
             chapter_id=chapter_id,
             system_prompts=dict(ROLE_SYSTEM_PROMPTS),
+            author_intent=self._load_story_control("author_intent.md", max_chars=3000),
+            creative_focus=self._load_story_control("current_focus.md", max_chars=2400),
             current_state=truth.current_state,
             ledger=truth.ledger,
             relationships=truth.relationships,
@@ -223,6 +235,9 @@ class ChapterAssemblerV2:
         packet.story_background = self._build_story_background(hierarchy)
 
         if chapter is not None:
+            packet.target_words = (
+                chapter.word_count_target or chapter.estimated_words or 0
+            )
             current_arc = hierarchy.get_parent_arc(chapter_id)
             packet.historical_arc_summaries = self._build_historical_arc_summaries(
                 hierarchy,
@@ -244,6 +259,11 @@ class ChapterAssemblerV2:
 
         packet.style_documents = self._load_all_style_documents()
         return packet
+
+    def _load_story_control(self, filename: str, *, max_chars: int) -> str:
+        path = self.src_root / "story" / filename
+        text = self._load_text(path).strip() if path.exists() else ""
+        return text[:max_chars]
 
     def _load_protagonist_state(self, hierarchy: OutlineHierarchy, chapter_id: str) -> str:
         truth = self.truth_manager.load_truth_files()
@@ -422,7 +442,43 @@ class ChapterAssemblerV2:
 
         main = chapter.involved_characters
         merged = main + appeared + future
-        return self._dedupe(merged)
+        merged = self._dedupe(merged)
+        if merged:
+            return merged
+
+        chapter_text = "\n".join(
+            [
+                chapter.title,
+                chapter.summary,
+                chapter.content_focus,
+                *chapter.goals,
+                *chapter.beats,
+                *chapter.hooks,
+            ]
+        )
+        character_root = self.src_root / "characters"
+        inferred: List[str] = []
+        for path in sorted(character_root.glob("*.md")):
+            meta, body = parse_toml_front_matter(self._load_text(path))
+            heading = ""
+            for line in body.splitlines():
+                if line.startswith("# "):
+                    heading = line[2:].strip()
+                    break
+            identifiers = {
+                path.stem,
+                str(meta.get("id") or "").strip(),
+                str(meta.get("name") or "").strip(),
+                heading,
+            }
+            if any(
+                identifier and identifier in chapter_text
+                for identifier in identifiers
+            ):
+                inferred.append(
+                    str(meta.get("name") or heading or path.stem).strip()
+                )
+        return self._dedupe(inferred)
 
     def _collect_relevant_concepts(self, hierarchy: OutlineHierarchy, chapter_id: str) -> List[str]:
         chapter = hierarchy.get_node(chapter_id)
@@ -466,6 +522,7 @@ class ChapterAssemblerV2:
                         self._load_text(src_path),
                         default_meta={"name": char_id},
                         max_chars=2200,
+                        max_sections=5,
                     ),
                     min_chars=500,
                     max_chars=2200,
@@ -479,6 +536,7 @@ class ChapterAssemblerV2:
                         self._load_text(profile_path),
                         default_meta={"name": char_id},
                         max_chars=2200,
+                        max_sections=5,
                     ),
                     min_chars=500,
                     max_chars=2200,

@@ -87,6 +87,8 @@ class OpenWriteOrchestrator:
         packet = {
             "novel_id": self.novel_id,
             "chapter_id": chapter_id,
+            "author_intent": getattr(context, "author_intent", ""),
+            "creative_focus": getattr(context, "creative_focus", ""),
             "story_background": self.story_planning_store.read_story_document(
                 "background", max_chars=2000
             ),
@@ -921,6 +923,9 @@ class OpenWriteOrchestrator:
             "chapter_goals": prompt_sections.get("本章目标", ""),
             "current_state": getattr(context, "current_state", ""),
             "pending_hooks": getattr(context, "pending_hooks", ""),
+            "ledger": getattr(context, "ledger", ""),
+            "relationships": getattr(context, "relationships", ""),
+            "chapter_summaries": getattr(context, "chapter_summaries", ""),
         }
 
     def _write_context_packet_snapshot(self, chapter_id: str, packet: dict[str, Any]) -> None:

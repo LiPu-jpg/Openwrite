@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 
+import pytest
 import yaml
 
 from tools.frontmatter import parse_toml_front_matter
@@ -9,6 +10,11 @@ from tools.outline_parser import OutlineMdParser
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NOVEL_ROOT = PROJECT_ROOT / "data" / "novels" / "test_novel"
+
+pytestmark = pytest.mark.skipif(
+    not (NOVEL_ROOT / "src" / "outline.md").exists(),
+    reason="标准样例已从公开仓库移除",
+)
 
 
 def test_test_novel_is_a_rich_standard_sample_fixture():

@@ -36,6 +36,7 @@ def init_project(project_root: Path, novel_id: str, title: Optional[str] = None)
 
     src_dirs = [
         novel_root / "src",
+        novel_root / "src" / "story",
         novel_root / "src" / "characters",
         novel_root / "src" / "world",
         novel_root / "src" / "world" / "entities",
@@ -47,6 +48,8 @@ def init_project(project_root: Path, novel_id: str, title: Optional[str] = None)
         novel_root / "data" / "workflows",
         novel_root / "data" / "world" / "entities",
         novel_root / "data" / "compressed",
+        novel_root / "data" / "memory" / "chapters",
+        novel_root / "data" / "reviews",
         novel_root / "data" / "snapshots",
         novel_root / "data" / "test_outputs" / "context_packets",
         novel_root / "data" / "test_outputs" / "multi_write",
@@ -58,8 +61,9 @@ def init_project(project_root: Path, novel_id: str, title: Optional[str] = None)
 
     config_path = project_root / "novel_config.yaml"
     if not config_path.exists():
+        title_line = f"title: {title}\n" if title else ""
         config_content = f"""novel_id: {novel_id}
-style_id: {novel_id}
+{title_line}style_id: {novel_id}
 current_arc: arc_001
 current_chapter: ch_001
 """
@@ -93,6 +97,82 @@ current_chapter: ch_001
 """
         outline_src_path.write_text(outline_content, encoding="utf-8")
         print(f"✓ 创建大纲源文件: data/novels/{novel_id}/src/outline.md")
+
+    author_intent_path = novel_root / "src" / "story" / "author_intent.md"
+    if not author_intent_path.exists():
+        author_intent_path.write_text(
+            """# 作者意图
+
+<!-- 这份文件定义整本书长期不变的创作承诺。 -->
+
+## 核心承诺
+
+（待填写：读者为什么要持续追这本书？）
+
+## 题材与目标读者
+
+（待填写）
+
+## 主角与核心矛盾
+
+（待填写）
+
+## 不可妥协
+
+- （待填写：绝不牺牲的体验、主题或人物原则）
+""",
+            encoding="utf-8",
+        )
+        print(f"✓ 创建作者意图: data/novels/{novel_id}/src/story/author_intent.md")
+
+    background_path = novel_root / "src" / "story" / "background.md"
+    if not background_path.exists():
+        background_path.write_text(
+            """# 故事背景
+
+## 一句话故事
+
+（待填写：主角在什么处境下，为了什么目标，对抗什么阻力。）
+
+## 核心冲突
+
+（待填写）
+
+## 故事基调
+
+（待填写）
+""",
+            encoding="utf-8",
+        )
+        print(f"✓ 创建故事背景: data/novels/{novel_id}/src/story/background.md")
+
+    foundation_path = novel_root / "src" / "story" / "foundation.md"
+    if not foundation_path.exists():
+        foundation_path.write_text(
+            """# 基础设定
+
+## 故事发生的世界
+
+（待填写）
+
+## 核心机制
+
+（待填写）
+
+## 叙事边界
+
+- （待填写：本书不会使用或不能突破的规则）
+""",
+            encoding="utf-8",
+        )
+        print(f"✓ 创建基础设定: data/novels/{novel_id}/src/story/foundation.md")
+
+    from tools.novel_workspace import CreativeFocus, current_focus_path, render_creative_focus
+
+    focus_path = current_focus_path(project_root, novel_id)
+    if not focus_path.exists():
+        focus_path.write_text(render_creative_focus(CreativeFocus()), encoding="utf-8")
+        print(f"✓ 创建创作罗盘: data/novels/{novel_id}/src/story/current_focus.md")
 
     from tools.outline_sync import sync_outline_to_hierarchy
 
@@ -166,8 +246,9 @@ current_chapter: ch_001
     dag_path = novel_root / "data" / "foreshadowing" / "dag.yaml"
     if not dag_path.exists():
         dag_content = """# 伏笔DAG
-nodes: []
+nodes: {}
 edges: []
+status: {}
 """
         dag_path.write_text(dag_content, encoding="utf-8")
         print(f"✓ 创建伏笔: data/novels/{novel_id}/data/foreshadowing/dag.yaml")

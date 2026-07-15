@@ -12,11 +12,14 @@ import tools.agent as agent_module
 import tools.context_builder as context_builder_module
 import tools.llm as llm_module
 import tools.chapter_assembler as chapter_assembler_module
+import tools.chapter_pipeline as chapter_pipeline_module
 from tools.agent.book_state import BookStage, BookStateStore
 import tools.agent.orchestrator as orchestrator_module
 import tools.agent.tool_runtime as tool_runtime_module
 from tools.frontmatter import parse_toml_front_matter
+from tools.review_store import ReviewStore
 from tools.story_planning import StoryPlanningStore
+from tools.truth_manager import TruthFiles, TruthFilesManager
 from tools.workflow_scheduler import WorkflowScheduler
 
 
@@ -398,6 +401,12 @@ def test_exec_write_chapter_uses_asyncio_run_without_missing_import(
     assert "particle_ledger" not in captured["context"]
     assert "character_matrix" not in captured["context"]
     assert "pending_hooks" not in captured["context"]
+    state = BookStateStore(tmp_path, "demo").load_or_create()
+    workflow = WorkflowScheduler(tmp_path, "demo").load_workflow("ch_001")
+    assert state.current_chapter == "ch_001"
+    assert state.stage == BookStage.REVIEW_AND_REVISE
+    assert workflow is not None
+    assert workflow.current_stage == "review"
 
 
 def test_exec_create_character_normalizes_shared_source_document(tmp_path: Path):
@@ -423,7 +432,7 @@ def test_exec_create_character_normalizes_shared_source_document(tmp_path: Path)
     assert "## 背景" in body
 
 
-def test_cmd_write_routes_through_canonical_packet_and_updates_runtime_state(
+def test_cmd_write_routes_through_canonical_packet(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     (tmp_path / "novel_config.yaml").write_text(
@@ -512,7 +521,11 @@ def test_cmd_write_routes_through_canonical_packet_and_updates_runtime_state(
             )
 
     monkeypatch.setattr(chapter_assembler_module, "ChapterAssemblerV2", FakeAssembler)
-    monkeypatch.setattr(cli_module, "_exec_write_chapter", fake_exec_write_chapter)
+    monkeypatch.setattr(
+        chapter_pipeline_module,
+        "execute_write_chapter",
+        fake_exec_write_chapter,
+    )
     monkeypatch.setattr(context_builder_module, "ContextBuilder", FakeBuilder)
     monkeypatch.setattr(agent_module, "WriterAgent", FakeWriter)
     monkeypatch.setattr(
@@ -533,12 +546,6 @@ def test_cmd_write_routes_through_canonical_packet_and_updates_runtime_state(
 
     assert result == 0
     assert exec_calls and exec_calls[0]["context_packet"]["story_background"] == "背景设定"
-    state = BookStateStore(tmp_path, "demo").load_or_create()
-    workflow = WorkflowScheduler(tmp_path, "demo").load_workflow("ch_001")
-    assert state.current_chapter == "ch_001"
-    assert state.stage == BookStage.REVIEW_AND_REVISE
-    assert workflow is not None
-    assert workflow.current_stage == "review"
 
 
 def test_cmd_multi_write_updates_runtime_state(
@@ -596,6 +603,17 @@ def test_cmd_multi_write_updates_runtime_state(
     assert state.stage == BookStage.CHAPTER_PREFLIGHT
     assert workflow is not None
     assert workflow.current_stage == "user_confirm"
+    review = ReviewStore(tmp_path, "demo").load("ch_002")
+    assert review is not None and review["score"] == 93
+    assert not (
+        tmp_path
+        / "data"
+        / "novels"
+        / "demo"
+        / "data"
+        / "workflows"
+        / "project.lock"
+    ).exists()
 
 
 def test_exec_review_chapter_uses_packet_based_context(
@@ -610,6 +628,14 @@ def test_exec_review_chapter_uses_packet_based_context(
     )
     draft_path.parent.mkdir(parents=True, exist_ok=True)
     draft_path.write_text("# 第一章\n\n正文", encoding="utf-8")
+    truth_manager = TruthFilesManager(tmp_path, "demo")
+    truth_manager.save_truth_files(
+        TruthFiles(current_state="写前状态", relationships="写前关系")
+    )
+    truth_manager.create_snapshot(0)
+    truth_manager.save_truth_files(
+        TruthFiles(current_state="本章结算后状态", relationships="本章结算后关系")
+    )
 
     class FakePacket:
         character_documents = {"陈明": "# 陈明\n\n角色档案"}
@@ -669,7 +695,8 @@ def test_exec_review_chapter_uses_packet_based_context(
     assert result["ok"] is True
     assert captured["content"] == "# 第一章\n\n正文"
     assert "角色档案" in captured["context"]["character_profiles"]
-    assert captured["context"]["current_state"] == "运行态"
+    assert captured["context"]["current_state"] == "写前状态"
+    assert captured["context"]["relationships"] == "写前关系"
 
 
 def test_cmd_style_synthesize_writes_composed_style_document(
@@ -729,8 +756,8 @@ def test_cmd_review_does_not_rewind_book_state_for_older_chapter(
 
     monkeypatch.setattr(cli_module, "Path", SimpleNamespace(cwd=lambda: tmp_path))
     monkeypatch.setattr(
-        cli_module,
-        "_exec_review_chapter",
+        chapter_pipeline_module,
+        "execute_review_chapter",
         lambda project_root, args: {
             "ok": True,
             "chapter_id": "ch_006",

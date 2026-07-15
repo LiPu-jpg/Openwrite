@@ -383,6 +383,12 @@ def main():
 
     novel_id = sys.argv[1]
     root = Path(__file__).parent.parent.resolve()
+    if "--project-root" in sys.argv:
+        idx = sys.argv.index("--project-root")
+        if idx + 1 >= len(sys.argv):
+            print("--project-root 缺少路径")
+            sys.exit(1)
+        root = Path(sys.argv[idx + 1]).expanduser().resolve()
 
     # --relations flag
     if "--relations" in sys.argv:
@@ -404,8 +410,8 @@ def main():
         if skip_next:
             skip_next = False
             continue
-        if arg in ("--type", "--relations"):
-            skip_next = arg == "--type"  # --type takes a value
+        if arg in ("--type", "--project-root", "--relations"):
+            skip_next = arg in {"--type", "--project-root"}
             continue
         entity_id = arg
         break

@@ -33,6 +33,7 @@ from models.context_package import (
     WorldRules,
 )
 from .truth_manager import TruthFilesManager
+from .chapter_memory import ChapterMemoryStore
 from .frontmatter import parse_toml_front_matter
 from .outline_cache import deserialize_outline_hierarchy
 from .shared_documents import render_indexed_document, resolve_shared_document_path
@@ -86,6 +87,7 @@ class ContextBuilder:
 
         # 真相文件管理器
         self.truth_manager = TruthFilesManager(project_root, novel_id)
+        self.chapter_memory = ChapterMemoryStore(project_root, novel_id)
 
         # 缓存
         self._outline_cache: Optional[Dict[str, Any]] = None
@@ -130,7 +132,11 @@ class ContextBuilder:
         dramatic_context: Dict[str, str] = {}
         if current_chapter:
             chapter_goals = current_chapter.goals
-            target_words = current_chapter.word_count_target or 6000
+            target_words = (
+                current_chapter.word_count_target
+                or current_chapter.estimated_words
+                or 6000
+            )
             emotion_arc = current_chapter.emotional_arc or ""
 
         # 从节/篇获取戏剧弧线上下文
@@ -139,6 +145,7 @@ class ContextBuilder:
 
         # 9. 加载运行时状态文件
         truth = self.truth_manager.load_truth_files()
+        chapter_summaries = self.chapter_memory.render_context(chapter_id, max_chars=4000)
 
         # 10. pending_hooks 现在从 foreshadowing state 获取
         # 伏笔状态已在前面加载到 foreshadowing 变量中
@@ -155,6 +162,8 @@ class ContextBuilder:
         context = GenerationContext(
             novel_id=self.novel_id,
             chapter_id=chapter_id,
+            author_intent=self._load_story_control("author_intent.md", max_chars=3000),
+            creative_focus=self._load_story_control("current_focus.md", max_chars=2400),
             outline_window=outline_window,
             current_chapter=current_chapter,
             active_characters=active_characters,
@@ -170,13 +179,24 @@ class ContextBuilder:
             foreshadowing_summary=pending_hooks_str,
             ledger=truth.ledger,
             relationships=truth.relationships,
-            chapter_summaries="",  # 章节摘要现在从大纲 hierarchy 或 compressed/ 获取
+            chapter_summaries=chapter_summaries,
         )
 
         # 12. 动态压缩（如果超限）
         context = self._compress_if_needed(context)
 
         return context
+
+    def _load_story_control(self, filename: str, *, max_chars: int) -> str:
+        """加载人类维护的书级控制面，不读取运行态草稿。"""
+        path = self.src_dir / "story" / filename
+        if not path.exists():
+            return ""
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+        return text[:max_chars]
 
     def _load_outline_hierarchy(self) -> OutlineHierarchy:
         """加载大纲层级结构"""
@@ -236,7 +256,7 @@ class ContextBuilder:
         if not chapter:
             return profiles
 
-        character_ids = chapter.involved_characters
+        character_ids = list(chapter.involved_characters)
         if not character_ids:
             section = hierarchy.get_parent_section(chapter_id)
             if section:
@@ -247,11 +267,39 @@ class ContextBuilder:
                         agg.extend(node.involved_characters)
                 character_ids = list(dict.fromkeys(agg))
 
+        profiles_dir = self.src_dir / "characters"
+        if not character_ids:
+            chapter_text = "\n".join(
+                [
+                    chapter.title,
+                    chapter.summary,
+                    chapter.content_focus,
+                    *chapter.goals,
+                    *chapter.beats,
+                    *chapter.hooks,
+                ]
+            )
+            for profile_path in sorted(profiles_dir.glob("*.md")):
+                profile = self._parse_character_profile(
+                    profile_path, profile_path.stem
+                )
+                if not profile:
+                    continue
+                identifiers = {
+                    profile_path.stem,
+                    profile.character_id,
+                    profile.name,
+                }
+                if any(
+                    identifier and identifier in chapter_text
+                    for identifier in identifiers
+                ):
+                    character_ids.append(profile.name or profile.character_id)
+
         if not character_ids:
             return profiles
 
         # 加载角色档案（静态信息）
-        profiles_dir = self.src_dir / "characters"
         cards_dir = self.data_dir / "characters" / "cards"
 
         for char_id in character_ids:

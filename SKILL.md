@@ -10,9 +10,12 @@ OpenWrite 是一个面向长篇小说创作的技能集合。当前口径已经�
 - 日常主入口只有两个：`openwrite goethe` 与 `openwrite dante`
 - `src/` 是人和 AI 共读的确认版真源
 - `data/` 是运行态、缓存、workflow、手稿与草案
+- `src/story/author_intent.md` 是长期作者意图，`src/story/current_focus.md` 是近期创作罗盘
 - `openwrite dante` 是主编排入口
 - `openwrite goethe` 是长期会话 planning 入口
 - `write` / `multi-write` / `review` 也会推进同一套 runtime state
+- 每章摘要、观察与三阶段 token 用量保存在 `data/memory/chapters/`
+- `write` 使用跨进程作品锁，并对正文、truth、memory 做失败回滚
 
 ## 子技能导航
 
@@ -87,6 +90,8 @@ data/novels/{id}/data/style/composed.md     -> 合成后的作品风格文档
 - `manuscript/arc_*/ch_*.md`：章节正文
 - `world/`：`current_state.md` / `ledger.md` / `relationships.md`
 - `workflows/`：`book_state.yaml` 与 `wf_ch_*.yaml`
+- `memory/chapters/`：有界章节摘要、客观观察与 token 用量
+- `reviews/`：结构化章节审稿结果
 - `foreshadowing/dag.yaml`：伏笔图
 - `style/`：`fingerprint.yaml` 与 `composed.md`
 
@@ -144,11 +149,19 @@ packet 典型包含：
 `source promote --target all` 会把 source pack 同时晋升到 style、foundation 和 world 文档。
 - `openwrite sync --check`
 - `openwrite status`
+- `openwrite desk`
+- `openwrite studio`
+- `openwrite focus set "本阶段目标"`
+- `openwrite import existing-novel.txt`
+- `openwrite export --format md`
 
 ### 当前约束
 
 - `write` / `multi-write` / `review` 现在都会复用 canonical packet 语义
 - direct CLI 也会推进 `book_state.yaml` 与 `wf_ch_*.yaml`
+- CLI 与 Studio 共用同一套写章锁、事务提交、审稿存储和生命周期
+- Studio 前端覆盖模型会话配置、Goethe/Dante 对话、导入、同步、上下文预览、资产新建、连续性、伏笔和 source pack 全流程
+- 空目录运行 `openwrite studio` 会进入前端建书页，不再要求先执行 `openwrite init`
 - `current_state / ledger / relationships` 是公开 canonical 命名
 
 ## 关键 Python 工具
@@ -185,6 +198,8 @@ data/novels/{novel_id}/
     ├── planning/*.md
     ├── characters/cards/*.yaml
     ├── manuscript/arc_*/ch_*.md
+    ├── memory/chapters/ch_*.yaml
+    ├── reviews/ch_*.json
     ├── foreshadowing/dag.yaml
     ├── world/*.md
     ├── style/composed.md
@@ -197,7 +212,6 @@ data/novels/{novel_id}/
 ## 参考入口
 
 - [README.md](./README.md) — 项目概览与命令入口
-- `data/novels/test_novel/` — 标准长篇样例
-- `tests/test_standard_test_novel_fixture.py` — 标准样例验收约束
+- `tests/test_novel_workspace.py` — 小说工作台、创作罗盘与导入导出验收
 
-*版本: 5.4.0 | 最后更新: 2026-03-31*
+*版本: 5.8.0 | 最后更新: 2026-07-14*

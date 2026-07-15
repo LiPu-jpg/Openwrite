@@ -1,6 +1,6 @@
 [project]
 name = "openwrite"
-version = "5.4.0"
+version = "5.8.0"
 description = "OpenWrite 长篇小说创作引擎 — AI 辅助小说创作"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,8 +15,12 @@ dependencies = [
 include = ["tools*", "models*"]
 exclude = ["tests*", "data*", "craft*", "skills*", "config*", "docs*"]
 
+[tool.setuptools.package-data]
+tools = ["studio_assets/*"]
+
 [project.optional-dependencies]
 dev = [
+    "markdown-it-py>=3.0",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "mypy>=1.10",

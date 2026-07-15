@@ -22,8 +22,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
+import tempfile
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -163,16 +165,35 @@ class TruthFilesManager:
         """
         self.ensure_dirs()
 
-        # metadata 缺失时自动补默认索引，避免调用方只传正文时写出“纯裸文本”文件。
+        rendered: Dict[str, str] = {}
         for attr_name in ["current_state", "ledger", "relationships"]:
             content = getattr(truth, attr_name, "")
-            file_path = self._get_file_path(attr_name)
-            try:
-                meta = truth.metadata.get(attr_name) or self._default_metadata(attr_name, content)
-                truth.metadata[attr_name] = meta
-                file_path.write_text(compose_toml_document(meta, content), encoding="utf-8")
-            except Exception as e:
-                logger.warning(f"Failed to save {attr_name}: {e}")
+            meta = truth.metadata.get(attr_name) or self._default_metadata(attr_name, content)
+            truth.metadata[attr_name] = meta
+            rendered[attr_name] = compose_toml_document(meta, content)
+
+        temporary: Dict[str, Path] = {}
+        try:
+            for attr_name, document in rendered.items():
+                file_path = self._get_file_path(attr_name)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=file_path.parent,
+                    prefix=f".{file_path.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as handle:
+                    handle.write(document)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                    temporary[attr_name] = Path(handle.name)
+            for attr_name in ["current_state", "ledger", "relationships"]:
+                temporary[attr_name].replace(self._get_file_path(attr_name))
+        except Exception:
+            for path in temporary.values():
+                path.unlink(missing_ok=True)
+            raise
 
     def update_truth_files(self, truth: TruthFiles, updates: Dict[str, str]):
         """更新指定的真相文件。
@@ -247,6 +268,31 @@ class TruthFilesManager:
         except Exception as e:
             logger.error(f"Failed to restore snapshot: {e}")
             return False
+
+    def load_snapshot_before(self, chapter_number: int) -> TruthFiles | None:
+        """Load the latest pre-write truth snapshot for a chapter without restoring it."""
+        import json
+
+        target = max(int(chapter_number) - 1, 0)
+        candidates = sorted(self.snapshots_dir.glob(f"snapshot_{target}_*.json"))
+        if not candidates:
+            return None
+        try:
+            snapshot = json.loads(candidates[-1].read_text(encoding="utf-8"))
+            files = snapshot.get("files", {})
+            if not isinstance(files, dict):
+                return None
+            return TruthFiles(
+                current_state=str(files.get("current_state") or ""),
+                ledger=str(files.get("ledger") or files.get("particle_ledger") or ""),
+                relationships=str(
+                    files.get("relationships")
+                    or files.get("character_matrix")
+                    or ""
+                ),
+            )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return None
 
     def list_snapshots(self) -> List[Dict[str, Any]]:
         """列出所有快照。

@@ -342,3 +342,57 @@ summary = "普通程序员觉醒术法。"
 
     assert "陈明" in packet.character_documents
     assert "普通程序员觉醒术法" in packet.character_documents["陈明"]
+
+
+def test_assembler_infers_character_from_chapter_text_when_metadata_is_missing(
+    tmp_path: Path,
+):
+    novel_root = _bootstrap_novel(tmp_path)
+    (novel_root / "src" / "outline.md").write_text(
+        """# 测试小说
+
+## 第一篇
+### 第一节
+#### 第一章：异常磁带
+> 内容焦点: 沈砚在雨夜修复一盒异常磁带。
+""",
+        encoding="utf-8",
+    )
+    (novel_root / "src" / "characters" / "shen_yan.md").write_text(
+        """+++
+id = "shen_yan"
+name = "沈砚"
+tier = "主角"
+summary = "谨慎的磁带修复师。"
++++
+
+# 沈砚
+
+## 基本信息
+
+磁带修复师。
+
+## 背景
+
+妹妹三年前去世。
+
+## 外貌
+
+常穿深灰工作衫。
+
+## 性格
+
+谨慎、程序化。
+
+## 关系
+
+只有妹妹会叫他“阿迟”。
+""",
+        encoding="utf-8",
+    )
+
+    packet = ChapterAssemblerV2(project_root=tmp_path, novel_id="demo").assemble("ch_001")
+
+    assert "沈砚" in packet.character_documents
+    assert "谨慎的磁带修复师" in packet.character_documents["沈砚"]
+    assert "阿迟" in packet.character_documents["沈砚"]

@@ -69,6 +69,8 @@ class GenerationContext(BaseModel):
     # 基础信息
     novel_id: str = Field(default="", description="小说 ID")
     chapter_id: str = Field(default="", description="当前章节 ID")
+    author_intent: str = Field(default="", description="整本书长期不变的作者意图")
+    creative_focus: str = Field(default="", description="当前阶段的创作罗盘与硬约束")
     chapter_goals: List[str] = Field(default_factory=list, description="本章写作目标")
     target_words: int = Field(default=6000, description="目标字数")
     emotion_arc: str = Field(default="", description="章内微观情绪变化")
@@ -147,8 +149,17 @@ class GenerationContext(BaseModel):
         """转为有序的 prompt 段落字典"""
         sections: Dict[str, str] = {}
 
+        if self.author_intent:
+            sections["作者意图"] = self.author_intent
+
+        if self.creative_focus:
+            sections["创作罗盘（当前最高优先级）"] = self.creative_focus
+
         if self.recent_text:
             sections["上文"] = self.recent_text
+
+        if self.chapter_summaries:
+            sections["历史章节记忆"] = self.chapter_summaries
 
         if self.outline_window:
             outlines = []

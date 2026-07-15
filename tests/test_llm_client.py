@@ -7,7 +7,30 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import openai
 
-from tools.llm.client import LLMClient, LLMConfig
+from tools.llm.client import LLMClient, LLMConfig, _plain_usage
+
+
+def test_usage_models_are_converted_to_serializable_plain_data():
+    class TokenDetails:
+        def model_dump(self, mode: str = "python"):
+            assert mode == "json"
+            return {"cached_tokens": 7, "audio_tokens": None}
+
+    usage = _plain_usage(
+        {
+            "prompt_tokens": 11,
+            "completion_tokens": 5,
+            "total_tokens": 16,
+            "prompt_tokens_details": TokenDetails(),
+        }
+    )
+
+    assert usage == {
+        "prompt_tokens": 11,
+        "completion_tokens": 5,
+        "total_tokens": 16,
+        "prompt_tokens_details": {"cached_tokens": 7, "audio_tokens": None},
+    }
 
 
 def test_llm_config_normalizes_full_chat_completions_endpoint():

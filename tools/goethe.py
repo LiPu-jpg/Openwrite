@@ -65,7 +65,7 @@ def build_goethe_prompt_session(history=None):
 
 def build_goethe_tool_layers(project_root: Path, novel_id: str | None = None) -> dict[str, object]:
     """构建 Goethe 工具分层视图，便于测试与 shell 复用。"""
-    from .cli import build_goethe_tool_layers as _build
+    from .agent.tool_layers import build_goethe_tool_layers as _build
 
     return _build(project_root, novel_id)
 
@@ -357,6 +357,36 @@ class GoetheChatAgent:
                 print(f"\n🤖 Goethe: {response_text}")
             self.session_store.save(self._require_session_state())
             turns_processed += 1
+
+    def respond(self, user_input: str) -> str:
+        """Process one persisted Goethe turn for non-terminal clients."""
+        text = str(user_input or "").strip()
+        if not text:
+            raise ValueError("消息不能为空")
+        if self.session_state is None:
+            self.startup()
+        if self._looks_like_handoff_request(text):
+            handoff = self.prepare_dante_handoff()
+            if handoff.get("ok"):
+                return "Goethe 已完成交接，可以切换到 Dante 继续正文创作。"
+            missing = "、".join(
+                str(item) for item in handoff.get("missing_items", [])
+            ) or "必要资产"
+            return f"暂时不能交接给 Dante，还缺少：{missing}。"
+        self._append_user_turn(text)
+        state = self._require_session_state()
+        state.last_action = "chat"
+        self.session_store.save(state)
+        try:
+            response_text = self._run_react_agent(self._get_react_agent(), text)
+        except Exception:
+            state.last_action = "react_error"
+            self.session_store.save(state)
+            raise
+        if response_text:
+            self._append_assistant_turn(response_text)
+        self.session_store.save(self._require_session_state())
+        return response_text
 
     def prepare_dante_handoff(self) -> dict[str, Any]:
         layers = self._load_tool_layers()

@@ -403,6 +403,10 @@ class TestToolsRegistry:
         print(f"\n✅ 所有 {len(registered_names)} 个工具已正确注册")
 
 
+@pytest.mark.skipif(
+    not (TEST_NOVEL / "src" / "outline.md").exists(),
+    reason="标准样例已从公开仓库移除",
+)
 class TestIntegration23Tools:
     """
     23工具全功能集成测试

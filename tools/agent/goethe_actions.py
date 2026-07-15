@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 
 from ..architect import ArchitectAgent
 from ..frontmatter import compose_toml_document
 from ..llm import LLMClient, LLMConfig
+from ..novel_service import NovelApplicationService, NovelServiceError
 from ..story_planning import StoryPlanningStore
 from ..truth_manager import TruthFilesManager
 from ..utils import generate_id
-from .book_state import BookStage, BookStateStore
 from .base import AgentContext
+from .book_state import BookStage, BookStateStore
 from .orchestrator import OpenWriteOrchestrator, OrchestratorResult
 
 
@@ -40,24 +42,8 @@ class GoethePlanningRuntime:
             novel_id=novel_id,
             tool_executors=self.tool_executors,
         )
+        self.novel_service = NovelApplicationService(self.project_root)
         self._architect: ArchitectAgent | None = None
-        self._source_review_renderer: Callable[[Path, str, str], str] | None = None
-        self._source_style_promoter: Callable[[Path, str, str], None] | None = None
-        self._source_setting_promoter: Callable[[Path, str, str], None] | None = None
-        self._source_world_promoter: Callable[[Path, str, str], None] | None = None
-
-    def bind_source_pack_services(
-        self,
-        *,
-        review_renderer: Callable[[Path, str, str], str],
-        style_promoter: Callable[[Path, str, str], None],
-        setting_promoter: Callable[[Path, str, str], None],
-        world_promoter: Callable[[Path, str, str], None],
-    ) -> None:
-        self._source_review_renderer = review_renderer
-        self._source_style_promoter = style_promoter
-        self._source_setting_promoter = setting_promoter
-        self._source_world_promoter = world_promoter
 
     def summarize_ideation(self) -> OrchestratorResult:
         return self.orchestrator.summarize_ideation()
@@ -83,7 +69,10 @@ class GoethePlanningRuntime:
         truth.current_state = foundation.current_state
         self.truth_manager.save_truth_files(truth)
 
-        foreshadowing_path = self.story_planning_store.runtime_planning_dir / "foreshadowing_draft.md"
+        foreshadowing_path = (
+            self.story_planning_store.runtime_planning_dir
+            / "foreshadowing_draft.md"
+        )
         foreshadowing_path.write_text(foundation.foreshadowing_seed, encoding="utf-8")
 
         return {
@@ -107,7 +96,9 @@ class GoethePlanningRuntime:
         name, role = self._parse_character_request(request_text)
         _, genre = self._load_title_and_genre()
         architect = self._get_architect()
-        foundation_text = self.story_planning_store.read_story_document("foundation", max_chars=2000)
+        foundation_text = self.story_planning_store.read_story_document(
+            "foundation", max_chars=2000
+        )
 
         character_md = asyncio.run(
             architect.generate_character(
@@ -163,12 +154,11 @@ class GoethePlanningRuntime:
         )
 
     def review_source_pack(self, source_id: str) -> dict[str, Any]:
+        try:
+            review = self.novel_service.review_source(source_id)["review_report"]
+        except NovelServiceError as exc:
+            return self._service_error("review_source_pack", source_id, exc)
         source_root = self._source_root(source_id)
-        if not source_root.exists():
-            return self._missing_source_pack("review_source_pack", source_id)
-        if self._source_review_renderer is None:
-            raise RuntimeError("source review renderer has not been configured")
-        review = self._source_review_renderer(self.project_root, self.novel_id, source_id)
         return {
             "ok": True,
             "blocked": False,
@@ -179,34 +169,15 @@ class GoethePlanningRuntime:
         }
 
     def promote_source_pack(self, source_id: str, target: str = "all") -> dict[str, Any]:
+        try:
+            result = self.novel_service.promote_source(source_id, target)
+        except NovelServiceError as exc:
+            return self._service_error("promote_source_pack", source_id, exc)
         source_root = self._source_root(source_id)
-        if not source_root.exists():
-            return self._missing_source_pack("promote_source_pack", source_id)
-        if (
-            self._source_style_promoter is None
-            or self._source_setting_promoter is None
-            or self._source_world_promoter is None
-        ):
-            raise RuntimeError("source promoters have not been configured")
-
-        promoted: list[str] = []
-        if target in {"style", "all"}:
-            self._source_style_promoter(self.project_root, self.novel_id, source_id)
-            promoted.append("style")
-        if target in {"setting", "all"}:
-            self._source_setting_promoter(self.project_root, self.novel_id, source_id)
-            promoted.append("setting")
-        if target in {"world", "all"}:
-            self._source_world_promoter(self.project_root, self.novel_id, source_id)
-            promoted.append("world")
-
         return {
-            "ok": True,
+            **result,
             "blocked": False,
             "next_action": "handoff_ready",
-            "source_id": source_id,
-            "target": target,
-            "promoted": promoted,
             "source_root": str(source_root),
         }
 
@@ -364,18 +335,46 @@ class GoethePlanningRuntime:
                 "source_id": source_id,
                 "source_file": str(source_file),
             }
-        from tools.cli import _extract_source_pack
-
-        return _extract_source_pack(
-            self.project_root,
-            self.novel_id,
-            source_id,
-            source_file,
-            focus=focus,
-        )
+        try:
+            return self.novel_service.extract_source(
+                source_id=source_id,
+                source_file=source_file,
+                focus=focus,
+            )
+        except NovelServiceError as exc:
+            return {
+                "ok": False,
+                "blocked": True,
+                "error": exc.code,
+                "message": str(exc),
+                "source_id": source_id,
+            }
 
     def _source_root(self, source_id: str) -> Path:
-        return self.project_root / "data" / "novels" / self.novel_id / "data" / "sources" / source_id
+        return (
+            self.project_root
+            / "data"
+            / "novels"
+            / self.novel_id
+            / "data"
+            / "sources"
+            / source_id
+        )
+
+    @staticmethod
+    def _service_error(
+        action: str,
+        source_id: str,
+        exc: NovelServiceError,
+    ) -> dict[str, Any]:
+        return {
+            "action": action,
+            "ok": False,
+            "blocked": True,
+            "error": exc.code,
+            "message": str(exc),
+            "source_id": source_id,
+        }
 
     def _evaluate_handoff_readiness(self) -> dict[str, Any]:
         required_assets = ["ideation_summary", "foundation", "outline", "persona"]
@@ -392,7 +391,10 @@ class GoethePlanningRuntime:
         foundation_ready = bool(background_body and foundation_body)
         outline_text = self.story_planning_store.read_outline_draft()
         outline_ready = bool(outline_text.strip())
-        persona_paths = [item["path"] for item in self.story_planning_store.list_character_documents()]
+        persona_paths = [
+            item["path"]
+            for item in self.story_planning_store.list_character_documents()
+        ]
         persona_ready = bool(persona_paths)
 
         if not ideation_ready:

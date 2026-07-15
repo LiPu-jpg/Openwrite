@@ -22,6 +22,44 @@ from urllib.parse import urlsplit, urlunsplit
 logger = logging.getLogger(__name__)
 
 
+def _plain_usage(usage: Any) -> dict[str, Any]:
+    """Convert SDK usage models into YAML/JSON-safe plain data."""
+
+    def convert(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): convert(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [convert(item) for item in value]
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            try:
+                return convert(model_dump(mode="json"))
+            except TypeError:
+                return convert(model_dump())
+        return str(value)
+
+    if usage is None:
+        return {}
+    if isinstance(usage, dict):
+        raw = usage
+    else:
+        model_dump = getattr(usage, "model_dump", None)
+        if callable(model_dump):
+            try:
+                raw = model_dump(mode="json")
+            except TypeError:
+                raw = model_dump()
+        else:
+            try:
+                raw = dict(usage)
+            except (TypeError, ValueError):
+                return {}
+    converted = convert(raw)
+    return converted if isinstance(converted, dict) else {}
+
+
 @dataclass
 class LLMResponse:
     """LLM 响应"""
@@ -342,7 +380,7 @@ class LLMClient:
             return ToolCallResponse(
                 content=message.content or "",
                 tool_calls=tool_calls,
-                usage=dict(response.usage) if hasattr(response, "usage") else {},
+                usage=_plain_usage(getattr(response, "usage", None)),
                 model=response.model,
                 provider="openai",
             )
@@ -460,7 +498,7 @@ class LLMClient:
             response = self._client.chat.completions.create(**create_params)
             return LLMResponse(
                 content=response.choices[0].message.content or "",
-                usage=dict(response.usage),
+                usage=_plain_usage(response.usage),
                 model=response.model,
                 provider="openai",
             )
@@ -500,7 +538,7 @@ class LLMClient:
             output_text = "\n".join(o.text for o in response.output if hasattr(o, "text"))
             return LLMResponse(
                 content=output_text,
-                usage=dict(response.usage) if hasattr(response, "usage") else {},
+                usage=_plain_usage(getattr(response, "usage", None)),
                 model=response.model,
                 provider="openai",
             )

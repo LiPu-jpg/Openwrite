@@ -9,7 +9,7 @@
 <h1 align="center">Autonomous Novel Writing CLI AI Agent<br><sub>自动化长篇小说写作 CLI AI Agent</sub></h1>
 
 <p align="center">
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/version-5.4.0-2563eb" alt="Version"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/version-5.8.0-2563eb" alt="Version"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-%3E%3D3.10-22c55e" alt="Python >= 3.10"></a>
   <img src="https://img.shields.io/badge/entry-openwrite%20dante-0f172a" alt="Primary Entry: openwrite dante">
   <img src="https://img.shields.io/badge/structure-src%20%2B%20data-1d4ed8" alt="Structure: src + data">
@@ -19,11 +19,43 @@
   长篇小说不是一次性 prompt。OpenWrite 把立项、设定、滚动大纲、章节写作、审查、真相文件和 workflow 放进同一条长期生产线里，让你和 Dante 持续把一本书写下去。
 </p>
 
+## 只做一件事：把长篇小说写完
+
+OpenWrite 不覆盖短篇、翻译、剧本或互动游戏。它把产品能力集中在长篇小说最难的部分：作者意图不会在几十章后丢失，人物与世界状态可追踪，近期写作目标能压住模型跑偏，并且旧稿可以接入、成稿可以完整导出。
+
+它的核心特色是：
+
+- **Goethe / Dante 双 Agent**：Goethe 负责把想法变成可写资产，Dante 负责持续写作、审查与状态结算。
+- **创作罗盘**：`author_intent.md` 保存整本书的长期承诺，`current_focus.md` 保存近期最高优先级目标；两者都会进入章节上下文。
+- **单一真源**：人物、设定和大纲以 `src/` 为确认版，机器缓存与运行状态留在 `data/`，避免多份文档互相打架。
+- **长篇连续性**：每章按大纲窗口、人物、世界规则、伏笔、上一章正文和真相文件组装 canonical packet。
+- **有界章节记忆**：每章把摘要、客观观察和三阶段 token 用量写入 `data/memory/chapters/`，下一章只注入相关的有界摘要，不把整本正文塞回模型。
+- **可靠提交**：写章使用跨进程作品锁；正文、真相文件和章节记忆作为一个提交单元，任一步失败都会恢复写前快照，避免半章或半份状态落盘。
+- **质量闭环**：37 维审稿会读取作者意图、创作罗盘、大纲、角色正典、关系和风格约束；CLI 与 Studio 共用同一套 workflow / book state 生命周期。
+- **完整交付闭环**：支持 TXT / Markdown 旧稿导入、写作进度与资产就绪度工作台、Markdown / TXT 整书导出。
+- **小说 Studio**：`openwrite studio` 覆盖模型连接、Goethe / Dante 长会话、小说资产编辑与新建、旧稿导入、同步、上下文检查、写章、37 维审稿、连续性/伏笔、来源提取晋升和整书导出。
+
+### 一个小说内核，四个入口
+
+OpenWrite 借鉴了 InkOS“多个交互入口共用同一 action surface”的思路，但只保留长篇小说需要的能力。CLI、Studio、Goethe 和 Dante 不再各自维护一套写章、审稿或来源处理逻辑：它们都把请求交给同一个小说应用服务，完成态以真实工具结果和落盘状态为准，不以模型口头声明为准。
+
+```text
+CLI ─────┐
+Studio ──┼─> Novel action surface ─> NovelApplicationService
+Goethe ──┤                              ├─ canonical packet
+Dante ───┘                              ├─ chapter write/review pipeline
+                                        ├─ source-pack lifecycle
+                                        └─ workflow / truth / memory / BookState
+```
+
+入口可以提供不同的交互体验，但以下契约只有一份：章节 ID 归一化、canonical packet、项目锁、事务回滚、错误码、workflow 推进、审稿存储和 BookState 结算。这样做的目的不是把 OpenWrite 扩成通用内容平台，而是让一本长篇小说从规划到完稿始终由同一套状态机负责。
+
 ## 推荐用法
 
 OpenWrite 推荐你把它当成一个长期协作的主 agent，而不是一组需要手工维护的文件夹。
 
-- 对大多数用户来说，日常只需要记住两个入口：`openwrite goethe` 和 `openwrite dante`
+- 对大多数用户来说，日常只需要记住两个 Agent 入口：`openwrite goethe` 和 `openwrite dante`
+- 直接运行 `openwrite` 或 `openwrite desk` 可以查看作品进度、资产就绪度和下一步建议
 - 先用 `openwrite goethe` 把脑洞整理成可写资产
 - 日常推进时优先用 `openwrite dante`
 - 只在需要精确检查或脚本化时才直接用 `write`、`review`、`context`、`assemble`
@@ -60,9 +92,9 @@ OpenWrite 推荐你把它当成一个长期协作的主 agent，而不是一组�
 ### 1. 安装
 
 ```bash
-git clone https://github.com/LiPu-jpg/Openwrite_skill.git
-cd Openwrite_skill
-python -m venv .venv
+git clone https://github.com/LiPu-jpg/Openwrite.git
+cd Openwrite
+python3.10 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```
@@ -102,6 +134,49 @@ openwrite dante
 source .venv/bin/activate
 openwrite dante
 ```
+
+### 5. 用创作罗盘约束近期写作
+
+```bash
+openwrite focus set "完成第一卷中段反转，让主角主动承担代价" \
+  --keep "克制的叙述视角" \
+  --keep "师徒关系的信任裂缝" \
+  --avoid "靠新能力强行解围"
+```
+
+这不是一条只在终端显示的备注。Dante 和章节写作管线组装上下文时，会把创作罗盘作为当前最高优先级控制面。
+
+如果你已有小说正文，可以先导入再续写：
+
+```bash
+openwrite import existing-novel.txt
+openwrite desk
+openwrite dante
+```
+
+### 6. 打开小说 Studio
+
+```bash
+openwrite studio
+```
+
+如果当前目录还没有项目，Studio 会直接显示“创建第一本小说”页面；填写书名和小说 ID 后即可生成完整目录，无需先运行 `openwrite init`。
+
+Studio 默认只绑定 `127.0.0.1`，不会把作品文件暴露到局域网。它和 CLI 使用同一个项目目录、同一个 `src/` 真源和同一套章节写作管线；浏览器中保存的文档会做版本冲突检查，避免覆盖其他编辑器刚写入的内容。章节审稿结果保存在 `data/reviews/ch_*.json`，分数和问题明细可在 Studio 中回看；工作台同时汇总累计 token 与已审章节均分。
+
+写章不是一次模型调用后直接保存。默认链路会依次生成正文、提取客观事实、结算运行态，并把三阶段 token 合计写入章节记忆。作品级锁覆盖上下文读取、模型调用和最终提交；如果真相文件或记忆保存失败，系统会恢复旧正文与写前状态。
+
+Studio 的主要前端工作区：
+
+| 工作区 | 可完成的真实流程 |
+|---|---|
+| 总览 / 编辑器 | 进度、资产就绪度、章节/人物/故事/世界文档编辑、版本冲突保护 |
+| AI 协作 | Goethe 规划会话、Dante 正文会话，复用持久化 session 与工具调用 |
+| 连续性 | 写前/写后状态、资源账本、人物关系、伏笔 DAG、章节 workflow |
+| 首次启动 / 工具箱 | 前端建书、模型连接、`src → data` 同步、canonical packet 预览、TXT/Markdown 导入、人物/设定新建、来源提取/审阅/晋升/风格合成 |
+| 写作闭环 | 写下一章、章节记忆与 truth 结算、37 维审稿、Markdown/TXT 导出 |
+
+模型连接可以直接在 Studio 顶部点击模型状态进行配置。API Key 只保存在当前 Studio 服务进程，不写入项目文件，也不会返回给浏览器。
 
 ## 最推荐的工作流
 
@@ -224,6 +299,8 @@ data/novels/{novel_id}/
 ├── src/
 │   ├── outline.md
 │   ├── story/
+│   │   ├── author_intent.md
+│   │   ├── current_focus.md
 │   │   ├── background.md
 │   │   └── foundation.md
 │   ├── characters/*.md
@@ -265,6 +342,8 @@ data/novels/{novel_id}/
 其中：
 
 - `src/outline.md` 是唯一大纲真源
+- `src/story/author_intent.md` 是整本书长期不变的创作承诺
+- `src/story/current_focus.md` 是近期写作最高优先级约束，可随篇章推进更新
 - `data/hierarchy.yaml` 是派生缓存
 - `data/planning/ideation.md` 和 `data/planning/ideation_summary.md` 是会话与规划运行态
 - `data/world/*.md` 和 `data/workflows/*.yaml` 是运行时状态
@@ -290,8 +369,19 @@ data/novels/{novel_id}/
 
 ### 主入口
 
+- `openwrite` / `openwrite desk`
 - `openwrite dante`
 - `openwrite goethe`
+
+### 创作控制与交付
+
+- `openwrite studio`
+- `openwrite focus show`
+- `openwrite focus set "本阶段目标" --keep "必须保留" --avoid "必须避免"`
+- `openwrite import existing-novel.txt`
+- `openwrite export --format md`
+- `openwrite export --format txt -o exports/my-book.txt`
+- `openwrite status --json`
 
 ### 写作与审查
 
@@ -339,19 +429,6 @@ data/novels/{novel_id}/
 - `review`
   独立审查入口。适合对现有章稿做单独质量检查。
 
-## 标准样例
-
-标准样例项目在 [`data/novels/test_novel/`](data/novels/test_novel)。
-
-如果你想最快看懂这套结构，建议顺序是：
-
-1. [`src/outline.md`](data/novels/test_novel/src/outline.md)
-2. [`src/story/background.md`](data/novels/test_novel/src/story/background.md)
-3. [`data/planning/ideation.md`](data/novels/test_novel/data/planning/ideation.md)
-4. [`data/planning/ideation_summary.md`](data/novels/test_novel/data/planning/ideation_summary.md)
-5. [`data/world/current_state.md`](data/novels/test_novel/data/world/current_state.md)
-6. [`data/workflows/book_state.yaml`](data/novels/test_novel/data/workflows/book_state.yaml)
-
 ## 常见问题
 
 ### 我应该先用 Goethe 还是 Dante
@@ -392,4 +469,4 @@ openwrite sync
 
 ## 版本
 
-当前版本：`5.4.0`
+当前版本：`5.8.0`

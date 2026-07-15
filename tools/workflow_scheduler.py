@@ -199,7 +199,10 @@ class WorkflowScheduler:
         if stage:
             stage.status = "running"
             stage.started_at = datetime.now().isoformat()
+            stage.completed_at = ""
+            stage.message = ""
             state.current_stage = stage_name
+            state.error = ""
             state.updated_at = datetime.now().isoformat()
             self._save_state(state)
         return state

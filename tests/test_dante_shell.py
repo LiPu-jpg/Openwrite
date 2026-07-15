@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -159,6 +160,47 @@ def test_dante_enters_prompt_loop_and_persists_turns(tmp_path: Path):
         {"role": "assistant", "content": "我已经记住了。"},
     ]
     assert persisted["last_action"] == "exit"
+
+
+def test_dante_respond_supports_persisted_web_turn(tmp_path: Path):
+    from tools.agent.dante import DanteChatAgent
+
+    react_agent = FakeReActAgent(responses=["先检查当前章，再继续写作。"])
+    agent = DanteChatAgent(
+        project_root=tmp_path,
+        novel_id="demo",
+        react_agent=react_agent,
+    )
+
+    response = agent.respond("帮我继续正文")
+
+    assert response == "先检查当前章，再继续写作。"
+    persisted = yaml.safe_load(agent.session_store.path.read_text(encoding="utf-8"))
+    assert persisted["recent_turns"][-2:] == [
+        {"role": "user", "content": "帮我继续正文"},
+        {"role": "assistant", "content": "先检查当前章，再继续写作。"},
+    ]
+
+
+def test_goethe_respond_supports_persisted_web_turn(tmp_path: Path):
+    from tools.goethe import GoetheChatAgent
+
+    react_agent = FakeReActAgent(responses=["先补齐主角矛盾与第一篇大纲。"])
+    agent = GoetheChatAgent(
+        project_root=tmp_path,
+        novel_id="demo",
+        react_agent=react_agent,
+        tool_layer_factory=lambda *args: {},
+    )
+
+    response = agent.respond("检查目前还缺什么")
+
+    assert response == "先补齐主角矛盾与第一篇大纲。"
+    persisted = yaml.safe_load(agent.session_store.path.read_text(encoding="utf-8"))
+    assert persisted["recent_turns"][-2:] == [
+        {"role": "user", "content": "检查目前还缺什么"},
+        {"role": "assistant", "content": "先补齐主角矛盾与第一篇大纲。"},
+    ]
 
 
 @pytest.mark.parametrize("command", ["quit", "exit", "q", "退出"])
@@ -338,6 +380,9 @@ def test_dante_default_react_agent_has_direct_and_action_tool_surface(
         novel_id="demo",
         prompt_session_factory=lambda **kwargs: FakePromptSession(["exit"]),
         react_agent=None,
+        llm_client_factory=lambda: SimpleNamespace(
+            config=SimpleNamespace(model="fake-model")
+        ),
         tool_executors={
             "get_status": lambda args: {"ok": True},
             "get_context": lambda args: {"ok": True},

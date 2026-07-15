@@ -178,6 +178,18 @@ class TestStageProgression:
         assert stage.status == "failed"
         assert "writing: 生成失败" in state.error
 
+    def test_restart_failed_stage_clears_stale_error(self, scheduler):
+        state = scheduler.create_workflow("ch_001")
+        state = scheduler.fail_stage(state, "writing", "生成失败")
+
+        state = scheduler.start_stage(state, "writing")
+
+        stage = next(s for s in state.stages if s.name == "writing")
+        assert stage.status == "running"
+        assert stage.completed_at == ""
+        assert stage.message == ""
+        assert state.error == ""
+
     def test_skip_stage(self, scheduler):
         state = scheduler.create_workflow("ch_001")
         state = scheduler.skip_stage(state, "review", "无需审查")
