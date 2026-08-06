@@ -272,12 +272,17 @@ def ensure_runtime(root: Path) -> Path:
         print("[OpenWrite] 运行环境与依赖已就绪。")
         return python
 
-    if not python.is_file():
+    if not python.is_file() or not _installation_healthy(
+        python, root, check_dependencies=False
+    ):
         print(f"[OpenWrite] 正在创建独立运行环境：{runtime}")
         runtime.parent.mkdir(parents=True, exist_ok=True)
+        if runtime.exists():
+            shutil.rmtree(runtime)
         try:
             _run([sys.executable, "-m", "venv", runtime], cwd=root)
         except (OSError, subprocess.CalledProcessError) as exc:
+            shutil.rmtree(runtime, ignore_errors=True)
             raise LauncherError("无法创建 Python 虚拟环境，请确认当前 Python 包含 venv。") from exc
 
     print("[OpenWrite] 正在检查并下载所需依赖，首次运行可能需要几分钟……")

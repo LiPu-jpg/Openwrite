@@ -73,7 +73,7 @@ def test_ensure_runtime_creates_and_installs_missing_environment(tmp_path: Path,
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(desktop_launcher, "_run", fake_run)
-    monkeypatch.setattr(desktop_launcher, "_installation_healthy", lambda *_: True)
+    monkeypatch.setattr(desktop_launcher, "_installation_healthy", lambda *args, **kwargs: True)
 
     assert desktop_launcher.ensure_runtime(tmp_path) == python
     assert commands[0][1:3] == ["-m", "venv"]
@@ -82,6 +82,32 @@ def test_ensure_runtime_creates_and_installs_missing_environment(tmp_path: Path,
     assert "--editable" in commands[2]
     assert (runtime / ".openwrite-dependencies.json").is_file()
 
+
+def test_ensure_runtime_rebuilds_corrupt_existing_environment(tmp_path: Path, monkeypatch):
+    runtime = desktop_launcher.runtime_directory(tmp_path)
+    python = desktop_launcher.runtime_python(runtime)
+    python.parent.mkdir(parents=True)
+    python.touch()
+    commands: list[list[str]] = []
+
+    def fake_run(command, *, cwd, check=True):
+        rendered = [str(item) for item in command]
+        commands.append(rendered)
+        if rendered[1:3] == ["-m", "venv"]:
+            python.parent.mkdir(parents=True)
+            python.touch()
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(desktop_launcher, "_run", fake_run)
+    monkeypatch.setattr(
+        desktop_launcher,
+        "_installation_healthy",
+        lambda _python, _root, *, check_dependencies=True: check_dependencies,
+    )
+
+    assert desktop_launcher.ensure_runtime(tmp_path) == python
+    assert commands[0][1:3] == ["-m", "venv"]
+    assert runtime.is_dir()
 
 def test_double_click_launchers_are_present_and_use_shared_bootstrap():
     root = Path(__file__).parent.parent
