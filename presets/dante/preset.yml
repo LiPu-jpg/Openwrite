@@ -1,0 +1,3 @@
+name: Dante 写作
+description: 长篇小说正文创作 Agent：基于已确认资产执行上下文预检、写章、37 维评审与状态结算；资产不齐时退回 Goethe 规划预设补齐，写作中可经 subagent_goethe 咨询规划一致性。
+order: 20

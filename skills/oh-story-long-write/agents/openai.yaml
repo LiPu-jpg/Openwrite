@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oh Story 长篇写作"
+  short_description: "用于长篇网文选题、设定、大纲、单章写作和连续更新的方法"
+  default_prompt: "使用 $oh-story-long-write 规划或撰写当前长篇小说，并遵守 OpenWrite 的确认流程。"

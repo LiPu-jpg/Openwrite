@@ -1,0 +1,61 @@
+# 风格指纹模板（Style Fingerprint Template）
+# 路径: data/novels/{novel_id}/data/style/fingerprint.yaml
+# 生成方式: 由风格初始化问询流程生成
+
+# ── 基本信息 ──────────────────────────────────────────────
+novel_id: "{novel_id}"
+created_at: "{timestamp}"
+version: 1
+
+# ── 基调设定（Q1）──────────────────────────────────────────
+tone:
+  primary: ""       # 轻松幽默 / 严肃正剧 / 悬疑紧张 / 温馨治愈 / 热血爽文
+  secondary: ""     # 可选的次要基调
+  description: ""   # 用户自由描述
+
+# ── 节奏设定（Q2）──────────────────────────────────────────
+rhythm:
+  pacing: ""        # fast / medium / slow
+  short_ratio: 0.3  # 短段落占比（<50字）
+  medium_ratio: 0.5 # 中段落占比（50-200字）
+  long_ratio: 0.2   # 长段落占比（>200字）
+  scene_transition: "" # 场景切换风格描述
+
+# ── 对话/描写比例（Q3）────────────────────────────────────
+dialogue:
+  ratio: 0.50       # 对话占比（0.0 - 1.0）
+  style: ""         # 对话驱动 / 描写驱动 / 平衡
+  tags: ""          # 对话标签风格：minimal / standard / descriptive
+
+# ── 来源文本（Q4，可选）───────────────────────────────────
+references:
+  # - title: "来源文本说明"
+  #   extracted_features:
+  #     - "特征1"
+  #     - "特征2"
+  #   source_pack: "data/novels/{novel_id}/data/sources/{source_id}/"
+
+# ── 特殊约束（Q5，可选）───────────────────────────────────
+constraints:
+  banned_phrases: []    # 禁用词/表达
+  required_elements: [] # 必须包含的元素
+  custom_rules: []      # 自定义规则
+  # 示例:
+  # banned_phrases:
+  #   - "网络流行语"
+  #   - "然而"
+  # required_elements:
+  #   - "每章至少一个笑点"
+
+# ── 叙述声音 ──────────────────────────────────────────────
+voice:
+  narrator_voice: ""    # 叙述者声音描述
+  pov_style: ""         # 第一人称 / 第三人称限知 / 第三人称全知 / 多视角
+  formality: ""         # 口语化 / 半正式 / 正式
+
+# ── 语言风格 ──────────────────────────────────────────────
+language:
+  sentence_patterns: [] # 推荐句式
+  vocabulary_level: ""  # 日常 / 文学 / 古风 / 技术
+  metaphor_style: ""    # 比喻风格描述
+  humor_style: ""       # 幽默风格描述（如适用）

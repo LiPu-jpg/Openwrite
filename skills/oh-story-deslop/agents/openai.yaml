@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oh Story 去 AI 味"
+  short_description: "用于诊断机械文本模式并在保留作者声音前提下自然化精修的方法"
+  default_prompt: "使用 $oh-story-deslop 在保留作者声音的前提下精修当前文本。"

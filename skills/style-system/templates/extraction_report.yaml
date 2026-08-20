@@ -1,0 +1,80 @@
+# 风格提取报告模板（Style Extraction Report Template）
+# 路径: data/novels/{novel_id}/data/style/extraction_report.yaml
+# 生成方式: 分析参考文本后由 Agent 填充
+
+# ── 基本信息 ──────────────────────────────────────────────
+novel_id: "{novel_id}"
+reference_title: ""
+reference_author: ""
+sample_length: 0          # 分析样本字数
+created_at: "{timestamp}"
+
+# ── 六维度特征提取 ────────────────────────────────────────
+
+# 1. 叙述声音
+voice:
+  narrator_type: ""       # 第一人称 / 第三人称限知 / 全知 等
+  distance: ""            # 亲密 / 适中 / 疏离
+  attitude: ""            # 同情 / 旁观 / 讽刺 等
+  examples:
+    # - "原文示例，展示叙述声音特征"
+  reusable: true          # 此特征是否可复用到其他作品
+
+# 2. 语言风格
+language:
+  vocabulary_level: ""    # 日常 / 文学 / 古风 / 技术
+  sentence_avg_length: 0  # 平均句长（字数）
+  favorite_patterns: []   # 高频句式
+  metaphor_density: ""    # 密 / 适中 / 少
+  examples:
+    # - "原文示例，展示语言特征"
+  reusable: true
+
+# 3. 节奏控制
+rhythm:
+  overall_pacing: ""      # 快 / 中 / 慢
+  paragraph_variation: "" # 大 / 中 / 小（段落长短变化幅度）
+  scene_transition: ""    # 硬切 / 渐变 / 空行 等
+  tension_curve: ""       # 描述张力变化模式
+  examples:
+    # - "原文示例，展示节奏特征"
+  reusable: true
+
+# 4. 对话风格
+dialogue:
+  ratio: 0.0              # 对话占比
+  tag_style: ""           # 最简 / 标准 / 描述性
+  subtext_level: ""       # 高 / 中 / 低（潜台词程度）
+  character_voice_diff: "" # 角色语言差异化程度
+  examples:
+    # - "原文示例，展示对话特征"
+  reusable: true
+
+# 5. 幽默体系
+humor:
+  type: ""                # 吐槽 / 冷幽默 / 荒诞 / 讽刺 / 无
+  density: ""             # 高频 / 偶尔 / 几乎没有
+  delivery: ""            # 角色吐槽 / 叙述者评论 / 情境反差
+  examples:
+    # - "原文示例，展示幽默特征"
+  reusable: false         # 幽默体系通常作品特定
+
+# 6. 情感表达
+emotion:
+  expression: ""          # 外化 / 内敛 / 间接
+  method: ""              # 动作暗示 / 内心独白 / 环境烘托
+  intensity_range: ""     # 克制 / 适中 / 浓烈
+  examples:
+    # - "原文示例，展示情感表达特征"
+  reusable: true
+
+# ── 综合评估 ──────────────────────────────────────────────
+summary:
+  reusable_features:
+    # - "可复用特征1（适用于多种作品）"
+    # - "可复用特征2"
+  work_specific_features:
+    # - "作品特定特征1（仅适用于此类作品）"
+    # - "作品特定特征2"
+  caution:
+    # - "注意事项：不要过度模仿的方面"

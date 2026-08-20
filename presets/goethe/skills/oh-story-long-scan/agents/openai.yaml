@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oh Story 长篇市场研究"
+  short_description: "用于研究长篇平台样本、读者契约、升级空间和选题机会的方法"
+  default_prompt: "使用 $oh-story-long-scan 研究带来源和日期的长篇市场样本。"

@@ -1,0 +1,74 @@
+# 节拍模板使用示例
+# 文件路径: skills/novel-creator/templates/example_usage.yaml
+#
+# 演示如何根据 dramatic_position 选择并填充节拍模板。
+# 实际使用时由 Agent 根据章节大纲的 dramatic_position 字段自动选取。
+
+# ── 示例 1: 「转」位置的章节 ────────────────────────
+
+chapter_example_turn:
+  chapter_id: ch_004
+  title: "第四章：真相大白"
+  dramatic_position: "转"
+  content_focus: "主角发现师门秘密，信念崩塌"
+  estimated_words: 5000
+
+  # 从 position_转 选择的节拍
+  selected_beats:
+    - beat: "升级"
+      filled_template: "陈明发现服务器异常超出预期，数据传输量是平时的百倍——有人在偷偷上传海量文件。"
+      target_length: 500-800
+
+    - beat: "核心决策"
+      filled_template: "陈明必须在举报和沉默之间做出选择。举报意味着得罪整个部门，沉默意味着成为共犯。他握紧了手中的U盘。"
+      target_length: 600-1000
+
+    - beat: "后果初现"
+      filled_template: "消息发出的瞬间，走廊尽头传来急促的脚步声。陈明知道，一切已经不可逆了。"
+      target_length: 400-600
+
+  # 可选：叠加场景类型覆盖
+  scene_overlay: revelation
+  overlay_beats:
+    - beat: "线索汇聚"
+      filled_template: "之前不经意间看到的几份报告，此刻在脑海中拼合成一幅完整的图画。"
+    - beat: "真相揭示"
+      filled_template: "所谓的'系统升级'，不过是一场精心策划的数据窃取。而主导者，正是他最信任的导师。"
+
+
+# ── 示例 2: 「起」位置的章节 ────────────────────────
+
+chapter_example_start:
+  chapter_id: ch_001
+  title: "第一章：平凡的早晨"
+  dramatic_position: "起"
+  content_focus: "建立主角日常，暗示异常"
+  estimated_words: 4000
+
+  selected_beats:
+    - beat: "场景切入"
+      filled_template: "陈明推开宿舍门，走廊里弥漫着食堂的早餐味道。一切和往常没什么两样——至少现在看来是这样。"
+      target_length: 400-600
+
+    - beat: "悬念铺设"
+      filled_template: "手机上有三条未读消息，全来自一个没存过的号码。他随手删掉了前两条，却在第三条的内容前停住了。"
+      target_length: 500-800
+
+    - beat: "角色状态"
+      filled_template: "距离毕业还有三个月，论文进度拉下一大截。陈明边走边想着怎么跟导师解释，完全没注意到身后跟着的那个人影。"
+      target_length: 300-500
+
+    - beat: "衔接钩子"
+      filled_template: "实验楼的门禁记录显示，昨晚两点十七分有人刷了他的卡。但他昨晚十一点就睡了。"
+      target_length: 200-300
+
+
+# ── 使用流程说明 ────────────────────────────────────
+
+usage_guide:
+  step_1: "从章节大纲获取 dramatic_position（起/承/转/合/过渡）"
+  step_2: "查询 beat_templates.yaml 中对应的 position_{位置} 模板列表"
+  step_3: "根据章节目标和角色选取 3-5 个节拍"
+  step_4: "填充模板变量（{protagonist}, {setting}, {foreshadowing_element} 等）"
+  step_5: "可选叠加 scene_overlays（combat/dialogue/exploration/revelation）"
+  step_6: "按节拍顺序写作，每个节拍的长度参考 length 字段"

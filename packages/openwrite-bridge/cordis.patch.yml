@@ -1,0 +1,10 @@
+# dsh patch layer mounting the OpenWrite Studio bridge plugin.
+# Apply with: dsh web --patch ./packages/openwrite-bridge/cordis.patch.yml
+# Override the resolved config in a later layer by repeating the row id.
+- insert:
+    - id: openwrite-bridge
+      name: '@dsh-novel/openwrite-bridge'
+      # config:
+      #   baseUrl: 'http://127.0.0.1:4567'
+      #   timeoutMs: 600000
+      #   outputDir: '/tmp/openwrite-exports'

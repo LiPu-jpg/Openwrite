@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oh Story 商业审稿"
+  short_description: "用于按事实、因果、人物、节奏和表达分级审查网文稿件的方法"
+  default_prompt: "使用 $oh-story-review 审查当前稿件并给出有证据的优先修订建议。"

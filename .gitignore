@@ -1,0 +1,7 @@
+node_modules/
+lib/
+dist/
+.venv/
+.tmp-*/
+*.log
+.DS_Store

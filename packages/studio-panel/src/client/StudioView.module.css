@@ -1,0 +1,58 @@
+/* Studio panel: full-height iframe host. Colors come from the shared
+   --dsw-* semantic aliases (ui-theme), never literals. */
+
+.root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--dsw-alias-bg-base);
+}
+
+.frame {
+  flex: 1 1 auto;
+  display: block;
+  width: 100%;
+  min-height: 0;
+  border: none;
+}
+
+.status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-base);
+  text-align: center;
+}
+
+.errorText {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.button {
+  padding: 4px 12px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}

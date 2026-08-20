@@ -1,0 +1,78 @@
+# 风格分析报告模板（Style Analysis Report Template）
+# 路径: data/novels/{novel_id}/data/style/analysis_report.yaml
+# 生成方式: 分析已写文本后由 Agent 填充
+
+# ── 基本信息 ──────────────────────────────────────────────
+novel_id: "{novel_id}"
+chapter_id: "{chapter_id}"
+analyzed_at: "{timestamp}"
+source_file: ""               # 被分析文件路径
+
+# ── 基本统计 ──────────────────────────────────────────────
+statistics:
+  total_chars: 0              # 总字数
+  paragraph_count: 0          # 段落数
+  sentence_count: 0           # 句子数
+  avg_sentence_length: 0      # 平均句长
+  dialogue_ratio: 0.0         # 对话占比
+  short_paragraph_ratio: 0.0  # 短段比例（<50字）
+  medium_paragraph_ratio: 0.0 # 中段比例（50-200字）
+  long_paragraph_ratio: 0.0   # 长段比例（>200字）
+
+# ── 风格特征分析 ──────────────────────────────────────────
+style_features:
+  voice:
+    detected: ""              # 检测到的叙述声音
+    consistency: ""           # 一致 / 有波动 / 不一致
+    notes: ""
+  language:
+    vocabulary_level: ""      # 日常 / 文学 / 古风 / 技术
+    sentence_variety: ""      # 丰富 / 一般 / 单调
+    notes: ""
+  rhythm:
+    pacing: ""                # 快 / 中 / 慢
+    variation: ""             # 好 / 一般 / 平淡
+    notes: ""
+  dialogue:
+    ratio: 0.0
+    quality: ""               # 角色分化度
+    notes: ""
+
+# ── AI痕迹检测 ────────────────────────────────────────────
+ai_detection:
+  score: 0                    # 人化评分 0-100，越高越好
+  total_issues: 0             # 发现的AI痕迹总数
+  high_severity: []           # 高严重度问题
+    # - location: "第X段"
+    #   text: "原文片段"
+    #   pattern: "匹配到的AI模式"
+    #   suggestion: "替换建议"
+  medium_severity: []         # 中严重度问题
+  low_severity: []            # 低严重度提示
+
+# ── 目标风格偏差 ──────────────────────────────────────────
+# 与 fingerprint.yaml 中目标风格的对比
+deviation:
+  tone_match: true            # 基调是否匹配
+  tone_notes: ""
+  rhythm_match: true          # 节奏是否匹配
+  rhythm_notes: ""
+  dialogue_ratio_diff: 0.0    # 对话占比偏差（实际 - 目标）
+  dialogue_notes: ""
+  overall_alignment: ""       # 高 / 中 / 低
+
+# ── 改进建议 ──────────────────────────────────────────────
+suggestions:
+  must_fix: []                # 必须修改
+    # - "删除X处AI痕迹"
+  should_fix: []              # 建议修改
+    # - "增加对话比例到55%"
+  optional: []                # 可选优化
+    # - "打破长段落，增加节奏变化"
+
+# ── 评分汇总 ──────────────────────────────────────────────
+scores:
+  humanization: 0             # 人化评分 0-100
+  style_adherence: 0          # 风格遵循度 0-100
+  readability: 0              # 可读性 0-100
+  overall: 0                  # 综合评分 0-100

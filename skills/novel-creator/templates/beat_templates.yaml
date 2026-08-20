@@ -1,0 +1,179 @@
+# 节拍模板（章内微结构）
+# 路径: skills/novel-creator/templates/beat_templates.yaml
+#
+# 设计理念:
+#   起承转合在「节」或「篇」层面完成。
+#   章节只是按字数切的最小写作单元，每章 3000-5000 字。
+#   节拍描述的是「这几千字的内部微结构」，
+#   而非独立的开场→高潮→收束（那是节的事）。
+#
+#   章节通过 dramatic_position 字段知道自己在节弧线中的角色:
+#     起 / 承 / 转 / 合 / 过渡
+#   节拍模板按 dramatic_position 选择。
+
+# ── 按戏剧位置选择的节拍模板 ──────────────────────────
+
+# 「起」— 节弧线的开端章节
+position_起:
+  - beat: "场景切入"
+    template: "建立新场景/新时空，{protagonist}进入{setting}"
+    purpose: "让读者快速进入新阶段"
+    length: 400-600
+
+  - beat: "悬念铺设"
+    template: "引入本节核心问题/冲突的端倪"
+    purpose: "让读者产生好奇心"
+    length: 500-800
+
+  - beat: "角色状态"
+    template: "{protagonist}的当前状态与目标，承接前节余韵"
+    purpose: "建立情感基线"
+    length: 300-500
+
+  - beat: "衔接钩子"
+    template: "留下一个引向下一章的小钩子"
+    purpose: "保证读者继续读"
+    length: 200-300
+
+# 「承」— 节弧线的发展章节
+position_承:
+  - beat: "推进"
+    template: "{protagonist}围绕本节目标采取行动"
+    purpose: "推动剧情向前"
+    length: 600-900
+
+  - beat: "碰撞"
+    template: "角色互动/信息揭示/小型冲突"
+    purpose: "制造张力，丰富内容"
+    length: 500-800
+
+  - beat: "伏笔"
+    template: "自然融入伏笔元素{foreshadowing_element}"
+    purpose: "为后续节/篇埋下线索"
+    length: 200-400
+    optional: true
+
+  - beat: "递进"
+    template: "情势变化，比章首更紧张/更复杂/更深入"
+    purpose: "保证信息密度，避免平淡"
+    length: 400-600
+
+# 「转」— 节弧线的转折章节
+position_转:
+  - beat: "升级"
+    template: "局势急剧变化，超出{protagonist}的预期"
+    purpose: "打破读者预期"
+    length: 500-800
+
+  - beat: "核心决策"
+    template: "{protagonist}被迫做出关键选择，付出代价"
+    purpose: "展现角色弧线"
+    length: 600-1000
+
+  - beat: "后果初现"
+    template: "决策的直接后果立刻显现"
+    purpose: "给读者情绪冲击"
+    length: 400-600
+
+# 「合」— 节弧线的收束章节
+position_合:
+  - beat: "余波"
+    template: "核心事件的结果扩散，{protagonist}消化影响"
+    purpose: "让情绪落地"
+    length: 400-600
+
+  - beat: "变化确认"
+    template: "角色/关系/局势的变化被明确"
+    purpose: "让读者确认剧情推进"
+    length: 300-500
+
+  - beat: "遗留"
+    template: "留下未解决的问题或新悬念{cliffhanger}"
+    purpose: "衔接下一节"
+    length: 200-400
+
+# 「过渡」— 节与节之间的过渡章节
+position_过渡:
+  - beat: "收尾"
+    template: "上一节最后的松散线索收拢"
+    purpose: "给读者喘息"
+    length: 300-500
+
+  - beat: "转场"
+    template: "时间/空间/视角的切换"
+    purpose: "自然过渡到新阶段"
+    length: 400-600
+
+  - beat: "预示"
+    template: "暗示下一节的方向"
+    purpose: "保持好奇心"
+    length: 200-400
+
+
+# ── 场景类型覆盖（可叠加在任何 position 上）───────────
+
+scene_overlays:
+  combat:
+    - beat: "对峙"
+      template: "双方对峙，{antagonist}率先发难"
+    - beat: "交锋"
+      template: "激烈战斗，{protagonist}陷入困境"
+    - beat: "决胜"
+      template: "{protagonist}找到破绽或付出代价"
+
+  dialogue:
+    - beat: "交流"
+      template: "{character_a}与{character_b}信息交换"
+    - beat: "交锋"
+      template: "观点分歧，产生矛盾或暗流"
+
+  exploration:
+    - beat: "发现"
+      template: "发现{discovery}，获得线索"
+    - beat: "危险"
+      template: "遭遇{danger}，险象环生"
+
+  revelation:
+    - beat: "线索汇聚"
+      template: "之前的碎片信息拼合"
+    - beat: "真相揭示"
+      template: "核心秘密/真相浮出水面"
+
+
+# ── 生成规则 ──────────────────────────────────────────
+
+generation_rules:
+  # 节拍数量由章节字数决定，不由戏剧结构决定
+  beats_per_chapter:
+    "3000字以下": 2-3
+    "3000-5000字": 3-4
+    "5000字以上": 4-6
+
+  # 伏笔融入规则
+  foreshadowing_rules:
+    - 每章最多融入 1 个待回收伏笔（自然为主）
+    - 伏笔融入位置由 dramatic_position 影响:
+        起/承: 适合埋设伏笔
+        转/合: 适合回收伏笔
+
+  # 节奏控制（章内微观）
+  rhythm_control:
+    - 长短句交替
+    - 对话与叙述平衡
+    - 避免连续 3 个以上长段落
+    - 「转」位置的章节节奏应比「承」更快
+
+
+# ── 变量说明 ──────────────────────────────────────────
+
+variables:
+  protagonist: "主角名称"
+  antagonist: "反派名称"
+  setting: "场景环境"
+  obstacle: "障碍"
+  foreshadowing_element: "伏笔元素"
+  cliffhanger: "悬念/钩子"
+  character_a: "角色A"
+  character_b: "角色B"
+  discovery: "发现内容"
+  danger: "危险"

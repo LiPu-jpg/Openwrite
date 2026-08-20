@@ -1,0 +1,8 @@
+# dsh patch layer mounting the Studio panel plugin (稿件 view tab).
+# Apply with: dsh web --patch ./packages/studio-panel/cordis.patch.yml
+# Override the resolved config in a later layer by repeating the row id.
+- insert:
+    - id: studio-panel
+      name: '@dsh-novel/studio-panel'
+      # config:
+      #   studioUrl: 'http://127.0.0.1:4567'

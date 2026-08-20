@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oh Story 长篇拆解"
+  short_description: "用于从开篇、章节和剧情单元证据化拆解长篇小说的方法"
+  default_prompt: "使用 $oh-story-long-analyze 对用户提供的长篇作品做证据化拆解。"
