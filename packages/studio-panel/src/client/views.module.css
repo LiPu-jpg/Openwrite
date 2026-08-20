@@ -1,0 +1,191 @@
+/* Shared styles for the data views (大纲 OutlineView / 资产 AssetsView).
+   Colors come from the shared --dsw-* semantic aliases, never literals. */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--dsw-alias-bg-base);
+}
+
+.toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--dsw-alias-border-l);
+}
+
+.toolbarMeta {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px 24px;
+}
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 24px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  text-align: center;
+}
+
+.errorText {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.button {
+  padding: 4px 12px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* --- outline tree --- */
+
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.treeChildren {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 22px;
+}
+
+.treeItem {
+  margin: 2px 0;
+}
+
+.treeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.chevronButton {
+  width: 18px;
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+}
+
+.chevronPlaceholder {
+  width: 18px;
+  flex: none;
+}
+
+.kindBadge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l);
+}
+
+.nodeTitle {
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.statusBadge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.statusBadge[data-status='drafted'] {
+  color: var(--dsw-alias-state-success-primary);
+  border: 1px solid var(--dsw-alias-state-success-tertiary);
+}
+
+.statusBadge[data-status='planned'] {
+  color: var(--dsw-alias-label-dimmed);
+  border: 1px solid var(--dsw-alias-border-l);
+}
+
+.nodeSummary {
+  margin: 2px 0 6px 26px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+}
+
+/* --- asset cards --- */
+
+.assetGroup {
+  margin-bottom: 20px;
+}
+
+.assetGroupTitle {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.assetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.assetCard {
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.assetCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assetMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+  border: 1px solid var(--dsw-alias-border-l);
+}

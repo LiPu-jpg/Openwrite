@@ -1,0 +1,179 @@
+/* novel_review_chapter report card. Colors from --dsw-* aliases only. */
+
+.card {
+  margin: 4px 0;
+}
+
+.root {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.root:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.sep {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  background: var(--dsw-alias-border-l);
+}
+
+.summary {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bodyWrap {
+  margin: 4px 0 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.verdictRow {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.verdict {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.verdict[data-passed='true'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.verdict[data-passed='false'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.score {
+  font-size: 14px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.issueCount {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.reportSummary {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+}
+
+.issueGroup {
+  margin-bottom: 10px;
+}
+
+.issueGroupTitle {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.issue {
+  padding: 8px 0;
+  border-top: 1px solid var(--dsw-alias-border-l);
+}
+
+.issueHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.severity {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  border: 1px solid var(--dsw-alias-border-l);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.severity[data-severity='blocker'] {
+  color: var(--dsw-alias-state-error-primary);
+  border-color: var(--dsw-alias-state-error-secondary);
+}
+
+.severity[data-severity='high'] {
+  color: var(--dsw-alias-state-warn-label);
+  border-color: var(--dsw-alias-state-warn-tertiary);
+}
+
+.dimension {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.issueSummary {
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  line-height: 1.5;
+}
+
+.quote {
+  margin: 6px 0 0;
+  padding: 4px 10px;
+  border-left: 2px solid var(--dsw-alias-border-l);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+}
+
+.suggestion {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.suggestionLabel {
+  margin-right: 6px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.rawTitle {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rawJson {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
