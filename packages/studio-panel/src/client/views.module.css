@@ -189,3 +189,97 @@
   color: var(--dsw-alias-label-caption);
   border: 1px solid var(--dsw-alias-border-l);
 }
+
+/* --- task list --- */
+
+.chip {
+  margin-right: 6px;
+  padding: 2px 10px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip[data-active='true'] {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-label-tertiary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.taskRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--dsw-alias-border-l);
+}
+
+.taskStatus {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  border: 1px solid var(--dsw-alias-border-l);
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.taskStatus[data-status='running'] {
+  color: var(--dsw-alias-state-business-primary);
+  border-color: var(--dsw-alias-state-business-tertiary);
+}
+
+.taskStatus[data-status='awaiting_confirmation'] {
+  color: var(--dsw-alias-state-warn-label);
+  border-color: var(--dsw-alias-state-warn-tertiary);
+}
+
+.taskStatus[data-status='failed'],
+.taskStatus[data-status='interrupted'] {
+  color: var(--dsw-alias-state-error-primary);
+  border-color: var(--dsw-alias-state-error-secondary);
+}
+
+.taskStatus[data-status='completed'] {
+  color: var(--dsw-alias-state-success-primary);
+  border-color: var(--dsw-alias-state-success-tertiary);
+}
+
+.taskPhase {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.taskChapter {
+  flex: none;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.taskSummary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskTime {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.taskError {
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-state-error-primary);
+  white-space: pre-wrap;
+}

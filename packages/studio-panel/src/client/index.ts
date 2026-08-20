@@ -18,6 +18,7 @@ import { en, NS, zh } from './locales.ts'
 import { OutlineView } from './OutlineView.tsx'
 import { NovelReviewCard } from './ReviewCard.tsx'
 import { StudioView, type StudioViewInjected } from './StudioView.tsx'
+import { TasksView } from './TasksView.tsx'
 
 /** Required services: the conversation/tool slots and the locale service. */
 export const inject = ['slots', 'locale']
@@ -89,6 +90,14 @@ export function apply(ctx: Context): void {
       label: () => t('view.assets'),
       inject: (): StudioApiInjected => studioApi,
     }, AssetsView)
+    yield ctx.slots.register({
+      name: 'conversation.view',
+      id: 'tasks',
+      order: 23,
+      locale: NS,
+      label: () => t('view.tasks'),
+      inject: (): StudioApiInjected => studioApi,
+    }, TasksView)
   })
   // The novel_review_chapter report card: keyed entry of the Tool-owned
   // toolview hole (the bash-sample registrant posture).

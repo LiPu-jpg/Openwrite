@@ -133,4 +133,46 @@ const exports_ = loaded.factory(() => ({}))
 assert.equal(typeof exports_.apply, 'function')
 assert.deepEqual(exports_.inject, ['slots', 'locale'])
 
+// Drive apply() with a fake client ctx and capture the slot registrations.
+const dictionaries = []
+const registrations = []
+const fakeClientCtx = {
+  effect(run) { run() },
+  locale: {
+    register(ns, dicts) { dictionaries.push({ ns, dicts }); return () => {} },
+    bind: () => (key) => key,
+  },
+  slots: {
+    inject(name, cb) {
+      const produced = cb()
+      // Multiple registrations arrive as a generator yielding each disposer.
+      if (produced !== null && typeof produced === 'object' && Symbol.iterator in produced) {
+        for (const _ of produced) { /* drain: registering is the side effect */ }
+      }
+    },
+    register(options, component) {
+      registrations.push({ options, component })
+      return () => {}
+    },
+  },
+}
+exports_.apply(fakeClientCtx)
+
+assert.deepEqual(dictionaries.map(entry => entry.ns), ['studio-panel'])
+assert.ok('zh' in dictionaries[0].dicts && 'en' in dictionaries[0].dicts)
+assert.equal(dictionaries[0].dicts.zh['view.tasks'], '任务')
+assert.equal(dictionaries[0].dicts.en['view.tasks'], 'Tasks')
+
+const views = registrations.filter(entry => entry.options.name === 'conversation.view')
+assert.deepEqual(
+  views.map(entry => [entry.options.id, entry.options.order]),
+  [['studio', 20], ['outline', 21], ['assets', 22], ['tasks', 23]],
+  'four conversation.view tabs in order',
+)
+for (const view of views) assert.equal(typeof view.component, 'function')
+const toolviews = registrations.filter(entry => entry.options.name === 'tool.call.toolview')
+assert.deepEqual(toolviews.map(entry => entry.options.key), ['novel_review_chapter'])
+// Locale label thunks resolve through the bound namespace.
+assert.equal(views[3].options.label(), 'view.tasks', 'tasks label thunk reads view.tasks')
+
 console.log('studio-panel smoke: all assertions passed')
