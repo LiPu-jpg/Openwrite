@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: the 'tool.call.toolview' SlotMap row (declared by ui-tool).
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
-import { fetchStudioApi, type StudioApiInjected } from './api.ts'
+import { fetchStudioApi, postStudioApi, type StudioApiInjected } from './api.ts'
 import { AssetsView } from './AssetsView.tsx'
 import { GraphView } from './GraphView.tsx'
 import { en, NS, zh } from './locales.ts'
@@ -51,8 +51,8 @@ async function resolveStudioUrl(): Promise<string> {
   }
 }
 
-/** The data views share one read-only Studio fetch face. */
-const studioApi: StudioApiInjected = { fetchStudioApi }
+/** The data views share one read-only Studio fetch face plus the allowlisted write face. */
+const studioApi: StudioApiInjected = { fetchStudioApi, postStudioApi }
 
 /**
  * Client plugin body: register the three view tabs and the review tool card.

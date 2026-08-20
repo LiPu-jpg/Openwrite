@@ -8,11 +8,13 @@
 export const API_PROXY_BASE = '/studio-panel/api'
 
 /**
- * Injected share of the data views (大纲 / 资产): one read-only JSON fetch
- * against the Studio API, e.g. `fetchStudioApi('/outline')`.
+ * Injected share of the data views (大纲 / 资产): JSON fetches against the
+ * Studio API. `postStudioApi` only reaches the host proxy's write allowlist
+ * (asset domain; see src/index.ts WRITABLE_PATHS).
  */
 export interface StudioApiInjected {
   fetchStudioApi: (path: string) => Promise<unknown>
+  postStudioApi: (path: string, body: unknown) => Promise<unknown>
 }
 
 /** Pull a human-readable message out of a Studio error payload when present. */
@@ -24,10 +26,21 @@ function errorMessage(data: unknown, status: number): string {
   return `HTTP ${String(status)}`
 }
 
+/** A Studio API failure that keeps the HTTP status (409 = optimistic-lock conflict). */
+export class StudioApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'StudioApiError'
+    this.status = status
+  }
+}
+
 /**
  * GET one Studio API path through the proxy and parse the JSON body. Throws
- * an Error carrying the upstream message on any non-2xx answer (including the
- * proxy's own 502 when Studio is down).
+ * a StudioApiError carrying the upstream status and message on any non-2xx
+ * answer (including the proxy's own 502 when Studio is down).
  * @param path - Studio API path beginning with `/`, query string allowed
  *   (e.g. `/assets?kind=character`).
  * @returns the parsed JSON payload.
@@ -44,6 +57,34 @@ export async function fetchStudioApi(path: string): Promise<unknown> {
       data = null
     }
   }
-  if (!response.ok) throw new Error(errorMessage(data, response.status))
+  if (!response.ok) throw new StudioApiError(errorMessage(data, response.status), response.status)
+  return data
+}
+
+/**
+ * POST a JSON body to one allowlisted Studio API path through the proxy and
+ * parse the JSON response. Throws StudioApiError with the upstream status and
+ * message on any non-2xx answer (409 = revision conflict, surfaced by the
+ * asset editor as "reload and retry").
+ * @param path - allowlisted Studio API path (e.g. `/assets/update`).
+ * @param body - JSON-serializable request body, forwarded verbatim.
+ * @returns the parsed JSON payload.
+ */
+export async function postStudioApi(path: string, body: unknown): Promise<unknown> {
+  const response = await fetch(`${API_PROXY_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const text = await response.text()
+  let data: unknown = null
+  if (text !== '') {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = null
+    }
+  }
+  if (!response.ok) throw new StudioApiError(errorMessage(data, response.status), response.status)
   return data
 }

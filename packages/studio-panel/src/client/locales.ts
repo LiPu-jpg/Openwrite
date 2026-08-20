@@ -37,6 +37,32 @@ export type StudioPanelKey =
   | 'assets.relation.confirmed'
   | 'assets.relation.registered'
   | 'assets.relation.incoming'
+  | 'assets.searchPlaceholder'
+  | 'assets.edit.open'
+  | 'assets.edit.name'
+  | 'assets.edit.summary'
+  | 'assets.edit.tags'
+  | 'assets.edit.listHint'
+  | 'assets.edit.save'
+  | 'assets.edit.saving'
+  | 'assets.edit.cancel'
+  | 'assets.edit.conflict'
+  | 'assets.edit.conflictRefresh'
+  | 'assets.edit.addRelation'
+  | 'assets.edit.removeRelation'
+  | 'assets.edit.relationTarget'
+  | 'assets.edit.relationNote'
+  | 'assets.edit.derivedRelations'
+  | 'assets.create.open'
+  | 'assets.create.submit'
+  | 'assets.create.idHint'
+  | 'assets.create.tier'
+  | 'assets.create.type'
+  | 'assets.create.progressionKind'
+  | 'assets.create.stages'
+  | 'assets.create.stageId'
+  | 'assets.create.stageName'
+  | 'assets.create.addStage'
   | 'tasks.empty'
   | 'tasks.filter.all'
   | 'tasks.attempt'
@@ -140,6 +166,32 @@ export const zh: Record<StudioPanelKey, string> = {
   'assets.relation.confirmed': '确认',
   'assets.relation.registered': '注记',
   'assets.relation.incoming': '被关联',
+  'assets.searchPlaceholder': '搜索名称 / ID / 类型 / 别名 / 标签 / 摘要…',
+  'assets.edit.open': '编辑',
+  'assets.edit.name': '名称',
+  'assets.edit.summary': '摘要',
+  'assets.edit.tags': '标签',
+  'assets.edit.listHint': '用逗号或顿号分隔',
+  'assets.edit.save': '保存',
+  'assets.edit.saving': '保存中…',
+  'assets.edit.cancel': '取消',
+  'assets.edit.conflict': '资产已在其他位置修改，请重新载入后再改。',
+  'assets.edit.conflictRefresh': '刷新重试',
+  'assets.edit.addRelation': '添加关系',
+  'assets.edit.removeRelation': '移除',
+  'assets.edit.relationTarget': '目标资产 ID',
+  'assets.edit.relationNote': '关系说明',
+  'assets.edit.derivedRelations': '派生关系（只读；请在对方资产上编辑）',
+  'assets.create.open': '新建',
+  'assets.create.submit': '创建',
+  'assets.create.idHint': '字母或数字开头，可含 _ . -',
+  'assets.create.tier': '位阶',
+  'assets.create.type': '类型',
+  'assets.create.progressionKind': '体系类型',
+  'assets.create.stages': '阶段',
+  'assets.create.stageId': '阶段 ID',
+  'assets.create.stageName': '阶段名称',
+  'assets.create.addStage': '添加阶段',
   'review.running': '评审进行中…',
   'review.passed': '通过',
   'review.failed': '未通过',
@@ -237,6 +289,32 @@ export const en: Record<StudioPanelKey, string> = {
   'assets.relation.confirmed': 'Confirmed',
   'assets.relation.registered': 'Annotation',
   'assets.relation.incoming': 'Incoming',
+  'assets.searchPlaceholder': 'Search name / id / type / aliases / tags / summary…',
+  'assets.edit.open': 'Edit',
+  'assets.edit.name': 'Name',
+  'assets.edit.summary': 'Summary',
+  'assets.edit.tags': 'Tags',
+  'assets.edit.listHint': 'Separate with commas',
+  'assets.edit.save': 'Save',
+  'assets.edit.saving': 'Saving…',
+  'assets.edit.cancel': 'Cancel',
+  'assets.edit.conflict': 'This asset changed elsewhere. Reload it before editing again.',
+  'assets.edit.conflictRefresh': 'Reload & retry',
+  'assets.edit.addRelation': 'Add relation',
+  'assets.edit.removeRelation': 'Remove',
+  'assets.edit.relationTarget': 'Target asset id',
+  'assets.edit.relationNote': 'Relation note',
+  'assets.edit.derivedRelations': 'Derived relations (read-only; edit them on the owning asset)',
+  'assets.create.open': 'New',
+  'assets.create.submit': 'Create',
+  'assets.create.idHint': 'Starts with a letter or digit; may contain _ . -',
+  'assets.create.tier': 'Tier',
+  'assets.create.type': 'Type',
+  'assets.create.progressionKind': 'System kind',
+  'assets.create.stages': 'Stages',
+  'assets.create.stageId': 'Stage id',
+  'assets.create.stageName': 'Stage name',
+  'assets.create.addStage': 'Add stage',
   'review.running': 'Reviewing…',
   'review.passed': 'Passed',
   'review.failed': 'Needs revision',

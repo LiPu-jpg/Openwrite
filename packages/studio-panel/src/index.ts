@@ -20,16 +20,29 @@ export const name = '@dsh-novel/studio-panel'
 export const CONFIG_ROUTE = '/studio-panel/config.json'
 
 /**
- * Read-only Studio API proxy: `GET /studio-panel/api/<path...>?query` forwards
- * to `${studioUrl}/api/<path...>?query`, passing through the upstream status,
+ * Studio API proxy: `/studio-panel/api/<path...>?query` forwards to
+ * `${studioUrl}/api/<path...>?query`, passing through the upstream status,
  * content type, and body. Prefix route — one registration covers every
- * multi-segment Studio GET endpoint. GET only on purpose: mutations stay with
- * the agent tools (@dsh-novel/openwrite-bridge), the native views are
- * read-only surfaces.
+ * multi-segment Studio endpoint. GET/HEAD are open; POST/PUT are gated to a
+ * small allowlist of asset-domain paths (the 资产 tab's editor), each write
+ * forwarded verbatim with the `X-OpenWrite-Studio: 1` header Studio requires.
+ * Manuscript/outline mutations stay exclusively in the agent tools
+ * (@dsh-novel/openwrite-bridge).
  */
 export const API_PROXY_ROUTE = '/studio-panel/api'
 
-/** Upstream fetch budget; the proxied reads (outline/assets) are local and fast. */
+/**
+ * Upstream paths the library UI may write (path portion after /api/, no
+ * query): asset update, asset create, and asset-package import. Everything
+ * else stays GET-only.
+ */
+const WRITABLE_PATHS: ReadonlySet<string> = new Set([
+  'assets',
+  'assets/update',
+  'assets/package/import',
+])
+
+/** Upstream fetch budget; the proxied reads/writes are local and fast. */
 const PROXY_TIMEOUT_MS = 15_000
 
 /** Plugin config, validated by the same-named schemastery schema. */
@@ -42,18 +55,36 @@ export const Config: Schema<Config> = Schema.object({
   studioUrl: Schema.string().default('http://127.0.0.1:4567'),
 })
 
-type WebRouteHandler = (
-  req: { method?: string | undefined; url?: string | undefined },
-  res: {
-    writeHead: (status: number, headers?: Record<string, string>) => void
-    end: (body?: string) => void
-  },
-) => void | Promise<void>
+/** Minimal request face: the webserver's IncomingMessage plus a test-friendly body channel. */
+interface ProxyRequest {
+  method?: string | undefined
+  url?: string | undefined
+  /** Async chunk source (IncomingMessage is an async iterable). */
+  [Symbol.asyncIterator]?: () => AsyncIterableIterator<Buffer | string>
+}
+
+type ProxyResponse = {
+  writeHead: (status: number, headers?: Record<string, string>) => void
+  end: (body?: string | Buffer) => void
+}
+
+type WebRouteHandler = (req: ProxyRequest, res: ProxyResponse) => void | Promise<void>
 
 /** JSON response helper for the proxy's own errors (upstream answers pass through untouched). */
-function sendJson(res: Parameters<WebRouteHandler>[1], status: number, payload: unknown): void {
+function sendJson(res: ProxyResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-cache' })
   res.end(JSON.stringify(payload))
+}
+
+/** Buffer the request body (writes only; GET/HEAD carry none). */
+async function readBody(req: ProxyRequest): Promise<Buffer> {
+  const iterator = req[Symbol.asyncIterator]
+  if (iterator === undefined) return Buffer.alloc(0)
+  const chunks: Buffer[] = []
+  for await (const chunk of iterator.call(req)) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+  }
+  return Buffer.concat(chunks)
 }
 
 /**
@@ -63,10 +94,6 @@ function sendJson(res: Parameters<WebRouteHandler>[1], status: number, payload: 
  */
 function createProxyHandler(studioUrl: string): WebRouteHandler {
   return async (req, res) => {
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      sendJson(res, 405, { error: 'studio-panel proxy is read-only (GET)' })
-      return
-    }
     // req.url is the raw request target (path + query); strip the route prefix
     // so `/studio-panel/api/outline?chapter=ch_1` forwards as `/api/outline?chapter=ch_1`.
     const sub = (req.url ?? '').slice(API_PROXY_ROUTE.length)
@@ -74,18 +101,39 @@ function createProxyHandler(studioUrl: string): WebRouteHandler {
       sendJson(res, 404, { error: 'studio-panel proxy: missing API path' })
       return
     }
+    const method = req.method ?? 'GET'
+    const pathPart = sub.split('?')[0]?.slice(1) ?? ''
+    const isWrite = method === 'POST' || method === 'PUT'
+    if (!isWrite && method !== 'GET' && method !== 'HEAD') {
+      sendJson(res, 405, { error: 'studio-panel proxy allows only GET/HEAD and allowlisted writes' })
+      return
+    }
+    if (isWrite && !WRITABLE_PATHS.has(pathPart)) {
+      sendJson(res, 405, { error: `studio-panel proxy: write path "${pathPart}" is not allowlisted` })
+      return
+    }
     const target = new URL(`/api${sub}`, studioUrl)
     try {
+      const headers: Record<string, string> = { accept: 'application/json' }
+      let body: Buffer | undefined
+      if (isWrite) {
+        body = await readBody(req)
+        headers['content-type'] = 'application/json'
+        // Studio's write fence: every POST/PUT must carry this marker header.
+        headers['x-openwrite-studio'] = '1'
+      }
       const upstream = await fetch(target, {
-        headers: { accept: 'application/json' },
+        method,
+        headers,
+        ...(body !== undefined ? { body: new Uint8Array(body) } : {}),
         signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
       })
-      const body = await upstream.text()
+      const text = await upstream.text()
       res.writeHead(upstream.status, {
         'content-type': upstream.headers.get('content-type') ?? 'application/json',
         'cache-control': 'no-cache',
       })
-      res.end(body)
+      res.end(text)
     } catch (error) {
       sendJson(res, 502, {
         error: `OpenWrite Studio unreachable at ${studioUrl}: ${error instanceof Error ? error.message : String(error)}`,
@@ -95,9 +143,9 @@ function createProxyHandler(studioUrl: string): WebRouteHandler {
 }
 
 /**
- * Publish the config and read-only proxy routes over the web server when the
- * deployment has one (the `web` profile). `ctx.inject` waits on the optional
- * service instead of declaring a hard edge, so composing this plugin into a
+ * Publish the config and proxy routes over the web server when the deployment
+ * has one (the `web` profile). `ctx.inject` waits on the optional service
+ * instead of declaring a hard edge, so composing this plugin into a
  * server-less profile (e.g. headless) loads fine — the client half then falls
  * back to the schema default baked into its bundle.
  * @param ctx - host plugin context.

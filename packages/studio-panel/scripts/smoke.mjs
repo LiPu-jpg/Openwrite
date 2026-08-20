@@ -73,8 +73,10 @@ function capture() {
 const realFetch = globalThis.fetch
 try {
   let seenUrl = ''
-  globalThis.fetch = async (url) => {
+  let seenOptions = {}
+  globalThis.fetch = async (url, options) => {
     seenUrl = String(url)
+    seenOptions = options ?? {}
     return new Response('{"roots":[]}', { status: 200, headers: { 'content-type': 'application/json' } })
   }
   const res = capture()
@@ -83,10 +85,32 @@ try {
   assert.equal(res.status, 200, 'status passthrough')
   assert.equal(res.headers['content-type'], 'application/json')
   assert.equal(res.body, '{"roots":[]}', 'body passthrough')
+  assert.equal(seenOptions.method ?? 'GET', 'GET', 'GET forwards as GET')
 
   // Multi-segment path.
   await proxyRoute.handler({ method: 'GET', url: '/studio-panel/api/assets/character/hero_01' }, capture())
   assert.equal(seenUrl, 'http://127.0.0.1:4567/api/assets/character/hero_01', 'multi-segment path')
+
+  // Allowlisted write: POST /studio-panel/api/assets/update forwards method,
+  // verbatim JSON body, and the Studio write header.
+  const writeBody = '{"kind":"character","id":"hero_01","revision":"sha256:x","data":{"summary":"新摘要"}}'
+  const writeReq = {
+    method: 'POST',
+    url: '/studio-panel/api/assets/update',
+    async *[Symbol.asyncIterator]() { yield Buffer.from(writeBody) },
+  }
+  const writeRes = capture()
+  await proxyRoute.handler(writeReq, writeRes)
+  assert.equal(seenUrl, 'http://127.0.0.1:4567/api/assets/update')
+  assert.equal(seenOptions.method, 'POST')
+  assert.equal(Buffer.from(seenOptions.body).toString('utf8'), writeBody, 'body verbatim')
+  assert.equal(seenOptions.headers['x-openwrite-studio'], '1', 'Studio write header injected')
+  assert.equal(seenOptions.headers['content-type'], 'application/json')
+  assert.equal(writeRes.status, 200, 'write status passthrough')
+
+  // PUT on an allowlisted path also forwards.
+  await proxyRoute.handler({ ...writeReq, method: 'PUT', url: '/studio-panel/api/assets' }, capture())
+  assert.equal(seenOptions.method, 'PUT')
 
   // Upstream error status/body pass through untouched.
   globalThis.fetch = async () => new Response('{"error":"nope","code":"X"}', { status: 409 })
@@ -94,11 +118,19 @@ try {
   await proxyRoute.handler({ method: 'GET', url: '/studio-panel/api/outline' }, conflict)
   assert.equal(conflict.status, 409)
   assert.equal(conflict.body, '{"error":"nope","code":"X"}')
+  // …including on writes (the optimistic-locking conflict the editor surfaces).
+  const writeConflict = capture()
+  await proxyRoute.handler(writeReq, writeConflict)
+  assert.equal(writeConflict.status, 409, 'write conflict passthrough')
 
-  // Non-GET is refused; bare prefix is 404; dead upstream is 502.
-  const denied = capture()
-  await proxyRoute.handler({ method: 'POST', url: '/studio-panel/api/assets' }, denied)
-  assert.equal(denied.status, 405)
+  // Non-allowlisted write path is refused; DELETE is refused; bare prefix is 404; dead upstream is 502.
+  const deniedWrite = capture()
+  await proxyRoute.handler({ ...writeReq, url: '/studio-panel/api/write' }, deniedWrite)
+  assert.equal(deniedWrite.status, 405, 'non-allowlisted write refused')
+  assert.match(JSON.parse(deniedWrite.body).error, /not allowlisted/)
+  const deniedDelete = capture()
+  await proxyRoute.handler({ method: 'DELETE', url: '/studio-panel/api/assets' }, deniedDelete)
+  assert.equal(deniedDelete.status, 405, 'DELETE refused')
   const bare = capture()
   await proxyRoute.handler({ method: 'GET', url: '/studio-panel/api' }, bare)
   assert.equal(bare.status, 404)
@@ -170,6 +202,13 @@ assert.equal(dictionaries[0].dicts.zh['assets.segment.core'], '作品核心')
 assert.equal(dictionaries[0].dicts.en['assets.segment.core'], 'Story Core')
 assert.equal(dictionaries[0].dicts.zh['assets.segment.references'], '参考作品')
 assert.equal(dictionaries[0].dicts.zh['assets.detail.relations'], '关系')
+// Editor/create surface keys (the 资产 tab's write UI).
+assert.equal(dictionaries[0].dicts.zh['assets.edit.save'], '保存')
+assert.equal(dictionaries[0].dicts.en['assets.edit.save'], 'Save')
+assert.equal(dictionaries[0].dicts.zh['assets.edit.conflictRefresh'], '刷新重试')
+assert.equal(dictionaries[0].dicts.zh['assets.create.open'], '新建')
+assert.equal(dictionaries[0].dicts.en['assets.create.open'], 'New')
+assert.equal(dictionaries[0].dicts.zh['assets.edit.derivedRelations'].includes('派生关系'), true)
 // Graph empty states + kind filter labels (component rendering itself needs a
 // DOM/React harness — out of scope for this no-server smoke).
 assert.equal(dictionaries[0].dicts.zh['graph.empty.foreshadowing'].includes('伏笔'), true)
