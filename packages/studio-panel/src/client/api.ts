@@ -15,6 +15,8 @@ export const API_PROXY_BASE = '/studio-panel/api'
 export interface StudioApiInjected {
   fetchStudioApi: (path: string) => Promise<unknown>
   postStudioApi: (path: string, body: unknown) => Promise<unknown>
+  /** Resolve the Studio base URL (config route with baked-in default fallback). */
+  resolveStudioUrl: () => Promise<string>
 }
 
 /** Pull a human-readable message out of a Studio error payload when present. */

@@ -60,7 +60,9 @@ export type StudioPanelKey =
   | 'assets.edit.body'
   | 'assets.edit.mode.edit'
   | 'assets.edit.mode.preview'
-  | 'assets.edit.mode.split'
+  | 'assets.edit.mode.live'
+  | 'assets.edit.liveLoading'
+  | 'assets.edit.liveFailed'
   | 'assets.edit.bodyEmpty'
   | 'assets.selectHint'
   | 'assets.create.open'
@@ -199,7 +201,9 @@ export const zh: Record<StudioPanelKey, string> = {
   'assets.edit.body': '正文',
   'assets.edit.mode.edit': '编辑',
   'assets.edit.mode.preview': '预览',
-  'assets.edit.mode.split': '分栏',
+  'assets.edit.mode.live': '实时',
+  'assets.edit.liveLoading': '正在加载实时编辑器…',
+  'assets.edit.liveFailed': '实时编辑器加载失败，已回退到纯文本编辑。',
   'assets.edit.bodyEmpty': '正文为空，没有可预览的内容。',
   'assets.selectHint': '选择左侧的条目查看或编辑。',
   'assets.create.open': '新建',
@@ -332,7 +336,9 @@ export const en: Record<StudioPanelKey, string> = {
   'assets.edit.body': 'Body',
   'assets.edit.mode.edit': 'Edit',
   'assets.edit.mode.preview': 'Preview',
-  'assets.edit.mode.split': 'Split',
+  'assets.edit.mode.live': 'Live',
+  'assets.edit.liveLoading': 'Loading the live editor…',
+  'assets.edit.liveFailed': 'The live editor failed to load; fell back to plain text editing.',
   'assets.edit.bodyEmpty': 'The body is empty — nothing to preview.',
   'assets.selectHint': 'Select an entry on the left to view or edit.',
   'assets.create.open': 'New',

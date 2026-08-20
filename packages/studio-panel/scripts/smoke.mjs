@@ -162,6 +162,9 @@ assert.ok(externals.includes('@deepseek-ai/dsh-client-ui-primitives'), 'Markdown
 // Inline-markdown normalization and field-row alignment ship in the inlined CSS.
 assert.ok(bundle.includes('mdInline>div{font:inherit'), 'mdInline font normalization present')
 assert.ok(bundle.includes('text-align:left'), 'left-aligned field/editor rows present')
+// Vditor loads via <script> tag from the Studio origin — never bundled/required.
+assert.ok(bundle.includes('/vendor/vditor/dist/index.min.js'), 'Vditor runtime URL present')
+assert.ok(!externals.some(specifier => specifier.toLowerCase().includes('vditor')), 'Vditor is not a module import')
 
 let loaded = null
 globalThis.window = { __ModuleLoader__: { load(entry) { loaded = entry } } }
@@ -223,8 +226,8 @@ assert.equal(dictionaries[0].dicts.en['assets.create.open'], 'New')
 assert.equal(dictionaries[0].dicts.zh['assets.edit.derivedRelations'].includes('派生关系'), true)
 assert.equal(dictionaries[0].dicts.zh['assets.edit.mode.preview'], '预览')
 assert.equal(dictionaries[0].dicts.en['assets.edit.mode.preview'], 'Preview')
-assert.equal(dictionaries[0].dicts.zh['assets.edit.mode.split'], '分栏')
-assert.equal(dictionaries[0].dicts.en['assets.edit.mode.split'], 'Split')
+assert.equal(dictionaries[0].dicts.zh['assets.edit.mode.live'], '实时')
+assert.equal(dictionaries[0].dicts.en['assets.edit.mode.live'], 'Live')
 assert.equal(dictionaries[0].dicts.zh['assets.selectHint'].includes('左侧'), true)
 assert.equal(dictionaries[0].dicts.zh['assets.detail.index'], '索引')
 assert.equal(dictionaries[0].dicts.zh['assets.list.taboos'], '忌讳')

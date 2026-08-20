@@ -19,9 +19,10 @@
  *   reputation/curse/custom.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { VditorBody, VditorLoading } from './VditorBody.tsx'
 import css from './views.module.css'
 
 /** The summary fields the editor needs from the parsed detail. */
@@ -106,11 +107,13 @@ interface AssetEditorProps {
   onSave: (data: Record<string, unknown>, bodyMarkdown: string) => void
   onCancel: () => void
   onRefresh: () => void
+  /** Resolve the Studio base URL (Vditor assets load from that origin). */
+  resolveStudioUrl: () => Promise<string>
   t: TFunc
 }
 
 /** Read-write editor over one asset's allowed front-matter fields. */
-export function AssetEditor({ kind, source, candidates, saving, saveError, conflict, onSave, onCancel, onRefresh, t }: AssetEditorProps) {
+export function AssetEditor({ kind, source, candidates, saving, saveError, conflict, onSave, onCancel, onRefresh, resolveStudioUrl, t }: AssetEditorProps) {
   const [name, setName] = useState(source.name)
   const [summary, setSummary] = useState(source.summary)
   const [aliasesText, setAliasesText] = useState(source.aliases.join('、'))
@@ -127,7 +130,20 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
   const [newTarget, setNewTarget] = useState('')
   const [newNote, setNewNote] = useState('')
   const [bodyDraft, setBodyDraft] = useState(source.body)
-  const [bodyMode, setBodyMode] = useState<'edit' | 'preview' | 'split'>('edit')
+  const [bodyMode, setBodyMode] = useState<'live' | 'edit' | 'preview'>('live')
+  /** Studio origin for the Vditor asset load; resolved lazily on first live-mode mount. */
+  const [studioUrl, setStudioUrl] = useState<string | null>(null)
+  /** True after the Vditor script failed — 实时 disables and edit mode shows a notice. */
+  const [liveFailed, setLiveFailed] = useState(false)
+
+  useEffect(() => {
+    if (bodyMode !== 'live' || studioUrl !== null || liveFailed) return
+    let cancelled = false
+    void resolveStudioUrl().then((url) => {
+      if (!cancelled) setStudioUrl(url)
+    })
+    return () => { cancelled = true }
+  }, [bodyMode, studioUrl, liveFailed, resolveStudioUrl])
 
   const scalarKeys = Object.keys(scalars)
   const save = () => {
@@ -299,6 +315,16 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
             <button
               type="button"
               className={css.chip}
+              data-active={bodyMode === 'live'}
+              onClick={() => { setBodyMode('live') }}
+              disabled={saving || liveFailed}
+              title={liveFailed ? t('assets.edit.liveFailed') : undefined}
+            >
+              {t('assets.edit.mode.live')}
+            </button>
+            <button
+              type="button"
+              className={css.chip}
               data-active={bodyMode === 'edit'}
               onClick={() => { setBodyMode('edit') }}
               disabled={saving}
@@ -314,48 +340,40 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
             >
               {t('assets.edit.mode.preview')}
             </button>
-            <button
-              type="button"
-              className={css.chip}
-              data-active={bodyMode === 'split'}
-              onClick={() => { setBodyMode('split') }}
-              disabled={saving}
-            >
-              {t('assets.edit.mode.split')}
-            </button>
           </div>
+          {bodyMode === 'live' && (
+            studioUrl === null
+              ? <VditorLoading t={t} />
+              : (
+                <VditorBody
+                  initial={bodyDraft}
+                  studioUrl={studioUrl}
+                  disabled={saving}
+                  onChange={setBodyDraft}
+                  onFailed={() => {
+                    setLiveFailed(true)
+                    setBodyMode('edit')
+                  }}
+                />
+              )
+          )}
           {bodyMode === 'edit' && (
-            <textarea
-              className={css.textarea}
-              rows={10}
-              value={bodyDraft}
-              onChange={event => { setBodyDraft(event.target.value) }}
-              disabled={saving}
-            />
+            <>
+              {liveFailed && <div className={css.detailNotice}>{t('assets.edit.liveFailed')}</div>}
+              <textarea
+                className={css.textarea}
+                rows={10}
+                value={bodyDraft}
+                onChange={event => { setBodyDraft(event.target.value) }}
+                disabled={saving}
+              />
+            </>
           )}
           {bodyMode === 'preview' && (
             <div className={css.detailBody}>
               {bodyDraft.trim() === ''
                 ? <span className={css.detailNotice}>{t('assets.edit.bodyEmpty')}</span>
                 : <MarkdownText text={bodyDraft} />}
-            </div>
-          )}
-          {bodyMode === 'split' && (
-            /* Split mode: the textarea's onChange feeds bodyDraft, which the
-               preview reads — the preview updates live on every keystroke. */
-            <div className={css.bodySplit}>
-              <textarea
-                className={css.textarea}
-                rows={12}
-                value={bodyDraft}
-                onChange={event => { setBodyDraft(event.target.value) }}
-                disabled={saving}
-              />
-              <div className={css.detailBody}>
-                {bodyDraft.trim() === ''
-                  ? <span className={css.detailNotice}>{t('assets.edit.bodyEmpty')}</span>
-                  : <MarkdownText text={bodyDraft} />}
-              </div>
             </div>
           )}
         </div>

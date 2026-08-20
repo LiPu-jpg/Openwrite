@@ -52,7 +52,7 @@ async function resolveStudioUrl(): Promise<string> {
 }
 
 /** The data views share one read-only Studio fetch face plus the allowlisted write face. */
-const studioApi: StudioApiInjected = { fetchStudioApi, postStudioApi }
+const studioApi: StudioApiInjected = { fetchStudioApi, postStudioApi, resolveStudioUrl }
 
 /**
  * Client plugin body: register the three view tabs and the review tool card.

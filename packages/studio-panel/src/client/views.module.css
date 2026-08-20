@@ -734,20 +734,12 @@
   margin-right: 0;
 }
 
-.bodySplit {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  align-items: stretch;
-}
-
-.bodySplit .textarea {
-  min-height: 260px;
-}
-
-.bodySplit .detailBody {
-  margin-top: 0;
-  max-height: none;
+/* Vditor (IR live editor) mounts here; its own stylesheet arrives from the
+   Studio origin. We only frame the host. */
+.vditorHost {
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 /* --- graph view (SVG) --- */
