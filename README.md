@@ -13,7 +13,7 @@
 
 | 路径 | 说明 |
 |---|---|
-| `packages/openwrite-bridge/` | dsh 插件：14 个 `novel_*` 工具，经 Studio HTTP 动作面调用 OpenWrite |
+| `packages/openwrite-bridge/` | dsh 插件：62 个 `novel_*` 工具，覆盖 Studio HTTP 动作面全部端点 |
 | `presets/goethe/` | Goethe 规划 agent 预设（灵感/人物/设定/大纲收敛） |
 | `presets/dante/` | Dante 写作 agent 预设（写章/评审/结算，可向 Goethe 子代理咨询） |
 | `skills/` | 移植自 OpenWrite 的 13 个 SKILL.md 技能 |

@@ -63,25 +63,30 @@ TS 插件，`apply(ctx)` 中 `ctx.tools.register(defineTool({...}))` 注册一�
 | 配置项 | 默认 | 说明 |
 |---|---|---|
 | `baseUrl` | `http://127.0.0.1:4567` | Studio 地址 |
-| `projectPath` | `~/my_novel` | OpenWrite 项目根（含 novel_config.yaml） |
 | `timeoutMs` | `600000` | 单工具超时（写章耗时长） |
+| `outputDir` | 系统临时目录下 `openwrite-exports/` | 导出文件保存目录 |
 
-首批工具（薄封装，一一对应动作面端点）：
+工具集（62 个，覆盖 Studio 动作面全部端点；按域分组）：
 
-| 工具 | 端点 | 用途 |
+| 域 | 工具 | 端点 |
 |---|---|---|
-| `novel_status` | GET /api/workspace | 项目快照 |
-| `novel_context_preview` | GET /api/context?chapter= | 章节上下文包预览 |
-| `novel_write_chapter` | POST /api/write | 写下一章/指定章 |
-| `novel_review_chapter` | POST /api/review | 37 维评审 |
-| `novel_outline_read` | GET /api/outline | 读大纲树 |
-| `novel_outline_edit` | POST /api/outline/edit | 修订门控大纲编辑 |
-| `novel_assets_list` / `novel_asset_update` | GET/POST /api/assets* | 人物/世界资产 |
-| `novel_foreshadowing` | POST /api/foreshadowing | 伏笔 DAG 管理 |
-| `novel_search` | GET /api/search | 语义+精确检索 |
-| `novel_doc_read` / `novel_doc_write` | GET /api/document, PUT /api/document | 文档读写（乐观版本锁） |
-| `novel_focus` | POST /api/focus | 创作焦点罗盘 |
-| `novel_export` | GET /api/export | 导出 md/txt/epub |
+| 基础读写 | `novel_status` / `novel_context_preview` / `novel_outline_read` / `novel_search` / `novel_doc_read` | GET /api/workspace、/api/context、/api/outline、/api/search、/api/document |
+| 核心写作 | `novel_outline_edit` / `novel_write_chapter` / `novel_review_chapter` / `novel_doc_write` / `novel_focus` / `novel_export` | POST /api/outline/edit、/api/write、/api/review，PUT /api/document，POST /api/focus，GET /api/export |
+| 资产 | `novel_assets_list` / `novel_asset_read` / `novel_asset_create` / `novel_asset_update` / `novel_assets_package_export` / `novel_assets_package_preview` / `novel_assets_package_import` | GET/POST /api/assets*（含 package 导入导出） |
+| 伏笔 | `novel_foreshadowing` | POST /api/foreshadowing |
+| 修订提案 | `novel_revisions_list` / `novel_revision_get` / `novel_revision_create_selection` / `novel_revision_create_from_review` / `novel_revision_apply` / `novel_revision_reject` / `novel_revision_regenerate` | GET /api/revisions*，POST /api/revisions/selection、/from-review、/{rev_*}/apply\|reject\|regenerate |
+| 后台任务 | `novel_tasks_list` / `novel_task_get` / `novel_task_create` / `novel_task_cancel` / `novel_task_retry` / `novel_task_confirm` / `novel_multi_write` | GET /api/tasks*，POST /api/tasks、/{tsk_*}/cancel\|retry\|confirm；multi_write 封装 continuous_write 任务 |
+| 项目生命周期 | `novel_project_init` / `novel_project_open` / `novel_project_delete` | POST /api/project/init（免项目）、/open（免项目）、/delete |
+| 章节/文档/导入 | `novel_chapter_delete` / `novel_doc_create` / `novel_import_preview` / `novel_import` / `novel_sync` / `novel_writing_targets` | POST /api/chapter/delete、/api/document/create、/api/import*、/api/sync、/api/project/writing-targets |
+| 连续性/诊断 | `novel_continuity` / `novel_diagnostics` | GET /api/continuity，POST /api/diagnostics |
+| 规划面 | `novel_chapter_run_action` / `novel_rolling_plan_action` / `novel_narrative_forecast_action` / `novel_manuscript_edit_action` | POST /api/chapter-runs-v2、/api/rolling-plans、/api/narrative-forecasts、/api/manuscript-editing（action 分发器） |
+| 风格/参考库 | `novel_source_action` / `novel_reference_library_action` / `novel_runtime_skill_action` / `novel_rule_action` | POST /api/source、/api/reference-library、/api/runtime-skills、/api/rules（action 分发器） |
+| 深度研究 | `novel_research_status` / `novel_research_report` / `novel_research_settings_save` | GET /api/research、/api/research/reports/{id}，POST /api/research/settings（跑研究用 novel_task_create type=research） |
+| 模型配置 | `novel_model_profiles` / `novel_model_configure` / `novel_model_test` / `novel_model_embedding_test` / `novel_model_profile_save` / `novel_model_profile_delete` / `novel_model_routes_save` | GET/POST /api/model* |
+
+刻意不桥接：`/api/chat` 与 `/api/agent/session*`（agent 层完全归 dsh）、
+`/api/agents`、`/api/agent/activity`（OpenWrite 原生 agent 的运行面）、
+`/api/health`（存活探针，连通性由 `novel_status` 覆盖）。
 
 ### 2. 双 agent 预设（`presets/goethe/`、`presets/dante/`）
 

@@ -69,6 +69,20 @@ function parseDispositionFilename(header: string | null): string | undefined {
   return plain?.[1]
 }
 
+/** Query parameters; array values become repeated `key=v1&key=v2` entries. */
+export type QueryParams = Record<string, string | string[]>
+
+/** Set query params on a URL, expanding array values into repeated entries. */
+function applyParams(url: URL, params: QueryParams): void {
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) {
+      for (const item of value) url.searchParams.append(key, item)
+    } else {
+      url.searchParams.set(key, value)
+    }
+  }
+}
+
 export class StudioClient {
   private readonly baseUrl: string
   private readonly timeoutMs: number
@@ -79,9 +93,9 @@ export class StudioClient {
   }
 
   /** GET a JSON endpoint. `params` entries are URL-encoded; undefined values are dropped. */
-  async getJson(path: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<JsonValue> {
+  async getJson(path: string, params: QueryParams = {}, signal?: AbortSignal): Promise<JsonValue> {
     const url = new URL(`${this.baseUrl}${path}`)
-    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
+    applyParams(url, params)
     const response = await this.request(url, { method: 'GET' }, signal)
     return this.readJson(response)
   }
@@ -115,9 +129,9 @@ export class StudioClient {
   }
 
   /** GET a file-download endpoint (export), returning the raw bytes and filename. */
-  async download(path: string, params: Record<string, string>, signal?: AbortSignal): Promise<StudioDownload> {
+  async download(path: string, params: QueryParams, signal?: AbortSignal): Promise<StudioDownload> {
     const url = new URL(`${this.baseUrl}${path}`)
-    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
+    applyParams(url, params)
     const response = await this.request(url, { method: 'GET' }, signal)
     if (!response.ok) {
       // Error downloads are still JSON payloads.
