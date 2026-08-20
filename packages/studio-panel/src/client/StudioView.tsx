@@ -4,7 +4,7 @@
  * Studio base URL arrives through the injected `resolveStudioUrl` callback.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './StudioView.module.css'
@@ -23,6 +23,12 @@ export type StudioViewProps =
   ConvViewProps & InjectFace<StudioViewInjected> & PropsLocale<'studio-panel'>
 
 type FrameState = 'loading' | 'ready' | 'error'
+type ShellTheme = 'dark' | 'light'
+
+/** The dsh shell marks dark mode with `data-ds-dark-theme` on <body> (ui-theme design-platform.css). */
+function currentShellTheme(): ShellTheme {
+  return document.body.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light'
+}
 
 /**
  * The 稿件 view body. The iframe is deliberately NOT sandboxed: Studio is a
@@ -42,6 +48,8 @@ export function StudioView({ resolveStudioUrl, t }: StudioViewProps) {
   const [studioUrl, setStudioUrl] = useState<string | null>(null)
   const [frameState, setFrameState] = useState<FrameState>('loading')
   const [reloadKey, setReloadKey] = useState(0)
+  const [shellTheme, setShellTheme] = useState<ShellTheme>(currentShellTheme)
+  const frameRef = useRef<HTMLIFrameElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -51,12 +59,34 @@ export function StudioView({ resolveStudioUrl, t }: StudioViewProps) {
     return () => { cancelled = true }
   }, [resolveStudioUrl, reloadKey])
 
+  // Follow the shell's light/dark switch without reloading the iframe.
+  useEffect(() => {
+    const observer = new MutationObserver(() => setShellTheme(currentShellTheme()))
+    observer.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (studioUrl === null || frameState !== 'ready') return
+    frameRef.current?.contentWindow?.postMessage(
+      { type: 'studio-theme', theme: shellTheme },
+      new URL(studioUrl).origin,
+    )
+  }, [studioUrl, frameState, shellTheme])
+
+  // The initial theme rides the iframe URL (?embed=dsh&theme=); later changes
+  // go through postMessage so a theme switch never reloads the editor.
+  const frameSrc = useMemo(
+    () => (studioUrl === null ? null : `${studioUrl}?embed=dsh&theme=${currentShellTheme()}`),
+    [studioUrl],
+  )
+
   const retry = () => {
     setFrameState('loading')
     setReloadKey(key => key + 1)
   }
 
-  if (studioUrl === null) {
+  if (studioUrl === null || frameSrc === null) {
     return <div className={css.root}><div className={css.status}>{t('resolving')}</div></div>
   }
   if (frameState === 'error') {
@@ -79,8 +109,9 @@ export function StudioView({ resolveStudioUrl, t }: StudioViewProps) {
       {frameState === 'loading' && <div className={css.status}>{t('loading')}</div>}
       <iframe
         key={reloadKey}
+        ref={frameRef}
         className={css.frame}
-        src={studioUrl}
+        src={frameSrc}
         title={t('view.studio')}
         allow="clipboard-read; clipboard-write"
         onLoad={() => { setFrameState('ready') }}
