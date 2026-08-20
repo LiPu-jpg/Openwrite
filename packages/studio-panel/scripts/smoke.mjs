@@ -159,6 +159,9 @@ for (const specifier of externals) {
   assert.ok(PLATFORM_MODULES.has(specifier), `non-platform external: ${specifier}`)
 }
 assert.ok(externals.includes('@deepseek-ai/dsh-client-ui-primitives'), 'MarkdownText platform import present')
+// Inline-markdown normalization and field-row alignment ship in the inlined CSS.
+assert.ok(bundle.includes('mdInline>div{font:inherit'), 'mdInline font normalization present')
+assert.ok(bundle.includes('text-align:left'), 'left-aligned field/editor rows present')
 
 let loaded = null
 globalThis.window = { __ModuleLoader__: { load(entry) { loaded = entry } } }

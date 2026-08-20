@@ -1,4 +1,4 @@
-"""Verify body editor preview toggle on 沈烬 (read-only check, no save)."""
+"""Re-verify: card summary size + detail field alignment."""
 import pathlib
 
 from playwright.sync_api import sync_playwright
@@ -13,18 +13,19 @@ with sync_playwright() as p:
     page.wait_for_timeout(1500)
     page.locator("button, [role=tab]", has_text="资产").first.click()
     page.wait_for_timeout(2500)
-    # 沈烬 card — click its name heading
-    page.locator("text=沈烬").first.click()
+    page.screenshot(path=str(OUT / "20-cards-fixed.png"))
+    # summary font size should be much smaller than the card name
+    sizes = page.evaluate("""() => {
+      const card = document.querySelector('text=伶舟') ? null : null;
+      const name = Array.from(document.querySelectorAll('*')).find(e => e.textContent === '伶舟' && e.children.length === 0);
+      if (!name) return null;
+      const cardEl = name.closest('li, article, div');
+      const summary = Array.from(cardEl.querySelectorAll('*')).find(e => e.textContent.includes('姓名') && e.children.length <= 2);
+      return { name: getComputedStyle(name).fontSize, summary: summary ? getComputedStyle(summary).fontSize : null };
+    }""")
+    print("字号:", sizes)
+    page.locator("text=伶舟").first.click()
     page.wait_for_timeout(1800)
-    page.locator("button", has_text="编辑").first.click()
-    page.wait_for_timeout(800)
-    text = page.evaluate("() => document.body.innerText")
-    print("正文区存在:", "正文" in text, "; 预览切换:", "预览" in text)
-    # switch to preview
-    prev = page.locator("button, [class*=chip]", has_text="预览").first
-    prev.click()
-    page.wait_for_timeout(800)
-    page.screenshot(path=str(OUT / "19-body-preview.png"))
-    print("shot ok")
+    page.screenshot(path=str(OUT / "20b-detail-fixed.png"))
     browser.close()
     print("done")

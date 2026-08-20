@@ -276,8 +276,10 @@
 /* --- asset detail (accordion expansion) --- */
 
 .detail {
+  width: 100%;
   padding: 0 12px 12px;
   border-top: 1px solid var(--dsw-alias-border-l);
+  text-align: left;
 }
 
 .detailNotice {
@@ -297,24 +299,30 @@
   margin: 10px 0 0;
   display: grid;
   gap: 4px;
+  width: 100%;
+  text-align: left;
 }
 
 .fieldRow {
   display: flex;
   gap: 10px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
+  text-align: left;
 }
 
 .fieldKey {
   flex: none;
-  min-width: 96px;
+  width: 96px;
   color: var(--dsw-alias-label-caption);
+  text-align: left;
 }
 
 .fieldValue {
+  flex: 1 1 auto;
   margin: 0;
   color: var(--dsw-alias-label-primary);
+  text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -342,7 +350,20 @@
 
 /* Inline markdown: neutralize MarkdownText's block layout so short
    user-authored strings (card summaries, titles) stay inline and the
-   parent's line-clamp keeps working. */
+   parent's line-clamp keeps working. The root's own sheet sets
+   `font: var(--dsw-font-markdown-base)` — `font: inherit` restores the
+   host's compact size/line-height; strong stays weight-only. */
+.mdInline > div {
+  display: inline;
+  font: inherit;
+  color: inherit;
+}
+
+.mdInline strong {
+  font-size: inherit;
+  font-weight: 600;
+}
+
 .mdInline p,
 .mdInline h1,
 .mdInline h2,
@@ -355,6 +376,7 @@
   display: inline;
   margin: 0;
   padding: 0;
+  font: inherit;
 }
 
 .mdInline li {
@@ -476,6 +498,7 @@
   gap: 10px;
   padding: 12px;
   border-top: 1px solid var(--dsw-alias-border-l);
+  text-align: left;
 }
 
 .createPanel .editor {
@@ -487,6 +510,7 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  text-align: left;
 }
 
 .editorLabel {
