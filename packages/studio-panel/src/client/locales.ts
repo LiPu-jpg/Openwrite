@@ -60,7 +60,9 @@ export type StudioPanelKey =
   | 'assets.edit.body'
   | 'assets.edit.mode.edit'
   | 'assets.edit.mode.preview'
+  | 'assets.edit.mode.split'
   | 'assets.edit.bodyEmpty'
+  | 'assets.selectHint'
   | 'assets.create.open'
   | 'assets.create.submit'
   | 'assets.create.idHint'
@@ -197,7 +199,9 @@ export const zh: Record<StudioPanelKey, string> = {
   'assets.edit.body': '正文',
   'assets.edit.mode.edit': '编辑',
   'assets.edit.mode.preview': '预览',
+  'assets.edit.mode.split': '分栏',
   'assets.edit.bodyEmpty': '正文为空，没有可预览的内容。',
+  'assets.selectHint': '选择左侧的条目查看或编辑。',
   'assets.create.open': '新建',
   'assets.create.submit': '创建',
   'assets.create.idHint': '字母或数字开头，可含 _ . -',
@@ -328,7 +332,9 @@ export const en: Record<StudioPanelKey, string> = {
   'assets.edit.body': 'Body',
   'assets.edit.mode.edit': 'Edit',
   'assets.edit.mode.preview': 'Preview',
+  'assets.edit.mode.split': 'Split',
   'assets.edit.bodyEmpty': 'The body is empty — nothing to preview.',
+  'assets.selectHint': 'Select an entry on the left to view or edit.',
   'assets.create.open': 'New',
   'assets.create.submit': 'Create',
   'assets.create.idHint': 'Starts with a letter or digit; may contain _ . -',

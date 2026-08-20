@@ -127,7 +127,7 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
   const [newTarget, setNewTarget] = useState('')
   const [newNote, setNewNote] = useState('')
   const [bodyDraft, setBodyDraft] = useState(source.body)
-  const [bodyMode, setBodyMode] = useState<'edit' | 'preview'>('edit')
+  const [bodyMode, setBodyMode] = useState<'edit' | 'preview' | 'split'>('edit')
 
   const scalarKeys = Object.keys(scalars)
   const save = () => {
@@ -314,24 +314,50 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
             >
               {t('assets.edit.mode.preview')}
             </button>
+            <button
+              type="button"
+              className={css.chip}
+              data-active={bodyMode === 'split'}
+              onClick={() => { setBodyMode('split') }}
+              disabled={saving}
+            >
+              {t('assets.edit.mode.split')}
+            </button>
           </div>
-          {bodyMode === 'edit'
-            ? (
+          {bodyMode === 'edit' && (
+            <textarea
+              className={css.textarea}
+              rows={10}
+              value={bodyDraft}
+              onChange={event => { setBodyDraft(event.target.value) }}
+              disabled={saving}
+            />
+          )}
+          {bodyMode === 'preview' && (
+            <div className={css.detailBody}>
+              {bodyDraft.trim() === ''
+                ? <span className={css.detailNotice}>{t('assets.edit.bodyEmpty')}</span>
+                : <MarkdownText text={bodyDraft} />}
+            </div>
+          )}
+          {bodyMode === 'split' && (
+            /* Split mode: the textarea's onChange feeds bodyDraft, which the
+               preview reads — the preview updates live on every keystroke. */
+            <div className={css.bodySplit}>
               <textarea
                 className={css.textarea}
-                rows={8}
+                rows={12}
                 value={bodyDraft}
                 onChange={event => { setBodyDraft(event.target.value) }}
                 disabled={saving}
               />
-            )
-            : (
               <div className={css.detailBody}>
                 {bodyDraft.trim() === ''
                   ? <span className={css.detailNotice}>{t('assets.edit.bodyEmpty')}</span>
                   : <MarkdownText text={bodyDraft} />}
               </div>
-            )}
+            </div>
+          )}
         </div>
       </div>
       {conflict && (

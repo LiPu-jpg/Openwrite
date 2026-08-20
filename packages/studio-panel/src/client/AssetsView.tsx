@@ -1,11 +1,11 @@
 /**
  * Assets view (资产): OpenWrite's structured canon library (Studio's 资料库)
- * rendered natively — segmented sections for 角色 / 设定 (grouped by
- * subcategory) / 进阶体系 / 参考作品 / 作品核心, with client-side search,
- * lazy per-card detail expansion, and an editor for the asset domain
- * (front-matter scalars, aliases/tags, relations) plus inline creation.
- * Only the asset domain is writable; manuscript/outline mutations stay with
- * the agent tools.
+ * rendered natively as an Obsidian-like master-detail layout — left sidebar
+ * (segment switcher, search, compact asset rows with collapsible 设定
+ * subcategory groups, 新建 button) + main detail pane (header, two-column
+ * fields, 索引, 关系, markdown body) with a read/edit toggle and inline
+ * creation. Only the asset domain is writable; manuscript/outline mutations
+ * stay with the agent tools.
  *
  * Wire shapes (verified against OpenWrite tools/studio_http.py do_GET,
  * tools/structured_assets.py, tools/world_query.py get_asset_relation_view,
@@ -95,7 +95,7 @@ interface AssetDetail {
   body: string
 }
 
-/** Per-card detail cache entry. */
+/** Per-asset detail cache entry. */
 type DetailState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -124,6 +124,7 @@ const READONLY_FIELDS = new Set(['state_updated_at'])
  */
 const LIST_FIELDS = new Set(['taboos', 'detail_refs'])
 
+/** Segments backed by writable structured assets (新建 lives there). */
 const CARDABLE_SEGMENTS: readonly Segment[] = ['characters', 'world', 'progression']
 
 /** Narrow one wire summary, tolerating missing/extra fields. */
@@ -318,7 +319,9 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
   const [error, setError] = useState('')
   const [segment, setSegment] = useState<Segment>('characters')
   const [query, setQuery] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
+  /** Selected sidebar row key: `${kind}:${id}` / `doc:${path}` / `ref:${sourceId}`. */
+  const [selected, setSelected] = useState<string | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set())
   const [details, setDetails] = useState<ReadonlyMap<string, DetailState>>(new Map())
   const [documents, setDocuments] = useState<ReadonlyMap<string, DocState>>(new Map())
   const [editKey, setEditKey] = useState<string | null>(null)
@@ -371,26 +374,21 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
       })
   }, [fetchStudioApi])
 
-  const toggleAsset = (asset: AssetSummary) => {
+  /** Select one sidebar row: clear transient editing state, lazy-load the detail. */
+  const selectAsset = (asset: AssetSummary) => {
     const key = `${asset.kind}:${asset.id}`
-    if (expanded === key) {
-      setExpanded(null)
-      setEditKey(null)
-      return
-    }
-    setExpanded(key)
+    setSelected(key)
     setEditKey(null)
     setSaveError(null)
+    setCreating(false)
     if (!detailsRef.current.has(key)) fetchDetail(asset)
   }
 
-  const toggleDocument = (doc: CoreDoc) => {
+  const selectDocument = (doc: CoreDoc) => {
     const key = `doc:${doc.path}`
-    if (expanded === key) {
-      setExpanded(null)
-      return
-    }
-    setExpanded(key)
+    setSelected(key)
+    setEditKey(null)
+    setCreating(false)
     if (documents.has(key)) return
     setDocuments(previous => new Map(previous).set(key, { status: 'loading' }))
     fetchStudioApi(`/document?path=${encodeURIComponent(doc.path)}`)
@@ -493,13 +491,140 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     }
   }
 
-  const renderDetail = (asset: AssetSummary, key: string) => {
+  const toggleGroup = (type: string) => {
+    setCollapsedGroups(previous => {
+      const next = new Set(previous)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }
+
+  /* --- sidebar --- */
+
+  const q = query.trim().toLowerCase()
+
+  const renderAssetRow = (asset: AssetSummary) => {
+    const key = `${asset.kind}:${asset.id}`
+    const meta = asset.assetType !== ''
+      ? asset.assetType
+      : asset.stageCount !== null
+        ? `${asset.stageCount} ${t('assets.stages')}`
+        : ''
+    return (
+      <button
+        key={key}
+        type="button"
+        className={css.assetRow}
+        data-active={selected === key}
+        onClick={() => { selectAsset(asset) }}
+      >
+        <span className={`${css.assetRowName} ${css.mdInline}`}>
+          <MarkdownText text={asset.name || asset.id} />
+        </span>
+        {meta !== '' && <span className={css.assetRowMeta}>{meta}</span>}
+      </button>
+    )
+  }
+
+  const renderSidebarList = () => {
+    if (segment === 'references') {
+      const filtered = q === ''
+        ? references
+        : references.filter(entry => `${entry.title}\n${entry.sourceId}`.toLowerCase().includes(q))
+      if (filtered.length === 0) return <div className={css.sidebarEmpty}>{t('assets.references.empty')}</div>
+      return filtered.map(entry => {
+        const key = `ref:${entry.sourceId}`
+        return (
+          <button
+            key={key}
+            type="button"
+            className={css.assetRow}
+            data-active={selected === key}
+            onClick={() => {
+              setSelected(key)
+              setEditKey(null)
+              setCreating(false)
+            }}
+          >
+            <span className={`${css.assetRowName} ${css.mdInline}`}>
+              <MarkdownText text={entry.title || entry.sourceId} />
+            </span>
+            <span className={css.assetRowMeta}>{intentLabel(entry.intent)}</span>
+          </button>
+        )
+      })
+    }
+    if (segment === 'core') {
+      const filtered = q === ''
+        ? coreDocs
+        : coreDocs.filter(doc => `${doc.title}\n${doc.categoryLabel}\n${doc.path}`.toLowerCase().includes(q))
+      if (filtered.length === 0) return <div className={css.sidebarEmpty}>{t('assets.core.empty')}</div>
+      return filtered.map(doc => {
+        const key = `doc:${doc.path}`
+        return (
+          <button
+            key={key}
+            type="button"
+            className={css.assetRow}
+            data-active={selected === key}
+            onClick={() => { selectDocument(doc) }}
+          >
+            <span className={`${css.assetRowName} ${css.mdInline}`}>
+              <MarkdownText text={doc.title} />
+            </span>
+            {doc.categoryLabel !== '' && <span className={css.assetRowMeta}>{doc.categoryLabel}</span>}
+          </button>
+        )
+      })
+    }
+    // character / world / progression segments
+    const kind = segment === 'characters' ? 'character' : segment === 'progression' ? 'progression' : 'world'
+    const segmentAssets = assets.filter(asset => asset.kind === kind && (q === '' || matchesQuery(asset, q)))
+    if (segmentAssets.length === 0) return <div className={css.sidebarEmpty}>{t('assets.segment.empty')}</div>
+    if (segment !== 'world') return segmentAssets.map(renderAssetRow)
+    // 设定: collapsible subcategory groups by asset_type (unknown lands in 其他).
+    const byType = new Map<string, AssetSummary[]>()
+    for (const asset of segmentAssets) {
+      const type = asset.assetType || t('assets.other')
+      const list = byType.get(type)
+      if (list !== undefined) list.push(asset)
+      else byType.set(type, [asset])
+    }
+    return [...byType.entries()].map(([type, items]) => {
+      const collapsed = collapsedGroups.has(type)
+      return (
+        <div key={type}>
+          <button
+            type="button"
+            className={css.groupHeader}
+            aria-expanded={!collapsed}
+            onClick={() => { toggleGroup(type) }}
+          >
+            <span className={css.groupChevron}>{collapsed ? '▸' : '▾'}</span>
+            {type}
+            <span className={css.countChip}>{items.length}</span>
+          </button>
+          {!collapsed && items.map(renderAssetRow)}
+        </div>
+      )
+    })
+  }
+
+  /* --- main pane --- */
+
+  const renderAssetDetail = (asset: AssetSummary, key: string) => {
     const entry = details.get(key)
     if (entry === undefined || entry.status === 'loading') {
-      return <div className={css.detailNotice}>{t('assets.detail.loading')}</div>
+      return <div className={css.notice}>{t('assets.detail.loading')}</div>
     }
     if (entry.status === 'error') {
-      return <div className={css.detailNotice}><span className={css.errorText}>{entry.message}</span></div>
+      return (
+        <div className={css.notice}>
+          <span className={css.errorText}>{entry.message}</span>
+          <button type="button" className={css.button} onClick={() => { fetchDetail(asset) }}>{t('retry')}</button>
+        </div>
+      )
     }
     const { detail } = entry
     if (editKey === key) {
@@ -535,17 +660,34 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     }
     return (
       <div className={css.detail}>
-        <div className={css.detailToolbar}>
-          <button
-            type="button"
-            className={css.button}
-            onClick={() => {
-              setEditKey(key)
-              setSaveError(null)
-            }}
-          >
-            {t('assets.edit.open')}
-          </button>
+        <div className={css.detailHeader}>
+          <div className={css.detailTitleRow}>
+            <span className={`${css.detailTitle} ${css.mdInline}`}>
+              <MarkdownText text={detail.name || asset.id} />
+            </span>
+            {asset.assetType !== '' && <span className={css.kindBadge}>{asset.assetType}</span>}
+            <button
+              type="button"
+              className={css.button}
+              onClick={() => {
+                setEditKey(key)
+                setSaveError(null)
+              }}
+            >
+              {t('assets.edit.open')}
+            </button>
+          </div>
+          {detail.aliases.length > 0 && (
+            <div className={css.assetAliases}>{t('assets.aliases')}: {detail.aliases.join('、')}</div>
+          )}
+          {detail.summary !== '' && (
+            <div className={`${css.detailSummary} ${css.mdInline}`}><MarkdownText text={detail.summary} /></div>
+          )}
+          {detail.tags.length > 0 && (
+            <div className={css.assetMeta}>
+              {detail.tags.map(tag => <span key={tag} className={css.tag}>{tag}</span>)}
+            </div>
+          )}
         </div>
         {detail.fields.length > 0 && (
           <dl className={css.fieldList}>
@@ -557,14 +699,9 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
             ))}
           </dl>
         )}
-        {(detail.tags.length > 0 || detail.lists.length > 0) && (
+        {detail.lists.length > 0 && (
           <div className={css.relationBlock}>
             <div className={css.detailHeading}>{t('assets.detail.index')}</div>
-            {detail.tags.length > 0 && (
-              <div className={css.assetMeta}>
-                {detail.tags.map(tag => <span key={tag} className={css.tag}>{tag}</span>)}
-              </div>
-            )}
             {detail.lists.map(list => (
               <div key={list.key} className={css.listBlock}>
                 <div className={css.listBlockLabel}>{listLabel(list.key)}</div>
@@ -599,195 +736,112 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     )
   }
 
-  const renderAssetCard = (asset: AssetSummary) => {
-    const key = `${asset.kind}:${asset.id}`
-    const isOpen = expanded === key
-    const shownTags = asset.tags.slice(0, 4)
-    return (
-      <div key={key} className={css.assetCard} data-kind={asset.kind} data-open={isOpen}>
-        <button
-          type="button"
-          className={css.assetCardButton}
-          aria-expanded={isOpen}
-          onClick={() => { toggleAsset(asset) }}
-        >
-          <div className={css.assetCardHead}>
-            <span className={css.assetName}>{asset.name || asset.id}</span>
-            {asset.assetType !== '' && <span className={css.kindBadge}>{asset.assetType}</span>}
-          </div>
-          {asset.aliases.length > 0 && (
-            <div className={css.assetAliases}>{t('assets.aliases')}: {asset.aliases.join('、')}</div>
-          )}
-          {asset.summary !== '' && (
-            <div className={`${css.assetSummary} ${css.mdInline}`}><MarkdownText text={asset.summary} /></div>
-          )}
-          <div className={css.assetMeta}>
-            {asset.stageCount !== null && (
-              <span className={css.tag}>{asset.stageCount} {t('assets.stages')}</span>
-            )}
-            {shownTags.map(tag => <span key={tag} className={css.tag}>{tag}</span>)}
-            {asset.tags.length > shownTags.length && (
-              <span className={css.tag}>+{asset.tags.length - shownTags.length}</span>
-            )}
-          </div>
-        </button>
-        {isOpen && renderDetail(asset, key)}
-      </div>
-    )
-  }
-
-  const renderSegmentBody = () => {
-    const q = query.trim().toLowerCase()
-    if (segment === 'references') {
-      const filtered = q === ''
-        ? references
-        : references.filter(entry => `${entry.title}\n${entry.sourceId}`.toLowerCase().includes(q))
-      if (filtered.length === 0) return <div className={css.notice}>{t('assets.references.empty')}</div>
+  const renderMain = () => {
+    // The create form owns the main pane while open.
+    if (creating && CARDABLE_SEGMENTS.includes(segment)) {
+      const kind = segment === 'characters' ? 'character' : segment === 'progression' ? 'progression' : 'world'
       return (
-        <div className={css.assetGrid}>
-          {filtered.map(entry => (
-            <div key={entry.sourceId} className={css.assetCard} data-kind="reference">
-              <div className={css.assetCardButton} data-static="true">
-                <div className={css.assetCardHead}>
-                  <div className={`${css.assetName} ${css.mdInline}`}><MarkdownText text={entry.title || entry.sourceId} /></div>
-                  <span className={css.kindBadge}>{intentLabel(entry.intent)}</span>
-                </div>
-                <div className={css.assetMeta}>
-                  {entry.structureStatus !== '' && (
-                    <span className={css.tag} data-confirmed={entry.structureStatus === 'confirmed'}>
-                      {entry.structureStatus === 'confirmed'
-                        ? t('reference.structure.confirmed')
-                        : t('reference.structure.awaiting_confirmation')}
-                    </span>
-                  )}
-                  <span className={css.tag} data-confirmed={entry.analysisComplete}>
-                    {entry.analysisComplete ? t('reference.analysis.complete') : entry.analysisStatus || t('reference.analysis.pending')}
-                  </span>
-                  {entry.totalChars > 0 && (
-                    <span className={css.tag}>{Math.round(entry.totalChars / 1000)}k {t('reference.chars')}</span>
-                  )}
-                </div>
-              </div>
+        <div className={css.createPanel}>
+          <NewAssetForm
+            kind={kind}
+            busy={createBusy}
+            error={createError}
+            onSubmit={(payload) => { createAsset(kind, payload) }}
+            onCancel={() => {
+              setCreating(false)
+              setCreateError(null)
+            }}
+            t={t}
+          />
+        </div>
+      )
+    }
+    if (selected === null) {
+      return <div className={css.notice}>{t('assets.selectHint')}</div>
+    }
+    if (selected.startsWith('doc:')) {
+      const path = selected.slice(4)
+      const docState = documents.get(selected)
+      return (
+        <div className={css.detail}>
+          {docState === undefined || docState.status === 'loading'
+            ? <div className={css.notice}>{t('assets.detail.loading')}</div>
+            : docState.status === 'error'
+              ? <div className={css.notice}><span className={css.errorText}>{docState.message}</span></div>
+              : (
+                <>
+                  <div className={css.detailHeader}>
+                    <div className={css.detailTitleRow}>
+                      <span className={`${css.detailTitle} ${css.mdInline}`}>
+                        <MarkdownText text={docState.title || path} />
+                      </span>
+                      <span className={css.kindBadge}>{path}</span>
+                    </div>
+                  </div>
+                  <div className={css.detailBody}><MarkdownText text={docState.content} /></div>
+                </>
+              )}
+        </div>
+      )
+    }
+    if (selected.startsWith('ref:')) {
+      const entry = references.find(item => `ref:${item.sourceId}` === selected)
+      if (entry === undefined) return <div className={css.notice}>{t('assets.selectHint')}</div>
+      return (
+        <div className={css.detail}>
+          <div className={css.detailHeader}>
+            <div className={css.detailTitleRow}>
+              <span className={`${css.detailTitle} ${css.mdInline}`}>
+                <MarkdownText text={entry.title || entry.sourceId} />
+              </span>
+              <span className={css.kindBadge}>{intentLabel(entry.intent)}</span>
             </div>
-          ))}
+            <div className={css.assetMeta}>
+              {entry.structureStatus !== '' && (
+                <span className={css.tag} data-confirmed={entry.structureStatus === 'confirmed'}>
+                  {entry.structureStatus === 'confirmed'
+                    ? t('reference.structure.confirmed')
+                    : t('reference.structure.awaiting_confirmation')}
+                </span>
+              )}
+              <span className={css.tag} data-confirmed={entry.analysisComplete}>
+                {entry.analysisComplete ? t('reference.analysis.complete') : entry.analysisStatus || t('reference.analysis.pending')}
+              </span>
+              {entry.totalChars > 0 && (
+                <span className={css.tag}>{Math.round(entry.totalChars / 1000)}k {t('reference.chars')}</span>
+              )}
+            </div>
+          </div>
         </div>
       )
     }
-    if (segment === 'core') {
-      const filtered = q === ''
-        ? coreDocs
-        : coreDocs.filter(doc => `${doc.title}\n${doc.categoryLabel}\n${doc.path}`.toLowerCase().includes(q))
-      if (filtered.length === 0) return <div className={css.notice}>{t('assets.core.empty')}</div>
-      return (
-        <div className={css.docList}>
-          {filtered.map(doc => {
-            const key = `doc:${doc.path}`
-            const isOpen = expanded === key
-            const docState = documents.get(key)
-            return (
-              <div key={doc.path} className={css.docRow} data-open={isOpen}>
-                <button
-                  type="button"
-                  className={css.docRowButton}
-                  aria-expanded={isOpen}
-                  onClick={() => { toggleDocument(doc) }}
-                >
-                  <div className={`${css.assetName} ${css.mdInline}`}><MarkdownText text={doc.title} /></div>
-                  {doc.categoryLabel !== '' && <span className={css.kindBadge}>{doc.categoryLabel}</span>}
-                  <span className={css.docPath}>{doc.path}</span>
-                </button>
-                {isOpen && (
-                  docState === undefined || docState.status === 'loading'
-                    ? <div className={css.detailNotice}>{t('assets.detail.loading')}</div>
-                    : docState.status === 'error'
-                      ? <div className={css.detailNotice}><span className={css.errorText}>{docState.message}</span></div>
-                      : <div className={css.detailBody}><MarkdownText text={docState.content} /></div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )
-    }
-    // character / world / progression segments
-    const kind = segment === 'characters' ? 'character' : segment === 'progression' ? 'progression' : 'world'
-    const segmentAssets = assets.filter(asset => asset.kind === kind && (q === '' || matchesQuery(asset, q)))
-    const createForm = creating && (
-      <div className={css.createPanel}>
-        <NewAssetForm
-          kind={kind}
-          busy={createBusy}
-          error={createError}
-          onSubmit={(payload) => { createAsset(kind, payload) }}
-          onCancel={() => {
-            setCreating(false)
-            setCreateError(null)
-          }}
-          t={t}
-        />
-      </div>
-    )
-    if (segmentAssets.length === 0) {
-      return (
-        <>
-          {createForm}
-          <div className={css.notice}>{t('assets.segment.empty')}</div>
-        </>
-      )
-    }
-    if (segment !== 'world') {
-      return (
-        <>
-          {createForm}
-          <div className={css.assetGrid}>{segmentAssets.map(renderAssetCard)}</div>
-        </>
-      )
-    }
-    // 设定: group by subcategory (asset_type), unknown type lands in 其他.
-    const byType = new Map<string, AssetSummary[]>()
-    for (const asset of segmentAssets) {
-      const type = asset.assetType || t('assets.other')
-      const list = byType.get(type)
-      if (list !== undefined) list.push(asset)
-      else byType.set(type, [asset])
-    }
-    return (
-      <>
-        {createForm}
-        {[...byType.entries()].map(([type, items]) => (
-          <section key={type} className={css.assetGroup}>
-            <h3 className={css.assetGroupTitle}>
-              {type}
-              <span className={css.countChip}>{items.length}</span>
-            </h3>
-            <div className={css.assetGrid}>{items.map(renderAssetCard)}</div>
-          </section>
-        ))}
-      </>
-    )
+    const asset = assets.find(item => `${item.kind}:${item.id}` === selected)
+    if (asset === undefined) return <div className={css.notice}>{t('assets.selectHint')}</div>
+    return renderAssetDetail(asset, selected)
   }
 
   return (
-    <div className={css.root}>
-      <div className={css.toolbar}>
-        <span className={css.toolbarMeta}>
+    <div className={css.libraryRoot}>
+      <div className={css.sidebar}>
+        <div className={css.sidebarSegments}>
           {SEGMENTS.map(which => (
             <button
               key={which}
               type="button"
-              className={css.chip}
+              className={css.segmentButton}
               data-active={segment === which}
               onClick={() => {
                 setSegment(which)
-                setExpanded(null)
+                setSelected(null)
                 setEditKey(null)
                 setCreating(false)
               }}
             >
-              {segmentLabel(which)} {segmentCount(which)}
+              {segmentLabel(which)}
+              <span className={css.countChip}>{segmentCount(which)}</span>
             </button>
           ))}
-        </span>
+        </div>
         <input
           className={css.searchInput}
           type="search"
@@ -796,35 +850,49 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
           aria-label={t('assets.searchPlaceholder')}
           onChange={event => { setQuery(event.target.value) }}
         />
-        {CARDABLE_SEGMENTS.includes(segment) && (
-          <button
-            type="button"
-            className={css.button}
-            disabled={creating}
-            onClick={() => {
-              setCreating(true)
-              setCreateError(null)
-            }}
-          >
-            {t('assets.create.open')}
+        <div className={css.sidebarList}>
+          {state === 'loading' && <div className={css.sidebarEmpty}>{t('loading')}</div>}
+          {state === 'error' && (
+            <div className={css.sidebarEmpty}>
+              <span className={css.errorText}>{error}</span>
+              <button type="button" className={css.button} onClick={() => { load() }}>{t('retry')}</button>
+            </div>
+          )}
+          {state === 'ready' && assets.length === 0 && references.length === 0 && coreDocs.length === 0 && (
+            <div className={css.sidebarEmpty}>{t('assets.empty')}</div>
+          )}
+          {state === 'ready' && renderSidebarList()}
+        </div>
+        <div className={css.sidebarFooter}>
+          {CARDABLE_SEGMENTS.includes(segment) && (
+            <button
+              type="button"
+              className={css.button}
+              disabled={creating}
+              onClick={() => {
+                setCreating(true)
+                setCreateError(null)
+              }}
+            >
+              {t('assets.create.open')}
+            </button>
+          )}
+          <button type="button" className={css.button} onClick={() => { load() }}>
+            {t('refresh')}
           </button>
-        )}
-        <button type="button" className={css.button} onClick={() => { load() }}>
-          {t('refresh')}
-        </button>
+        </div>
       </div>
-      <div className={css.body}>
-        {state === 'loading' && <div className={css.notice}>{t('loading')}</div>}
-        {state === 'error' && (
-          <div className={css.notice}>
-            <span className={css.errorText}>{error}</span>
-            <button type="button" className={css.button} onClick={() => { load() }}>{t('retry')}</button>
-          </div>
+      <div className={css.mainPane}>
+        {state === 'ready' || creating ? renderMain() : (
+          state === 'loading'
+            ? <div className={css.notice}>{t('loading')}</div>
+            : (
+              <div className={css.notice}>
+                <span className={css.errorText}>{error}</span>
+                <button type="button" className={css.button} onClick={() => { load() }}>{t('retry')}</button>
+              </div>
+            )
         )}
-        {state === 'ready' && assets.length === 0 && references.length === 0 && coreDocs.length === 0 && (
-          <div className={css.notice}>{t('assets.empty')}</div>
-        )}
-        {state === 'ready' && (assets.length > 0 || references.length > 0 || coreDocs.length > 0) && renderSegmentBody()}
       </div>
     </div>
   )
