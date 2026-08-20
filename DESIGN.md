@@ -47,10 +47,10 @@
 | OpenWrite Studio 界面 | dsh 原生形态 | 状态 |
 |---|---|---|
 | AI 协作（Goethe/Dante 聊天） | goethe/dante agent 预设 + dsh 会话 | ✅ |
-| AI 协作 → 任务中心 | `novel_tasks_*` / `novel_multi_write` 工具 | ✅ |
-| 大纲视图 | 「大纲」原生视图 tab（studio-panel） | 进行中 |
-| 人物/世界观资产看板 | 「资产」原生视图 tab + `novel_asset_*` 工具 | 进行中 |
-| 审稿报告 | `novel_review_chapter` 自定义工具卡片 + 评审工具 | 进行中 |
+| 大纲视图 | 「大纲」原生视图 tab（studio-panel） | ✅ |
+| 人物/世界观资产看板 | 「资产」原生视图 tab + `novel_asset_*` 工具 | ✅ |
+| 审稿报告 | `novel_review_chapter` 自定义工具卡片 + 评审工具 | ✅ |
+| AI 协作 → 任务中心 | 「任务」原生视图 tab + `novel_tasks_*` / `novel_multi_write` 工具 | ✅ |
 | 修订提案 | `novel_revisions_*` 工具（应用/驳回/重生成） | ✅ |
 | 高级工具（风格/参考库/规则/迁移等） | `novel_source_action` / `novel_reference_library_action` / `novel_rule_action` 等 | ✅ |
 | 深度研究 | `novel_research_*` 工具 | ✅ |
