@@ -352,25 +352,4 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
       return { path, filename, format, bytes: download.content.byteLength }
     },
   }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_chat_goethe',
-    description:
-      'Escape hatch: consult OpenWrite\'s native planning agent Goethe directly (LONG-RUNNING). ' +
-      'Use for deep planning questions that need OpenWrite\'s own tools and project memory.',
-    parameters: {
-      message: { type: 'string', required: true, description: 'The message to Goethe (max 12000 characters).' },
-      session_id: { type: 'string', description: 'Goethe session id to continue a conversation (default "default").' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!args.message.trim() || args.message.length > 12000) {
-        throw new Error('message must be non-empty and at most 12000 characters')
-      }
-      const body: JsonObject = { agent: 'goethe', message: args.message }
-      if (args.session_id !== undefined) body['session_id'] = args.session_id
-      return await client.postJson('/api/chat', body, exec.signal)
-    },
-  }))
 }

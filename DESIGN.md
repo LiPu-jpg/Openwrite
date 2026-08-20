@@ -31,8 +31,11 @@
 
 - **领域逻辑零搬迁**：大纲、写作、评审、伏笔、风格等全部仍由 OpenWrite 实现，
   dsh 侧只有薄桥接。OpenWrite 升级后桥接只需跟进 HTTP 契约。
-- **agent 行为归 dsh**：persona、技能目录、子代理委派、会话持久化、长上下文压缩
-  全部使用 dsh 的机制，不再使用 OpenWrite 自带的 ReAct agent 循环。
+- **agent 唯一归属 dsh**：persona、技能目录、子代理委派、会话持久化、长上下文压缩
+  全部使用 dsh 的机制。OpenWrite 自带的 ReAct agent 层（Goethe/Dante Python 循环、
+  /api/chat、Studio 助手面板）不参与本方案——草案生成等创作推理由 dsh agent 自身完成，
+  OpenWrite 只暴露确定性领域服务（存储、校验、上下文装配、章节流水线、评审）。
+  嵌入模式下 Studio 的内置 agent 入口会被皮肤隐藏，保证只有一个 agent 界面。
 - **双前端并存**：dsh web 是对话/编排控制台；Studio 是稿件编辑器与资产看板。
   两者读写同一份 `data/novels/{id}`，经 OpenWrite 的修订门控保证一致。
 
@@ -79,7 +82,6 @@ TS 插件，`apply(ctx)` 中 `ctx.tools.register(defineTool({...}))` 注册一�
 | `novel_doc_read` / `novel_doc_write` | GET /api/document, PUT /api/document | 文档读写（乐观版本锁） |
 | `novel_focus` | POST /api/focus | 创作焦点罗盘 |
 | `novel_export` | GET /api/export | 导出 md/txt/epub |
-| `novel_chat_goethe` | POST /api/chat | 兜底：调 OpenWrite 原生 Goethe（深度咨询） |
 
 ### 2. 双 agent 预设（`presets/goethe/`、`presets/dante/`）
 

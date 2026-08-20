@@ -23,7 +23,7 @@ const expected = [
   'novel_status', 'novel_context_preview', 'novel_outline_read', 'novel_assets_list',
   'novel_search', 'novel_doc_read',
   'novel_outline_edit', 'novel_write_chapter', 'novel_review_chapter', 'novel_asset_update',
-  'novel_foreshadowing', 'novel_doc_write', 'novel_focus', 'novel_export', 'novel_chat_goethe',
+  'novel_foreshadowing', 'novel_doc_write', 'novel_focus', 'novel_export',
 ]
 assert.deepEqual(registered.map((t) => t.name), expected, 'registered novel_* tools')
 for (const tool of registered) {
