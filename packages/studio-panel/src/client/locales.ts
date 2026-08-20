@@ -9,6 +9,7 @@ export type StudioPanelKey =
   | 'view.outline'
   | 'view.assets'
   | 'view.tasks'
+  | 'view.graph'
   | 'resolving'
   | 'loading'
   | 'unreachable'
@@ -50,6 +51,29 @@ export type StudioPanelKey =
   | 'tasks.type.reference_operation'
   | 'tasks.type.manuscript_import'
   | 'tasks.type.research'
+  | 'graph.foreshadowing'
+  | 'graph.relationships'
+  | 'graph.weight'
+  | 'graph.target'
+  | 'graph.truncated'
+  | 'graph.validation.errors'
+  | 'graph.empty.foreshadowing'
+  | 'graph.empty.relationships'
+  | 'graph.kind.character'
+  | 'graph.kind.faction'
+  | 'graph.kind.place'
+  | 'graph.kind.concept'
+  | 'graph.kind.other'
+  | 'assets.references'
+  | 'reference.intent.reference'
+  | 'reference.intent.continuation'
+  | 'reference.intent.canon'
+  | 'reference.intent.migration'
+  | 'reference.structure.awaiting_confirmation'
+  | 'reference.structure.confirmed'
+  | 'reference.analysis.complete'
+  | 'reference.analysis.pending'
+  | 'reference.chars'
   | 'review.running'
   | 'review.passed'
   | 'review.failed'
@@ -77,6 +101,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'view.outline': '大纲',
   'view.assets': '资产',
   'view.tasks': '任务',
+  'view.graph': '图谱',
   resolving: '正在读取 Studio 配置…',
   loading: '正在连接 OpenWrite Studio…',
   unreachable: '无法连接 OpenWrite Studio。请确认 Studio 已启动（默认 http://127.0.0.1:4567）。',
@@ -131,6 +156,29 @@ export const zh: Record<StudioPanelKey, string> = {
   'tasks.type.reference_operation': '参考库',
   'tasks.type.manuscript_import': '导入',
   'tasks.type.research': '研究',
+  'graph.foreshadowing': '伏笔',
+  'graph.relationships': '关系图',
+  'graph.weight': '权重',
+  'graph.target': '回收',
+  'graph.truncated': '结果已被服务端截断',
+  'graph.validation.errors': '伏笔 DAG 校验错误',
+  'graph.empty.foreshadowing': '暂无待回收伏笔。让 agent 用 novel_foreshadowing_* 埋设后刷新。',
+  'graph.empty.relationships': '暂无关系数据。建立资产关系后刷新（或调整上方类型过滤）。',
+  'graph.kind.character': '角色',
+  'graph.kind.faction': '势力',
+  'graph.kind.place': '地点',
+  'graph.kind.concept': '概念',
+  'graph.kind.other': '其他',
+  'assets.references': '资料库（参考作品）',
+  'reference.intent.reference': '参考',
+  'reference.intent.continuation': '续写',
+  'reference.intent.canon': '正典',
+  'reference.intent.migration': '迁移',
+  'reference.structure.awaiting_confirmation': '结构待确认',
+  'reference.structure.confirmed': '结构已确认',
+  'reference.analysis.complete': '分析完成',
+  'reference.analysis.pending': '分析未完成',
+  'reference.chars': '字符',
 }
 
 /** English dictionary. */
@@ -139,6 +187,7 @@ export const en: Record<StudioPanelKey, string> = {
   'view.outline': 'Outline',
   'view.assets': 'Assets',
   'view.tasks': 'Tasks',
+  'view.graph': 'Graph',
   resolving: 'Reading Studio configuration…',
   loading: 'Connecting to OpenWrite Studio…',
   unreachable: 'OpenWrite Studio is unreachable. Make sure Studio is running (default http://127.0.0.1:4567).',
@@ -193,4 +242,27 @@ export const en: Record<StudioPanelKey, string> = {
   'tasks.type.reference_operation': 'Reference',
   'tasks.type.manuscript_import': 'Import',
   'tasks.type.research': 'Research',
+  'graph.foreshadowing': 'Foreshadowing',
+  'graph.relationships': 'Relationships',
+  'graph.weight': 'Weight',
+  'graph.target': 'Target',
+  'graph.truncated': 'Results truncated server-side',
+  'graph.validation.errors': 'Foreshadowing DAG validation errors',
+  'graph.empty.foreshadowing': 'No pending foreshadowing. Ask the agent to plant some with novel_foreshadowing_*, then refresh.',
+  'graph.empty.relationships': 'No relationship data. Create asset relations and refresh (or adjust the kind filters above).',
+  'graph.kind.character': 'Characters',
+  'graph.kind.faction': 'Factions',
+  'graph.kind.place': 'Places',
+  'graph.kind.concept': 'Concepts',
+  'graph.kind.other': 'Other',
+  'assets.references': 'Reference library',
+  'reference.intent.reference': 'Reference',
+  'reference.intent.continuation': 'Continuation',
+  'reference.intent.canon': 'Canon',
+  'reference.intent.migration': 'Migration',
+  'reference.structure.awaiting_confirmation': 'Structure pending',
+  'reference.structure.confirmed': 'Structure confirmed',
+  'reference.analysis.complete': 'Analyzed',
+  'reference.analysis.pending': 'Analysis incomplete',
+  'reference.chars': 'chars',
 }

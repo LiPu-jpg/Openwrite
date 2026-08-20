@@ -191,6 +191,99 @@
   border: 1px solid var(--dsw-alias-border-l);
 }
 
+/* --- graph view (SVG) --- */
+
+.graphCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 320px;
+}
+
+.graphColumnHeader {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--dsw-alias-label-secondary);
+}
+
+.graphNodeTitle {
+  font-size: 12px;
+  fill: var(--dsw-alias-label-primary);
+}
+
+.graphNodeMeta {
+  font-size: 11px;
+  fill: var(--dsw-alias-label-tertiary);
+}
+
+.foreshadowNode {
+  fill: var(--dsw-alias-bg-layer-2);
+  stroke: var(--dsw-alias-border-l);
+}
+
+.foreshadowNode[data-status='待收'] {
+  stroke: var(--dsw-alias-state-warn-tertiary);
+}
+
+.foreshadowNode[data-status='埋伏'] {
+  stroke: var(--dsw-alias-state-business-tertiary);
+}
+
+.edge {
+  stroke: var(--dsw-alias-label-dimmed);
+  stroke-width: 1;
+  fill: none;
+}
+
+.edge[data-confirmed='false'] {
+  stroke-dasharray: 4 3;
+}
+
+.edgeArrow {
+  fill: var(--dsw-alias-label-dimmed);
+}
+
+.edgeLabel {
+  font-size: 10px;
+  fill: var(--dsw-alias-label-caption);
+  text-anchor: middle;
+}
+
+.relationNode {
+  fill: var(--dsw-alias-bg-layer-3);
+  stroke: var(--dsw-alias-label-tertiary);
+  stroke-width: 1;
+}
+
+.relationNode[data-kind='character'] {
+  fill: var(--dsw-alias-state-business-tertiary);
+}
+
+.relationNode[data-kind='faction'] {
+  fill: var(--dsw-alias-state-warn-tertiary);
+}
+
+.relationNode[data-kind='place'] {
+  fill: var(--dsw-alias-state-success-tertiary);
+}
+
+.relationNode[data-unresolved='true'] {
+  stroke-dasharray: 3 3;
+  fill: transparent;
+}
+
+.truncatedNote {
+  font-size: 11px;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.kindFilterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 0 10px;
+}
+
 /* --- task list --- */
 
 .chip {

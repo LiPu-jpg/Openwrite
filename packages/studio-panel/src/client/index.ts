@@ -14,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import { fetchStudioApi, type StudioApiInjected } from './api.ts'
 import { AssetsView } from './AssetsView.tsx'
+import { GraphView } from './GraphView.tsx'
 import { en, NS, zh } from './locales.ts'
 import { OutlineView } from './OutlineView.tsx'
 import { NovelReviewCard } from './ReviewCard.tsx'
@@ -98,6 +99,14 @@ export function apply(ctx: Context): void {
       label: () => t('view.tasks'),
       inject: (): StudioApiInjected => studioApi,
     }, TasksView)
+    yield ctx.slots.register({
+      name: 'conversation.view',
+      id: 'graph',
+      order: 24,
+      locale: NS,
+      label: () => t('view.graph'),
+      inject: (): StudioApiInjected => studioApi,
+    }, GraphView)
   })
   // The novel_review_chapter report card: keyed entry of the Tool-owned
   // toolview hole (the bash-sample registrant posture).

@@ -162,12 +162,21 @@ assert.deepEqual(dictionaries.map(entry => entry.ns), ['studio-panel'])
 assert.ok('zh' in dictionaries[0].dicts && 'en' in dictionaries[0].dicts)
 assert.equal(dictionaries[0].dicts.zh['view.tasks'], '任务')
 assert.equal(dictionaries[0].dicts.en['view.tasks'], 'Tasks')
+assert.equal(dictionaries[0].dicts.zh['view.graph'], '图谱')
+assert.equal(dictionaries[0].dicts.en['view.graph'], 'Graph')
+assert.equal(dictionaries[0].dicts.zh['assets.references'], '资料库（参考作品）')
+// Graph empty states + kind filter labels (component rendering itself needs a
+// DOM/React harness — out of scope for this no-server smoke).
+assert.equal(dictionaries[0].dicts.zh['graph.empty.foreshadowing'].includes('伏笔'), true)
+assert.equal(dictionaries[0].dicts.zh['graph.empty.relationships'].includes('关系'), true)
+assert.equal(dictionaries[0].dicts.zh['graph.kind.character'], '角色')
+assert.equal(dictionaries[0].dicts.en['graph.kind.faction'], 'Factions')
 
 const views = registrations.filter(entry => entry.options.name === 'conversation.view')
 assert.deepEqual(
   views.map(entry => [entry.options.id, entry.options.order]),
-  [['studio', 20], ['outline', 21], ['assets', 22], ['tasks', 23]],
-  'four conversation.view tabs in order',
+  [['studio', 20], ['outline', 21], ['assets', 22], ['tasks', 23], ['graph', 24]],
+  'five conversation.view tabs in order',
 )
 for (const view of views) assert.equal(typeof view.component, 'function')
 const toolviews = registrations.filter(entry => entry.options.name === 'tool.call.toolview')

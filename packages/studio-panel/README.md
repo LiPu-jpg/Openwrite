@@ -4,8 +4,9 @@ dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会�
 
 - **稿件**（id `studio`，order 20）：全高度 iframe 内嵌本地 OpenWrite Studio（默认 `http://127.0.0.1:4567`）。
 - **大纲**（id `outline`，order 21）：原生渲染大纲树 —— 卷/篇/节/章层级、kind 徽章、标题、摘要、成稿状态，可折叠，只读。
-- **资产**（id `assets`，order 22）：角色/世界/成长体系分组卡片看板（名称、类型徽章、摘要、标签、阶段数），只读。
+- **资产**（id `assets`，order 22）：角色/世界/成长体系分组卡片看板（名称、类型徽章、摘要、标签、阶段数），外加**资料库（参考作品）**分组（标题、意图徽章、结构确认态、分析完成态、字符数），只读。
 - **任务**（id `tasks`，order 23）：后台任务中心 —— 状态过滤片（运行中/待确认/排队/已中断/失败/已取消/已完成）、类型徽章（写章/评审/连写/修订/风格源/参考库/导入/研究）、phase 进度信号、失败任务的错误消息；每 5s 轮询（页面隐藏时跳过，切换标签卸载即停止），只读（取消/重试留在 agent 工具）。
+- **图谱**（id `graph`，order 24）：原生 SVG 可视化（无图库，小型确定性布局）——伏笔板按 主线/支线/彩蛋 分列、按回收章节排序（节点卡：内容截断 + 权重/回收目标/状态，title 悬浮全文）；关系图用圆形布局，有向弦边带箭头与关系标签（未确认关系虚线，未归档节点空心），带类型过滤片（角色/势力/地点/概念/其他，多选，默认角色+势力，边只在两端点可见时渲染；可见节点 >30 隐藏边标签改悬浮 <title>，>40 节点标签截断到 6 字）。两个面板各有独立空态，分段控件切换，只读。
 - **novel_review_chapter 评审卡**：`tool.call.toolview` 键控渲染器，把 37 维章节评审 JSON 渲染成报告卡（总分/结论横幅 + 按类别分组的问题列表 + 引用与修改建议），形状异常时回退到美化 JSON。
 
 ## 它是怎么被加载的
@@ -22,8 +23,10 @@ dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会�
 
 ## 数据链路
 
-- 大纲/资产/任务视图：组件挂载时经 inject 面拿到 `fetchStudioApi(path)` → 同源打 `/studio-panel/api/...` → host 代理转发到 Studio。Studio 本身不发 CORS 头（`OpenWrite/tools/studio_http.py` 无任何 `Access-Control`），所以浏览器只能走这个代理，不能直连。
-- 信封差异（已核对源码）：`GET /api/outline` **不带**信封，直接返回 `{ roots, counts, drafted_chapters, ... }`；`GET /api/assets` 与 `GET /api/tasks` **带**成功信封 `{ ok, data: { ... }, error, request_id }`。各视图按真实形状解析，字段缺失时容错为空态。
+- 大纲/资产/任务/图谱视图：组件挂载时经 inject 面拿到 `fetchStudioApi(path)` → 同源打 `/studio-panel/api/...` → host 代理转发到 Studio。Studio 本身不发 CORS 头（`OpenWrite/tools/studio_http.py` 无任何 `Access-Control`），所以浏览器只能走这个代理，不能直连。
+- 信封差异（已核对源码）：`GET /api/outline` 与 `GET /api/continuity` **不带**信封，直接返回数据对象；`GET /api/assets` 与 `GET /api/tasks` **带**成功信封 `{ ok, data: { ... }, error, request_id }`。各视图按真实形状解析，字段缺失时容错为空态。
+- 图谱形状（`novel_service.py` continuity()）：`foreshadowing.nodes` 只含**待回收**节点（status 埋伏/待收，weight≥1），字段 `{id, content, weight(1-10), layer(主线/支线/彩蛋), status, created_at, target_arc/target_section/target_chapter, tags}`；**DAG 的边不在响应里**（存储模型有 edges，但 continuity 端点不暴露）——渲染器做了防御性消费（若未来端点加上 `foreshadowing.edges` 会画带箭头的连线），当前只画分层节点板。`foreshadowing_validation: {valid, errors}` 的错误数显示在工具栏。`relationship_graph` 含 `{nodes: [{id, label, kind(character/faction/place/concept/unknown), type, status, unresolved}], edges: [{id, source, target, label, confirmed, ...}], truncated}`（服务端上限 120 节点/240 边）。
+- 资料库无独立 GET 路由：`/api/reference-library` 是 **POST-only** 动作分发器（Studio 自己的前端连 `status` 读取都走 POST）。只读列表经 `GET /api/workspace` → `operations.reference_library` 获得（workspace() 内嵌 operation_status()），条目为 `{record: {source_id, title, intent(reference/continuation/canon/migration), total_chars, updated_at}, structure: {status(awaiting_confirmation/confirmed)}, analysis: {status, complete}, assets}`。注意：每条的「采用状态」不在列表里（采用信息在项目级 `project_style_surface`），视图显示结构确认态与分析完成态代替。
 - 任务形状（`task_store.py` TaskStore.create + `studio_application.py` task_surface）：`data.tasks[]` 的 id 字段是 **`task_id`**（不是 `id`）；`status` ∈ pending/running/awaiting_confirmation/completed/failed/cancelled/interrupted；**没有数值型 progress 字段**——`phase`（queued/reading/preparing/model/validating/committing/complete）就是进度信号；失败时 `error` 是 `{ code, message, recoverable }` 对象。`data.counts` 给各状态计数，用于渲染过滤片。
 - 评审卡：工具结果文本（`renderJson` 的 JSON）解析为 `{ result: { passed, score, issues: <数量 int>, summary, issue_details: [...] }, workspace }`。注意 `issues` 是**问题计数**而非数组（数组在 `issue_details`）；`score` 是 0-100 单一总分（由 severity 计数推导），**没有**按维度的分数表——维度只标注在每条问题上（`dimension: int|null`）。解析失败或字段缺失时回退为原始 JSON 展示。
 
