@@ -323,6 +323,48 @@
   margin-top: 4px;
 }
 
+.listBlock {
+  margin-top: 6px;
+}
+
+.listBlockLabel {
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.listBlockItems {
+  margin: 2px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Inline markdown: neutralize MarkdownText's block layout so short
+   user-authored strings (card summaries, titles) stay inline and the
+   parent's line-clamp keeps working. */
+.mdInline p,
+.mdInline h1,
+.mdInline h2,
+.mdInline h3,
+.mdInline h4,
+.mdInline ul,
+.mdInline ol,
+.mdInline blockquote,
+.mdInline pre {
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+
+.mdInline li {
+  display: inline;
+}
+
+.mdInline li + li::before {
+  content: '、';
+}
+
 .relationChips {
   display: flex;
   flex-wrap: wrap;

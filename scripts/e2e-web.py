@@ -1,15 +1,9 @@
-"""Verify relation editor: 沈烬 prefilled editable row; 伶舟 derived read-only section."""
+"""Verify: markdown rendering in asset detail + list fields (索引区)."""
 import pathlib
 
 from playwright.sync_api import sync_playwright
 
 OUT = pathlib.Path("/tmp/dsh-e2e")
-
-def open_edit(page, name):
-    page.locator(f"text={name}").first.click()
-    page.wait_for_timeout(1500)
-    page.locator("button", has_text="编辑").first.click()
-    page.wait_for_timeout(800)
 
 with sync_playwright() as p:
     browser = p.chromium.launch(channel="chrome", headless=True)
@@ -19,19 +13,17 @@ with sync_playwright() as p:
     page.wait_for_timeout(1500)
     page.locator("button, [role=tab]", has_text="资产").first.click()
     page.wait_for_timeout(2500)
-
-    # 伶舟: expect derived read-only section
-    open_edit(page, "伶舟")
+    page.locator("text=伶舟").first.click()
+    page.wait_for_timeout(2000)
+    # markdown rendered? look for <strong>/<h2> inside the detail body instead of raw ** / ##
+    rendered = page.evaluate("""() => {
+      const strongs = document.querySelectorAll('strong, h1, h2, h3, blockquote').length;
+      return strongs;
+    }""")
+    print("渲染元素数(strong/h2/blockquote):", rendered)
     text = page.evaluate("() => document.body.innerText")
-    print("伶舟派生关系区:", "派生关系" in text, "; 只读提示:", "对方资产" in text)
-    page.screenshot(path=str(OUT / "16-lingzhou-derived.png"))
-
-    # cancel, then 沈烬: expect prefilled editable row with ling_zhou
-    page.locator("button", has_text="取消").first.click()
-    page.wait_for_timeout(800)
-    open_edit(page, "沈烬")
-    text = page.evaluate("() => document.body.innerText")
-    print("沈烬预填行含 ling_zhou:", "ling_zhou" in text or "伶舟" in text)
-    page.screenshot(path=str(OUT / "16b-shenjin-edit.png"))
+    print("还残留原始 ** 标记:", "**姓名**" in text)
+    print("索引区:", "索引" in text, "; 详情引用:", "详情引用" in text)
+    page.screenshot(path=str(OUT / "17-markdown-detail.png"))
     browser.close()
     print("done")

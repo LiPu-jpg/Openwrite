@@ -30,6 +30,8 @@ export interface AssetEditorSource {
   aliases: string[]
   tags: string[]
   scalars: { key: string; value: string }[]
+  /** List-typed whitelist fields (taboos/detail_refs), edited one entry per line. */
+  lists: { key: string; items: string[] }[]
   related: RelationDraft[]
   /**
    * Derived relations (incoming edges and annotation-sourced entries) shown
@@ -69,6 +71,20 @@ function splitList(value: string): string[] {
   return value.split(/[,、，]/).map(item => item.trim()).filter(item => item !== '')
 }
 
+/** Split a one-entry-per-line textarea into a clean string list (Studio's line-join semantics). */
+function splitLines(value: string): string[] {
+  return value.split('\n').map(item => item.trim()).filter(item => item !== '')
+}
+
+/** Localized label for a list-typed whitelist field (raw key as fallback). */
+function listLabel(key: string, t: TFunc): string {
+  switch (key) {
+    case 'detail_refs': return t('assets.list.detail_refs')
+    case 'taboos': return t('assets.list.taboos')
+    default: return key
+  }
+}
+
 /** Scalar keys always shown even when absent from the current front matter. */
 const ALWAYS_SCALARS: Record<string, readonly string[]> = {
   character: ['tier', 'personality', 'goal', 'current_state'],
@@ -103,6 +119,8 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
     return initial
   })
   const [related, setRelated] = useState<RelationDraft[]>(source.related.map(row => ({ ...row })))
+  const [listsText, setListsText] = useState<Record<string, string>>(() =>
+    Object.fromEntries(source.lists.map(list => [list.key, list.items.join('\n')])))
   const [newTarget, setNewTarget] = useState('')
   const [newNote, setNewNote] = useState('')
 
@@ -116,6 +134,10 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
     }
     for (const [key, value] of Object.entries(scalars)) {
       if (value !== '') data[key] = value
+    }
+    // List fields serialize back as arrays, one entry per line.
+    for (const [key, value] of Object.entries(listsText)) {
+      data[key] = splitLines(value)
     }
     // character/world only: related is the editable front-matter list
     // (relation_view's incoming/annotation entries are derived, not edited).
@@ -154,6 +176,19 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
             className={css.input}
             value={scalars[key] ?? ''}
             onChange={event => { setScalars(previous => ({ ...previous, [key]: event.target.value })) }}
+            disabled={saving}
+          />
+        </label>
+      ))}
+      {Object.keys(listsText).map(key => (
+        <label key={key} className={css.editorRow}>
+          <span className={css.editorLabel}>{listLabel(key, t)}</span>
+          <textarea
+            className={css.textarea}
+            rows={Math.max(2, splitLines(listsText[key] ?? '').length + 1)}
+            value={listsText[key] ?? ''}
+            placeholder={t('assets.edit.linesHint')}
+            onChange={event => { setListsText(previous => ({ ...previous, [key]: event.target.value })) }}
             disabled={saving}
           />
         </label>

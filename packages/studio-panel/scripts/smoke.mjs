@@ -148,8 +148,17 @@ try {
 const bundle = await readFile(`${root}lib/client.js`, 'utf8')
 assert.match(bundle, /__ModuleLoader__\.load\(\{[\s\S]*id: "@dsh-novel\/studio-panel"/, 'loader handoff banner')
 // The purity contract: only platform-seeded externals may be require()d.
+const PLATFORM_MODULES = new Set([
+  'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-web-react',
+  '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-attachment',
+  '@deepseek-ai/dsh-client-schema-form', '@deepseek-ai/dsh-client-runtime/client',
+])
 const externals = [...bundle.matchAll(/require\("([^"]+)"\)/g)].map(match => match[1])
-assert.deepEqual([...new Set(externals)].sort(), ['react', 'react/jsx-runtime'], 'platform-only externals')
+for (const specifier of externals) {
+  assert.ok(PLATFORM_MODULES.has(specifier), `non-platform external: ${specifier}`)
+}
+assert.ok(externals.includes('@deepseek-ai/dsh-client-ui-primitives'), 'MarkdownText platform import present')
 
 let loaded = null
 globalThis.window = { __ModuleLoader__: { load(entry) { loaded = entry } } }
@@ -209,6 +218,9 @@ assert.equal(dictionaries[0].dicts.zh['assets.edit.conflictRefresh'], '刷新重
 assert.equal(dictionaries[0].dicts.zh['assets.create.open'], '新建')
 assert.equal(dictionaries[0].dicts.en['assets.create.open'], 'New')
 assert.equal(dictionaries[0].dicts.zh['assets.edit.derivedRelations'].includes('派生关系'), true)
+assert.equal(dictionaries[0].dicts.zh['assets.detail.index'], '索引')
+assert.equal(dictionaries[0].dicts.zh['assets.list.taboos'], '忌讳')
+assert.equal(dictionaries[0].dicts.en['assets.list.detail_refs'], 'Detail refs')
 // Graph empty states + kind filter labels (component rendering itself needs a
 // DOM/React harness — out of scope for this no-server smoke).
 assert.equal(dictionaries[0].dicts.zh['graph.empty.foreshadowing'].includes('伏笔'), true)

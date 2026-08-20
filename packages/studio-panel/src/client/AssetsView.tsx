@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { StudioApiError, type StudioApiInjected } from './api.ts'
@@ -87,6 +88,8 @@ interface AssetDetail {
   tags: string[]
   scalars: { key: string; value: string }[]
   fields: { key: string; value: string }[]
+  /** List-typed whitelist fields (taboos/detail_refs): string entries. */
+  lists: { key: string; items: string[] }[]
   related: RelationDraft[]
   relations: RelationItem[]
   body: string
@@ -113,6 +116,13 @@ const SEGMENTS: readonly Segment[] = ['characters', 'world', 'progression', 'ref
 const EDITOR_OWNED_FIELDS = new Set(['id', 'name', 'summary', 'aliases', 'tags', 'related'])
 /** Server-managed keys rendered read-only. */
 const READONLY_FIELDS = new Set(['state_updated_at'])
+/**
+ * List-typed whitelist keys (structured_assets.py: CHARACTER_FIELDS has
+ * taboos/detail_refs, WORLD_FIELDS has detail_refs) rendered as proper list
+ * blocks in the read view and edited as one-entry-per-line textareas
+ * (Studio's assets.js line-join semantics).
+ */
+const LIST_FIELDS = new Set(['taboos', 'detail_refs'])
 
 const CARDABLE_SEGMENTS: readonly Segment[] = ['characters', 'world', 'progression']
 
@@ -233,8 +243,17 @@ function parseAssetDetail(data: unknown): AssetDetail {
   const text = (value: unknown): string => (typeof value === 'string' ? value : '')
   const scalars: { key: string; value: string }[] = []
   const fields: { key: string; value: string }[] = []
+  const lists: { key: string; items: string[] }[] = []
   for (const [key, value] of Object.entries(frontMatter)) {
     if (EDITOR_OWNED_FIELDS.has(key)) continue
+    if (LIST_FIELDS.has(key)) {
+      // One row per entry; non-string entries keep a readable JSON form.
+      const items = (Array.isArray(value) ? value : [])
+        .map(item => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .filter(item => item !== '')
+      if (items.length > 0) lists.push({ key, items })
+      continue
+    }
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
       (READONLY_FIELDS.has(key) ? fields : scalars).push({ key, value: String(value) })
     } else {
@@ -257,6 +276,7 @@ function parseAssetDetail(data: unknown): AssetDetail {
       : [],
     scalars,
     fields,
+    lists,
     related: (Array.isArray(frontMatter['related']) ? frontMatter['related'] : [])
       .map(parseRelatedDraft)
       .filter((item): item is RelationDraft => item !== null),
@@ -438,6 +458,15 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     return item.origin === 'annotation' ? t('assets.relation.registered') : t('assets.relation.confirmed')
   }
 
+  /** Localized label for a list-typed whitelist field (raw key as fallback). */
+  const listLabel = (key: string): string => {
+    switch (key) {
+      case 'detail_refs': return t('assets.list.detail_refs')
+      case 'taboos': return t('assets.list.taboos')
+      default: return key
+    }
+  }
+
   const segmentCount = (which: Segment): number => {
     switch (which) {
       case 'characters': return assets.filter(asset => asset.kind === 'character').length
@@ -522,6 +551,24 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
             ))}
           </dl>
         )}
+        {(detail.tags.length > 0 || detail.lists.length > 0) && (
+          <div className={css.relationBlock}>
+            <div className={css.detailHeading}>{t('assets.detail.index')}</div>
+            {detail.tags.length > 0 && (
+              <div className={css.assetMeta}>
+                {detail.tags.map(tag => <span key={tag} className={css.tag}>{tag}</span>)}
+              </div>
+            )}
+            {detail.lists.map(list => (
+              <div key={list.key} className={css.listBlock}>
+                <div className={css.listBlockLabel}>{listLabel(list.key)}</div>
+                <ul className={css.listBlockItems}>
+                  {list.items.map((item, index) => <li key={index}>{item}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
         {detail.relations.length > 0 && (
           <div className={css.relationBlock}>
             <div className={css.detailHeading}>{t('assets.detail.relations')}</div>
@@ -541,7 +588,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
             </div>
           </div>
         )}
-        {detail.body !== '' && <div className={css.detailBody}>{detail.body}</div>}
+        {detail.body !== '' && <div className={css.detailBody}><MarkdownText text={detail.body} /></div>}
       </div>
     )
   }
@@ -565,7 +612,9 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
           {asset.aliases.length > 0 && (
             <div className={css.assetAliases}>{t('assets.aliases')}: {asset.aliases.join('、')}</div>
           )}
-          {asset.summary !== '' && <div className={css.assetSummary}>{asset.summary}</div>}
+          {asset.summary !== '' && (
+            <div className={`${css.assetSummary} ${css.mdInline}`}><MarkdownText text={asset.summary} /></div>
+          )}
           <div className={css.assetMeta}>
             {asset.stageCount !== null && (
               <span className={css.tag}>{asset.stageCount} {t('assets.stages')}</span>
@@ -594,7 +643,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
             <div key={entry.sourceId} className={css.assetCard} data-kind="reference">
               <div className={css.assetCardButton} data-static="true">
                 <div className={css.assetCardHead}>
-                  <span className={css.assetName}>{entry.title || entry.sourceId}</span>
+                  <div className={`${css.assetName} ${css.mdInline}`}><MarkdownText text={entry.title || entry.sourceId} /></div>
                   <span className={css.kindBadge}>{intentLabel(entry.intent)}</span>
                 </div>
                 <div className={css.assetMeta}>
@@ -637,7 +686,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
                   aria-expanded={isOpen}
                   onClick={() => { toggleDocument(doc) }}
                 >
-                  <span className={css.assetName}>{doc.title}</span>
+                  <div className={`${css.assetName} ${css.mdInline}`}><MarkdownText text={doc.title} /></div>
                   {doc.categoryLabel !== '' && <span className={css.kindBadge}>{doc.categoryLabel}</span>}
                   <span className={css.docPath}>{doc.path}</span>
                 </button>
@@ -646,7 +695,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
                     ? <div className={css.detailNotice}>{t('assets.detail.loading')}</div>
                     : docState.status === 'error'
                       ? <div className={css.detailNotice}><span className={css.errorText}>{docState.message}</span></div>
-                      : <div className={css.detailBody}>{docState.content}</div>
+                      : <div className={css.detailBody}><MarkdownText text={docState.content} /></div>
                 )}
               </div>
             )

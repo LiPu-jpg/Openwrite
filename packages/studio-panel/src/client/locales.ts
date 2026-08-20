@@ -34,6 +34,10 @@ export type StudioPanelKey =
   | 'assets.core.empty'
   | 'assets.detail.loading'
   | 'assets.detail.relations'
+  | 'assets.detail.index'
+  | 'assets.list.detail_refs'
+  | 'assets.list.taboos'
+  | 'assets.edit.linesHint'
   | 'assets.relation.confirmed'
   | 'assets.relation.registered'
   | 'assets.relation.incoming'
@@ -163,6 +167,10 @@ export const zh: Record<StudioPanelKey, string> = {
   'assets.core.empty': '作品核心为空。让 agent 先完成创作承诺与故事基础。',
   'assets.detail.loading': '加载详情…',
   'assets.detail.relations': '关系',
+  'assets.detail.index': '索引',
+  'assets.list.detail_refs': '详情引用',
+  'assets.list.taboos': '忌讳',
+  'assets.edit.linesHint': '每行一条',
   'assets.relation.confirmed': '确认',
   'assets.relation.registered': '注记',
   'assets.relation.incoming': '被关联',
@@ -286,6 +294,10 @@ export const en: Record<StudioPanelKey, string> = {
   'assets.core.empty': 'The story core is empty. Ask the agent to draft the author intent and story foundation first.',
   'assets.detail.loading': 'Loading details…',
   'assets.detail.relations': 'Relations',
+  'assets.detail.index': 'Index',
+  'assets.list.detail_refs': 'Detail refs',
+  'assets.list.taboos': 'Taboos',
+  'assets.edit.linesHint': 'One entry per line',
   'assets.relation.confirmed': 'Confirmed',
   'assets.relation.registered': 'Annotation',
   'assets.relation.incoming': 'Incoming',

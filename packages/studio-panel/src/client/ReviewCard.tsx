@@ -18,6 +18,7 @@
  */
 
 import { useState, type KeyboardEvent } from 'react'
+import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ToolResultNode } from '@deepseek-ai/dsh-client-runtime/client'
@@ -170,7 +171,7 @@ export function NovelReviewCard({ block, t }: ReviewCardProps) {
                 )}
                 <span className={css.issueCount}>{t('review.issues')} {report.issueCount}</span>
               </div>
-              {report.summary !== '' && <p className={css.reportSummary}>{report.summary}</p>}
+              {report.summary !== '' && <div className={css.reportSummary}><MarkdownText text={report.summary} /></div>}
               {groupByCategory(report.issues).map(group => (
                 <section key={group.category || '_'} className={css.issueGroup}>
                   {group.category !== '' && <h4 className={css.issueGroupTitle}>{group.category}</h4>}
@@ -183,15 +184,15 @@ export function NovelReviewCard({ block, t }: ReviewCardProps) {
                         {issue.dimension !== null && (
                           <span className={css.dimension}>{t('review.dimension')} {issue.dimension}</span>
                         )}
-                        <span className={css.issueSummary}>{issue.summary}</span>
+                        <span className={css.issueSummary}><MarkdownText text={issue.summary} /></span>
                       </div>
                       {issue.quote !== '' && (
-                        <blockquote className={css.quote}>{issue.quote}</blockquote>
+                        <blockquote className={css.quote}><MarkdownText text={issue.quote} /></blockquote>
                       )}
                       {issue.suggestion !== '' && (
                         <div className={css.suggestion}>
                           <span className={css.suggestionLabel}>{t('review.suggestion')}</span>
-                          {issue.suggestion}
+                          <MarkdownText text={issue.suggestion} />
                         </div>
                       )}
                     </div>
