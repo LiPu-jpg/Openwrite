@@ -39,6 +39,32 @@
 - **双前端并存**：dsh web 是对话/编排控制台；Studio 是稿件编辑器与资产看板。
   两者读写同一份 `data/novels/{id}`，经 OpenWrite 的修订门控保证一致。
 
+## 功能迁移对照（Studio 界面 → dsh 原生机制）
+
+原生融入原则：能力本身成为 dsh 的一等公民（agent 工具 / 原生视图 / 工具卡片），
+嵌入的 Studio 只做编辑器，不承载任何在 dsh 里已有原生形态的功能。
+
+| OpenWrite Studio 界面 | dsh 原生形态 | 状态 |
+|---|---|---|
+| AI 协作（Goethe/Dante 聊天） | goethe/dante agent 预设 + dsh 会话 | ✅ |
+| AI 协作 → 任务中心 | `novel_tasks_*` / `novel_multi_write` 工具 | ✅ |
+| 大纲视图 | 「大纲」原生视图 tab（studio-panel） | 进行中 |
+| 人物/世界观资产看板 | 「资产」原生视图 tab + `novel_asset_*` 工具 | 进行中 |
+| 审稿报告 | `novel_review_chapter` 自定义工具卡片 + 评审工具 | 进行中 |
+| 修订提案 | `novel_revisions_*` 工具（应用/驳回/重生成） | ✅ |
+| 高级工具（风格/参考库/规则/迁移等） | `novel_source_action` / `novel_reference_library_action` / `novel_rule_action` 等 | ✅ |
+| 深度研究 | `novel_research_*` 工具 | ✅ |
+| 连续性检查 | `novel_continuity` 工具 | ✅ |
+| 模型与设置 | `novel_model_*` 工具 | ✅ |
+| 项目搜索 | `novel_search` 工具 | ✅ |
+| 滚动大纲 / 叙事预测 | `novel_rolling_plan_action` / `novel_narrative_forecast_action` | ✅ |
+| 正文编辑器（Vditor） | 「稿件」tab 嵌入完整 Studio（唯一保留的嵌入面） | ✅ |
+| 导入/导出 | `novel_import*` / `novel_export` 工具 | ✅ |
+| 项目初始化/切换 | `novel_project_init` / `novel_project_open` 工具 | ✅ |
+
+刻意不迁移：OpenWrite 的内部 agent 会话层（`/api/chat`、`/api/agent/*`）——
+agent 运行时唯一归属 dsh，见职责划分原则。
+
 ## 选用的 dsh 模式
 
 主模式：**Agent 预设（agent preset）+ 自定义插件 + Web profile**。
