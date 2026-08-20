@@ -14,7 +14,9 @@
   写操作仍只走 agent 工具）
 - 配套 OpenWrite 侧改动（在 OpenWrite 仓库，未提交）：嵌入检测改为
   参数/被嵌/sessionStorage 三重判定；修复 start() 覆盖 shell 主题的问题；
-  `applyShellTheme` 实时联动 Vditor 编辑器主题；嵌入时隐藏 Studio 主题切换按钮
+  `applyShellTheme` 实时联动 Vditor 编辑器主题；嵌入时隐藏 Studio 主题切换按钮；
+  **修复嵌入模式从未生效的根因——Studio CSP `script-src 'self'` 拦截内联脚本，
+  启动逻辑移到外部 `embed-boot.js`**；嵌入时不再自动弹新手引导
 - studio-panel：iframe 带 `?embed=dsh&theme=` 参数，跟随 shell 深浅色主题实时联动
 - 配套 OpenWrite 侧改动（在 OpenWrite 仓库，未提交）：`OPENWRITE_FRAME_ANCESTORS`
   可配置嵌入白名单、`embed-dsh.css` 皮肤（嵌入时隐藏 Studio 内置 agent 入口）、
