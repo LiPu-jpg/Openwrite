@@ -164,7 +164,12 @@ assert.equal(dictionaries[0].dicts.zh['view.tasks'], '任务')
 assert.equal(dictionaries[0].dicts.en['view.tasks'], 'Tasks')
 assert.equal(dictionaries[0].dicts.zh['view.graph'], '图谱')
 assert.equal(dictionaries[0].dicts.en['view.graph'], 'Graph')
-assert.equal(dictionaries[0].dicts.zh['assets.references'], '资料库（参考作品）')
+assert.equal(dictionaries[0].dicts.zh['assets.references'], '参考作品')
+assert.equal(dictionaries[0].dicts.en['assets.references'], 'References')
+assert.equal(dictionaries[0].dicts.zh['assets.segment.core'], '作品核心')
+assert.equal(dictionaries[0].dicts.en['assets.segment.core'], 'Story Core')
+assert.equal(dictionaries[0].dicts.zh['assets.segment.references'], '参考作品')
+assert.equal(dictionaries[0].dicts.zh['assets.detail.relations'], '关系')
 // Graph empty states + kind filter labels (component rendering itself needs a
 // DOM/React harness — out of scope for this no-server smoke).
 assert.equal(dictionaries[0].dicts.zh['graph.empty.foreshadowing'].includes('伏笔'), true)

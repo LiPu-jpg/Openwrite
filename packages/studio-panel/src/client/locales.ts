@@ -21,11 +21,22 @@ export type StudioPanelKey =
   | 'outline.planned'
   | 'outline.draftedCount'
   | 'assets.empty'
-  | 'assets.character'
-  | 'assets.world'
-  | 'assets.progression'
   | 'assets.other'
   | 'assets.stages'
+  | 'assets.aliases'
+  | 'assets.segment.characters'
+  | 'assets.segment.world'
+  | 'assets.segment.progression'
+  | 'assets.segment.references'
+  | 'assets.segment.core'
+  | 'assets.segment.empty'
+  | 'assets.references.empty'
+  | 'assets.core.empty'
+  | 'assets.detail.loading'
+  | 'assets.detail.relations'
+  | 'assets.relation.confirmed'
+  | 'assets.relation.registered'
+  | 'assets.relation.incoming'
   | 'tasks.empty'
   | 'tasks.filter.all'
   | 'tasks.attempt'
@@ -113,11 +124,22 @@ export const zh: Record<StudioPanelKey, string> = {
   'outline.planned': '待写',
   'outline.draftedCount': '已成稿章节',
   'assets.empty': '暂无资产。让 agent 用 novel_asset_* 工具创建后刷新。',
-  'assets.character': '角色',
-  'assets.world': '世界',
-  'assets.progression': '成长体系',
   'assets.other': '其他',
   'assets.stages': '阶段',
+  'assets.aliases': '别名',
+  'assets.segment.characters': '角色',
+  'assets.segment.world': '设定',
+  'assets.segment.progression': '进阶体系',
+  'assets.segment.references': '参考作品',
+  'assets.segment.core': '作品核心',
+  'assets.segment.empty': '该分类暂无条目。',
+  'assets.references.empty': '暂无参考作品。让 agent 用 novel_reference_* 工具导入后刷新。',
+  'assets.core.empty': '作品核心为空。让 agent 先完成创作承诺与故事基础。',
+  'assets.detail.loading': '加载详情…',
+  'assets.detail.relations': '关系',
+  'assets.relation.confirmed': '确认',
+  'assets.relation.registered': '注记',
+  'assets.relation.incoming': '被关联',
   'review.running': '评审进行中…',
   'review.passed': '通过',
   'review.failed': '未通过',
@@ -169,7 +191,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'graph.kind.place': '地点',
   'graph.kind.concept': '概念',
   'graph.kind.other': '其他',
-  'assets.references': '资料库（参考作品）',
+  'assets.references': '参考作品',
   'reference.intent.reference': '参考',
   'reference.intent.continuation': '续写',
   'reference.intent.canon': '正典',
@@ -199,11 +221,22 @@ export const en: Record<StudioPanelKey, string> = {
   'outline.planned': 'Planned',
   'outline.draftedCount': 'Drafted chapters',
   'assets.empty': 'No assets yet. Ask the agent to create some with the novel_asset_* tools, then refresh.',
-  'assets.character': 'Characters',
-  'assets.world': 'World',
-  'assets.progression': 'Progression',
   'assets.other': 'Other',
   'assets.stages': 'stages',
+  'assets.aliases': 'Aliases',
+  'assets.segment.characters': 'Characters',
+  'assets.segment.world': 'World',
+  'assets.segment.progression': 'Progression',
+  'assets.segment.references': 'References',
+  'assets.segment.core': 'Story Core',
+  'assets.segment.empty': 'Nothing in this section yet.',
+  'assets.references.empty': 'No reference works yet. Ask the agent to import some with the novel_reference_* tools, then refresh.',
+  'assets.core.empty': 'The story core is empty. Ask the agent to draft the author intent and story foundation first.',
+  'assets.detail.loading': 'Loading details…',
+  'assets.detail.relations': 'Relations',
+  'assets.relation.confirmed': 'Confirmed',
+  'assets.relation.registered': 'Annotation',
+  'assets.relation.incoming': 'Incoming',
   'review.running': 'Reviewing…',
   'review.passed': 'Passed',
   'review.failed': 'Needs revision',
@@ -255,7 +288,7 @@ export const en: Record<StudioPanelKey, string> = {
   'graph.kind.place': 'Places',
   'graph.kind.concept': 'Concepts',
   'graph.kind.other': 'Other',
-  'assets.references': 'Reference library',
+  'assets.references': 'References',
   'reference.intent.reference': 'Reference',
   'reference.intent.continuation': 'Continuation',
   'reference.intent.canon': 'Canon',
