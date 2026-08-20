@@ -57,6 +57,10 @@ export type StudioPanelKey =
   | 'assets.edit.relationTarget'
   | 'assets.edit.relationNote'
   | 'assets.edit.derivedRelations'
+  | 'assets.edit.body'
+  | 'assets.edit.mode.edit'
+  | 'assets.edit.mode.preview'
+  | 'assets.edit.bodyEmpty'
   | 'assets.create.open'
   | 'assets.create.submit'
   | 'assets.create.idHint'
@@ -190,6 +194,10 @@ export const zh: Record<StudioPanelKey, string> = {
   'assets.edit.relationTarget': '目标资产 ID',
   'assets.edit.relationNote': '关系说明',
   'assets.edit.derivedRelations': '派生关系（只读；请在对方资产上编辑）',
+  'assets.edit.body': '正文',
+  'assets.edit.mode.edit': '编辑',
+  'assets.edit.mode.preview': '预览',
+  'assets.edit.bodyEmpty': '正文为空，没有可预览的内容。',
   'assets.create.open': '新建',
   'assets.create.submit': '创建',
   'assets.create.idHint': '字母或数字开头，可含 _ . -',
@@ -317,6 +325,10 @@ export const en: Record<StudioPanelKey, string> = {
   'assets.edit.relationTarget': 'Target asset id',
   'assets.edit.relationNote': 'Relation note',
   'assets.edit.derivedRelations': 'Derived relations (read-only; edit them on the owning asset)',
+  'assets.edit.body': 'Body',
+  'assets.edit.mode.edit': 'Edit',
+  'assets.edit.mode.preview': 'Preview',
+  'assets.edit.bodyEmpty': 'The body is empty — nothing to preview.',
   'assets.create.open': 'New',
   'assets.create.submit': 'Create',
   'assets.create.idHint': 'Starts with a letter or digit; may contain _ . -',

@@ -1,4 +1,4 @@
-"""Verify: markdown rendering in asset detail + list fields (索引区)."""
+"""Verify body editor preview toggle on 沈烬 (read-only check, no save)."""
 import pathlib
 
 from playwright.sync_api import sync_playwright
@@ -13,17 +13,18 @@ with sync_playwright() as p:
     page.wait_for_timeout(1500)
     page.locator("button, [role=tab]", has_text="资产").first.click()
     page.wait_for_timeout(2500)
-    page.locator("text=伶舟").first.click()
-    page.wait_for_timeout(2000)
-    # markdown rendered? look for <strong>/<h2> inside the detail body instead of raw ** / ##
-    rendered = page.evaluate("""() => {
-      const strongs = document.querySelectorAll('strong, h1, h2, h3, blockquote').length;
-      return strongs;
-    }""")
-    print("渲染元素数(strong/h2/blockquote):", rendered)
+    # 沈烬 card — click its name heading
+    page.locator("text=沈烬").first.click()
+    page.wait_for_timeout(1800)
+    page.locator("button", has_text="编辑").first.click()
+    page.wait_for_timeout(800)
     text = page.evaluate("() => document.body.innerText")
-    print("还残留原始 ** 标记:", "**姓名**" in text)
-    print("索引区:", "索引" in text, "; 详情引用:", "详情引用" in text)
-    page.screenshot(path=str(OUT / "17-markdown-detail.png"))
+    print("正文区存在:", "正文" in text, "; 预览切换:", "预览" in text)
+    # switch to preview
+    prev = page.locator("button, [class*=chip]", has_text="预览").first
+    prev.click()
+    page.wait_for_timeout(800)
+    page.screenshot(path=str(OUT / "19-body-preview.png"))
+    print("shot ok")
     browser.close()
     print("done")

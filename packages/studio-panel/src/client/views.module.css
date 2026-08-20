@@ -639,6 +639,22 @@
   font-size: 12px;
 }
 
+.bodyEditor {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.bodyToggleRow {
+  display: flex;
+  gap: 2px;
+}
+
+.bodyToggleRow .chip {
+  margin-right: 0;
+}
+
 /* --- graph view (SVG) --- */
 
 .graphCanvas {

@@ -406,13 +406,19 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
   }
 
   /** Save one editor draft: revision-locked update, then refresh detail + list. */
-  const saveAsset = (asset: AssetSummary, data: Record<string, unknown>) => {
+  const saveAsset = (asset: AssetSummary, data: Record<string, unknown>, bodyMarkdown: string) => {
     const key = `${asset.kind}:${asset.id}`
     const entry = details.get(key)
     if (entry?.status !== 'ready') return
     setSaving(true)
     setSaveError(null)
-    postStudioApi('/assets/update', { kind: asset.kind, id: asset.id, revision: entry.detail.revision, data })
+    postStudioApi('/assets/update', {
+      kind: asset.kind,
+      id: asset.id,
+      revision: entry.detail.revision,
+      data,
+      body_markdown: bodyMarkdown,
+    })
       .then(() => {
         setSaving(false)
         setEditKey(null)
@@ -514,7 +520,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
           saving={saving}
           saveError={saveError?.message ?? null}
           conflict={saveError?.conflict === true}
-          onSave={(data) => { saveAsset(asset, data) }}
+          onSave={(data, bodyMarkdown) => { saveAsset(asset, data, bodyMarkdown) }}
           onCancel={() => {
             setEditKey(null)
             setSaveError(null)

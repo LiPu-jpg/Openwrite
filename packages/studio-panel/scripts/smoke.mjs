@@ -218,6 +218,8 @@ assert.equal(dictionaries[0].dicts.zh['assets.edit.conflictRefresh'], '刷新重
 assert.equal(dictionaries[0].dicts.zh['assets.create.open'], '新建')
 assert.equal(dictionaries[0].dicts.en['assets.create.open'], 'New')
 assert.equal(dictionaries[0].dicts.zh['assets.edit.derivedRelations'].includes('派生关系'), true)
+assert.equal(dictionaries[0].dicts.zh['assets.edit.mode.preview'], '预览')
+assert.equal(dictionaries[0].dicts.en['assets.edit.mode.preview'], 'Preview')
 assert.equal(dictionaries[0].dicts.zh['assets.detail.index'], '索引')
 assert.equal(dictionaries[0].dicts.zh['assets.list.taboos'], '忌讳')
 assert.equal(dictionaries[0].dicts.en['assets.list.detail_refs'], 'Detail refs')

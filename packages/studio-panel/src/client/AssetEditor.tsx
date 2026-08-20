@@ -20,6 +20,7 @@
  */
 
 import { useState } from 'react'
+import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './views.module.css'
 
@@ -33,6 +34,8 @@ export interface AssetEditorSource {
   /** List-typed whitelist fields (taboos/detail_refs), edited one entry per line. */
   lists: { key: string; items: string[] }[]
   related: RelationDraft[]
+  /** The markdown body (body_markdown), edited with a preview toggle. */
+  body: string
   /**
    * Derived relations (incoming edges and annotation-sourced entries) shown
    * read-only in the editor. They live in OTHER assets' front matter (or in
@@ -100,7 +103,7 @@ interface AssetEditorProps {
   saving: boolean
   saveError: string | null
   conflict: boolean
-  onSave: (data: Record<string, unknown>) => void
+  onSave: (data: Record<string, unknown>, bodyMarkdown: string) => void
   onCancel: () => void
   onRefresh: () => void
   t: TFunc
@@ -123,6 +126,8 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
     Object.fromEntries(source.lists.map(list => [list.key, list.items.join('\n')])))
   const [newTarget, setNewTarget] = useState('')
   const [newNote, setNewNote] = useState('')
+  const [bodyDraft, setBodyDraft] = useState(source.body)
+  const [bodyMode, setBodyMode] = useState<'edit' | 'preview'>('edit')
 
   const scalarKeys = Object.keys(scalars)
   const save = () => {
@@ -148,7 +153,7 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
           ? row.target.trim()
           : { target: row.target.trim(), kind: row.kind.trim() || 'related', note: row.note.trim() })
     }
-    onSave(data)
+    onSave(data, bodyDraft)
   }
 
   return (
@@ -287,6 +292,48 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
           </div>
         </div>
       )}
+      <div className={css.editorRow}>
+        <span className={css.editorLabel}>{t('assets.edit.body')}</span>
+        <div className={css.bodyEditor}>
+          <div className={css.bodyToggleRow} role="group" aria-label={t('assets.edit.body')}>
+            <button
+              type="button"
+              className={css.chip}
+              data-active={bodyMode === 'edit'}
+              onClick={() => { setBodyMode('edit') }}
+              disabled={saving}
+            >
+              {t('assets.edit.mode.edit')}
+            </button>
+            <button
+              type="button"
+              className={css.chip}
+              data-active={bodyMode === 'preview'}
+              onClick={() => { setBodyMode('preview') }}
+              disabled={saving}
+            >
+              {t('assets.edit.mode.preview')}
+            </button>
+          </div>
+          {bodyMode === 'edit'
+            ? (
+              <textarea
+                className={css.textarea}
+                rows={8}
+                value={bodyDraft}
+                onChange={event => { setBodyDraft(event.target.value) }}
+                disabled={saving}
+              />
+            )
+            : (
+              <div className={css.detailBody}>
+                {bodyDraft.trim() === ''
+                  ? <span className={css.detailNotice}>{t('assets.edit.bodyEmpty')}</span>
+                  : <MarkdownText text={bodyDraft} />}
+              </div>
+            )}
+        </div>
+      </div>
       {conflict && (
         <div className={css.conflictNotice}>
           <span className={css.errorText}>{saveError ?? t('assets.edit.conflict')}</span>
