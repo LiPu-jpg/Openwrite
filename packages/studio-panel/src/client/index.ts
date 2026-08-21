@@ -17,7 +17,9 @@ import { AssetsView } from './AssetsView.tsx'
 import { GraphView } from './GraphView.tsx'
 import { en, NS, zh } from './locales.ts'
 import { OutlineView } from './OutlineView.tsx'
+import { ResearchView } from './ResearchView.tsx'
 import { NovelReviewCard } from './ReviewCard.tsx'
+import { SearchView } from './SearchView.tsx'
 import { StudioView, type StudioViewInjected } from './StudioView.tsx'
 import { TasksView } from './TasksView.tsx'
 
@@ -125,6 +127,22 @@ export function apply(ctx: Context): void {
       label: () => t('view.graph'),
       inject: (): StudioApiInjected => studioApi,
     }, GraphView)
+    yield ctx.slots.register({
+      name: 'conversation.view',
+      id: 'research',
+      order: 26,
+      locale: NS,
+      label: () => t('view.research'),
+      inject: (): StudioApiInjected => studioApi,
+    }, ResearchView)
+    yield ctx.slots.register({
+      name: 'conversation.view',
+      id: 'search',
+      order: 27,
+      locale: NS,
+      label: () => t('view.search'),
+      inject: (): StudioApiInjected => studioApi,
+    }, SearchView)
   })
   // The novel_review_chapter report card: keyed entry of the Tool-owned
   // toolview hole (the bash-sample registrant posture).

@@ -820,6 +820,101 @@
   color: var(--dsw-alias-state-warn-label);
 }
 
+/* --- graph view: validation / truth / workflow sections --- */
+
+.validationBlock {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-state-error-secondary);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.validationList {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.truthSection {
+  margin-bottom: 14px;
+}
+
+.workflowBlock {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--dsw-alias-border-l);
+}
+
+.workflowStages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 4px 4px;
+}
+
+/* --- search view --- */
+
+.scopeSelect {
+  margin-right: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+}
+
+.scopeSelect:focus {
+  outline: none;
+  border-color: var(--dsw-alias-label-tertiary);
+}
+
+.searchResult {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--dsw-alias-border-l);
+}
+
+.searchResultHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.searchResultTitle {
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.searchResultPath {
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.searchResultHeading {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.searchSnippet {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.searchMark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-label-primary);
+}
+
 .kindFilterRow {
   display: flex;
   flex-wrap: wrap;

@@ -26,12 +26,23 @@
  *               source_label }],
  *     truncated, ...
  *   },
- *   workflows: [...],
+ *   // 事实账本: three markdown DOCUMENTS (truth_manager.py TruthFiles), not
+ *   // structured rows — rendered as-is with MarkdownText.
+ *   truth: { current_state: string, ledger: string, relationships: string },
+ *   // 章节工作流 (workflow_scheduler.py): stages carry
+ *   // status pending/running/completed/failed/skipped.
+ *   workflows: [{ chapter_id, current_stage, error,
+ *                 stages: [{ name, status, message }] }],
  * }
+ *
+ * Sections (toolbar chips): 伏笔 (board + DAG validation errors), 关系图
+ * (kind-filtered circle), 事实账本 (the three truth documents), 工作流
+ * (per-chapter pipeline stages). All read-only.
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
 import css from './views.module.css'
@@ -70,6 +81,27 @@ interface RelationEdge {
   confirmed: boolean
 }
 
+/** 事实账本: the three truth markdown documents. */
+interface TruthDocs {
+  currentState: string
+  ledger: string
+  relationships: string
+}
+
+interface WorkflowStage {
+  name: string
+  status: string
+  message: string
+}
+
+/** One chapter pipeline (workflows[] entry). */
+interface WorkflowItem {
+  chapterId: string
+  currentStage: string
+  error: string
+  stages: WorkflowStage[]
+}
+
 interface ContinuityPayload {
   foreshadowNodes: ForeshadowNode[]
   foreshadowEdges: ForeshadowEdge[]
@@ -77,10 +109,12 @@ interface ContinuityPayload {
   relationNodes: RelationNode[]
   relationEdges: RelationEdge[]
   relationTruncated: boolean
+  truth: TruthDocs
+  workflows: WorkflowItem[]
 }
 
 type LoadState = 'loading' | 'error' | 'ready'
-type Segment = 'foreshadowing' | 'relationships'
+type Segment = 'foreshadowing' | 'relationships' | 'truth' | 'workflows'
 
 /** `ch_0010` → 10; anything else → null (sorted last). */
 function chapterNumber(value: string): number | null {
@@ -144,6 +178,27 @@ function parseContinuity(data: unknown): ContinuityPayload {
       }
     })
 
+  const truthRaw = record(root['truth'])
+  const truth: TruthDocs = {
+    currentState: text(truthRaw['current_state']),
+    ledger: text(truthRaw['ledger']),
+    relationships: text(truthRaw['relationships']),
+  }
+  const workflows: WorkflowItem[] = (Array.isArray(root['workflows']) ? root['workflows'] : [])
+    .map((raw): WorkflowItem => {
+      const workflow = record(raw)
+      return {
+        chapterId: text(workflow['chapter_id']),
+        currentStage: text(workflow['current_stage']),
+        error: text(workflow['error']),
+        stages: (Array.isArray(workflow['stages']) ? workflow['stages'] : [])
+          .map((stageRaw): WorkflowStage => {
+            const stage = record(stageRaw)
+            return { name: text(stage['name']), status: text(stage['status']), message: text(stage['message']) }
+          }),
+      }
+    })
+
   return {
     foreshadowNodes,
     foreshadowEdges,
@@ -153,6 +208,8 @@ function parseContinuity(data: unknown): ContinuityPayload {
     relationNodes,
     relationEdges,
     relationTruncated: graph['truncated'] === true,
+    truth,
+    workflows,
   }
 }
 
@@ -306,6 +363,9 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
             onClick={() => { setSegment('foreshadowing') }}
           >
             {t('graph.foreshadowing')} {payload?.foreshadowNodes.length ?? 0}
+            {payload !== null && payload.validationErrors.length > 0 && (
+              <span className={css.errorText}> ⚠{payload.validationErrors.length}</span>
+            )}
           </button>
           <button
             type="button"
@@ -315,11 +375,22 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
           >
             {t('graph.relationships')} {visibleRelationEdges.length}/{payload?.relationEdges.length ?? 0}
           </button>
-          {payload !== null && payload.validationErrors.length > 0 && (
-            <span className={css.errorText}>
-              {t('graph.validation.errors')}: {payload.validationErrors.length}
-            </span>
-          )}
+          <button
+            type="button"
+            className={css.chip}
+            data-active={segment === 'truth'}
+            onClick={() => { setSegment('truth') }}
+          >
+            {t('graph.truth')}
+          </button>
+          <button
+            type="button"
+            className={css.chip}
+            data-active={segment === 'workflows'}
+            onClick={() => { setSegment('workflows') }}
+          >
+            {t('graph.workflows')} {payload?.workflows.length ?? 0}
+          </button>
           {segment === 'relationships' && payload?.relationTruncated === true && (
             <span className={css.truncatedNote}>{t('graph.truncated')}</span>
           )}
@@ -337,9 +408,22 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
           </div>
         )}
         {state === 'ready' && payload !== null && segment === 'foreshadowing' && foreshadow !== null && (
-          payload.foreshadowNodes.length === 0
-            ? <div className={css.notice}>{t('graph.empty.foreshadowing')}</div>
-            : (
+          <>
+            {payload.validationErrors.length > 0 && (
+              <div className={css.validationBlock}>
+                <div className={css.detailHeading}>
+                  {t('graph.validation.errors')} ({payload.validationErrors.length})
+                </div>
+                <ul className={css.validationList}>
+                  {payload.validationErrors.map(item => (
+                    <li key={item} className={css.errorText}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {payload.foreshadowNodes.length === 0
+              ? <div className={css.notice}>{t('graph.empty.foreshadowing')}</div>
+              : (
               <svg
                 className={css.graphCanvas}
                 viewBox={`0 0 ${foreshadow.width} ${foreshadow.height}`}
@@ -394,7 +478,8 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
                   </g>
                 ))}
               </svg>
-            )
+            )}
+          </>
         )}
         {state === 'ready' && payload !== null && segment === 'relationships' && (
           <>
@@ -474,6 +559,53 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
               )
             }
           </>
+        )}
+        {state === 'ready' && payload !== null && segment === 'truth' && (
+          payload.truth.currentState === '' && payload.truth.ledger === '' && payload.truth.relationships === ''
+            ? <div className={css.notice}>{t('graph.empty.truth')}</div>
+            : (
+              <div className={css.detail}>
+                {([
+                  ['graph.truth.currentState', payload.truth.currentState],
+                  ['graph.truth.ledger', payload.truth.ledger],
+                  ['graph.truth.relationships', payload.truth.relationships],
+                ] as const).map(([key, document_]) => (
+                  <section key={key} className={css.truthSection}>
+                    <div className={css.detailHeading}>{t(key)}</div>
+                    {document_ === ''
+                      ? <div className={css.detailNotice}>{t('graph.empty.truthDoc')}</div>
+                      : <div className={css.detailBody}><MarkdownText text={document_} /></div>}
+                  </section>
+                ))}
+              </div>
+            )
+        )}
+        {state === 'ready' && payload !== null && segment === 'workflows' && (
+          payload.workflows.length === 0
+            ? <div className={css.notice}>{t('graph.empty.workflows')}</div>
+            : payload.workflows.map(workflow => (
+              <div key={workflow.chapterId} className={css.workflowBlock}>
+                <div className={css.taskRow}>
+                  <span className={css.taskChapter}>{workflow.chapterId || '—'}</span>
+                  <span className={css.taskSummary}>
+                    {t('graph.workflow.currentStage')}: {workflow.currentStage || '—'}
+                  </span>
+                </div>
+                {workflow.error !== '' && <div className={css.taskError}>{workflow.error}</div>}
+                <div className={css.workflowStages}>
+                  {workflow.stages.map(stage => (
+                    <span
+                      key={stage.name}
+                      className={css.taskStatus}
+                      data-status={stage.status}
+                      title={stage.message !== '' ? stage.message : undefined}
+                    >
+                      {stage.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))
         )}
       </div>
     </div>

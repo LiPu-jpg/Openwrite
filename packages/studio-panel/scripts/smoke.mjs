@@ -211,6 +211,10 @@ assert.equal(dictionaries[0].dicts.zh['view.tasks'], '任务')
 assert.equal(dictionaries[0].dicts.en['view.tasks'], 'Tasks')
 assert.equal(dictionaries[0].dicts.zh['view.graph'], '图谱')
 assert.equal(dictionaries[0].dicts.en['view.graph'], 'Graph')
+assert.equal(dictionaries[0].dicts.zh['view.research'], '研究')
+assert.equal(dictionaries[0].dicts.en['view.research'], 'Research')
+assert.equal(dictionaries[0].dicts.zh['view.search'], '搜索')
+assert.equal(dictionaries[0].dicts.en['view.search'], 'Search')
 assert.equal(dictionaries[0].dicts.zh['assets.references'], '参考作品')
 assert.equal(dictionaries[0].dicts.en['assets.references'], 'References')
 assert.equal(dictionaries[0].dicts.zh['assets.segment.core'], '作品核心')
@@ -242,12 +246,23 @@ assert.equal(dictionaries[0].dicts.zh['graph.empty.foreshadowing'].includes('伏
 assert.equal(dictionaries[0].dicts.zh['graph.empty.relationships'].includes('关系'), true)
 assert.equal(dictionaries[0].dicts.zh['graph.kind.character'], '角色')
 assert.equal(dictionaries[0].dicts.en['graph.kind.faction'], 'Factions')
+// Graph continuity sections (伏笔校验/事实账本/工作流) + research/search keys.
+assert.equal(dictionaries[0].dicts.zh['graph.truth'], '事实账本')
+assert.equal(dictionaries[0].dicts.en['graph.truth'], 'Truth ledger')
+assert.equal(dictionaries[0].dicts.zh['graph.workflows'], '工作流')
+assert.equal(dictionaries[0].dicts.zh['graph.truth.ledger'], '资源账本')
+assert.equal(dictionaries[0].dicts.en['graph.empty.workflows'], 'No active chapter workflows.')
+assert.equal(dictionaries[0].dicts.zh['research.selectHint'].includes('报告'), true)
+assert.equal(dictionaries[0].dicts.en['research.report.loading'], 'Loading report…')
+assert.equal(dictionaries[0].dicts.zh['search.scope.chapters'], '正文')
+assert.equal(dictionaries[0].dicts.en['search.scope.sources'], 'Sources')
+assert.equal(dictionaries[0].dicts.zh['search.indexed'], '已索引')
 
 const views = registrations.filter(entry => entry.options.name === 'conversation.view')
 assert.deepEqual(
   views.map(entry => [entry.options.id, entry.options.order]),
-  [['overview', 19], ['studio', 20], ['review-ws', 21], ['outline', 22], ['assets', 23], ['tasks', 24], ['graph', 25]],
-  'seven conversation.view tabs in order',
+  [['overview', 19], ['studio', 20], ['review-ws', 21], ['outline', 22], ['assets', 23], ['tasks', 24], ['graph', 25], ['research', 26], ['search', 27]],
+  'nine conversation.view tabs in order',
 )
 // Pinned Studio hash views ride the inject face; the dashboard pin is no hash.
 const injected = Object.fromEntries(views.map(entry => [entry.options.id, entry.options.inject()]))

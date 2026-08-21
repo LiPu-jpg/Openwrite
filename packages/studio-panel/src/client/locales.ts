@@ -12,6 +12,8 @@ export type StudioPanelKey =
   | 'view.assets'
   | 'view.tasks'
   | 'view.graph'
+  | 'view.research'
+  | 'view.search'
   | 'resolving'
   | 'loading'
   | 'unreachable'
@@ -128,6 +130,35 @@ export type StudioPanelKey =
   | 'graph.kind.place'
   | 'graph.kind.concept'
   | 'graph.kind.other'
+  | 'graph.truth'
+  | 'graph.truth.currentState'
+  | 'graph.truth.ledger'
+  | 'graph.truth.relationships'
+  | 'graph.workflows'
+  | 'graph.workflow.currentStage'
+  | 'graph.empty.truth'
+  | 'graph.empty.truthDoc'
+  | 'graph.empty.workflows'
+  | 'research.reports'
+  | 'research.unavailable'
+  | 'research.empty'
+  | 'research.selectHint'
+  | 'research.report.loading'
+  | 'research.quality'
+  | 'research.language'
+  | 'search.placeholder'
+  | 'search.hint'
+  | 'search.empty'
+  | 'search.indexed'
+  | 'search.timeout'
+  | 'search.scope.all'
+  | 'search.scope.outline'
+  | 'search.scope.core'
+  | 'search.scope.characters'
+  | 'search.scope.settings'
+  | 'search.scope.continuity'
+  | 'search.scope.chapters'
+  | 'search.scope.sources'
   | 'assets.references'
   | 'reference.intent.reference'
   | 'reference.intent.continuation'
@@ -168,6 +199,8 @@ export const zh: Record<StudioPanelKey, string> = {
   'view.assets': '资产',
   'view.tasks': '任务',
   'view.graph': '图谱',
+  'view.research': '研究',
+  'view.search': '搜索',
   resolving: '正在读取 Studio 配置…',
   loading: '正在连接 OpenWrite Studio…',
   unreachable: '无法连接 OpenWrite Studio。请确认 Studio 已启动（默认 http://127.0.0.1:4567）。',
@@ -297,6 +330,35 @@ export const zh: Record<StudioPanelKey, string> = {
   'graph.kind.place': '地点',
   'graph.kind.concept': '概念',
   'graph.kind.other': '其他',
+  'graph.truth': '事实账本',
+  'graph.truth.currentState': '当前状态',
+  'graph.truth.ledger': '资源账本',
+  'graph.truth.relationships': '关系矩阵',
+  'graph.workflows': '工作流',
+  'graph.workflow.currentStage': '当前阶段',
+  'graph.empty.truth': '暂无真相文件内容。章节推进后由 agent 更新 data/world/ 下的真相文件。',
+  'graph.empty.truthDoc': '（空）',
+  'graph.empty.workflows': '暂无活动章节工作流。',
+  'research.reports': '报告',
+  'research.unavailable': '深度研究运行环境未就绪，请先在 Studio 中完成初始化。',
+  'research.empty': '暂无研究报告。让 agent 发起一次深度研究后刷新。',
+  'research.selectHint': '选择左侧的报告查看全文。',
+  'research.report.loading': '正在加载报告…',
+  'research.quality': '质量',
+  'research.language': '语言',
+  'search.placeholder': '搜索项目资料…',
+  'search.hint': '输入关键词搜索大纲、正文、角色、设定等项目资料。',
+  'search.empty': '没有匹配的结果。',
+  'search.indexed': '已索引',
+  'search.timeout': '搜索请求超时。请确认 Studio 正在运行后重试。',
+  'search.scope.all': '全部',
+  'search.scope.outline': '大纲',
+  'search.scope.core': '作品核心',
+  'search.scope.characters': '角色',
+  'search.scope.settings': '设定',
+  'search.scope.continuity': '连续性',
+  'search.scope.chapters': '正文',
+  'search.scope.sources': '参考资料',
   'assets.references': '参考作品',
   'reference.intent.reference': '参考',
   'reference.intent.continuation': '续写',
@@ -318,6 +380,8 @@ export const en: Record<StudioPanelKey, string> = {
   'view.assets': 'Assets',
   'view.tasks': 'Tasks',
   'view.graph': 'Graph',
+  'view.research': 'Research',
+  'view.search': 'Search',
   resolving: 'Reading Studio configuration…',
   loading: 'Connecting to OpenWrite Studio…',
   unreachable: 'OpenWrite Studio is unreachable. Make sure Studio is running (default http://127.0.0.1:4567).',
@@ -447,6 +511,35 @@ export const en: Record<StudioPanelKey, string> = {
   'graph.kind.place': 'Places',
   'graph.kind.concept': 'Concepts',
   'graph.kind.other': 'Other',
+  'graph.truth': 'Truth ledger',
+  'graph.truth.currentState': 'Current state',
+  'graph.truth.ledger': 'Resource ledger',
+  'graph.truth.relationships': 'Relationship matrix',
+  'graph.workflows': 'Workflows',
+  'graph.workflow.currentStage': 'Current stage',
+  'graph.empty.truth': 'No truth-file content yet. The agent updates the data/world/ truth files as chapters advance.',
+  'graph.empty.truthDoc': '(empty)',
+  'graph.empty.workflows': 'No active chapter workflows.',
+  'research.reports': 'Reports',
+  'research.unavailable': 'The deep-research runtime is not ready. Finish the setup in Studio first.',
+  'research.empty': 'No research reports yet. Ask the agent to run a deep research, then refresh.',
+  'research.selectHint': 'Select a report on the left to read it.',
+  'research.report.loading': 'Loading report…',
+  'research.quality': 'Quality',
+  'research.language': 'Language',
+  'search.placeholder': 'Search project material…',
+  'search.hint': 'Type a query to search the outline, chapters, characters, settings and other project material.',
+  'search.empty': 'No matching results.',
+  'search.indexed': 'indexed',
+  'search.timeout': 'The search request timed out. Make sure Studio is running, then retry.',
+  'search.scope.all': 'All',
+  'search.scope.outline': 'Outline',
+  'search.scope.core': 'Story core',
+  'search.scope.characters': 'Characters',
+  'search.scope.settings': 'Settings',
+  'search.scope.continuity': 'Continuity',
+  'search.scope.chapters': 'Chapters',
+  'search.scope.sources': 'Sources',
   'assets.references': 'References',
   'reference.intent.reference': 'Reference',
   'reference.intent.continuation': 'Continuation',
