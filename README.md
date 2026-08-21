@@ -14,10 +14,9 @@
 | 路径 | 说明 |
 |---|---|
 | `packages/openwrite-bridge/` | dsh 插件：62 个 `novel_*` 工具，覆盖 Studio HTTP 动作面全部端点 |
-| `packages/studio-panel/` | dsh web 原生视图：稿件（内嵌编辑器）、大纲、资产（含资料库）、任务、图谱 tab + 评审报告卡 |
+| `packages/studio-panel/` | dsh web 原生视图：总览/正文/审稿（内嵌 Studio）、大纲、资产、任务、图谱、研究、搜索 tab + 评审报告卡 |
 | `presets/goethe/` | Goethe 规划 agent 预设（灵感/人物/设定/大纲收敛） |
 | `presets/dante/` | Dante 写作 agent 预设（写章/评审/结算，可向 Goethe 子代理咨询） |
-| `skills/` | 移植自 OpenWrite 的 13 个 SKILL.md 技能 |
 | `scripts/install.sh` | 构建插件、安装预设到 `~/.dsh/.agent-presets/`、插件装进 dsh profile |
 | `scripts/dev.sh` | 一键启动 OpenWrite Studio + dsh web |
 | `scripts/verify.sh` | 一键集成验证（服务/插件/代理路由/嵌入皮肤） |
@@ -34,8 +33,9 @@ scripts/dev.sh       # 启动两端服务
 ```
 
 然后打开 http://127.0.0.1:3080 ，新建会话时选择 **Goethe 规划** 或
-**Dante 写作** 预设。会话头部的「稿件 / 大纲 / 资产 / 任务 / 图谱」tab 覆盖
-编辑、结构、设定与资料库、后台任务、伏笔与人物关系图；无需直接打开 Studio。
+**Dante 写作** 预设。会话头部的「总览 / 正文 / 审稿 / 大纲 / 资产 / 任务 /
+图谱 / 研究 / 搜索」tab 覆盖编辑、结构、设定与资料库、后台任务、伏笔与
+人物关系图、深度研究与项目检索；无需直接打开 Studio。
 
 ## 工作方式
 
@@ -48,5 +48,5 @@ scripts/dev.sh       # 启动两端服务
 
 ## 许可
 
-桥接插件与预设代码沿用 OpenWrite 的 Apache-2.0；`skills/` 下 oh-story-*
+桥接插件与预设代码沿用 OpenWrite 的 Apache-2.0；`presets/*/skills/` 下 oh-story-*
 技能保留其原有 MIT 许可（见各目录 LICENSE）。

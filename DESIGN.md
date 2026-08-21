@@ -116,7 +116,22 @@ TS 插件，`apply(ctx)` 中 `ctx.tools.register(defineTool({...}))` 注册一�
 `/api/agents`、`/api/agent/activity`（OpenWrite 原生 agent 的运行面）、
 `/api/health`（存活探针，连通性由 `novel_status` 覆盖）。
 
-### 2. 双 agent 预设（`presets/goethe/`、`presets/dante/`）
+### 2. studio-panel 前端插件（`packages/studio-panel/`）
+
+dsh web 的 client 插件，把 Studio 的关键界面原生融入会话 UI（细节见包内 README）：
+
+- **Host 半边**：最小 cordis 插件，在 dsh web server 上注册同源路由：
+  `GET /studio-panel/config.json` 下发配置；`GET /studio-panel/api/<path>` 只读代理
+  到 Studio（透传状态码与错误体；写通道白名单仅资产域，其余变更一律走 agent 工具）。
+  Studio 不发 CORS 头，浏览器数据视图必须经此代理。
+- **Client 半边**：九个 `conversation.view` 视图 tab——总览 / 正文 / 审稿
+  （内嵌 Studio iframe，hash 钉路由）、大纲（只读树）、资产（主从布局 +
+  乐观锁编辑 + Vditor 正文实时渲染）、任务（后台任务中心）、图谱（伏笔分层板 /
+  人物关系环形图 / 事实账本 / 章节工作流）、研究（深度研究报告库）、搜索
+  （项目资料检索）；另有 `novel_review_chapter` 评审报告卡
+  （`tool.call.toolview` 键控渲染，37 维评审 JSON → 报告卡）。
+
+### 3. 双 agent 预设（`presets/goethe/`、`presets/dante/`）
 
 每个预设目录：`agent.cordis.yml` + `preset.yml` + `skills/`。
 
@@ -132,22 +147,27 @@ TS 插件，`apply(ctx)` 中 `ctx.tools.register(defineTool({...}))` 注册一�
 预设经 `scripts/install.sh` 复制到 `~/.dsh/.agent-presets/`（dsh 的用户预设根，
 copy-only 语义，不在原地改）。
 
-### 3. 技能移植（`skills/`）
+### 4. 技能移植（`presets/*/skills/`）
 
 从 `/Users/jiaoziang/OpenWrite/skills/` 与 `tools/runtime_skills/` 复制 SKILL.md
-目录树到本仓库 `skills/`，由两个预设的 `customSkillDirs` 引用。
+目录树，按预设分工拆分随包携带：goethe 带 foreshadowing-system、novel-creator、
+oh-story-long-analyze/scan、style-system、world-query；dante 带 dialoguequality、
+novel-reviewer、oh-story-long-write/deslop/review、truth-validation、workflow-manager。
+预设经 `customSkillDirs`（baseUrl 相对路径）自带加载，安装时随预设 rsync。
 格式已兼容（name/description frontmatter），无需改写内容。
 
-### 4. 组合与启动（`overlays/`、`scripts/`）
+### 5. 组合与启动（`scripts/`）
 
-- `overlays/dsh-novel.patch.yml`：dsh patch 层，insert bridge 插件行
-  （开发期指向构建产物 JS 的绝对路径）。
-- `scripts/install.sh`：构建插件 → 复制预设到 `~/.dsh/.agent-presets/` →
-  幂等写入 patch。
+- `scripts/install.sh`：构建两个插件 → 复制预设到 `~/.dsh/.agent-presets/` →
+  初始化 web/headless profile → 把插件 `pnpm add -w` 进 profile 并追加到
+  `dsh.profile.bundles`（bundle 路径自动挂载插件行，无需 patch 层；
+  各包内 `cordis.patch.yml` 仅作 `--patch` 手动挂载的备用通道）。
 - `scripts/dev.sh`：启动 `openwrite studio --port 4567 --project ~/my_novel --no-open`
-  + `dsh web`（或开发期 `pnpm --dir ~/DSH dsh web --patch ...`）。
+  + `dsh web`（导出 `NO_PROXY`，本机探活不被系统代理劫持）。
+- `scripts/verify.sh`：一键集成验证（服务存活、插件装载、代理路由、嵌入皮肤）；
+  `scripts/e2e-web.py`：Playwright 走查面板视图。
 
-### 5. Python 编排器 conductor（`conductor/`，第二阶段）
+### 6. Python 编排器 conductor（`conductor/`，第二阶段）
 
 用 uv 建 Python ≥3.10 环境，装 `deepseek-harness-sdk`（自带单文件 Node 运行时，
 macOS arm64 有 wheel）。职责：无人值守流水线，例如"按大纲连续写 N 章，
@@ -161,12 +181,11 @@ macOS arm64 有 wheel）。职责：无人值守流水线，例如"按大纲连�
 dsh-novel/
 ├── DESIGN.md                  # 本文档
 ├── README.md                  # 使用说明
-├── packages/openwrite-bridge/ # TS 桥接插件（构建产物 lib/）
-├── presets/goethe/            # Goethe 规划 agent 预设
-├── presets/dante/             # Dante 写作 agent 预设
-├── skills/                    # 移植自 OpenWrite 的 SKILL.md 树
-├── overlays/dsh-novel.patch.yml
-├── scripts/install.sh, dev.sh
+├── packages/openwrite-bridge/ # TS 桥接插件：62 个 novel_* 工具
+├── packages/studio-panel/     # dsh web 原生视图插件（9 tab + 评审卡）
+├── presets/goethe/            # Goethe 规划 agent 预设（含自带 skills/）
+├── presets/dante/             # Dante 写作 agent 预设（含自带 skills/）
+├── scripts/install.sh, dev.sh, verify.sh, e2e-web.py
 └── conductor/                 # (二阶段) Python SDK 编排器
 ```
 
