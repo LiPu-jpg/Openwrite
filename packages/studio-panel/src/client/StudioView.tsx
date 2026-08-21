@@ -12,10 +12,13 @@ import css from './StudioView.module.css'
 /**
  * Injected share of the studio view entry: resolve the Studio base URL from
  * the host-side plugin config (same-origin config route; falls back to the
- * schema default when the route is absent).
+ * schema default when the route is absent). `view` pins the iframe to one
+ * Studio function (hash route — application.js routeFromLocation; e.g.
+ * 'chapters', 'review'); undefined boots the dashboard.
  */
 export interface StudioViewInjected {
   resolveStudioUrl: () => Promise<string>
+  view?: string | undefined
 }
 
 /** Full studio-view props: conversation-view runtime share & injected share & locale seat. */
@@ -44,7 +47,7 @@ function currentShellTheme(): ShellTheme {
  * still fire `load` in some browsers, so the error panel is best-effort — the
  * "open in new tab" escape hatch is always visible on failure.
  */
-export function StudioView({ resolveStudioUrl, t }: StudioViewProps) {
+export function StudioView({ resolveStudioUrl, view, t }: StudioViewProps) {
   const [studioUrl, setStudioUrl] = useState<string | null>(null)
   const [frameState, setFrameState] = useState<FrameState>('loading')
   const [reloadKey, setReloadKey] = useState(0)
@@ -74,11 +77,14 @@ export function StudioView({ resolveStudioUrl, t }: StudioViewProps) {
     )
   }, [studioUrl, frameState, shellTheme])
 
-  // The initial theme rides the iframe URL (?embed=dsh&theme=); later changes
-  // go through postMessage so a theme switch never reloads the editor.
+  // The initial theme and pinned Studio view ride the iframe URL
+  // (?embed=dsh&theme=<t>#<view>); later theme changes go through postMessage
+  // so a theme switch never reloads the editor.
   const frameSrc = useMemo(
-    () => (studioUrl === null ? null : `${studioUrl}?embed=dsh&theme=${currentShellTheme()}`),
-    [studioUrl],
+    () => (studioUrl === null
+      ? null
+      : `${studioUrl}?embed=dsh&theme=${currentShellTheme()}${view !== undefined && view !== '' ? `#${view}` : ''}`),
+    [studioUrl, view],
   )
 
   const retry = () => {

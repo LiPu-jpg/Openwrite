@@ -5,7 +5,9 @@ export const NS = 'studio-panel'
 
 /** The studio-panel dictionary key set (the source of truth for both locales). */
 export type StudioPanelKey =
+  | 'view.overview'
   | 'view.studio'
+  | 'view.reviewWs'
   | 'view.outline'
   | 'view.assets'
   | 'view.tasks'
@@ -159,7 +161,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh: Record<StudioPanelKey, string> = {
-  'view.studio': '稿件',
+  'view.overview': '总览',
+  'view.studio': '正文',
+  'view.reviewWs': '审稿',
   'view.outline': '大纲',
   'view.assets': '资产',
   'view.tasks': '任务',
@@ -307,7 +311,9 @@ export const zh: Record<StudioPanelKey, string> = {
 
 /** English dictionary. */
 export const en: Record<StudioPanelKey, string> = {
+  'view.overview': 'Overview',
   'view.studio': 'Manuscript',
+  'view.reviewWs': 'Review',
   'view.outline': 'Outline',
   'view.assets': 'Assets',
   'view.tasks': 'Tasks',

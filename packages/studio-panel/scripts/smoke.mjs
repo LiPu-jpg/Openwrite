@@ -246,13 +246,21 @@ assert.equal(dictionaries[0].dicts.en['graph.kind.faction'], 'Factions')
 const views = registrations.filter(entry => entry.options.name === 'conversation.view')
 assert.deepEqual(
   views.map(entry => [entry.options.id, entry.options.order]),
-  [['studio', 20], ['outline', 21], ['assets', 22], ['tasks', 23], ['graph', 24]],
-  'five conversation.view tabs in order',
+  [['overview', 19], ['studio', 20], ['review-ws', 21], ['outline', 22], ['assets', 23], ['tasks', 24], ['graph', 25]],
+  'seven conversation.view tabs in order',
 )
+// Pinned Studio hash views ride the inject face; the dashboard pin is no hash.
+const injected = Object.fromEntries(views.map(entry => [entry.options.id, entry.options.inject()]))
+assert.equal(injected['overview'].view, undefined)
+assert.equal(injected['studio'].view, 'chapters')
+assert.equal(injected['review-ws'].view, 'review')
 for (const view of views) assert.equal(typeof view.component, 'function')
 const toolviews = registrations.filter(entry => entry.options.name === 'tool.call.toolview')
 assert.deepEqual(toolviews.map(entry => entry.options.key), ['novel_review_chapter'])
 // Locale label thunks resolve through the bound namespace.
-assert.equal(views[3].options.label(), 'view.tasks', 'tasks label thunk reads view.tasks')
+const tasksView = views.find(entry => entry.options.id === 'tasks')
+assert.equal(tasksView.options.label(), 'view.tasks', 'tasks label thunk reads view.tasks')
+const studioView = views.find(entry => entry.options.id === 'studio')
+assert.equal(studioView.options.label(), 'view.studio')
 
 console.log('studio-panel smoke: all assertions passed')

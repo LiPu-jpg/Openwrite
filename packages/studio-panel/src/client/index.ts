@@ -67,18 +67,36 @@ export function apply(ctx: Context): void {
   // re-registration.
   const t = ctx.locale.bind(NS)
   ctx.slots.inject('conversation.view', function* () {
+    // The three pinned-iframe tabs first (Studio hash routing), then the
+    // native data views.
+    yield ctx.slots.register({
+      name: 'conversation.view',
+      id: 'overview',
+      order: 19,
+      locale: NS,
+      label: () => t('view.overview'),
+      inject: (): StudioViewInjected => ({ resolveStudioUrl }),
+    }, StudioView)
     yield ctx.slots.register({
       name: 'conversation.view',
       id: 'studio',
       order: 20,
       locale: NS,
       label: () => t('view.studio'),
-      inject: (): StudioViewInjected => ({ resolveStudioUrl }),
+      inject: (): StudioViewInjected => ({ resolveStudioUrl, view: 'chapters' }),
+    }, StudioView)
+    yield ctx.slots.register({
+      name: 'conversation.view',
+      id: 'review-ws',
+      order: 21,
+      locale: NS,
+      label: () => t('view.reviewWs'),
+      inject: (): StudioViewInjected => ({ resolveStudioUrl, view: 'review' }),
     }, StudioView)
     yield ctx.slots.register({
       name: 'conversation.view',
       id: 'outline',
-      order: 21,
+      order: 22,
       locale: NS,
       label: () => t('view.outline'),
       inject: (): StudioApiInjected => studioApi,
@@ -86,7 +104,7 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({
       name: 'conversation.view',
       id: 'assets',
-      order: 22,
+      order: 23,
       locale: NS,
       label: () => t('view.assets'),
       inject: (): StudioApiInjected => studioApi,
@@ -94,7 +112,7 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({
       name: 'conversation.view',
       id: 'tasks',
-      order: 23,
+      order: 24,
       locale: NS,
       label: () => t('view.tasks'),
       inject: (): StudioApiInjected => studioApi,
@@ -102,7 +120,7 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({
       name: 'conversation.view',
       id: 'graph',
-      order: 24,
+      order: 25,
       locale: NS,
       label: () => t('view.graph'),
       inject: (): StudioApiInjected => studioApi,

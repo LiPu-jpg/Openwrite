@@ -2,11 +2,13 @@
 
 dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会话 UI：
 
-- **稿件**（id `studio`，order 20）：全高度 iframe 内嵌本地 OpenWrite Studio（默认 `http://127.0.0.1:4567`）。
-- **大纲**（id `outline`，order 21）：原生渲染大纲树 —— 卷/篇/节/章层级、kind 徽章、标题、摘要、成稿状态，可折叠，只读。
-- **资产**（id `assets`，order 22）：原生结构化资产库（对应 Studio 左侧导航的「资料库」，可完整替代），Obsidian 式主从布局——左侧栏（288px，独立滚动）：分段切换（角色/设定/进阶体系/参考作品/作品核心，纵向带计数）、搜索框（按名称/ID/类型/别名/标签/摘要过滤）、紧凑条目行（设定段按 asset_type 折叠分组）、底部新建/刷新按钮；右侧主区：详情头（名称/别名/摘要/标签 + 编辑按钮）、双列字段表、索引区（详情引用/忌讳逐行）、关系区（方向/注记/来源片）、正文 MarkdownText 全宽渲染。编辑模式进 AssetEditor（front-matter 字段 + 关系增删 + 正文三模式：**实时**（Vditor IR 即时渲染，运行时从 Studio 源 `${studioUrl}/vendor/vditor/dist/` 按需注入 <script>/<link>，不打包；主题跟随 shell 的 `body[data-ds-dark-theme]`，MutationObserver 实时切换；加载失败回退纯文本 textarea 并提示）/ 编辑（纯 textarea）/ 预览（MarkdownText））；保存走乐观锁 `revision`，409 冲突给「刷新重试」；新建为内联表单（占用主区）。参考作品段（Studio 的 deconstruct 面，**不是**资料库）与作品核心段（`documents.core` + `GET /api/document`）只读。未选中时主区显示选择提示。
-- **任务**（id `tasks`，order 23）：后台任务中心 —— 状态过滤片（运行中/待确认/排队/已中断/失败/已取消/已完成）、类型徽章（写章/评审/连写/修订/风格源/参考库/导入/研究）、phase 进度信号、失败任务的错误消息；每 5s 轮询（页面隐藏时跳过，切换标签卸载即停止），只读（取消/重试留在 agent 工具）。
-- **图谱**（id `graph`，order 24）：原生 SVG 可视化（无图库，小型确定性布局）——伏笔板按 主线/支线/彩蛋 分列、按回收章节排序（节点卡：内容截断 + 权重/回收目标/状态，title 悬浮全文）；关系图用圆形布局，有向弦边带箭头与关系标签（未确认关系虚线，未归档节点空心），带类型过滤片（角色/势力/地点/概念/其他，多选，默认角色+势力，边只在两端点可见时渲染；可见节点 >30 隐藏边标签改悬浮 <title>，>40 节点标签截断到 6 字）。两个面板各有独立空态，分段控件切换，只读。
+- **总览**（id `overview`，order 19）：内嵌 Studio 仪表盘（iframe，无 hash 默认路由）。
+- **正文**（id `studio`，order 20）：内嵌 Studio 章节编辑器（iframe 钉到 `#chapters`）。
+- **审稿**（id `review-ws`，order 21）：内嵌 Studio 审稿工作台（iframe 钉到 `#review`）。
+- **大纲**（id `outline`，order 22）：原生渲染大纲树 —— 卷/篇/节/章层级、kind 徽章、标题、摘要、成稿状态，可折叠，只读。
+- **资产**（id `assets`，order 23）：原生结构化资产库（对应 Studio 左侧导航的「资料库」，可完整替代），Obsidian 式主从布局——左侧栏（288px，独立滚动）：分段切换（角色/设定/进阶体系/参考作品/作品核心，纵向带计数）、搜索框（按名称/ID/类型/别名/标签/摘要过滤）、紧凑条目行（设定段按 asset_type 折叠分组）、底部新建/刷新按钮；右侧主区：详情头（名称/别名/摘要/标签 + 编辑按钮）、双列字段表、索引区（详情引用/忌讳逐行）、关系区（方向/注记/来源片）、正文 MarkdownText 全宽渲染。编辑模式进 AssetEditor（front-matter 字段 + 关系增删 + 正文即 Vditor IR 即时渲染（运行时从 Studio 源 `${studioUrl}/vendor/vditor/dist/` 按需注入 <script>/<link>，不打包；主题跟随 shell 的 `body[data-ds-dark-theme]`，MutationObserver 实时切换；加载失败回退纯文本 textarea 并提示），无独立预览模式）；保存走乐观锁 `revision`，409 冲突给「刷新重试」；新建为内联表单（占用主区）。参考作品段（Studio 的 deconstruct 面，**不是**资料库）与作品核心段（`documents.core` + `GET /api/document`）只读。未选中时主区显示选择提示。
+- **任务**（id `tasks`，order 24）：后台任务中心 —— 状态过滤片（运行中/待确认/排队/已中断/失败/已取消/已完成）、类型徽章（写章/评审/连写/修订/风格源/参考库/导入/研究）、phase 进度信号、失败任务的错误消息；每 5s 轮询（页面隐藏时跳过，切换标签卸载即停止），只读（取消/重试留在 agent 工具）。
+- **图谱**（id `graph`，order 25）：原生 SVG 可视化（无图库，小型确定性布局）——伏笔板按 主线/支线/彩蛋 分列、按回收章节排序（节点卡：内容截断 + 权重/回收目标/状态，title 悬浮全文）；关系图用圆形布局，有向弦边带箭头与关系标签（未确认关系虚线，未归档节点空心），带类型过滤片（角色/势力/地点/概念/其他，多选，默认角色+势力，边只在两端点可见时渲染；可见节点 >30 隐藏边标签改悬浮 <title>，>40 节点标签截断到 6 字）。两个面板各有独立空态，分段控件切换，只读。
 - **novel_review_chapter 评审卡**：`tool.call.toolview` 键控渲染器，把 37 维章节评审 JSON 渲染成报告卡（总分/结论横幅 + 按类别分组的问题列表 + 引用与修改建议），形状异常时回退到美化 JSON。
 
 ## 它是怎么被加载的
@@ -19,7 +21,7 @@ dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会�
   `webServer` 通过 `ctx.inject` 可选等待，因此在无 web server 的 profile（如 headless）里也能正常加载，只是不注册路由。
 - **Client 半边**（`src/client/` → `lib/client.js`）：package.json 里的 `dsh.client` 块（`platform: "web"`）+ `exports["./client"]` 指向构建产物。dsh web 的 client 模块表（`ctx.clientModules`）扫描 host Loader 条目时发现该声明，把 bundle 挂到 `/plugins/@dsh-novel/studio-panel/client.js` 并注入启动图；浏览器半边用 `ctx.slots.inject('conversation.view', function* () { ... })` 等待 ui-conversation 声明槽位后逐个 yield 四个视图注册，并用 `ctx.slots.inject('tool.call.toolview', ...)` 注册评审卡（与 ui-trajectory / bash-sample 同一模式）。
 
-安装走 profile bundle 路径（与 `@dsh-novel/openwrite-bridge` 相同）：`scripts/install.sh` 把本包 `pnpm add -w` 进 `~/.dsh/profiles/web/` 并追加到 `dsh.profile.bundles`；`cordis.patch.yml` 通过 `--patch` 叠加层或 profile 的 `dsh.bundle.patch` 把插件挂进 cordis 配置树。加载后，打开任意会话即可在头部标签栏看到「聊天 / 轨迹 / 稿件 / 大纲 / 资产 / 任务」。
+安装走 profile bundle 路径（与 `@dsh-novel/openwrite-bridge` 相同）：`scripts/install.sh` 把本包 `pnpm add -w` 进 `~/.dsh/profiles/web/` 并追加到 `dsh.profile.bundles`；`cordis.patch.yml` 通过 `--patch` 叠加层或 profile 的 `dsh.bundle.patch` 把插件挂进 cordis 配置树。加载后，打开任意会话即可在头部标签栏看到「聊天 / 轨迹 / 总览 / 正文 / 审稿 / 大纲 / 资产 / 任务 / 图谱」。
 
 ## 数据链路
 
