@@ -167,16 +167,33 @@ novel-reviewer、oh-story-long-write/deslop/review、truth-validation、workflow
 - `scripts/verify.sh`：一键集成验证（服务存活、插件装载、代理路由、嵌入皮肤）；
   `scripts/e2e-web.py`：Playwright 走查面板视图。
 
-### 6. Python 编排器 conductor（`conductor/`，第二阶段）
+### 6. Python 编排器 conductor（`conductor/`，已落地）
 
-用 uv 建 Python ≥3.10 环境，装 `deepseek-harness-sdk`（自带单文件 Node 运行时，
-macOS arm64 有 wheel）。职责：无人值守流水线，例如"按大纲连续写 N 章，
-每章写完自动评审，低于阈值自动回炉"，通过 SDK 起 dante 预设会话驱动。
-注意 SDK 的生产 exe 运行时插件集是编译期内置的，自定义插件需
-`runtime_bin` 指向 dev node 载体——conductor 会用源码/开发载体启动。
+uv 环境 + `deepseek-harness-sdk`（自带单文件 Node 运行时，macOS arm64 有 wheel）。
+无人值守流水线：按大纲连续写章 → 37 维评审 → 低于阈值/含 blocker 自动回炉。
+
+架构要点（v2，实测迭代后的稳定形态）：
+
+- **长操作全部走 OpenWrite 后台任务系统**（POST /api/tasks 提交 chapter_write /
+  chapter_review / revision_from_review，轮询 GET /api/tasks/{id} 的 phase 与
+  result）。同步端点 /api/write、/api/review 把执行期耦合进 HTTP 请求生命周期，
+  客户端超时即孤儿化服务端任务并占住项目写锁——实测长评审（分批审计 + 截断
+  二分重试可达小时级）必翻车，故弃用。托管任务由服务端持有生命周期，
+  预算超时由 conductor 显式 cancel，recoverable 失败走任务原生 retry。
+- **回炉 = 修订闭环**：/api/write 拒绝重写成稿章节（409），改走
+  revision_from_review 任务 → regenerate → apply。客户端先做锚点预过滤
+  （evidence.quote 须在正文中唯一出现，镜像服务端 _resolve_issue_anchor 规则），
+  regenerate 会派生新提案（旧提案转 rejected），应用最新的 proposed 提案。
+- **手稿路径含 arc 段**（data/manuscript/arc_XXX/ch_NNN.md），从 workspace 快照解析。
+- 可选 --agent-guidance：dsh SDK 起 bundled 运行时会话把评审 JSON 综合成改写指导
+  （cordis.yml 为最小组合；无需自定义插件载体——生产 exe 编译期内置插件集，
+  自定义闭包需重建 deploy root，收益不抵成本，刻意不做）。
+
+实测记录（~/my_novel）：ch_001~004 全流程跑通；ch_003 经修订回炉 0 分 → 35 分
+（blocker 人设矛盾被精准修复）；ch_004 评审在当前模型路由下系统性输出截断
+（上游 OpenWrite reviewer 的 bisect 只覆盖部分截断路径），已作为上游问题记录。
 
 ## 目录结构
-
 ```
 dsh-novel/
 ├── DESIGN.md                  # 本文档
@@ -186,7 +203,7 @@ dsh-novel/
 ├── presets/goethe/            # Goethe 规划 agent 预设（含自带 skills/）
 ├── presets/dante/             # Dante 写作 agent 预设（含自带 skills/）
 ├── scripts/install.sh, dev.sh, verify.sh, e2e-web.py
-└── conductor/                 # (二阶段) Python SDK 编排器
+└── conductor/                 # Python 编排器（任务驱动流水线 + SDK 指导会话）
 ```
 
 ## 验证计划

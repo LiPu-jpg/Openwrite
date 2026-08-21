@@ -2,6 +2,13 @@
 
 ## 未发布
 
+- conductor 落地（`conductor/`）：无人值守写章流水线——写章/评审/修订回炉全部
+  走 OpenWrite 后台任务系统（phase 轮询、预算超时显式取消、recoverable 原生
+  retry），回炉经 revision_from_review → regenerate → apply 修订闭环（含客户端
+  锚点预过滤）；可选 --agent-guidance 用 dsh SDK bundled 会话综合改写指导。
+  同步端点 /api/write、/api/review 因孤儿化服务端任务被弃用于编排路径
+- 新增 --review-only（对成稿章节只跑评审门）；实测 ch_001~004 全流程，
+  ch_003 修订回炉 0 → 35 分
 - 根目录 `skills/` 移除：技能唯一来源是 `presets/*/skills/`（内容相同，根副本无任何引用）
 - `scripts/verify.sh` / `dev.sh` 导出 `NO_PROXY`：系统代理指向本机时
   （HTTP_PROXY=127.0.0.1:*），探活与验证请求不再被代理劫持而全部误报失败

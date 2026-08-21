@@ -25,6 +25,9 @@ check "client bundle"      "window.__ModuleLoader__"   "$(curl -s -m 5 "$DSH/plu
 check "config 路由"        '"studioUrl"'               "$(curl -s -m 5 "$DSH/studio-panel/config.json")"
 
 check "代理 outline"       '"roots"'                   "$(curl -s -m 5 "$DSH/studio-panel/api/outline" | head -c 400)"
+check "代理 tasks"         '"tasks"'                   "$(curl -s -m 5 "$DSH/studio-panel/api/tasks" | head -c 400)"
+check "代理 research"      '"available"'               "$(curl -s -m 5 "$DSH/studio-panel/api/research" | head -c 400)"
+check "代理 search"        '"results"'                 "$(curl -s -m 5 "$DSH/studio-panel/api/search?q=%E4%BC%B6%E8%88%9F&limit=3" | head -c 400)"
 check "代理 assets"        '"assets"'                  "$(curl -s -m 5 "$DSH/studio-panel/api/assets" | head -c 400)"
 
 check "index 引用皮肤"     "embed-dsh.css"             "$(curl -s -m 5 "$STUDIO/" | grep -o 'embed-dsh.css')"
