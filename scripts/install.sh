@@ -7,7 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BRIDGE="$ROOT/packages/openwrite-bridge"
 PANEL="$ROOT/packages/studio-panel"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
-DSH=(npx -y @deepseek-ai/dsh)
+# dsh 装在项目内（devDependency，pin 版本）；不走 npx——npx 的缓存自旋过
+DSH=("$ROOT/node_modules/.bin/dsh")
 
 echo "==> 1/5 构建 openwrite-bridge 插件"
 (cd "$BRIDGE" && npm install --no-audit --no-fund && npm run build)

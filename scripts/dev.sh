@@ -16,6 +16,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # OpenWrite 运行时（Python >= 3.10，用 uv 隔离在仓库内 .venv）
+export NO_PROXY="127.0.0.1,localhost"
 if [[ ! -x "$VENV/bin/openwrite" ]]; then
   echo "==> 首次运行，创建 OpenWrite 运行时（uv venv + editable install）"
   uv venv "$VENV" --python 3.12
@@ -36,4 +37,4 @@ for _ in $(seq 1 30); do
 done
 
 echo "==> 启动 dsh web: http://127.0.0.1:3080"
-exec npx -y @deepseek-ai/dsh web
+exec "$ROOT/node_modules/.bin/dsh" web

@@ -9,5 +9,8 @@
     "install-dsh": "bash scripts/install.sh",
     "dev": "bash scripts/dev.sh"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@deepseek-ai/dsh": "^0.1.0-rc.7"
+  }
 }

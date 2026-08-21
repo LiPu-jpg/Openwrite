@@ -4,7 +4,7 @@ import pathlib
 from playwright.sync_api import sync_playwright
 
 OUT = pathlib.Path("/tmp/dsh-e2e")
-
+OUT.mkdir(parents=True, exist_ok=True)
 with sync_playwright() as p:
     browser = p.chromium.launch(channel="chrome", headless=True)
     page = browser.new_page(viewport={"width": 1600, "height": 1000})
