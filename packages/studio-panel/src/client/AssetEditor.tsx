@@ -20,7 +20,6 @@
  */
 
 import { useEffect, useState } from 'react'
-import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { VditorBody, VditorLoading } from './VditorBody.tsx'
 import css from './views.module.css'
@@ -89,6 +88,38 @@ function listLabel(key: string, t: TFunc): string {
   }
 }
 
+/**
+ * Localized label for any front-matter field key (edit form + read field
+ * table). List-typed keys delegate to the 索引 labels; unmapped keys fall
+ * back to the raw key — unknown fields are never hidden.
+ */
+export function fieldLabel(key: string, t: TFunc): string {
+  switch (key) {
+    case 'detail_refs':
+    case 'taboos':
+      return listLabel(key, t)
+    case 'tier':
+    case 'personality':
+    case 'goal':
+    case 'fear':
+    case 'appearance':
+    case 'voice':
+    case 'current_state':
+    case 'organization':
+    case 'progression_system':
+    case 'progression_stage':
+    case 'status':
+    case 'kind':
+    case 'type':
+    case 'subtype':
+    case 'state_updated_at':
+    case 'role':
+      return t(`assets.field.${key}`)
+    default:
+      return key
+  }
+}
+
 /** Scalar keys always shown even when absent from the current front matter. */
 const ALWAYS_SCALARS: Record<string, readonly string[]> = {
   character: ['tier', 'personality', 'goal', 'current_state'],
@@ -130,20 +161,19 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
   const [newTarget, setNewTarget] = useState('')
   const [newNote, setNewNote] = useState('')
   const [bodyDraft, setBodyDraft] = useState(source.body)
-  const [bodyMode, setBodyMode] = useState<'live' | 'edit' | 'preview'>('live')
-  /** Studio origin for the Vditor asset load; resolved lazily on first live-mode mount. */
+  /** Studio origin for the Vditor asset load; resolved lazily on mount. */
   const [studioUrl, setStudioUrl] = useState<string | null>(null)
-  /** True after the Vditor script failed — 实时 disables and edit mode shows a notice. */
+  /** True after the Vditor script failed — the body falls back to a textarea with a notice. */
   const [liveFailed, setLiveFailed] = useState(false)
 
   useEffect(() => {
-    if (bodyMode !== 'live' || studioUrl !== null || liveFailed) return
+    if (studioUrl !== null || liveFailed) return
     let cancelled = false
     void resolveStudioUrl().then((url) => {
       if (!cancelled) setStudioUrl(url)
     })
     return () => { cancelled = true }
-  }, [bodyMode, studioUrl, liveFailed, resolveStudioUrl])
+  }, [studioUrl, liveFailed, resolveStudioUrl])
 
   const scalarKeys = Object.keys(scalars)
   const save = () => {
@@ -180,7 +210,7 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
       </label>
       <label className={css.editorRow}>
         <span className={css.editorLabel}>{t('assets.edit.summary')}</span>
-        <textarea className={css.textarea} rows={3} value={summary} onChange={event => { setSummary(event.target.value) }} disabled={saving} />
+        <textarea className={css.textarea} rows={2} value={summary} onChange={event => { setSummary(event.target.value) }} disabled={saving} />
       </label>
       <label className={css.editorRow}>
         <span className={css.editorLabel}>{t('assets.aliases')}</span>
@@ -192,10 +222,11 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
       </label>
       {scalarKeys.map(key => (
         <label key={key} className={css.editorRow}>
-          <span className={css.editorLabel}>{key}</span>
+          <span className={css.editorLabel}>{fieldLabel(key, t)}</span>
           <input
             className={css.input}
             value={scalars[key] ?? ''}
+            placeholder={(scalars[key] ?? '') === '' ? t('assets.edit.optional') : undefined}
             onChange={event => { setScalars(previous => ({ ...previous, [key]: event.target.value })) }}
             disabled={saving}
           />
@@ -203,7 +234,7 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
       ))}
       {Object.keys(listsText).map(key => (
         <label key={key} className={css.editorRow}>
-          <span className={css.editorLabel}>{listLabel(key, t)}</span>
+          <span className={css.editorLabel}>{fieldLabel(key, t)}</span>
           <textarea
             className={css.textarea}
             rows={Math.max(2, splitLines(listsText[key] ?? '').length + 1)}
@@ -311,55 +342,12 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
       <div className={css.editorRow}>
         <span className={css.editorLabel}>{t('assets.edit.body')}</span>
         <div className={css.bodyEditor}>
-          <div className={css.bodyToggleRow} role="group" aria-label={t('assets.edit.body')}>
-            <button
-              type="button"
-              className={css.chip}
-              data-active={bodyMode === 'live'}
-              onClick={() => { setBodyMode('live') }}
-              disabled={saving || liveFailed}
-              title={liveFailed ? t('assets.edit.liveFailed') : undefined}
-            >
-              {t('assets.edit.mode.live')}
-            </button>
-            <button
-              type="button"
-              className={css.chip}
-              data-active={bodyMode === 'edit'}
-              onClick={() => { setBodyMode('edit') }}
-              disabled={saving}
-            >
-              {t('assets.edit.mode.edit')}
-            </button>
-            <button
-              type="button"
-              className={css.chip}
-              data-active={bodyMode === 'preview'}
-              onClick={() => { setBodyMode('preview') }}
-              disabled={saving}
-            >
-              {t('assets.edit.mode.preview')}
-            </button>
-          </div>
-          {bodyMode === 'live' && (
-            studioUrl === null
-              ? <VditorLoading t={t} />
-              : (
-                <VditorBody
-                  initial={bodyDraft}
-                  studioUrl={studioUrl}
-                  disabled={saving}
-                  onChange={setBodyDraft}
-                  onFailed={() => {
-                    setLiveFailed(true)
-                    setBodyMode('edit')
-                  }}
-                />
-              )
-          )}
-          {bodyMode === 'edit' && (
+          {/* The body edits in Vditor IR (实时渲染) — editing and rendered
+              output are one pane, so there is no separate preview mode. The
+              plain textarea is the load-failure fallback, with notice. */}
+          {liveFailed && (
             <>
-              {liveFailed && <div className={css.detailNotice}>{t('assets.edit.liveFailed')}</div>}
+              <div className={css.detailNotice}>{t('assets.edit.liveFailed')}</div>
               <textarea
                 className={css.textarea}
                 rows={10}
@@ -369,12 +357,15 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
               />
             </>
           )}
-          {bodyMode === 'preview' && (
-            <div className={css.detailBody}>
-              {bodyDraft.trim() === ''
-                ? <span className={css.detailNotice}>{t('assets.edit.bodyEmpty')}</span>
-                : <MarkdownText text={bodyDraft} />}
-            </div>
+          {!liveFailed && studioUrl === null && <VditorLoading t={t} />}
+          {!liveFailed && studioUrl !== null && (
+            <VditorBody
+              initial={bodyDraft}
+              studioUrl={studioUrl}
+              disabled={saving}
+              onChange={setBodyDraft}
+              onFailed={() => { setLiveFailed(true) }}
+            />
           )}
         </div>
       </div>

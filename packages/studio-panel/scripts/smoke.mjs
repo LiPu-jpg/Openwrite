@@ -224,10 +224,14 @@ assert.equal(dictionaries[0].dicts.zh['assets.edit.conflictRefresh'], '刷新重
 assert.equal(dictionaries[0].dicts.zh['assets.create.open'], '新建')
 assert.equal(dictionaries[0].dicts.en['assets.create.open'], 'New')
 assert.equal(dictionaries[0].dicts.zh['assets.edit.derivedRelations'].includes('派生关系'), true)
-assert.equal(dictionaries[0].dicts.zh['assets.edit.mode.preview'], '预览')
-assert.equal(dictionaries[0].dicts.en['assets.edit.mode.preview'], 'Preview')
-assert.equal(dictionaries[0].dicts.zh['assets.edit.mode.live'], '实时')
-assert.equal(dictionaries[0].dicts.en['assets.edit.mode.live'], 'Live')
+// Body edit is Vditor IR only — the mode chips are gone, the keys with them.
+assert.equal(dictionaries[0].dicts.zh['assets.edit.mode.preview'], undefined)
+assert.equal(dictionaries[0].dicts.zh['assets.edit.mode.live'], undefined)
+// Localized field labels + hidden-field handling.
+assert.equal(dictionaries[0].dicts.zh['assets.field.tier'], '位阶')
+assert.equal(dictionaries[0].dicts.en['assets.field.tier'], 'Tier')
+assert.equal(dictionaries[0].dicts.zh['assets.field.current_state'], '当前状态')
+assert.equal(dictionaries[0].dicts.zh['assets.edit.optional'], '选填')
 assert.equal(dictionaries[0].dicts.zh['assets.selectHint'].includes('左侧'), true)
 assert.equal(dictionaries[0].dicts.zh['assets.detail.index'], '索引')
 assert.equal(dictionaries[0].dicts.zh['assets.list.taboos'], '忌讳')

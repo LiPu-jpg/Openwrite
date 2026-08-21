@@ -58,12 +58,25 @@ export type StudioPanelKey =
   | 'assets.edit.relationNote'
   | 'assets.edit.derivedRelations'
   | 'assets.edit.body'
-  | 'assets.edit.mode.edit'
-  | 'assets.edit.mode.preview'
-  | 'assets.edit.mode.live'
   | 'assets.edit.liveLoading'
+  | 'assets.edit.optional'
+  | 'assets.field.tier'
+  | 'assets.field.personality'
+  | 'assets.field.goal'
+  | 'assets.field.fear'
+  | 'assets.field.appearance'
+  | 'assets.field.voice'
+  | 'assets.field.current_state'
+  | 'assets.field.organization'
+  | 'assets.field.progression_system'
+  | 'assets.field.progression_stage'
+  | 'assets.field.status'
+  | 'assets.field.kind'
+  | 'assets.field.type'
+  | 'assets.field.subtype'
+  | 'assets.field.state_updated_at'
+  | 'assets.field.role'
   | 'assets.edit.liveFailed'
-  | 'assets.edit.bodyEmpty'
   | 'assets.selectHint'
   | 'assets.create.open'
   | 'assets.create.submit'
@@ -199,12 +212,25 @@ export const zh: Record<StudioPanelKey, string> = {
   'assets.edit.relationNote': '关系说明',
   'assets.edit.derivedRelations': '派生关系（只读；请在对方资产上编辑）',
   'assets.edit.body': '正文',
-  'assets.edit.mode.edit': '编辑',
-  'assets.edit.mode.preview': '预览',
-  'assets.edit.mode.live': '实时',
   'assets.edit.liveLoading': '正在加载实时编辑器…',
+  'assets.edit.optional': '选填',
+  'assets.field.tier': '位阶',
+  'assets.field.personality': '性格',
+  'assets.field.goal': '目标',
+  'assets.field.fear': '恐惧',
+  'assets.field.appearance': '外貌',
+  'assets.field.voice': '说话风格',
+  'assets.field.current_state': '当前状态',
+  'assets.field.organization': '所属组织',
+  'assets.field.progression_system': '进阶体系',
+  'assets.field.progression_stage': '进阶阶段',
+  'assets.field.status': '状态',
+  'assets.field.kind': '类型',
+  'assets.field.type': '类型',
+  'assets.field.subtype': '子类型',
+  'assets.field.state_updated_at': '状态更新时间',
+  'assets.field.role': '角色定位',
   'assets.edit.liveFailed': '实时编辑器加载失败，已回退到纯文本编辑。',
-  'assets.edit.bodyEmpty': '正文为空，没有可预览的内容。',
   'assets.selectHint': '选择左侧的条目查看或编辑。',
   'assets.create.open': '新建',
   'assets.create.submit': '创建',
@@ -334,12 +360,25 @@ export const en: Record<StudioPanelKey, string> = {
   'assets.edit.relationNote': 'Relation note',
   'assets.edit.derivedRelations': 'Derived relations (read-only; edit them on the owning asset)',
   'assets.edit.body': 'Body',
-  'assets.edit.mode.edit': 'Edit',
-  'assets.edit.mode.preview': 'Preview',
-  'assets.edit.mode.live': 'Live',
   'assets.edit.liveLoading': 'Loading the live editor…',
+  'assets.edit.optional': 'Optional',
+  'assets.field.tier': 'Tier',
+  'assets.field.personality': 'Personality',
+  'assets.field.goal': 'Goal',
+  'assets.field.fear': 'Fear',
+  'assets.field.appearance': 'Appearance',
+  'assets.field.voice': 'Voice',
+  'assets.field.current_state': 'Current state',
+  'assets.field.organization': 'Organization',
+  'assets.field.progression_system': 'Progression system',
+  'assets.field.progression_stage': 'Progression stage',
+  'assets.field.status': 'Status',
+  'assets.field.kind': 'Kind',
+  'assets.field.type': 'Type',
+  'assets.field.subtype': 'Subtype',
+  'assets.field.state_updated_at': 'State updated at',
+  'assets.field.role': 'Role',
   'assets.edit.liveFailed': 'The live editor failed to load; fell back to plain text editing.',
-  'assets.edit.bodyEmpty': 'The body is empty — nothing to preview.',
   'assets.selectHint': 'Select an entry on the left to view or edit.',
   'assets.create.open': 'New',
   'assets.create.submit': 'Create',

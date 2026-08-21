@@ -339,8 +339,8 @@
 /* --- asset detail (main pane) --- */
 
 .detailHeader {
-  margin-bottom: 12px;
-  padding-bottom: 12px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--dsw-alias-border-l);
 }
 
@@ -380,17 +380,17 @@
 }
 
 .detailHeading {
-  margin: 10px 0 6px;
+  margin: 6px 0 4px;
   font-size: 12px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
 
 .fieldList {
-  margin: 10px 0 0;
+  margin: 6px 0 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px 24px;
+  gap: 2px 20px;
   width: 100%;
   text-align: left;
 }
@@ -399,7 +399,7 @@
   display: flex;
   gap: 10px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.5;
   text-align: left;
 }
 
@@ -420,11 +420,11 @@
 }
 
 .relationBlock {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .listBlock {
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 .listBlockLabel {
@@ -433,10 +433,10 @@
 }
 
 .listBlockItems {
-  margin: 2px 0 0;
+  margin: 0;
   padding-left: 18px;
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.5;
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -512,7 +512,7 @@
 }
 
 .detailBody {
-  margin-top: 10px;
+  margin-top: 8px;
   padding: 10px 12px;
   border-radius: 6px;
   background: var(--dsw-alias-bg-layer-2);
@@ -541,8 +541,8 @@
 }
 
 .createPanel {
-  margin-bottom: 14px;
-  padding: 12px;
+  margin-bottom: 0;
+  padding: 10px 12px;
   border: 1px solid var(--dsw-alias-border-l);
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-2);
@@ -550,8 +550,8 @@
 
 .editor {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 6px;
+  padding: 10px 12px;
   border-top: 1px solid var(--dsw-alias-border-l);
   text-align: left;
 }
@@ -660,7 +660,7 @@
 .relationEditor {
   flex: 1 1 auto;
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .relationRow {
@@ -725,14 +725,6 @@
   gap: 6px;
 }
 
-.bodyToggleRow {
-  display: flex;
-  gap: 2px;
-}
-
-.bodyToggleRow .chip {
-  margin-right: 0;
-}
 
 /* Vditor (IR live editor) mounts here; its own stylesheet arrives from the
    Studio origin. We only frame the host. */

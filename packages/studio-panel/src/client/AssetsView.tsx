@@ -32,7 +32,7 @@ import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { StudioApiError, type StudioApiInjected } from './api.ts'
-import { AssetEditor, NewAssetForm, type RelationDraft } from './AssetEditor.tsx'
+import { AssetEditor, fieldLabel, NewAssetForm, type RelationDraft } from './AssetEditor.tsx'
 import css from './views.module.css'
 
 /** One asset summary (the fields this view reads; the payload carries more). */
@@ -114,8 +114,18 @@ const SEGMENTS: readonly Segment[] = ['characters', 'world', 'progression', 'ref
 
 /** Front-matter keys the editor owns (excluded from the read-only field list). */
 const EDITOR_OWNED_FIELDS = new Set(['id', 'name', 'summary', 'aliases', 'tags', 'related'])
-/** Server-managed keys rendered read-only. */
-const READONLY_FIELDS = new Set(['state_updated_at'])
+/**
+ * Server-managed or non-writable keys rendered read-only. `role` is NOT in
+ * the server's CHARACTER_FIELDS/WORLD_FIELDS write whitelist — editing it
+ * would silently no-op, so it displays read-only.
+ */
+const READONLY_FIELDS = new Set(['state_updated_at', 'role'])
+/**
+ * Internal noise hidden entirely (neither read nor edit): `title` duplicates
+ * 名称 (name), `source` is creation provenance. Neither is in the server's
+ * write whitelists, so hiding drops nothing saveable.
+ */
+const HIDDEN_FIELDS = new Set(['title', 'source'])
 /**
  * List-typed whitelist keys (structured_assets.py: CHARACTER_FIELDS has
  * taboos/detail_refs, WORLD_FIELDS has detail_refs) rendered as proper list
@@ -246,7 +256,7 @@ function parseAssetDetail(data: unknown): AssetDetail {
   const fields: { key: string; value: string }[] = []
   const lists: { key: string; items: string[] }[] = []
   for (const [key, value] of Object.entries(frontMatter)) {
-    if (EDITOR_OWNED_FIELDS.has(key)) continue
+    if (EDITOR_OWNED_FIELDS.has(key) || HIDDEN_FIELDS.has(key)) continue
     if (LIST_FIELDS.has(key)) {
       // One row per entry; non-string entries keep a readable JSON form.
       const items = (Array.isArray(value) ? value : [])
@@ -460,15 +470,6 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
   const relationOriginLabel = (item: RelationItem): string => {
     if (item.direction === 'incoming') return t('assets.relation.incoming')
     return item.origin === 'annotation' ? t('assets.relation.registered') : t('assets.relation.confirmed')
-  }
-
-  /** Localized label for a list-typed whitelist field (raw key as fallback). */
-  const listLabel = (key: string): string => {
-    switch (key) {
-      case 'detail_refs': return t('assets.list.detail_refs')
-      case 'taboos': return t('assets.list.taboos')
-      default: return key
-    }
   }
 
   const segmentCount = (which: Segment): number => {
@@ -690,22 +691,30 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
             </div>
           )}
         </div>
-        {detail.fields.length > 0 && (
-          <dl className={css.fieldList}>
-            {detail.fields.map(field => (
-              <div key={field.key} className={css.fieldRow}>
-                <dt className={css.fieldKey}>{field.key}</dt>
-                <dd className={css.fieldValue}>{field.value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
+        {(() => {
+          // Read table: non-empty scalars + read-only leftovers, all with
+          // localized labels; empty fields are hidden entirely.
+          const readFields = [
+            ...detail.scalars.filter(field => field.value !== ''),
+            ...detail.fields,
+          ]
+          return readFields.length > 0 && (
+            <dl className={css.fieldList}>
+              {readFields.map(field => (
+                <div key={field.key} className={css.fieldRow}>
+                  <dt className={css.fieldKey}>{fieldLabel(field.key, t)}</dt>
+                  <dd className={css.fieldValue}>{field.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )
+        })()}
         {detail.lists.length > 0 && (
           <div className={css.relationBlock}>
             <div className={css.detailHeading}>{t('assets.detail.index')}</div>
             {detail.lists.map(list => (
               <div key={list.key} className={css.listBlock}>
-                <div className={css.listBlockLabel}>{listLabel(list.key)}</div>
+                <div className={css.listBlockLabel}>{fieldLabel(list.key, t)}</div>
                 <ul className={css.listBlockItems}>
                   {list.items.map((item, index) => <li key={index}>{item}</li>)}
                 </ul>
