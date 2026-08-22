@@ -129,13 +129,17 @@ const ALWAYS_SCALARS: Record<string, readonly string[]> = {
 
 interface AssetEditorProps {
   kind: string
-  /** Current values from the freshly loaded detail (remount on revision change resets the draft). */
+  /** Current values from the freshly loaded detail (remount on epoch change resets the draft). */
   source: AssetEditorSource
   candidates: readonly RelationCandidate[]
   saving: boolean
   saveError: string | null
   conflict: boolean
   onSave: (data: Record<string, unknown>, bodyMarkdown: string) => void
+  /** Single-field autosave on blur (Obsidian-style): AssetsView owns the revision chain. */
+  onFieldSave: (field: string, value: unknown) => void
+  /** The field key whose single-field save is in flight (input stays interactive otherwise). */
+  fieldBusy: string | null
   onCancel: () => void
   onRefresh: () => void
   /** Resolve the Studio base URL (Vditor assets load from that origin). */
@@ -144,7 +148,7 @@ interface AssetEditorProps {
 }
 
 /** Read-write editor over one asset's allowed front-matter fields. */
-export function AssetEditor({ kind, source, candidates, saving, saveError, conflict, onSave, onCancel, onRefresh, resolveStudioUrl, t }: AssetEditorProps) {
+export function AssetEditor({ kind, source, candidates, saving, saveError, conflict, onSave, onFieldSave, fieldBusy, onCancel, onRefresh, resolveStudioUrl, t }: AssetEditorProps) {
   const [name, setName] = useState(source.name)
   const [summary, setSummary] = useState(source.summary)
   const [aliasesText, setAliasesText] = useState(source.aliases.join('、'))
@@ -176,6 +180,16 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
   }, [studioUrl, liveFailed, resolveStudioUrl])
 
   const scalarKeys = Object.keys(scalars)
+
+  /**
+   * Blur-commit one field when it drifted from the loaded detail. Single-key
+   * merge on the wire; AssetsView owns the revision chain and conflict UX.
+   */
+  const commitField = (field: string, value: unknown) => {
+    if (fieldBusy === field || saving) return
+    onFieldSave(field, value)
+  }
+
   const save = () => {
     const data: Record<string, unknown> = {
       name: name.trim(),
@@ -206,19 +220,27 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
     <div className={css.editor}>
       <label className={css.editorRow}>
         <span className={css.editorLabel}>{t('assets.edit.name')}</span>
-        <input className={css.input} value={name} onChange={event => { setName(event.target.value) }} disabled={saving} />
+        <input className={css.input} value={name} onChange={event => { setName(event.target.value) }}
+          onBlur={() => { if (name.trim() !== '' && name !== source.name) commitField('name', name.trim()) }}
+          disabled={saving || fieldBusy === 'name'} />
       </label>
       <label className={css.editorRow}>
         <span className={css.editorLabel}>{t('assets.edit.summary')}</span>
-        <textarea className={css.textarea} rows={2} value={summary} onChange={event => { setSummary(event.target.value) }} disabled={saving} />
+        <textarea className={css.textarea} rows={2} value={summary} onChange={event => { setSummary(event.target.value) }}
+          onBlur={() => { if (summary !== source.summary) commitField('summary', summary) }}
+          disabled={saving || fieldBusy === 'summary'} />
       </label>
       <label className={css.editorRow}>
         <span className={css.editorLabel}>{t('assets.aliases')}</span>
-        <input className={css.input} value={aliasesText} placeholder={t('assets.edit.listHint')} onChange={event => { setAliasesText(event.target.value) }} disabled={saving} />
+        <input className={css.input} value={aliasesText} placeholder={t('assets.edit.listHint')} onChange={event => { setAliasesText(event.target.value) }}
+          onBlur={() => { if (splitList(aliasesText).join('、') !== source.aliases.join('、')) commitField('aliases', splitList(aliasesText)) }}
+          disabled={saving || fieldBusy === 'aliases'} />
       </label>
       <label className={css.editorRow}>
         <span className={css.editorLabel}>{t('assets.edit.tags')}</span>
-        <input className={css.input} value={tagsText} placeholder={t('assets.edit.listHint')} onChange={event => { setTagsText(event.target.value) }} disabled={saving} />
+        <input className={css.input} value={tagsText} placeholder={t('assets.edit.listHint')} onChange={event => { setTagsText(event.target.value) }}
+          onBlur={() => { if (splitList(tagsText).join('、') !== source.tags.join('、')) commitField('tags', splitList(tagsText)) }}
+          disabled={saving || fieldBusy === 'tags'} />
       </label>
       {scalarKeys.map(key => (
         <label key={key} className={css.editorRow}>
@@ -228,7 +250,11 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
             value={scalars[key] ?? ''}
             placeholder={(scalars[key] ?? '') === '' ? t('assets.edit.optional') : undefined}
             onChange={event => { setScalars(previous => ({ ...previous, [key]: event.target.value })) }}
-            disabled={saving}
+            onBlur={() => {
+              const baseline = source.scalars.find(item => item.key === key)?.value ?? ''
+              if ((scalars[key] ?? '') !== baseline) commitField(key, scalars[key] ?? '')
+            }}
+            disabled={saving || fieldBusy === key}
           />
         </label>
       ))}
@@ -241,7 +267,11 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
             value={listsText[key] ?? ''}
             placeholder={t('assets.edit.linesHint')}
             onChange={event => { setListsText(previous => ({ ...previous, [key]: event.target.value })) }}
-            disabled={saving}
+            onBlur={() => {
+              const baseline = source.lists.find(item => item.key === key)?.items.join('\n') ?? ''
+              if ((listsText[key] ?? '') !== baseline) commitField(key, splitLines(listsText[key] ?? ''))
+            }}
+            disabled={saving || fieldBusy === key}
           />
         </label>
       ))}

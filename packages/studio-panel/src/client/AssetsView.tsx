@@ -336,6 +336,12 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
   const [documents, setDocuments] = useState<ReadonlyMap<string, DocState>>(new Map())
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<{ message: string; conflict: boolean } | null>(null)
+  /** Optimistic-lock revision for the currently edited asset (chained across field autosaves). */
+  const revisionRef = useRef('')
+  /** Bumped only on conflict-refetch/cancel so the editor remounts with server truth. */
+  const [draftEpoch, setDraftEpoch] = useState(0)
+  /** Field key with an in-flight single-field autosave. */
+  const [fieldBusy, setFieldBusy] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -368,12 +374,15 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
 
   useEffect(() => load(), [load])
 
-  const fetchDetail = useCallback((asset: AssetSummary) => {
+  const fetchDetail = useCallback((asset: AssetSummary, resetDraft = false) => {
+    if (resetDraft) setDraftEpoch(previous => previous + 1)
     const key = `${asset.kind}:${asset.id}`
     setDetails(previous => new Map(previous).set(key, { status: 'loading' }))
     fetchStudioApi(`/assets/${asset.kind}/${encodeURIComponent(asset.id)}`)
       .then((data) => {
-        setDetails(previous => new Map(previous).set(key, { status: 'ready', detail: parseAssetDetail(data) }))
+        const parsedDetail = parseAssetDetail(data)
+        if (parsedDetail.revision !== '') revisionRef.current = parsedDetail.revision
+        setDetails(previous => new Map(previous).set(key, { status: 'ready', detail: parsedDetail }))
       })
       .catch((cause: unknown) => {
         setDetails(previous => new Map(previous).set(key, {
@@ -411,6 +420,46 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
       })
   }
 
+  /**
+   * Single-field autosave (Obsidian-style): one-key merge on the wire, the
+   * response's fresh revision silently re-arms the lock. Conflict → banner +
+   * draft-reset refetch (the editor remounts with server truth).
+   */
+  const saveField = (asset: AssetSummary, field: string, value: unknown) => {
+    const key = `${asset.kind}:${asset.id}`
+    const entry = details.get(key)
+    if (entry?.status !== 'ready') return
+    if (fieldBusy !== null) return
+    setFieldBusy(field)
+    setSaveError(null)
+    postStudioApi('/assets/update', {
+      kind: asset.kind,
+      id: asset.id,
+      revision: revisionRef.current || entry.detail.revision,
+      data: { [field]: value },
+    })
+      .then((data) => {
+        setFieldBusy(null)
+        const record = (data !== null && typeof data === 'object' ? data : {}) as { asset?: { revision?: unknown } }
+        const nextRevision = typeof record.asset?.revision === 'string' ? record.asset.revision : null
+        if (nextRevision !== null) revisionRef.current = nextRevision
+        setDetails(previous => {
+          const current = previous.get(key)
+          if (current?.status !== 'ready') return previous
+          return new Map(previous).set(key, {
+            ...current,
+            detail: { ...current.detail, revision: nextRevision ?? current.detail.revision },
+          })
+        })
+      })
+      .catch((cause: unknown) => {
+        setFieldBusy(null)
+        const conflict = cause instanceof StudioApiError && cause.status === 409
+        setSaveError({ message: cause instanceof Error ? cause.message : String(cause), conflict })
+        if (conflict) fetchDetail(asset, true)
+      })
+  }
+
   /** Save one editor draft: revision-locked update, then refresh detail + list. */
   const saveAsset = (asset: AssetSummary, data: Record<string, unknown>, bodyMarkdown: string) => {
     const key = `${asset.kind}:${asset.id}`
@@ -421,7 +470,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
     postStudioApi('/assets/update', {
       kind: asset.kind,
       id: asset.id,
-      revision: entry.detail.revision,
+      revision: revisionRef.current || entry.detail.revision,
       data,
       body_markdown: bodyMarkdown,
     })
@@ -433,10 +482,12 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
       })
       .catch((cause: unknown) => {
         setSaving(false)
+        const conflict = cause instanceof StudioApiError && cause.status === 409
         setSaveError({
           message: cause instanceof Error ? cause.message : String(cause),
-          conflict: cause instanceof StudioApiError && cause.status === 409,
+          conflict,
         })
+        if (conflict) fetchDetail(asset, true)
       })
   }
 
@@ -625,8 +676,9 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
     if (editableKind) {
       return (
         <AssetEditor
-          // Remount on revision change: a post-conflict refresh rebuilds the draft honestly.
-          key={`${key}:${detail.revision}`}
+          // Remount only on draft-epoch change (conflict/cancel refetch):
+          // field autosaves chain revisions WITHOUT resetting the other drafts.
+          key={`${key}:${draftEpoch}`}
           kind={asset.kind}
           source={{
             ...detail,
@@ -641,14 +693,16 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
           saveError={saveError?.message ?? null}
           conflict={saveError?.conflict === true}
           onSave={(data, bodyMarkdown) => { saveAsset(asset, data, bodyMarkdown) }}
+          onFieldSave={(field, value) => { saveField(asset, field, value) }}
+          fieldBusy={fieldBusy}
           onCancel={() => {
-            // 无只读卡片可回退：取消=放弃本地草稿，重取服务端真值重建。
+            // 取消=放弃本地草稿：epoch 重挂以服务端真值诚实重建。
             setSaveError(null)
-            fetchDetail(asset)
+            fetchDetail(asset, true)
           }}
           onRefresh={() => {
             setSaveError(null)
-            fetchDetail(asset)
+            fetchDetail(asset, true)
           }}
           resolveStudioUrl={resolveStudioUrl}
           t={t}
