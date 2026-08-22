@@ -24,19 +24,15 @@ export type StudioPanelKey =
   | 'outline.drafted'
   | 'outline.planned'
   | 'outline.draftedCount'
-  | 'outline.rename'
-  | 'outline.editSummary'
   | 'outline.addChild'
   | 'outline.addAfter'
   | 'outline.addVolume'
   | 'outline.del'
-  | 'outline.save'
-  | 'outline.cancel'
   | 'outline.confirmDelete'
   | 'outline.newTitlePlaceholder'
-  | 'outline.summaryHint'
   | 'outline.opConflict'
   | 'outline.opFailed'
+  | 'outline.summaryEmpty'
   | 'assets.empty'
   | 'assets.other'
   | 'assets.stages'
@@ -224,19 +220,15 @@ export const zh: Record<StudioPanelKey, string> = {
   'outline.drafted': '已成稿',
   'outline.planned': '待写',
   'outline.draftedCount': '已成稿章节',
-  'outline.rename': '重命名',
-  'outline.editSummary': '内容',
   'outline.addChild': '新增下级',
   'outline.addAfter': '新增同级',
   'outline.addVolume': '新增卷',
   'outline.del': '删',
-  'outline.save': '保存',
-  'outline.cancel': '取消',
   'outline.confirmDelete': '确认删除以下节点及其全部下级：',
   'outline.newTitlePlaceholder': '新标题（章需含章节号，如“第12章：转折”）',
-  'outline.summaryHint': '本章内容（大纲正文块）…',
   'outline.opConflict': '大纲已在其他位置变化，已刷新结构，请重试操作。',
   'outline.opFailed': '操作失败',
+  'outline.summaryEmpty': '（空）',
   'assets.empty': '暂无资产。让 agent 用 novel_asset_* 工具创建后刷新。',
   'assets.other': '其他',
   'assets.stages': '阶段',
@@ -418,19 +410,15 @@ export const en: Record<StudioPanelKey, string> = {
   'outline.drafted': 'Drafted',
   'outline.planned': 'Planned',
   'outline.draftedCount': 'Drafted chapters',
-  'outline.rename': 'Rename',
-  'outline.editSummary': 'Content',
   'outline.addChild': 'Add child',
   'outline.addAfter': 'Add sibling',
   'outline.addVolume': 'Add volume',
   'outline.del': 'Delete',
-  'outline.save': 'Save',
-  'outline.cancel': 'Cancel',
   'outline.confirmDelete': 'Delete this node and all of its children:',
   'outline.newTitlePlaceholder': 'New title (chapters need a number, e.g. "Ch.12: Turning Point")',
-  'outline.summaryHint': 'Chapter content (the outline body block)…',
   'outline.opConflict': 'The outline changed elsewhere. Structure refreshed — please retry.',
   'outline.opFailed': 'Operation failed',
+  'outline.summaryEmpty': '(empty)',
   'assets.empty': 'No assets yet. Ask the agent to create some with the novel_asset_* tools, then refresh.',
   'assets.other': 'Other',
   'assets.stages': 'stages',

@@ -1,28 +1,25 @@
 /**
- * Outline view (大纲): the OpenWrite outline tree rendered natively —
- * volume/act/section/chapter hierarchy with kind badges, titles, summaries,
- * and draft status — plus NATIVE structural editing through the
- * revision-guarded atomic tree editor (POST /api/outline/edit; operations
- * verified against OpenWrite tools/outline_tree.py mutate_outline_structure):
+ * Outline view (大纲): the OpenWrite outline tree rendered natively — AND
+ * editable in place, Obsidian-style: titles and body blocks render as
+ * borderless inputs that look identical to plain text; click into them and
+ * type. Commits ride the revision-guarded atomic tree editor
+ * (POST /api/outline/edit; operations verified against OpenWrite
+ * tools/outline_tree.py mutate_outline_structure):
  *
- * - rename        node_id + title   (chapter titles must carry a chapter number)
- * - update_summary node_id + summary (replaces the node's body block)
- * - add_child     node_id + title + kind (= parent's child_kind; empty
- *                 node_id adds a top-level volume)
- * - add_after     node_id + title + kind (= the node's own kind)
- * - delete        node_id (only when can_delete; server renumbers following
- *                 chapters and reports the renumber plan)
+ * - title input  blur/Enter → rename        (chapters must carry a number)
+ * - body textarea blur       → update_summary (replaces the node's body block)
+ * - hover buttons → add_child / add_after / delete (server renumbers on delete)
+ * - toolbar      → add a top-level volume (add_child with empty node_id)
  *
- * Every answer carries the refreshed outline tree, so each successful op
- * re-renders straight from the response. A stale revision answers 409 →
- * reload the tree and surface a retry hint. Editability flags come from the
- * wire (editable / can_delete / delete_blocked_reason / child_kind).
+ * Commit semantics: optimistic local patch + silent revision bump on success
+ * (no tree re-render — focus and scroll survive); 409 reloads the tree and
+ * asks for a retry; other failures revert the field and toast the server
+ * message. A chapter rename changes its node id server-side, so a follow-up
+ * op on the same node may 404 — the error path reloads and the user retries.
  *
  * Wire shape (verified against OpenWrite tools/outline_tree.py
  * build_outline_structure): GET /api/outline answers WITHOUT an envelope —
- * { path, revision, roots: OutlineNode[], counts, drafted_chapters,
- * recommendation }. Every node carries { id, kind, label, title, summary,
- * status: 'drafted'|'planned', children, descendant_count, ... }.
+ * { path, revision, roots, counts, drafted_chapters, recommendation }.
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
@@ -55,6 +52,12 @@ interface OutlinePayload {
   drafted_chapters: number
 }
 
+/** Uncommitted field overlay keyed by node id (title / summary drafts). */
+interface FieldDraft {
+  title?: string
+  summary?: string
+}
+
 /** Narrow the wire payload, tolerating missing/extra fields (empty tree on garbage). */
 function parseOutline(data: unknown): OutlinePayload {
   const root = (data !== null && typeof data === 'object' ? data : {}) as Record<string, unknown>
@@ -82,17 +85,7 @@ function parseOutline(data: unknown): OutlinePayload {
   }
 }
 
-
 type LoadState = 'loading' | 'error' | 'ready'
-
-/** One pending inline form over a node (only one open at a time). */
-interface InlineForm {
-  kind: 'rename' | 'summary' | 'addChild' | 'addAfter'
-  nodeId: string
-  /** Expected child kind for add forms ('' = resolved lazily from the node). */
-  addKind: string
-  text: string
-}
 
 /** Full outline-view props: conversation-view runtime share & injected fetch & locale seat. */
 export type OutlineViewProps =
@@ -103,12 +96,13 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
   const [payload, setPayload] = useState<OutlinePayload | null>(null)
   const [error, setError] = useState('')
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
-  const [form, setForm] = useState<InlineForm | null>(null)
+  const [drafts, setDrafts] = useState<Record<string, FieldDraft>>({})
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<{ text: string, bad: boolean } | null>(null)
 
   const load = useCallback(() => {
     setState('loading')
+    setDrafts({})
     let cancelled = false
     fetchStudioApi('/outline')
       .then((data) => {
@@ -131,21 +125,41 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
     window.setTimeout(() => setToast(null), 6000)
   }
 
+  /** Patch one node's draft overlay. */
+  const setDraft = (id: string, patch: FieldDraft) => {
+    setDrafts(previous => ({ ...previous, [id]: { ...previous[id], ...patch } }))
+  }
+
+  const clearDraft = (id: string, field: 'title' | 'summary') => {
+    setDrafts(previous => {
+      const next = { ...previous }
+      const entry = { ...next[id] }
+      delete entry[field]
+      if (Object.keys(entry).length === 0) delete next[id]
+      else next[id] = entry
+      return next
+    })
+  }
+
   /**
-   * Run one structural operation against the current revision. The response's
-   * refreshed tree re-renders the view directly; conflicts reload first.
+   * Run one structural operation. Success bumps the revision silently (the
+   * optimistic local patch already reflects the edit — no re-render, focus
+   * survives); failure reverts the field and toasts; 409 reloads the tree.
+   * Returns true when the local patch should stick.
    */
   const runOp = useCallback(async (
     op: { operation: string, node_id?: string, title?: string, summary?: string, kind?: string },
-    okText: string,
-  ) => {
-    if (payload === null || busy) return
+  ): Promise<boolean> => {
+    if (payload === null || busy) return false
     setBusy(true)
     try {
       const data = await postStudioApi('/outline/edit', { ...op, revision: payload.revision }) as Record<string, unknown>
-      setPayload(parseOutline(data.outline))
-      setToast({ text: typeof data.message === 'string' && data.message !== '' ? data.message : okText, bad: false })
-      setForm(null)
+      const fresh = (data.outline ?? null) as Record<string, unknown> | null
+      if (fresh !== null) {
+        const nextRevision = String(fresh.revision ?? payload.revision)
+        setPayload(previous => previous === null ? previous : { ...previous, revision: nextRevision })
+      }
+      return true
     } catch (cause: unknown) {
       if (cause instanceof StudioApiError && cause.status === 409) {
         load()
@@ -153,10 +167,33 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
       } else {
         showToast(`${t('outline.opFailed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
       }
+      return false
     } finally {
       setBusy(false)
     }
   }, [payload, busy, postStudioApi, load, t])
+
+  /** Title blur/Enter: commit a rename when the value actually changed. */
+  const commitTitle = async (node: OutlineNode) => {
+    const value = (drafts[node.id]?.title ?? node.title).trim()
+    if (value === '' || value === node.title) {
+      clearDraft(node.id, 'title')
+      return
+    }
+    const ok = await runOp({ operation: 'rename', node_id: node.id, title: value })
+    if (ok) clearDraft(node.id, 'title')
+  }
+
+  /** Body blur: commit update_summary when the block actually changed. */
+  const commitSummary = async (node: OutlineNode) => {
+    const value = drafts[node.id]?.summary ?? node.summary
+    if (value === node.summary) {
+      clearDraft(node.id, 'summary')
+      return
+    }
+    const ok = await runOp({ operation: 'update_summary', node_id: node.id, summary: value })
+    if (ok) clearDraft(node.id, 'summary')
+  }
 
   const toggle = (id: string) => {
     setCollapsed(previous => {
@@ -167,40 +204,64 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
     })
   }
 
-  /** Commit the currently open inline form as one structural operation. */
-  const commitForm = () => {
-    if (form === null || payload === null) return
-    const title = form.text.trim()
-    if (form.kind === 'rename') {
-      if (title === '') return
-      void runOp({ operation: 'rename', node_id: form.nodeId, title }, '')
-    } else if (form.kind === 'summary') {
-      void runOp({ operation: 'update_summary', node_id: form.nodeId, summary: form.text }, '')
-    } else if (form.kind === 'addChild') {
-      if (title === '') return
-      const parent = findNode(payload.roots, form.nodeId)
-      void runOp({
-        operation: 'add_child',
-        node_id: form.nodeId,
-        kind: form.addKind !== '' ? form.addKind : parent?.child_kind ?? '',
-        title,
-      }, '')
-    } else {
-      if (title === '') return
-      const sibling = findNode(payload.roots, form.nodeId)
-      void runOp({
-        operation: 'add_after',
-        node_id: form.nodeId,
-        kind: form.addKind !== '' ? form.addKind : sibling?.kind ?? '',
-        title,
-      }, '')
+  const findNode = (roots: OutlineNode[], id: string): OutlineNode | null => {
+    for (const root of roots) {
+      if (root.id === id) return root
+      const hit = findNode(root.children, id)
+      if (hit !== null) return hit
     }
+    return null
+  }
+
+  /** Inline add form state: '' nodeId = top-level volume; otherwise child/sibling. */
+  const [addForm, setAddForm] = useState<{ mode: 'child' | 'after' | 'volume', nodeId: string, kind: string, text: string } | null>(null)
+
+  const commitAdd = async () => {
+    if (addForm === null || payload === null) return
+    const title = addForm.text.trim()
+    if (title === '') {
+      setAddForm(null)
+      return
+    }
+    const op = addForm.mode === 'volume'
+      ? { operation: 'add_child', node_id: '', kind: addForm.kind, title }
+      : addForm.mode === 'child'
+        ? { operation: 'add_child', node_id: addForm.nodeId, kind: addForm.kind, title }
+        : { operation: 'add_after', node_id: addForm.nodeId, kind: addForm.kind, title }
+    const ok = await runOp(op)
+    if (ok) setAddForm(null)
+  }
+
+  const renderAddForm = (): ReactNode => {
+    if (addForm === null) return null
+    const kindHint = addForm.mode === 'volume' ? 'volume' : addForm.kind
+    return (
+      <div className={css.inlineActions}>
+        <input
+          className={css.inlineInput}
+          value={addForm.text}
+          autoFocus
+          placeholder={`${t('outline.newTitlePlaceholder')} (${kindHint})`}
+          onChange={(event) => { setAddForm({ ...addForm, text: event.target.value }) }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void commitAdd()
+            if (event.key === 'Escape') setAddForm(null)
+          }}
+          onBlur={() => { if (addForm.text.trim() === '') setAddForm(null) }}
+        />
+        <button type="button" className={css.actionButton} disabled={busy} onClick={() => { void commitAdd() }}>✓</button>
+        <button type="button" className={css.actionButton} onClick={() => { setAddForm(null) }}>✕</button>
+      </div>
+    )
   }
 
   const renderNode = (node: OutlineNode): ReactNode => {
     const isCollapsed = collapsed.has(node.id)
     const hasChildren = node.children.length > 0
-    const editingThis = form !== null && form.nodeId === node.id
+    const editable = node.editable === true
+    const titleValue = drafts[node.id]?.title ?? node.title
+    const summaryValue = drafts[node.id]?.summary ?? node.summary
+    const summaryDirty = (drafts[node.id]?.summary ?? '') !== '' && summaryValue !== node.summary
     return (
       <li key={node.id} className={css.treeItem}>
         <div className={css.treeRow}>
@@ -217,23 +278,21 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
             )
             : <span className={css.chevronPlaceholder} aria-hidden />}
           <span className={css.kindBadge} data-kind={node.kind}>{node.label || node.kind}</span>
-          {(form?.kind ?? '') === 'rename' && editingThis
+          {editable
             ? (
-              <span className={css.inlineRename}>
-                <input
-                  className={css.inlineInput}
-                  value={form.text}
-                  autoFocus
-                  onChange={(event) => { setForm({ ...form, text: event.target.value }) }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') commitForm()
-                    if (event.key === 'Escape') setForm(null)
-                  }}
-                  placeholder={t('outline.newTitlePlaceholder')}
-                />
-                <button type="button" className={css.actionButton} disabled={busy} onClick={() => { commitForm() }}>✓</button>
-                <button type="button" className={css.actionButton} onClick={() => { setForm(null) }}>✕</button>
-              </span>
+              <input
+                className={css.titleInput}
+                value={titleValue}
+                onChange={(event) => { setDraft(node.id, { title: event.target.value }) }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') { event.currentTarget.blur() }
+                  if (event.key === 'Escape') {
+                    setDraft(node.id, { title: node.title })
+                    event.currentTarget.blur()
+                  }
+                }}
+                onBlur={() => { void commitTitle(node) }}
+              />
             )
             : <span className={css.nodeTitle}>{node.title}</span>}
           {node.kind === 'chapter' && (
@@ -244,31 +303,20 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
               {node.status === 'drafted' ? t('outline.drafted') : t('outline.planned')}
             </span>
           )}
-          {node.editable === true && form === null && (
+          {editable && (
             <span className={css.nodeActions}>
-              <button type="button" className={css.actionButton} title={t('outline.rename')}
-                onClick={() => { setForm({ kind: 'rename', nodeId: node.id, addKind: '', text: node.title }) }}>
-                {t('outline.rename')}
-              </button>
-              <button type="button" className={css.actionButton} title={t('outline.editSummary')}
-                onClick={() => { setForm({ kind: 'summary', nodeId: node.id, addKind: '', text: node.summary }) }}>
-                {t('outline.editSummary')}
-              </button>
               {node.child_kind !== '' && (
                 <button type="button" className={css.actionButton} title={t('outline.addChild')}
-                  disabled={node.child_kind === ''}
                   onClick={() => {
-                    toggleIfCollapsed(node.id, hasChildren)
-                    setForm({ kind: 'addChild', nodeId: node.id, addKind: node.child_kind ?? '', text: '' })
+                    if (hasChildren && collapsed.has(node.id)) toggle(node.id)
+                    setAddForm({ mode: 'child', nodeId: node.id, kind: node.child_kind ?? '', text: '' })
                   }}>
-                  {t('outline.addChild')}
+                  +{t('outline.addChild')}
                 </button>
               )}
               <button type="button" className={css.actionButton} title={t('outline.addAfter')}
-                onClick={() => {
-                  setForm({ kind: 'addAfter', nodeId: node.id, addKind: node.kind, text: '' })
-                }}>
-                {t('outline.addAfter')}
+                onClick={() => { setAddForm({ mode: 'after', nodeId: node.id, kind: node.kind, text: '' }) }}>
+                +{t('outline.addAfter')}
               </button>
               <button
                 type="button"
@@ -277,7 +325,7 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
                 disabled={node.can_delete !== true || busy}
                 onClick={() => {
                   if (window.confirm(`${t('outline.confirmDelete')}「${node.title}」`)) {
-                    void runOp({ operation: 'delete', node_id: node.id }, '')
+                    void runOp({ operation: 'delete', node_id: node.id })
                   }
                 }}
               >
@@ -286,106 +334,31 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
             </span>
           )}
         </div>
-        {(form?.kind ?? '') === 'summary' && editingThis && (
-          <div className={css.summaryEditor}>
+        {editable
+          ? (
             <textarea
-              className={css.summaryTextarea}
-              value={form.text}
-              rows={Math.min(14, Math.max(3, form.text.split('\n').length + 1))}
-              onChange={(event) => { setForm({ ...form, text: event.target.value }) }}
-              placeholder={t('outline.summaryHint')}
+              className={`${css.bodyTextarea}${summaryDirty ? ` ${css.bodyTextareaDirty}` : ''}`}
+              value={summaryValue}
+              rows={Math.min(16, Math.max(1, summaryValue.split('\n').length))}
+              placeholder={summaryValue === '' ? t('outline.summaryEmpty') : undefined}
+              onChange={(event) => { setDraft(node.id, { summary: event.target.value }) }}
+              onBlur={() => { void commitSummary(node) }}
             />
-            <div className={css.inlineActions}>
-              <button type="button" className={css.button} disabled={busy} onClick={() => { commitForm() }}>
-                {t('outline.save')}
-              </button>
-              <button type="button" className={css.button} onClick={() => { setForm(null) }}>
-                {t('outline.cancel')}
-              </button>
-            </div>
-          </div>
-        )}
-        {(form?.kind ?? '') === 'addChild' && editingThis && (
-          <div className={css.inlineActions}>
-            <input
-              className={css.inlineInput}
-              value={form.text}
-              autoFocus
-              placeholder={`${t('outline.newTitlePlaceholder')} (${form.addKind})`}
-              onChange={(event) => { setForm({ ...form, text: event.target.value }) }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') commitForm()
-                if (event.key === 'Escape') setForm(null)
-              }}
-            />
-            <button type="button" className={css.actionButton} disabled={busy} onClick={() => { commitForm() }}>✓</button>
-            <button type="button" className={css.actionButton} onClick={() => { setForm(null) }}>✕</button>
-          </div>
-        )}
-        {(form?.kind ?? '') === 'addAfter' && editingThis && (
-          <div className={css.inlineActions}>
-            <input
-              className={css.inlineInput}
-              value={form.text}
-              autoFocus
-              placeholder={`${t('outline.newTitlePlaceholder')} (${form.addKind})`}
-              onChange={(event) => { setForm({ ...form, text: event.target.value }) }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') commitForm()
-                if (event.key === 'Escape') setForm(null)
-              }}
-            />
-            <button type="button" className={css.actionButton} disabled={busy} onClick={() => { commitForm() }}>✓</button>
-            <button type="button" className={css.actionButton} onClick={() => { setForm(null) }}>✕</button>
-          </div>
-        )}
-        {node.summary !== '' && (form === null || !editingThis) && (
-          <div className={css.nodeSummary}>{node.summary}</div>
-        )}
+          )
+          : node.summary !== '' && <div className={css.nodeSummary}>{node.summary}</div>}
+        {addForm !== null && addForm.mode === 'after' && addForm.nodeId === node.id && renderAddForm()}
         {hasChildren && !isCollapsed && (
-          <ul className={css.treeChildren}>{node.children.map(renderNode)}</ul>
+          <ul className={css.treeChildren}>
+            {node.children.map(renderNode)}
+            {addForm !== null && addForm.mode === 'child' && addForm.nodeId === node.id && renderAddForm()}
+          </ul>
         )}
       </li>
     )
   }
 
-  const findNode = (roots: OutlineNode[], id: string): OutlineNode | null => {
-    for (const root of roots) {
-      if (root.id === id) return root
-      const hit = findNode(root.children, id)
-      if (hit !== null) return hit
-    }
-    return null
-  }
-
-  const toggleIfCollapsed = (id: string, hasChildren: boolean) => {
-    if (hasChildren && collapsed.has(id)) toggle(id)
-  }
-
   const addVolume = () => {
-    if (payload === null || busy) return
-    setForm({ kind: 'addChild', nodeId: '', addKind: 'volume', text: '' })
-  }
-
-  const renderAddVolume = () => {
-    if (form === null || form.kind !== 'addChild' || form.nodeId !== '') return null
-    return (
-      <div className={css.inlineActions}>
-        <input
-          className={css.inlineInput}
-          value={form.text}
-          autoFocus
-          placeholder={`${t('outline.newTitlePlaceholder')} (volume)`}
-          onChange={(event) => { setForm({ ...form, text: event.target.value }) }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') commitForm()
-            if (event.key === 'Escape') setForm(null)
-          }}
-        />
-        <button type="button" className={css.actionButton} disabled={busy} onClick={() => { commitForm() }}>✓</button>
-        <button type="button" className={css.actionButton} onClick={() => { setForm(null) }}>✕</button>
-      </div>
-    )
+    setAddForm({ mode: 'volume', nodeId: '', kind: 'volume', text: '' })
   }
 
   return (
@@ -417,11 +390,11 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
           </div>
         )}
         {state === 'ready' && payload !== null && payload.roots.length === 0 && (
-          <div className={css.notice}>{renderAddVolume() ?? t('outline.empty')}</div>
+          <div className={css.notice}>{renderAddForm() ?? t('outline.empty')}</div>
         )}
         {state === 'ready' && payload !== null && payload.roots.length > 0 && (
           <>
-            {renderAddVolume()}
+            {renderAddForm()}
             <ul className={css.tree}>{payload.roots.map(renderNode)}</ul>
           </>
         )}
