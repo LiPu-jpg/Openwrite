@@ -189,9 +189,11 @@ uv 环境 + `deepseek-harness-sdk`（自带单文件 Node 运行时，macOS arm6
   （cordis.yml 为最小组合；无需自定义插件载体——生产 exe 编译期内置插件集，
   自定义闭包需重建 deploy root，收益不抵成本，刻意不做）。
 
-实测记录（~/my_novel）：ch_001~004 全流程跑通；ch_003 经修订回炉 0 分 → 35 分
-（blocker 人设矛盾被精准修复）；ch_004 评审在当前模型路由下系统性输出截断
-（上游 OpenWrite reviewer 的 bisect 只覆盖部分截断路径），已作为上游问题记录。
+实测记录（~/my_novel）：ch_001~005 全流程跑通；ch_003 经修订回炉 0 分 → 35 分
+（blocker 人设矛盾被精准修复）。上游问题（OpenWrite 仓库，未动）：ch_004 评审系统性
+输出截断——模型无视单维度契约产出跨维度大 JSON 直至 finish=length，单维批无法再二分；
+且 chapter_pipeline.execute_review_chapter 兜底异常丢弃 exc.code，任务里只记到通用
+OPERATION_FAILED 而非 MODEL_OUTPUT_TRUNCATED（可观测性缺陷）。
 
 ## 目录结构
 ```

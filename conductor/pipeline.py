@@ -289,7 +289,7 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
     chapter_id = str(rec["chapter_id"])
     drafted = rec.get("status") == "drafted"
 
-    if drafted and not args.review_only:
+    if drafted and not args.review_only and not args.rework:
         return {"chapter": chapter_id, "title": rec.get("title", ""), "skipped": "已成形"}
 
     base_guidance = str(rec.get("guidance") or "")
@@ -360,6 +360,8 @@ def main() -> int:
                         help="回炉指导用 dsh SDK 会话综合（需 DEEPSEEK_API_KEY）")
     parser.add_argument("--review-only", action="store_true",
                         help="对已成稿章节只跑评审门（不写章）")
+    parser.add_argument("--rework", action="store_true",
+                        help="对已成稿章节强制回炉：基线评审 → 修订闭环 → 复评")
     parser.add_argument("--dry-run", action="store_true", help="只解析推荐与计划，不写章")
     args = parser.parse_args()
 
