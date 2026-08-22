@@ -84,7 +84,7 @@ try {
   assert.equal(seenUrl, 'http://127.0.0.1:4567/api/assets?kind=character', 'path+query forward verbatim')
   assert.equal(res.status, 200, 'status passthrough')
   assert.equal(res.headers['content-type'], 'application/json')
-  assert.equal(res.body, '{"roots":[]}', 'body passthrough')
+  assert.equal(res.body.toString('utf8'), '{"roots":[]}', 'body passthrough (binary-safe bytes)')
   assert.equal(seenOptions.method ?? 'GET', 'GET', 'GET forwards as GET')
 
   // Multi-segment path.
@@ -130,7 +130,7 @@ try {
   const conflict = capture()
   await proxyRoute.handler({ method: 'GET', url: '/studio-panel/api/outline' }, conflict)
   assert.equal(conflict.status, 409)
-  assert.equal(conflict.body, '{"error":"nope","code":"X"}')
+  assert.equal(conflict.body.toString('utf8'), '{"error":"nope","code":"X"}')
   // …including on writes (the optimistic-locking conflict the editor surfaces).
   const writeConflict = capture()
   await proxyRoute.handler(writeReq, writeConflict)

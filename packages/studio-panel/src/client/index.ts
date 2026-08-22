@@ -2,7 +2,7 @@
  * Browser studio-panel plugin: the 稿件 (Studio iframe), 大纲 (outline tree)
  * and 资产 (asset board) conversation view tabs, plus the keyed
  * novel_review_chapter report card — all registered through the slot system,
- * no service defined (the ui-trajectory registration pattern).
+ * and a native 工具箱 strip (export/sync/import) on the 总览 tab.
  */
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
@@ -14,11 +14,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import { fetchStudioApi, postStudioApi, type StudioApiInjected } from './api.ts'
 import { AssetsView } from './AssetsView.tsx'
-import { GraphView } from './GraphView.tsx'
+import { OverviewView, type OverviewInjected } from './OverviewView.tsx'
 import { en, NS, zh } from './locales.ts'
 import { OutlineView } from './OutlineView.tsx'
 import { ResearchView } from './ResearchView.tsx'
 import { NovelReviewCard } from './ReviewCard.tsx'
+import { GraphView } from './GraphView.tsx'
 import { SearchView } from './SearchView.tsx'
 import { StudioView, type StudioViewInjected } from './StudioView.tsx'
 import { TasksView } from './TasksView.tsx'
@@ -77,8 +78,8 @@ export function apply(ctx: Context): void {
       order: 19,
       locale: NS,
       label: () => t('view.overview'),
-      inject: (): StudioViewInjected => ({ resolveStudioUrl }),
-    }, StudioView)
+      inject: (): OverviewInjected => ({ ...studioApi }),
+    }, OverviewView)
     yield ctx.slots.register({
       name: 'conversation.view',
       id: 'studio',

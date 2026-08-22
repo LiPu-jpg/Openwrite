@@ -2,6 +2,10 @@
 
 ## 未发布
 
+- 总览 tab 原生工具箱条：导出 md/txt/epub（经代理二进制安全下载）、同步项目、
+  导入章节（文件选择 → 预览切章计划/冲突 → 确认/强制覆盖）——补齐 Studio
+  「工具与设置」抽屉在 dsh 侧最后一个无 UI 缺口；代理改二进制安全透传并放宽超时至 60s，
+  写白名单增补 sync / import/preview / import
 - conductor 落地（`conductor/`）：无人值守写章流水线——写章/评审/修订回炉全部
   走 OpenWrite 后台任务系统（phase 轮询、预算超时显式取消、recoverable 原生
   retry），回炉经 revision_from_review → regenerate → apply 修订闭环（含客户端

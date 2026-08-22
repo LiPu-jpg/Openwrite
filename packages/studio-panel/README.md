@@ -2,7 +2,7 @@
 
 dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会话 UI：
 
-- **总览**（id `overview`，order 19）：内嵌 Studio 仪表盘（iframe，无 hash 默认路由）。
+- **总览**（id `overview`，order 19）：**原生工具箱条** + 内嵌 Studio 仪表盘。工具箱补齐 Studio「工具与设置」抽屉在 dsh 侧的最后缺口——导出（md/txt/epub，经二进制安全代理下载，Content-Disposition 文件名）、同步项目、导入章节（选文件 → 预览切章计划/冲突检测 → 确认导入，支持起始章节号与强制覆盖；TXT/Markdown）。
 - **正文**（id `studio`，order 20）：内嵌 Studio 章节编辑器（iframe 钉到 `#chapters`）。
 - **审稿**（id `review-ws`，order 21）：内嵌 Studio 审稿工作台（iframe 钉到 `#review`）。
 - **大纲**（id `outline`，order 22）：原生大纲树，**默认即可编辑（Obsidian 哲学：内容本身就是编辑器）** —— 卷/篇/节/章层级、kind 徽章、成稿状态，可折叠；标题与正文块渲染为无框 input/textarea（视觉与纯文本一致，focus 才现细边框），点击即改，失焦/回车自动提交（未变更不提交）；悬停出结构钮（+下级 / +同级 / 删），工具栏「新增卷」。全部走 `POST /api/outline/edit` 原子树编辑（revision 乐观锁；成功静默更新 revision 不重渲染——焦点与滚动位置保留；409 冲突自动刷新结构并提示重试；delete 由服务端连续重编号后续章节）。按钮可用性以线上 `editable` / `can_delete` / `child_kind` 为准（正文章节的章节号校验错误透传）。注意：章重命名会更换节点 id，紧随其后的同节点操作可能 404——错误路径自动重载结构。
@@ -19,7 +19,7 @@ dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会�
 
 - **Host 半边**（`src/index.ts` → `lib/index.js`）：一个最小 cordis 插件，声明 `Config` schema（Schemastery，`studioUrl` 默认 `http://127.0.0.1:4567`），并在 dsh web server 上注册两条同源路由：
   - `GET /studio-panel/config.json`：把解析后的配置发给浏览器；
-  - `GET /studio-panel/api/<path...>?query`（prefix 路由）：代理到 `${studioUrl}/api/<path...>?query`，透传上游状态码、content-type 与响应体（含错误体）；Studio 不可达时 502 JSON。**写通道带白名单**：仅 `assets`、`assets/update`、`assets/package/import`、`outline/edit` 四个路径接受 POST/PUT（转发方法与 JSON body 原文，注入 Studio 写操作必需的 `X-OpenWrite-Studio: 1` 头）；其余路径保持 GET-only（405）。正文变更仍留在 agent 工具（`@dsh-novel/openwrite-bridge`）；UI 可写资产域与大纲结构域。
+  - `GET /studio-panel/api/<path...>?query`（prefix 路由）：代理到 `${studioUrl}/api/<path...>?query`，透传上游状态码、content-type 与响应体（含错误体）；Studio 不可达时 502 JSON。**写通道带白名单**：仅 `assets`、`assets/update`、`assets/package/import`、`outline/edit`、`sync`、`import/preview`、`import` 七个路径接受 POST/PUT（转发方法与 JSON body 原文，注入 Studio 写操作必需的 `X-OpenWrite-Studio: 1` 头）；其余路径保持 GET-only（405）。正文变更仍留在 agent 工具（`@dsh-novel/openwrite-bridge`）；UI 可写资产域与大纲结构域。
   `webServer` 通过 `ctx.inject` 可选等待，因此在无 web server 的 profile（如 headless）里也能正常加载，只是不注册路由。
 - **Client 半边**（`src/client/` → `lib/client.js`）：package.json 里的 `dsh.client` 块（`platform: "web"`）+ `exports["./client"]` 指向构建产物。dsh web 的 client 模块表（`ctx.clientModules`）扫描 host Loader 条目时发现该声明，把 bundle 挂到 `/plugins/@dsh-novel/studio-panel/client.js` 并注入启动图；浏览器半边用 `ctx.slots.inject('conversation.view', function* () { ... })` 等待 ui-conversation 声明槽位后逐个 yield 四个视图注册，并用 `ctx.slots.inject('tool.call.toolview', ...)` 注册评审卡（与 ui-trajectory / bash-sample 同一模式）。
 
@@ -71,6 +71,7 @@ npm run smoke   # node scripts/smoke.mjs（无服务器：路由注册/转发语
 ## 设计决定与限制
 
 - **iframe 不加 `sandbox`**：Studio 是受信任的本地第一方应用，需要自身源下的 localStorage/cookie、表单提交、导出下载和可能的 window.open；即使 `allow-scripts allow-same-origin` 也会破坏下载/弹窗，沙箱化本地开发工具没有收益。保留了 `allow="clipboard-read; clipboard-write"`。
+- **代理二进制安全透传**：上游响应按 arrayBuffer 原样转发（epub 是 zip），content-type/content-disposition 原样携带；代理超时放宽到 60s（epub 构建与导入是重操作）。
 - **不做 Studio 健康预检**：跨源 fetch 必失败（无 CORS）。iframe 视图用 `load`/`error` 事件驱动加载态与错误兜底；跨源加载失败在部分浏览器仍触发 `load`，所以错误面板是尽力而为，始终提供「重试」与「在新标签页打开」出口。数据视图的失败则能被代理的 502 准确捕获。
 - **任务/图谱/研究/搜索/评审卡均为只读**：变更走 agent 工具（novel_revision_*、novel_task_* 等），UI 不另开写通道（搜索 tab 只发 GET）。任务视图特意不提供取消/重试按钮。**可写域两处**：资产 tab（角色/设定/进阶体系，走 assets 白名单路径）与大纲 tab（rename/update_summary/add_child/add_after/delete 五个原子操作，走 outline/edit；内容级批量改写仍建议走 agent 的 novel_outline_edit 分批流）。
 - **无 invariant companion**：DSH 仓库内的 `./invariant` 伴侣是其仓库内部约束（有专门的脚本门禁），loader 并不要求；本仓库已有插件（openwrite-bridge）同样不带。

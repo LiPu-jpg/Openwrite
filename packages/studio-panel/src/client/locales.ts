@@ -33,6 +33,26 @@ export type StudioPanelKey =
   | 'outline.opConflict'
   | 'outline.opFailed'
   | 'outline.summaryEmpty'
+  | 'tools.title'
+  | 'tools.export'
+  | 'tools.export.done'
+  | 'tools.export.failed'
+  | 'tools.sync'
+  | 'tools.sync.done'
+  | 'tools.sync.failed'
+  | 'tools.import'
+  | 'tools.import.empty'
+  | 'tools.import.failed'
+  | 'tools.import.done'
+  | 'tools.import.choose'
+  | 'tools.import.noFile'
+  | 'tools.import.start'
+  | 'tools.import.startAuto'
+  | 'tools.import.preview'
+  | 'tools.import.plan'
+  | 'tools.import.conflicts'
+  | 'tools.import.force'
+  | 'tools.import.confirm'
   | 'assets.empty'
   | 'assets.other'
   | 'assets.stages'
@@ -229,6 +249,26 @@ export const zh: Record<StudioPanelKey, string> = {
   'outline.opConflict': '大纲已在其他位置变化，已刷新结构，请重试操作。',
   'outline.opFailed': '操作失败',
   'outline.summaryEmpty': '（空）',
+  'tools.title': '工具箱',
+  'tools.export': '导出',
+  'tools.export.done': '已导出 {name}',
+  'tools.export.failed': '导出失败',
+  'tools.sync': '同步项目',
+  'tools.sync.done': '项目已同步',
+  'tools.sync.failed': '同步失败',
+  'tools.import': '导入章节',
+  'tools.import.empty': '导入内容为空',
+  'tools.import.failed': '导入失败',
+  'tools.import.done': '已导入 {count} 章（起始 ch_{start}），刷新大纲/正文可见',
+  'tools.import.choose': '选择文件',
+  'tools.import.noFile': '未选择文件',
+  'tools.import.start': '起始章节号',
+  'tools.import.startAuto': '自动',
+  'tools.import.preview': '预览',
+  'tools.import.plan': '将导入 {count} 章 / {units} 写作单元，起始 ch_{start}（{arc}）。',
+  'tools.import.conflicts': '冲突：{ids} 已存在。',
+  'tools.import.force': '强制覆盖导入',
+  'tools.import.confirm': '确认导入',
   'assets.empty': '暂无资产。让 agent 用 novel_asset_* 工具创建后刷新。',
   'assets.other': '其他',
   'assets.stages': '阶段',
@@ -419,6 +459,26 @@ export const en: Record<StudioPanelKey, string> = {
   'outline.opConflict': 'The outline changed elsewhere. Structure refreshed — please retry.',
   'outline.opFailed': 'Operation failed',
   'outline.summaryEmpty': '(empty)',
+  'tools.title': 'Toolbox',
+  'tools.export': 'Export',
+  'tools.export.done': 'Exported {name}',
+  'tools.export.failed': 'Export failed',
+  'tools.sync': 'Sync project',
+  'tools.sync.done': 'Project synced',
+  'tools.sync.failed': 'Sync failed',
+  'tools.import': 'Import chapters',
+  'tools.import.empty': 'Import content is empty',
+  'tools.import.failed': 'Import failed',
+  'tools.import.done': 'Imported {count} chapters (starting ch_{start}); refresh Outline/Manuscript to see them',
+  'tools.import.choose': 'Choose file',
+  'tools.import.noFile': 'No file chosen',
+  'tools.import.start': 'Start number',
+  'tools.import.startAuto': 'auto',
+  'tools.import.preview': 'Preview',
+  'tools.import.plan': 'Will import {count} chapters / {units} writing units, starting ch_{start} ({arc}).',
+  'tools.import.conflicts': 'Conflicts: {ids} already exist.',
+  'tools.import.force': 'Force overwrite import',
+  'tools.import.confirm': 'Confirm import',
   'assets.empty': 'No assets yet. Ask the agent to create some with the novel_asset_* tools, then refresh.',
   'assets.other': 'Other',
   'assets.stages': 'stages',

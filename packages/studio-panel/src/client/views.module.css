@@ -1155,3 +1155,92 @@
 .bodyTextareaDirty {
   border-color: var(--dsw-alias-state-warning-primary, rgb(234, 178, 43));
 }
+
+/* ── 总览工具箱（OverviewView tools strip) ─────────────────────────────── */
+
+.toolsRoot {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.toolsBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.2));
+}
+
+.toolsTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-text-secondary, inherit);
+}
+
+.toolsGroup {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.toolsFile {
+  display: none;
+}
+
+.toolsStatus {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--dsw-alias-state-success-primary, inherit);
+}
+
+.toolsStatus[data-bad='true'] {
+  color: var(--dsw-alias-state-error-primary, inherit);
+}
+
+.toolsImport {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.2));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.toolsImportRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolsImportFile {
+  color: var(--dsw-alias-text-secondary, inherit);
+}
+
+.toolsImportLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolsImportPlan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toolsFrame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolsFrame > * {
+  flex: 1;
+  min-height: 0;
+}

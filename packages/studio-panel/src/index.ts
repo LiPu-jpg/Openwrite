@@ -41,10 +41,12 @@ const WRITABLE_PATHS: Record<string, true> = {
   'assets/update': true,
   'assets/package/import': true,
   'outline/edit': true,
+  sync: true,
+  'import/preview': true,
+  import: true,
 }
-
-/** Upstream fetch budget; the proxied reads/writes are local and fast. */
-const PROXY_TIMEOUT_MS = 15_000
+/** Upstream fetch budget; local ops are fast, but epub builds and imports can take a while. */
+const PROXY_TIMEOUT_MS = 60_000
 
 /** Plugin config, validated by the same-named schemastery schema. */
 export interface Config {
@@ -129,12 +131,17 @@ function createProxyHandler(studioUrl: string): WebRouteHandler {
         ...(body !== undefined ? { body: new Uint8Array(body) } : {}),
         signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
       })
-      const text = await upstream.text()
-      res.writeHead(upstream.status, {
+      // Binary-safe passthrough (epub exports are zip archives): buffer the
+      // raw bytes and forward the upstream content-type untouched.
+      const bytes = Buffer.from(await upstream.arrayBuffer())
+      const responseHeaders: Record<string, string> = {
         'content-type': upstream.headers.get('content-type') ?? 'application/json',
         'cache-control': 'no-cache',
-      })
-      res.end(text)
+      }
+      const dispo = upstream.headers.get('content-disposition')
+      if (dispo !== null) responseHeaders['content-disposition'] = dispo
+      res.writeHead(upstream.status, responseHeaders)
+      res.end(bytes)
     } catch (error) {
       sendJson(res, 502, {
         error: `OpenWrite Studio unreachable at ${studioUrl}: ${error instanceof Error ? error.message : String(error)}`,
