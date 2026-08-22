@@ -32,7 +32,7 @@ import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { StudioApiError, type StudioApiInjected } from './api.ts'
-import { AssetEditor, fieldLabel, NewAssetForm, type RelationDraft } from './AssetEditor.tsx'
+import { AssetEditor, NewAssetForm, type RelationDraft } from './AssetEditor.tsx'
 import css from './views.module.css'
 
 /** One asset summary (the fields this view reads; the payload carries more). */
@@ -334,7 +334,6 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set())
   const [details, setDetails] = useState<ReadonlyMap<string, DetailState>>(new Map())
   const [documents, setDocuments] = useState<ReadonlyMap<string, DocState>>(new Map())
-  const [editKey, setEditKey] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<{ message: string; conflict: boolean } | null>(null)
   const [creating, setCreating] = useState(false)
@@ -388,7 +387,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
   const selectAsset = (asset: AssetSummary) => {
     const key = `${asset.kind}:${asset.id}`
     setSelected(key)
-    setEditKey(null)
+    // Obsidian 哲学：选中即编辑——可编辑三类直接进编辑器，不再有只读卡片门。
     setSaveError(null)
     setCreating(false)
     if (!detailsRef.current.has(key)) fetchDetail(asset)
@@ -397,7 +396,6 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
   const selectDocument = (doc: CoreDoc) => {
     const key = `doc:${doc.path}`
     setSelected(key)
-    setEditKey(null)
     setCreating(false)
     if (documents.has(key)) return
     setDocuments(previous => new Map(previous).set(key, { status: 'loading' }))
@@ -429,7 +427,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
     })
       .then(() => {
         setSaving(false)
-        setEditKey(null)
+        // 留在编辑态：detail.revision 变化会让编辑器以服务端真值重挂。
         fetchDetail(asset)
         load(true)
       })
@@ -467,10 +465,6 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
     }
   }
 
-  const relationOriginLabel = (item: RelationItem): string => {
-    if (item.direction === 'incoming') return t('assets.relation.incoming')
-    return item.origin === 'annotation' ? t('assets.relation.registered') : t('assets.relation.confirmed')
-  }
 
   const segmentCount = (which: Segment): number => {
     switch (which) {
@@ -544,7 +538,6 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
             data-active={selected === key}
             onClick={() => {
               setSelected(key)
-              setEditKey(null)
               setCreating(false)
             }}
           >
@@ -628,7 +621,8 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
       )
     }
     const { detail } = entry
-    if (editKey === key) {
+    const editableKind = asset.kind === 'character' || asset.kind === 'world' || asset.kind === 'progression'
+    if (editableKind) {
       return (
         <AssetEditor
           // Remount on revision change: a post-conflict refresh rebuilds the draft honestly.
@@ -648,8 +642,9 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
           conflict={saveError?.conflict === true}
           onSave={(data, bodyMarkdown) => { saveAsset(asset, data, bodyMarkdown) }}
           onCancel={() => {
-            setEditKey(null)
+            // 无只读卡片可回退：取消=放弃本地草稿，重取服务端真值重建。
             setSaveError(null)
+            fetchDetail(asset)
           }}
           onRefresh={() => {
             setSaveError(null)
@@ -660,90 +655,9 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
         />
       )
     }
-    return (
-      <div className={css.detail}>
-        <div className={css.detailHeader}>
-          <div className={css.detailTitleRow}>
-            <span className={`${css.detailTitle} ${css.mdInline}`}>
-              <MarkdownText text={detail.name || asset.id} />
-            </span>
-            {asset.assetType !== '' && <span className={css.kindBadge}>{asset.assetType}</span>}
-            <button
-              type="button"
-              className={css.button}
-              onClick={() => {
-                setEditKey(key)
-                setSaveError(null)
-              }}
-            >
-              {t('assets.edit.open')}
-            </button>
-          </div>
-          {detail.aliases.length > 0 && (
-            <div className={css.assetAliases}>{t('assets.aliases')}: {detail.aliases.join('、')}</div>
-          )}
-          {detail.summary !== '' && (
-            <div className={`${css.detailSummary} ${css.mdInline}`}><MarkdownText text={detail.summary} /></div>
-          )}
-          {detail.tags.length > 0 && (
-            <div className={css.assetMeta}>
-              {detail.tags.map(tag => <span key={tag} className={css.tag}>{tag}</span>)}
-            </div>
-          )}
-        </div>
-        {(() => {
-          // Read table: non-empty scalars + read-only leftovers, all with
-          // localized labels; empty fields are hidden entirely.
-          const readFields = [
-            ...detail.scalars.filter(field => field.value !== ''),
-            ...detail.fields,
-          ]
-          return readFields.length > 0 && (
-            <dl className={css.fieldList}>
-              {readFields.map(field => (
-                <div key={field.key} className={css.fieldRow}>
-                  <dt className={css.fieldKey}>{fieldLabel(field.key, t)}</dt>
-                  <dd className={css.fieldValue}>{field.value}</dd>
-                </div>
-              ))}
-            </dl>
-          )
-        })()}
-        {detail.lists.length > 0 && (
-          <div className={css.relationBlock}>
-            <div className={css.detailHeading}>{t('assets.detail.index')}</div>
-            {detail.lists.map(list => (
-              <div key={list.key} className={css.listBlock}>
-                <div className={css.listBlockLabel}>{fieldLabel(list.key, t)}</div>
-                <ul className={css.listBlockItems}>
-                  {list.items.map((item, index) => <li key={index}>{item}</li>)}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-        {detail.relations.length > 0 && (
-          <div className={css.relationBlock}>
-            <div className={css.detailHeading}>{t('assets.detail.relations')}</div>
-            <div className={css.relationChips}>
-              {detail.relations.map((relation, index) => (
-                <span
-                  key={`${relation.direction}:${relation.name}:${index}`}
-                  className={css.relationChip}
-                  data-resolved={relation.resolved}
-                  title={relation.note}
-                >
-                  {relation.direction === 'incoming' ? '←' : '→'} {relation.name}
-                  {relation.note !== '' && <span className={css.relationNote}>{relation.note}</span>}
-                  <span className={css.relationOrigin}>{relationOriginLabel(relation)}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-        {detail.body !== '' && <div className={css.detailBody}><MarkdownText text={detail.body} /></div>}
-      </div>
-    )
+    // Unreachable: details are only fetched for the three editable kinds,
+    // which always take the editor branch above. Kept for exhaustiveness.
+    return null
   }
 
   const renderMain = () => {
@@ -843,8 +757,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
               onClick={() => {
                 setSegment(which)
                 setSelected(null)
-                setEditKey(null)
-                setCreating(false)
+                  setCreating(false)
               }}
             >
               {segmentLabel(which)}
