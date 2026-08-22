@@ -71,6 +71,9 @@ export type StudioPanelKey =
   | 'research.launch.submitted'
   | 'research.launch.failed'
   | 'research.launch.hint'
+  | 'tasks.result.toggle'
+  | 'tasks.result.score'
+  | 'tasks.result.issues'
   | 'assets.empty'
   | 'assets.other'
   | 'assets.stages'
@@ -305,6 +308,9 @@ export const zh: Record<StudioPanelKey, string> = {
   'research.launch.submitted': '研究任务已提交，进度见「任务」tab。',
   'research.launch.failed': '提交失败',
   'research.launch.hint': '后台执行（DeepResearch），完成后报告出现在左侧列表。',
+  'tasks.result.toggle': '展开或收起评审问题',
+  'tasks.result.score': '评分',
+  'tasks.result.issues': '问题',
   'assets.empty': '暂无资产。让 agent 用 novel_asset_* 工具创建后刷新。',
   'assets.other': '其他',
   'assets.stages': '阶段',
@@ -533,6 +539,9 @@ export const en: Record<StudioPanelKey, string> = {
   'research.launch.submitted': 'Research task submitted — track it in the Tasks tab.',
   'research.launch.failed': 'Submit failed',
   'research.launch.hint': 'Runs in the background (DeepResearch); the report lands in the list on the left when done.',
+  'tasks.result.toggle': 'Expand or collapse review issues',
+  'tasks.result.score': 'Score',
+  'tasks.result.issues': 'Issues',
   'assets.empty': 'No assets yet. Ask the agent to create some with the novel_asset_* tools, then refresh.',
   'assets.other': 'Other',
   'assets.stages': 'stages',

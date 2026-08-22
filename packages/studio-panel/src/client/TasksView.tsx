@@ -18,7 +18,7 @@
  * `only: <active id>`), so switching tabs stops polling via effect cleanup.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
@@ -46,6 +46,46 @@ const PHASES = ['queued', 'reading', 'preparing', 'model', 'validating', 'commit
 type TaskPhase = (typeof PHASES)[number]
 
 /** One task record (the fields this view reads; the payload carries more). */
+/** Completed chapter_review result (subset the row/expand reads). */
+interface ReviewResult {
+  score: number | null
+  passed: boolean | null
+  issues: number | null
+  summary: string
+  issueDetails: { severity: string; dimension: string; summary: string }[]
+}
+
+/** Narrow one issue entry from a completed review result. */
+function parseIssue(raw: unknown): { severity: string; dimension: string; summary: string } | null {
+  if (raw === null || typeof raw !== 'object') return null
+  const item = raw as Record<string, unknown>
+  const summary = typeof item['summary'] === 'string' ? item.summary : ''
+  if (summary === '') return null
+  return {
+    severity: String(item['severity'] ?? 'medium'),
+    dimension: String(item['dimension'] ?? 'general'),
+    summary,
+  }
+}
+
+/** Narrow a completed chapter_review result (empty on garbage). */
+function parseReviewResult(raw: unknown): ReviewResult | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const r = raw as Record<string, unknown>
+  const details = Array.isArray(r['issue_details'])
+    ? r['issue_details'].map(parseIssue).filter((item): item is NonNullable<typeof item> => item !== null)
+    : []
+  const score = typeof r['score'] === 'number' ? r.score : null
+  if (score === null && details.length === 0) return null
+  return {
+    score,
+    passed: typeof r['passed'] === 'boolean' ? r.passed : null,
+    issues: typeof r['issues'] === 'number' ? r.issues : null,
+    summary: typeof r['summary'] === 'string' ? r.summary : '',
+    issueDetails: details,
+  }
+}
+
 interface TaskRecord {
   taskId: string
   type: string
@@ -54,6 +94,8 @@ interface TaskRecord {
   chapterId: string
   inputSummary: string
   errorMessage: string
+  /** Completed chapter_review payload (score / issues / issue_details). */
+  result: ReviewResult | null
   /** Server hint that a failed task may be retried. */
   recoverable: boolean
   attempt: number
@@ -82,6 +124,9 @@ function parseTask(raw: unknown): TaskRecord {
     phase: (PHASES as readonly string[]).includes(phase) ? phase as TaskPhase : 'queued',
     chapterId: text(record['chapter_id']),
     inputSummary: text(record['input_summary']),
+    result: text(record['type']) === 'chapter_review' && status === 'completed'
+      ? parseReviewResult(record['result'])
+      : null,
     errorMessage: text(error['message']),
     recoverable: error['recoverable'] === true,
     attempt: typeof record['attempt'] === 'number' ? record['attempt'] : 1,
@@ -141,6 +186,7 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
 
   /** One-shot task action (cancel/retry) through the pattern-allowlisted proxy. */
   const [acting, setActing] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [actionNote, setActionNote] = useState<{ text: string; bad: boolean } | null>(null)
 
   const runAction = useCallback(async (task: TaskRecord, action: 'cancel' | 'retry') => {
@@ -240,7 +286,8 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
           <div className={css.notice}>{t('tasks.empty')}</div>
         )}
         {visible.map(task => (
-          <div key={task.taskId} className={css.taskRow}>
+        <Fragment key={task.taskId}>
+          <div className={css.taskRow}>
             <span className={css.kindBadge}>{typeLabel(task.type)}</span>
             <span className={css.taskStatus} data-status={task.status}>{t(`tasks.status.${task.status}`)}</span>
             {(task.status === 'running' || task.status === 'pending') && (
@@ -251,6 +298,24 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
               <span className={css.taskPhase}>{t('tasks.attempt')} {task.attempt}</span>
             )}
             <span className={css.taskSummary}>{task.inputSummary}</span>
+            {task.result !== null && (
+              <button
+                type="button"
+                className={css.scoreChip}
+                data-band={task.result.score === null ? 'na' : task.result.score >= 70 ? 'good' : task.result.score >= 40 ? 'mid' : 'bad'}
+                title={t('tasks.result.toggle')}
+                onClick={() => {
+                  setExpanded(previous => {
+                    const next = new Set(previous)
+                    if (next.has(task.taskId)) next.delete(task.taskId)
+                    else next.add(task.taskId)
+                    return next
+                  })
+                }}
+              >
+                {t('tasks.result.score')} {task.result.score ?? '—'} · {t('tasks.result.issues')} {task.result.issues ?? task.result.issueDetails.length}
+              </button>
+            )}
             <span className={css.taskActions}>
               {(task.status === 'pending' || task.status === 'running' || task.status === 'awaiting_confirmation') && (
                 <button
@@ -282,6 +347,19 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
               <div className={css.taskError}>{task.errorMessage}</div>
             )}
           </div>
+          {expanded.has(task.taskId) && task.result !== null && (
+            <div className={css.taskIssues}>
+              {task.result.summary !== '' && <div className={css.taskIssuesSummary}>{task.result.summary}</div>}
+              {task.result.issueDetails.slice(0, 10).map((issue, index) => (
+                <div key={index} className={css.taskIssueRow}>
+                  <span className={css.taskIssueSeverity} data-severity={issue.severity}>{issue.severity}</span>
+                  <span className={css.taskIssueDim}>{issue.dimension}</span>
+                  <span className={css.taskIssueText}>{issue.summary}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Fragment>
         ))}
       </div>
     </div>
