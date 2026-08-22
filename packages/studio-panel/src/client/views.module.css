@@ -1015,3 +1015,88 @@
   color: var(--dsw-alias-state-error-primary);
   white-space: pre-wrap;
 }
+
+/* ── 大纲原生编辑（OutlineView structural editing) ──────────────────────── */
+
+/* Row action buttons: hidden until the row is hovered/focused. */
+.nodeActions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.treeRow:hover .nodeActions,
+.treeRow:focus-within .nodeActions {
+  opacity: 1;
+}
+
+.actionButton {
+  border: 1px solid var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.3));
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.actionButton:hover:not(:disabled) {
+  border-color: var(--dsw-alias-border-primary, rgba(127, 127, 127, 0.6));
+}
+
+.actionButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.inlineRename {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.inlineInput {
+  flex: 1;
+  min-width: 120px;
+  border: 1px solid var(--dsw-alias-border-primary, rgba(127, 127, 127, 0.5));
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 6px;
+}
+
+.inlineActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 4px 24px;
+}
+
+.summaryEditor {
+  margin: 4px 0 6px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summaryTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-primary, rgba(127, 127, 127, 0.5));
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 6px 8px;
+  resize: vertical;
+}

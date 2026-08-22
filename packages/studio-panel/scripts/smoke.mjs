@@ -112,6 +112,19 @@ try {
   await proxyRoute.handler({ ...writeReq, method: 'PUT', url: '/studio-panel/api/assets' }, capture())
   assert.equal(seenOptions.method, 'PUT')
 
+  // The structural outline editor rides the same allowlist: POST
+  // /studio-panel/api/outline/edit forwards the revision-guarded payload.
+  const outlineBody = '{"operation":"rename","node_id":"ch_009","revision":"rev-1","title":"第9章：新标题"}'
+  const outlineReq = {
+    method: 'POST',
+    url: '/studio-panel/api/outline/edit',
+    async *[Symbol.asyncIterator]() { yield Buffer.from(outlineBody) },
+  }
+  const outlineRes = capture()
+  await proxyRoute.handler(outlineReq, outlineRes)
+  assert.equal(seenUrl, 'http://127.0.0.1:4567/api/outline/edit', 'outline edit forwarded')
+  assert.equal(Buffer.from(seenOptions.body).toString('utf8'), outlineBody, 'outline body verbatim')
+
   // Upstream error status/body pass through untouched.
   globalThis.fetch = async () => new Response('{"error":"nope","code":"X"}', { status: 409 })
   const conflict = capture()

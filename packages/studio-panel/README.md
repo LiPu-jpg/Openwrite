@@ -5,7 +5,7 @@ dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会�
 - **总览**（id `overview`，order 19）：内嵌 Studio 仪表盘（iframe，无 hash 默认路由）。
 - **正文**（id `studio`，order 20）：内嵌 Studio 章节编辑器（iframe 钉到 `#chapters`）。
 - **审稿**（id `review-ws`，order 21）：内嵌 Studio 审稿工作台（iframe 钉到 `#review`）。
-- **大纲**（id `outline`，order 22）：原生渲染大纲树 —— 卷/篇/节/章层级、kind 徽章、标题、摘要、成稿状态，可折叠，只读。
+- **大纲**（id `outline`，order 22）：原生大纲树 + **原生结构编辑** —— 卷/篇/节/章层级、kind 徽章、标题、摘要、成稿状态，可折叠；行悬停出操作钮（重命名 / 内容 / 新增下级 / 新增同级 / 删），工具栏「新增卷」；全部走 `POST /api/outline/edit` 原子树编辑（revision 乐观锁，409 冲突自动刷新结构并提示重试；delete 由服务端连续重编号后续章节并回显 renumber 计划）。操作按钮以线上 `editable` / `can_delete` / `child_kind` 为准（含正文章节的章节号校验错误透传）。
 - **资产**（id `assets`，order 23）：原生结构化资产库（对应 Studio 左侧导航的「资料库」，可完整替代），Obsidian 式主从布局——左侧栏（288px，独立滚动）：分段切换（角色/设定/进阶体系/参考作品/作品核心，纵向带计数）、搜索框（按名称/ID/类型/别名/标签/摘要过滤）、紧凑条目行（设定段按 asset_type 折叠分组）、底部新建/刷新按钮；右侧主区：详情头（名称/别名/摘要/标签 + 编辑按钮）、双列字段表、索引区（详情引用/忌讳逐行）、关系区（方向/注记/来源片）、正文 MarkdownText 全宽渲染。编辑模式进 AssetEditor（front-matter 字段 + 关系增删 + 正文即 Vditor IR 即时渲染（运行时从 Studio 源 `${studioUrl}/vendor/vditor/dist/` 按需注入 <script>/<link>，不打包；主题跟随 shell 的 `body[data-ds-dark-theme]`，MutationObserver 实时切换；加载失败回退纯文本 textarea 并提示），无独立预览模式）；保存走乐观锁 `revision`，409 冲突给「刷新重试」；新建为内联表单（占用主区）。参考作品段（Studio 的 deconstruct 面，**不是**资料库）与作品核心段（`documents.core` + `GET /api/document`）只读。未选中时主区显示选择提示。
 - **任务**（id `tasks`，order 24）：后台任务中心 —— 状态过滤片（运行中/待确认/排队/已中断/失败/已取消/已完成）、类型徽章（写章/评审/连写/修订/风格源/参考库/导入/研究）、phase 进度信号、失败任务的错误消息；每 5s 轮询（页面隐藏时跳过，切换标签卸载即停止），只读（取消/重试留在 agent 工具）。
 - **图谱**（id `graph`，order 25）：完整连续性面，分段控件切四段。**伏笔**：SVG 伏笔板按 主线/支线/彩蛋 分列、按回收章节排序（节点卡：内容截断 + 权重/回收目标/状态，title 悬浮全文；无图库，小型确定性布局），上方叠 `foreshadowing_validation.errors` 校验错误块（逐条列出，错误数同时以 ⚠ 角标挂在分段片上）。**关系图**：圆形布局，有向弦边带箭头与关系标签（未确认关系虚线，未归档节点空心），带类型过滤片（角色/势力/地点/概念/其他，多选，默认角色+势力，边只在两端点可见时渲染；可见节点 >30 隐藏边标签改悬浮 <title>，>40 节点标签截断到 6 字）。**事实账本**：`truth` 的三份 markdown 文档（当前状态/资源账本/关系矩阵，truth_manager.py TruthFiles 是纯文本不是结构化行）经 MarkdownText 渲染。**工作流**：`workflows[]` 每章流水线紧凑列表（章节号 + 当前阶段 + 各 stage 状态徽章，message 走 title 悬浮，error 单独成行）。全部只读。
@@ -19,7 +19,7 @@ dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会�
 
 - **Host 半边**（`src/index.ts` → `lib/index.js`）：一个最小 cordis 插件，声明 `Config` schema（Schemastery，`studioUrl` 默认 `http://127.0.0.1:4567`），并在 dsh web server 上注册两条同源路由：
   - `GET /studio-panel/config.json`：把解析后的配置发给浏览器；
-  - `GET /studio-panel/api/<path...>?query`（prefix 路由）：代理到 `${studioUrl}/api/<path...>?query`，透传上游状态码、content-type 与响应体（含错误体）；Studio 不可达时 502 JSON。**写通道带白名单**：仅 `assets`、`assets/update`、`assets/package/import` 三个路径接受 POST/PUT（转发方法与 JSON body 原文，注入 Studio 写操作必需的 `X-OpenWrite-Studio: 1` 头）；其余路径保持 GET-only（405）。正文/大纲的变更仍然全部留在 agent 工具（`@dsh-novel/openwrite-bridge`），UI 只允许改资产域。
+  - `GET /studio-panel/api/<path...>?query`（prefix 路由）：代理到 `${studioUrl}/api/<path...>?query`，透传上游状态码、content-type 与响应体（含错误体）；Studio 不可达时 502 JSON。**写通道带白名单**：仅 `assets`、`assets/update`、`assets/package/import`、`outline/edit` 四个路径接受 POST/PUT（转发方法与 JSON body 原文，注入 Studio 写操作必需的 `X-OpenWrite-Studio: 1` 头）；其余路径保持 GET-only（405）。正文变更仍留在 agent 工具（`@dsh-novel/openwrite-bridge`）；UI 可写资产域与大纲结构域。
   `webServer` 通过 `ctx.inject` 可选等待，因此在无 web server 的 profile（如 headless）里也能正常加载，只是不注册路由。
 - **Client 半边**（`src/client/` → `lib/client.js`）：package.json 里的 `dsh.client` 块（`platform: "web"`）+ `exports["./client"]` 指向构建产物。dsh web 的 client 模块表（`ctx.clientModules`）扫描 host Loader 条目时发现该声明，把 bundle 挂到 `/plugins/@dsh-novel/studio-panel/client.js` 并注入启动图；浏览器半边用 `ctx.slots.inject('conversation.view', function* () { ... })` 等待 ui-conversation 声明槽位后逐个 yield 四个视图注册，并用 `ctx.slots.inject('tool.call.toolview', ...)` 注册评审卡（与 ui-trajectory / bash-sample 同一模式）。
 
@@ -72,6 +72,6 @@ npm run smoke   # node scripts/smoke.mjs（无服务器：路由注册/转发语
 
 - **iframe 不加 `sandbox`**：Studio 是受信任的本地第一方应用，需要自身源下的 localStorage/cookie、表单提交、导出下载和可能的 window.open；即使 `allow-scripts allow-same-origin` 也会破坏下载/弹窗，沙箱化本地开发工具没有收益。保留了 `allow="clipboard-read; clipboard-write"`。
 - **不做 Studio 健康预检**：跨源 fetch 必失败（无 CORS）。iframe 视图用 `load`/`error` 事件驱动加载态与错误兜底；跨源加载失败在部分浏览器仍触发 `load`，所以错误面板是尽力而为，始终提供「重试」与「在新标签页打开」出口。数据视图的失败则能被代理的 502 准确捕获。
-- **大纲/任务/图谱/研究/搜索/评审卡均为只读**：变更走 agent 工具（novel_outline_*、novel_revision_*、novel_task_* 等），UI 不另开写通道（搜索 tab 是唯一交互视图，但只发 GET）。任务视图特意不提供取消/重试按钮。**资产 tab 例外**：仅资产域（角色/设定/进阶体系）可写，且写通道收窄在 host 代理的路径白名单里（assets / assets/update / assets/package/import）。
+- **任务/图谱/研究/搜索/评审卡均为只读**：变更走 agent 工具（novel_revision_*、novel_task_* 等），UI 不另开写通道（搜索 tab 只发 GET）。任务视图特意不提供取消/重试按钮。**可写域两处**：资产 tab（角色/设定/进阶体系，走 assets 白名单路径）与大纲 tab（rename/update_summary/add_child/add_after/delete 五个原子操作，走 outline/edit；内容级批量改写仍建议走 agent 的 novel_outline_edit 分批流）。
 - **无 invariant companion**：DSH 仓库内的 `./invariant` 伴侣是其仓库内部约束（有专门的脚本门禁），loader 并不要求；本仓库已有插件（openwrite-bridge）同样不带。
 - 文案走 locale 命名空间 `studio-panel`（zh/en 双语），视图标签用 `label: () => t(...)` thunk，跟随活动语言。

@@ -32,15 +32,16 @@ export const CONFIG_ROUTE = '/studio-panel/config.json'
 export const API_PROXY_ROUTE = '/studio-panel/api'
 
 /**
- * Upstream paths the library UI may write (path portion after /api/, no
- * query): asset update, asset create, and asset-package import. Everything
- * else stays GET-only.
+ * Upstream paths the panel UI may write (path portion after /api/, no
+ * query): asset update/create/package-import, and the revision-guarded
+ * structural outline editor. Everything else stays GET-only.
  */
-const WRITABLE_PATHS: ReadonlySet<string> = new Set([
-  'assets',
-  'assets/update',
-  'assets/package/import',
-])
+const WRITABLE_PATHS: Record<string, true> = {
+  assets: true,
+  'assets/update': true,
+  'assets/package/import': true,
+  'outline/edit': true,
+}
 
 /** Upstream fetch budget; the proxied reads/writes are local and fast. */
 const PROXY_TIMEOUT_MS = 15_000
@@ -108,7 +109,7 @@ function createProxyHandler(studioUrl: string): WebRouteHandler {
       sendJson(res, 405, { error: 'studio-panel proxy allows only GET/HEAD and allowlisted writes' })
       return
     }
-    if (isWrite && !WRITABLE_PATHS.has(pathPart)) {
+    if (isWrite && WRITABLE_PATHS[pathPart] !== true) {
       sendJson(res, 405, { error: `studio-panel proxy: write path "${pathPart}" is not allowlisted` })
       return
     }
