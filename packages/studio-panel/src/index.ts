@@ -44,6 +44,7 @@ const WRITABLE_PATHS: Record<string, true> = {
   sync: true,
   'import/preview': true,
   import: true,
+  tasks: true,
 }
 
 /**

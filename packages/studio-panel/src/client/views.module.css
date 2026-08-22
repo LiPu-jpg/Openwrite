@@ -5106,3 +5106,13 @@
 .taskRow:focus-within .taskActions {
   opacity: 1;
 }
+
+/* ── 研究·发起面板（ResearchView launch) ───────────────────────────────── */
+
+.launchPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l);
+}

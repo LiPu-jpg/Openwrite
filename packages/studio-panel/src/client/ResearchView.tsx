@@ -1,8 +1,9 @@
 /**
  * Research view (研究): OpenWrite deep-research reports rendered natively —
  * a master-detail list (title/status/date) with the full report body rendered
- * as markdown. Read-only: submitting research runs and saving API settings
- * stay with Studio / the agent tools.
+ * as markdown. launching research submits a managed background task
+ * (POST /api/tasks { type: 'research', input: { prompt } } — the same lane the
+ * Tasks tab renders); saving API settings stays with Studio / agent tools.
  *
  * Wire shape (verified against OpenWrite tools/studio_http.py do_GET +
  * tools/studio_application.py research_surface/research_report +
@@ -111,7 +112,7 @@ function shortTime(iso: string): string {
 export type ResearchViewProps =
   ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
 
-export function ResearchView({ fetchStudioApi, t }: ResearchViewProps) {
+export function ResearchView({ fetchStudioApi, postStudioApi, t }: ResearchViewProps) {
   const [state, setState] = useState<LoadState>('loading')
   const [surface, setSurface] = useState<ResearchSurface | null>(null)
   const [error, setError] = useState('')
@@ -119,6 +120,11 @@ export function ResearchView({ fetchStudioApi, t }: ResearchViewProps) {
   const [reportState, setReportState] = useState<LoadState>('loading')
   const [report, setReport] = useState<ReportBody | null>(null)
   const [reportError, setReportError] = useState('')
+  /** 发起研究：折叠面板状态 */
+  const [launchOpen, setLaunchOpen] = useState(false)
+  const [launchPrompt, setLaunchPrompt] = useState('')
+  const [launchBusy, setLaunchBusy] = useState(false)
+  const [launchNote, setLaunchNote] = useState<{ text: string; bad: boolean } | null>(null)
 
   const load = useCallback(() => {
     setState('loading')
@@ -159,6 +165,27 @@ export function ResearchView({ fetchStudioApi, t }: ResearchViewProps) {
     return () => { cancelled = true }
   }, [fetchStudioApi])
 
+  /** Submit one deep-research task; progress shows up in the Tasks tab. */
+  const submitResearch = async () => {
+    const prompt = launchPrompt.trim()
+    if (prompt === '' || launchBusy) return
+    setLaunchBusy(true)
+    setLaunchNote(null)
+    try {
+      await postStudioApi('/tasks', { type: 'research', input: { prompt } })
+      setLaunchNote({ text: t('research.launch.submitted'), bad: false })
+      setLaunchPrompt('')
+      load()
+    } catch (cause: unknown) {
+      setLaunchNote({
+        text: `${t('research.launch.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`,
+        bad: true,
+      })
+    } finally {
+      setLaunchBusy(false)
+    }
+  }
+
   const selected = surface?.reports.find(item => item.id === selectedId)
 
   return (
@@ -171,10 +198,46 @@ export function ResearchView({ fetchStudioApi, t }: ResearchViewProps) {
               : surface.setupHint !== '' ? surface.setupHint : t('research.unavailable')
           )}
         </span>
+        <button
+          type="button"
+          className={css.button}
+          disabled={!surface?.available || launchBusy}
+          title={surface?.available === false ? surface.setupHint : undefined}
+          onClick={() => { setLaunchOpen(previous => !previous) }}
+        >
+          {t('research.launch')}
+        </button>
         <button type="button" className={css.button} onClick={() => { load() }}>
           {t('refresh')}
         </button>
       </div>
+      {launchOpen && (
+        <div className={css.launchPanel}>
+          <textarea
+            className={css.summaryTextarea}
+            rows={3}
+            value={launchPrompt}
+            placeholder={t('research.launch.placeholder')}
+            onChange={event => { setLaunchPrompt(event.target.value) }}
+          />
+          <div className={css.inlineActions}>
+            <button
+              type="button"
+              className={css.button}
+              disabled={launchBusy || launchPrompt.trim() === ''}
+              onClick={() => { void submitResearch() }}
+            >
+              {launchBusy ? t('research.launch.submitting') : t('research.launch.submit')}
+            </button>
+            <span className={css.toolbarMeta}>{t('research.launch.hint')}</span>
+          </div>
+          {launchNote !== null && (
+            <div className={css.notice}>
+              <span className={launchNote.bad ? css.errorText : undefined}>{launchNote.text}</span>
+            </div>
+          )}
+        </div>
+      )}
       {state === 'loading' && <div className={css.body}><div className={css.notice}>{t('loading')}</div></div>}
       {state === 'error' && (
         <div className={css.body}>

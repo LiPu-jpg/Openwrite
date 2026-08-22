@@ -64,6 +64,13 @@ export type StudioPanelKey =
   | 'tasks.retry.notRecoverable'
   | 'tasks.retry.done'
   | 'tasks.retry.failed'
+  | 'research.launch'
+  | 'research.launch.placeholder'
+  | 'research.launch.submit'
+  | 'research.launch.submitting'
+  | 'research.launch.submitted'
+  | 'research.launch.failed'
+  | 'research.launch.hint'
   | 'assets.empty'
   | 'assets.other'
   | 'assets.stages'
@@ -291,6 +298,13 @@ export const zh: Record<StudioPanelKey, string> = {
   'tasks.retry.notRecoverable': '该失败不可恢复，无法重试',
   'tasks.retry.done': '任务已重新排队',
   'tasks.retry.failed': '重试提交失败',
+  'research.launch': '发起研究',
+  'research.launch.placeholder': '研究问题（例如：明清漕运制度的运作与衰落）…',
+  'research.launch.submit': '提交研究任务',
+  'research.launch.submitting': '提交中…',
+  'research.launch.submitted': '研究任务已提交，进度见「任务」tab。',
+  'research.launch.failed': '提交失败',
+  'research.launch.hint': '后台执行（DeepResearch），完成后报告出现在左侧列表。',
   'assets.empty': '暂无资产。让 agent 用 novel_asset_* 工具创建后刷新。',
   'assets.other': '其他',
   'assets.stages': '阶段',
@@ -512,6 +526,13 @@ export const en: Record<StudioPanelKey, string> = {
   'tasks.retry.notRecoverable': 'This failure is not recoverable',
   'tasks.retry.done': 'Task re-queued',
   'tasks.retry.failed': 'Retry submission failed',
+  'research.launch': 'Launch research',
+  'research.launch.placeholder': 'Research question (e.g. the rise and fall of Ming-Qing grain transport)…',
+  'research.launch.submit': 'Submit research task',
+  'research.launch.submitting': 'Submitting…',
+  'research.launch.submitted': 'Research task submitted — track it in the Tasks tab.',
+  'research.launch.failed': 'Submit failed',
+  'research.launch.hint': 'Runs in the background (DeepResearch); the report lands in the list on the left when done.',
   'assets.empty': 'No assets yet. Ask the agent to create some with the novel_asset_* tools, then refresh.',
   'assets.other': 'Other',
   'assets.stages': 'stages',
