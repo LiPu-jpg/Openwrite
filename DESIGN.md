@@ -60,7 +60,7 @@
 | 模型与设置 | `novel_model_*` 工具 | ✅ |
 | 项目搜索 | `novel_search` 工具 | ✅ |
 | 滚动大纲 / 叙事预测 | `novel_rolling_plan_action` / `novel_narrative_forecast_action` | ✅ |
-| 正文编辑器（Vditor） | 「稿件」tab 嵌入完整 Studio（唯一保留的嵌入面） | ✅ |
+| 总览仪表盘 + 正文编辑器（Vditor） | 「总览」tab：原生工具箱条 + 单 iframe 分段切换（hash 片段导航不重载） | ✅ |
 | 导入/导出 | `novel_import*` / `novel_export` 工具 | ✅ |
 | 项目初始化/切换 | `novel_project_init` / `novel_project_open` 工具 | ✅ |
 

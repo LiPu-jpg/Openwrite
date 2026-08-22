@@ -1244,3 +1244,28 @@
   flex: 1;
   min-height: 0;
 }
+
+/* ── 总览/正文 合并 tab 的分段切换 ─────────────────────────────────────── */
+
+.modeSwitch {
+  display: flex;
+  gap: 2px;
+  padding: 4px 10px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.2));
+}
+
+.modeButton {
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--dsw-alias-text-secondary, inherit);
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.modeButton[data-active='true'] {
+  color: var(--dsw-alias-accent, rgb(65, 118, 230));
+  border-bottom-color: var(--dsw-alias-accent, rgb(65, 118, 230));
+  font-weight: 600;
+}

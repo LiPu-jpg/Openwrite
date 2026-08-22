@@ -274,13 +274,14 @@ assert.equal(dictionaries[0].dicts.zh['search.indexed'], '已索引')
 const views = registrations.filter(entry => entry.options.name === 'conversation.view')
 assert.deepEqual(
   views.map(entry => [entry.options.id, entry.options.order]),
-  [['overview', 19], ['studio', 20], ['review-ws', 21], ['outline', 22], ['assets', 23], ['tasks', 24], ['graph', 25], ['research', 26], ['search', 27]],
-  'nine conversation.view tabs in order',
+  [['overview', 19], ['review-ws', 21], ['outline', 22], ['assets', 23], ['tasks', 24], ['graph', 25], ['research', 26], ['search', 27]],
+  'ten conversation.view tabs in order (总览/正文 merged into one)',
 )
-// Pinned Studio hash views ride the inject face; the dashboard pin is no hash.
+// The merged 总览 tab carries the full API face (toolbox) with no hash pin;
+// the review workbench keeps its '#review' pin.
 const injected = Object.fromEntries(views.map(entry => [entry.options.id, entry.options.inject()]))
 assert.equal(injected['overview'].view, undefined)
-assert.equal(injected['studio'].view, 'chapters')
+assert.equal(typeof injected['overview'].postStudioApi, 'function', 'overview toolbox API face')
 assert.equal(injected['review-ws'].view, 'review')
 for (const view of views) assert.equal(typeof view.component, 'function')
 const toolviews = registrations.filter(entry => entry.options.name === 'tool.call.toolview')
@@ -288,7 +289,7 @@ assert.deepEqual(toolviews.map(entry => entry.options.key), ['novel_review_chapt
 // Locale label thunks resolve through the bound namespace.
 const tasksView = views.find(entry => entry.options.id === 'tasks')
 assert.equal(tasksView.options.label(), 'view.tasks', 'tasks label thunk reads view.tasks')
-const studioView = views.find(entry => entry.options.id === 'studio')
-assert.equal(studioView.options.label(), 'view.studio')
+const overviewView = views.find(entry => entry.options.id === 'overview')
+assert.equal(overviewView.options.label(), 'view.overview', 'merged tab keeps the 总览 label')
 
 console.log('studio-panel smoke: all assertions passed')

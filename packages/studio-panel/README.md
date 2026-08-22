@@ -2,8 +2,7 @@
 
 dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会话 UI：
 
-- **总览**（id `overview`，order 19）：**原生工具箱条** + 内嵌 Studio 仪表盘。工具箱补齐 Studio「工具与设置」抽屉在 dsh 侧的最后缺口——导出（md/txt/epub，经二进制安全代理下载，Content-Disposition 文件名）、同步项目、导入章节（选文件 → 预览切章计划/冲突检测 → 确认导入，支持起始章节号与强制覆盖；TXT/Markdown）。
-- **正文**（id `studio`，order 20）：内嵌 Studio 章节编辑器（iframe 钉到 `#chapters`）。
+- **总览**（id `overview`，order 19）：**原生工具箱条 + 分段切换（总览 ⇄ 正文）+ 单一内嵌 Studio**——原「总览」「正文」两个 tab 合并：同一 iframe 经 hash 片段导航在 仪表盘 / 章节编辑器 间切换（不整页重载，编辑器状态保留）。工具箱补齐 Studio「工具与设置」抽屉在 dsh 侧的最后缺口——导出（md/txt/epub，经二进制安全代理下载，Content-Disposition 文件名）、同步项目、导入章节（选文件 → 预览切章计划/冲突检测 → 确认导入，支持起始章节号与强制覆盖；TXT/Markdown）。
 - **审稿**（id `review-ws`，order 21）：内嵌 Studio 审稿工作台（iframe 钉到 `#review`）。
 - **大纲**（id `outline`，order 22）：原生大纲树，**默认即可编辑（Obsidian 哲学：内容本身就是编辑器）** —— 卷/篇/节/章层级、kind 徽章、成稿状态，可折叠；标题与正文块渲染为无框 input/textarea（视觉与纯文本一致，focus 才现细边框），点击即改，失焦/回车自动提交（未变更不提交）；悬停出结构钮（+下级 / +同级 / 删），工具栏「新增卷」。全部走 `POST /api/outline/edit` 原子树编辑（revision 乐观锁；成功静默更新 revision 不重渲染——焦点与滚动位置保留；409 冲突自动刷新结构并提示重试；delete 由服务端连续重编号后续章节）。按钮可用性以线上 `editable` / `can_delete` / `child_kind` 为准（正文章节的章节号校验错误透传）。注意：章重命名会更换节点 id，紧随其后的同节点操作可能 404——错误路径自动重载结构。
 - **资产**（id `assets`，order 23）：原生结构化资产库（对应 Studio 左侧导航的「资料库」，可完整替代），Obsidian 式主从布局——左侧栏（288px，独立滚动）：分段切换（角色/设定/进阶体系/参考作品/作品核心，纵向带计数）、搜索框（按名称/ID/类型/别名/标签/摘要过滤）、紧凑条目行（设定段按 asset_type 折叠分组）、底部新建/刷新按钮；右侧主区：**选中即编辑**（可编辑三类无只读卡片门，直接进 AssetEditor：front-matter 字段 + 关系增删 + 正文即 Vditor IR 实时渲染（运行时从 Studio 源 `${studioUrl}/vendor/vditor/dist/` 按需注入 <script>/<link>，不打包；主题跟随 shell 的 `body[data-ds-dark-theme]`，MutationObserver 实时切换；加载失败回退纯文本 textarea 并提示））；保存走乐观锁 `revision`，保存后留在编辑态（revision 变化触发编辑器以服务端真值重挂），409 冲突给「刷新重试」；取消=放弃本地草稿重取真值；新建为内联表单（占用主区）。参考作品段（Studio 的 deconstruct 面，**不是**资料库）与作品核心段（`documents.core` + `GET /api/document`）只读。未选中时主区显示选择提示。
@@ -21,7 +20,7 @@ dsh web 的 client 插件，把 OpenWrite Studio 的关键界面原生融入会�
   - `GET /studio-panel/config.json`：把解析后的配置发给浏览器；
   - `GET /studio-panel/api/<path...>?query`（prefix 路由）：代理到 `${studioUrl}/api/<path...>?query`，透传上游状态码、content-type 与响应体（含错误体）；Studio 不可达时 502 JSON。**写通道带白名单**：仅 `assets`、`assets/update`、`assets/package/import`、`outline/edit`、`sync`、`import/preview`、`import` 七个路径接受 POST/PUT（转发方法与 JSON body 原文，注入 Studio 写操作必需的 `X-OpenWrite-Studio: 1` 头）；其余路径保持 GET-only（405）。正文变更仍留在 agent 工具（`@dsh-novel/openwrite-bridge`）；UI 可写资产域与大纲结构域。
   `webServer` 通过 `ctx.inject` 可选等待，因此在无 web server 的 profile（如 headless）里也能正常加载，只是不注册路由。
-- **Client 半边**（`src/client/` → `lib/client.js`）：package.json 里的 `dsh.client` 块（`platform: "web"`）+ `exports["./client"]` 指向构建产物。dsh web 的 client 模块表（`ctx.clientModules`）扫描 host Loader 条目时发现该声明，把 bundle 挂到 `/plugins/@dsh-novel/studio-panel/client.js` 并注入启动图；浏览器半边用 `ctx.slots.inject('conversation.view', function* () { ... })` 等待 ui-conversation 声明槽位后逐个 yield 四个视图注册，并用 `ctx.slots.inject('tool.call.toolview', ...)` 注册评审卡（与 ui-trajectory / bash-sample 同一模式）。
+- **Client 半边**（`src/client/` → `lib/client.js`）：package.json 里的 `dsh.client` 块（`platform: "web"`）+ `exports["./client"]` 指向构建产物。dsh web 的 client 模块表（`ctx.clientModules`）扫描 host Loader 条目时发现该声明，把 bundle 挂到 `/plugins/@dsh-novel/studio-panel/client.js` 并注入启动图；浏览器半边用 `ctx.slots.inject('conversation.view', function* () { ... })` 等待 ui-conversation 声明槽位后逐个 yield 视图注册，并用 `ctx.slots.inject('tool.call.toolview', ...)` 注册评审卡（与 ui-trajectory / bash-sample 同一模式）。
 
 安装走 profile bundle 路径（与 `@dsh-novel/openwrite-bridge` 相同）：`scripts/install.sh` 把本包 `pnpm add -w` 进 `~/.dsh/profiles/web/` 并追加到 `dsh.profile.bundles`；`cordis.patch.yml` 通过 `--patch` 叠加层或 profile 的 `dsh.bundle.patch` 把插件挂进 cordis 配置树。加载后，打开任意会话即可在头部标签栏看到「聊天 / 轨迹 / 总览 / 正文 / 审稿 / 大纲 / 资产 / 任务 / 图谱 / 研究 / 搜索」。
 

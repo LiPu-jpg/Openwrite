@@ -82,14 +82,6 @@ export function apply(ctx: Context): void {
     }, OverviewView)
     yield ctx.slots.register({
       name: 'conversation.view',
-      id: 'studio',
-      order: 20,
-      locale: NS,
-      label: () => t('view.studio'),
-      inject: (): StudioViewInjected => ({ resolveStudioUrl, view: 'chapters' }),
-    }, StudioView)
-    yield ctx.slots.register({
-      name: 'conversation.view',
       id: 'review-ws',
       order: 21,
       locale: NS,

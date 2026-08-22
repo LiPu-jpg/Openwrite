@@ -24,6 +24,9 @@ import css from './views.module.css'
  * directly omits the runtime seats it never touches. */
 const EmbeddedDashboard = StudioView as unknown as ComponentType<{
   resolveStudioUrl: () => Promise<string>
+  /** Pin the SPA to '#chapters'; empty/undefined boots the dashboard. A
+   * fragment-only change navigates without reloading — editor state survives. */
+  view?: string | undefined
   t: OverviewViewProps['t']
 }>
 
@@ -57,6 +60,8 @@ export function OverviewView({ postStudioApi, resolveStudioUrl, t }: OverviewVie
   const [force, setForce] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  /** Which Studio surface the single iframe shows: dashboard or chapter editor. */
+  const [mode, setMode] = useState<'overview' | 'chapters'>('overview')
 
   const say = (text: string, bad = false) => {
     setStatus({ text, bad })
@@ -253,8 +258,18 @@ export function OverviewView({ postStudioApi, resolveStudioUrl, t }: OverviewVie
           )}
         </div>
       )}
+      <div className={css.modeSwitch}>
+        <button type="button" className={css.modeButton} data-active={mode === 'overview'}
+          onClick={() => { setMode('overview') }}>
+          {t('view.overview')}
+        </button>
+        <button type="button" className={css.modeButton} data-active={mode === 'chapters'}
+          onClick={() => { setMode('chapters') }}>
+          {t('view.studio')}
+        </button>
+      </div>
       <div className={css.toolsFrame}>
-        <EmbeddedDashboard resolveStudioUrl={resolveStudioUrl} t={t} />
+        <EmbeddedDashboard resolveStudioUrl={resolveStudioUrl} t={t} view={mode === 'chapters' ? 'chapters' : undefined} />
       </div>
     </div>
   )
