@@ -19,7 +19,8 @@
 | `presets/dante/` | Dante 写作 agent 预设（写章/评审/结算，可向 Goethe 子代理咨询） |
 | `scripts/install.sh` | 构建插件、安装预设到 `~/.dsh/.agent-presets/`、插件装进 dsh profile |
 | `scripts/dev.sh` | 一键启动 OpenWrite Studio + dsh web |
-| `scripts/verify.sh` | 一键集成验证（服务/插件/代理路由/嵌入皮肤） |
+| `scripts/verify.sh` | 一键集成验证（服务/插件/代理路由/嵌入皮肤，13 项） |
+| `conductor/` | Python 编排器：无人值守连续写章 → 37 维评审 → 低于阈值自动回炉（走 OpenWrite 后台任务系统；详见 DESIGN.md §6） |
 
 ## 快速开始
 
@@ -44,7 +45,11 @@ scripts/dev.sh       # 启动两端服务
 2. 切到 **Dante** 会话写正文：`novel_context_preview` 预检上下文包 →
    `novel_write_chapter` 写章 → `novel_review_chapter` 37 维评审。
    资产不齐时 Dante 会建议回 Goethe，或经 `subagent_goethe` 子代理做只读咨询。
-3. 在 Studio 里精修稿件、看大纲树与资产看板，导出 MD/TXT/EPUB。
+3. 无人值守批量生产用 **conductor**（需 Studio 在跑）：
+   `cd conductor && .venv/bin/python pipeline.py --chapters next --limit 3`——
+   连续写章 → 37 维评审 → 低于阈值/含 blocker 自动经修订闭环回炉；
+   `--review-only` / `--rework` / `--agent-guidance` 见模块 docstring 与 DESIGN.md §6。
+4. 在 Studio 里精修稿件、看大纲树与资产看板，导出 MD/TXT/EPUB。
 
 ## 许可
 

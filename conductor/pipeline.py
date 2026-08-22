@@ -321,9 +321,11 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
             content = studio.document(chapter_id)
             issue_ids = anchored_ids(candidates, content)
             if not issue_ids:
-                issue_ids = [str(i["id"]) for i in candidates if i.get("id")]
-            if not issue_ids:
-                raise StudioError(0, "NO_ISSUES", "评审无可用问题，无法构造修订回炉")
+                # 评审引用在正文中无可定位锚点（多为模型幻觉引用）：
+                # 修订通道无法工作，如实保留未达标结果，不硬塞导致 400。
+                print("    评审问题均无可定位正文锚点，跳过修订回炉（需人工处理）",
+                      flush=True)
+                break
             studio.rework(chapter_id, issue_ids, guidance)
             print("    修订已应用，复评中…", flush=True)
 
