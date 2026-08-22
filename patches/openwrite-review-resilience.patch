@@ -1,0 +1,43 @@
+--- a/tools/agent/reviewer.py
++++ b/tools/agent/reviewer.py
+@@ -764,10 +764,10 @@
+                     f"第 {index} 个审稿问题 severity 无效",
+                 )
+             if not isinstance(dimension, int) or dimension not in allowed_dimensions:
+-                raise ProviderResponseError(
+-                    "MALFORMED_STRUCTURED_OUTPUT",
+-                    f"第 {index} 个审稿问题 dimension 不在请求范围内",
+-                )
++                # 模型偶发把问题标到请求批次之外。整批失败会让章节评审随机翻车
++                # （dsh-novel conductor 实测：同章多次重试均命中），改为丢弃该条，
++                # 其余问题照常进入报告。
++                continue
+             issues.append(
+                 ReviewIssue(
+                     severity=severity,
+
+--- a/tools/chapter_pipeline.py
++++ b/tools/chapter_pipeline.py
+@@ -1343,17 +1343,20 @@
+         }
+     except Exception as exc:
+         scheduler.fail_stage(workflow, "review", str(exc))
++        code = str(getattr(exc, "code", "REVIEW_FAILED") or "REVIEW_FAILED")
+         if run_v2_manifest is not None:
+             try:
+                 run_v2_store.fail_stage(
+                     run_v2_manifest,
+                     "review",
+-                    code=str(getattr(exc, "code", "REVIEW_FAILED") or "REVIEW_FAILED"),
++                    code=code,
+                     message=str(exc),
+                 )
+             except Exception:
+                 pass
+-        return {"ok": False, "chapter_id": chapter_id, "error": str(exc)}
++        # 保留真实错误码（如 MODEL_OUTPUT_TRUNCATED / MALFORMED_STRUCTURED_OUTPUT）：
++        # 任务系统据此展示可恢复性与根因，而非一律 OPERATION_FAILED。
++        return {"ok": False, "chapter_id": chapter_id, "error": str(exc), "code": code}
+ 
+ 
+ def execute_multi_agent_chapter(
