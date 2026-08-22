@@ -7,6 +7,9 @@
 - 任务 tab 补管理闭环：行悬停 取消（pending/running/awaiting_confirmation，
   confirm 门）与 重试（failed 且 recoverable）按钮，走 host 代理新增的模式
   白名单 `tasks/{id}/cancel|retry`
+- 任务 tab 评审结果可见化：完成的 chapter_review 行内嵌分数徽章（分档着色），
+  点击展开问题清单（severity 着色 + 维度 + 摘要，≤10 条）——conductor 经 HTTP
+  跑的评审与 agent 工具跑的同样可见
 - 设计令牌归一：本轮新增样式全部映射回平台既有词汇，清除自造令牌
 - 研究 tab 补「发起研究」：问题输入 → type=research 托管任务（进度在任务 tab，
   可恢复错误如搜索凭据缺失原样透传）；host 白名单增补 `tasks` 写路径
