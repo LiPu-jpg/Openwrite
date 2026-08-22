@@ -45,6 +45,13 @@ const WRITABLE_PATHS: Record<string, true> = {
   'import/preview': true,
   import: true,
 }
+
+/**
+ * Pattern-based writable paths: the task lifecycle actions carry a task id
+ * segment (tasks/{task_id}/cancel|retry). Exact-match WRITABLE_PATHS cannot
+ * express them, so they get their own gate.
+ */
+const WRITABLE_PATH_RE: RegExp = /^tasks\/[A-Za-z0-9_-]+\/(?:cancel|retry)$/
 /** Upstream fetch budget; local ops are fast, but epub builds and imports can take a while. */
 const PROXY_TIMEOUT_MS = 60_000
 
@@ -111,7 +118,7 @@ function createProxyHandler(studioUrl: string): WebRouteHandler {
       sendJson(res, 405, { error: 'studio-panel proxy allows only GET/HEAD and allowlisted writes' })
       return
     }
-    if (isWrite && WRITABLE_PATHS[pathPart] !== true) {
+    if (isWrite && WRITABLE_PATHS[pathPart] !== true && !WRITABLE_PATH_RE.test(pathPart)) {
       sendJson(res, 405, { error: `studio-panel proxy: write path "${pathPart}" is not allowlisted` })
       return
     }

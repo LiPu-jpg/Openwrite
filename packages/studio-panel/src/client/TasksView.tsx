@@ -54,6 +54,8 @@ interface TaskRecord {
   chapterId: string
   inputSummary: string
   errorMessage: string
+  /** Server hint that a failed task may be retried. */
+  recoverable: boolean
   attempt: number
   createdAt: string
   updatedAt: string
@@ -81,6 +83,7 @@ function parseTask(raw: unknown): TaskRecord {
     chapterId: text(record['chapter_id']),
     inputSummary: text(record['input_summary']),
     errorMessage: text(error['message']),
+    recoverable: error['recoverable'] === true,
     attempt: typeof record['attempt'] === 'number' ? record['attempt'] : 1,
     createdAt: text(record['created_at']),
     updatedAt: text(record['updated_at']),
@@ -113,7 +116,7 @@ function shortTime(iso: string): string {
 export type TasksViewProps =
   ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
 
-export function TasksView({ fetchStudioApi, t }: TasksViewProps) {
+export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) {
   const [state, setState] = useState<LoadState>('loading')
   const [payload, setPayload] = useState<TasksPayload | null>(null)
   const [error, setError] = useState('')
@@ -135,6 +138,28 @@ export function TasksView({ fetchStudioApi, t }: TasksViewProps) {
       })
     return () => { cancelled = true }
   }, [fetchStudioApi])
+
+  /** One-shot task action (cancel/retry) through the pattern-allowlisted proxy. */
+  const [acting, setActing] = useState<string | null>(null)
+  const [actionNote, setActionNote] = useState<{ text: string; bad: boolean } | null>(null)
+
+  const runAction = useCallback(async (task: TaskRecord, action: 'cancel' | 'retry') => {
+    if (acting !== null) return
+    setActing(`${task.taskId}:${action}`)
+    setActionNote(null)
+    try {
+      await postStudioApi(`/tasks/${task.taskId}/${action}`, {})
+      setActionNote({ text: action === 'cancel' ? t('tasks.cancel.done') : t('tasks.retry.done'), bad: false })
+      load(true)
+    } catch (cause: unknown) {
+      setActionNote({
+        text: `${action === 'cancel' ? t('tasks.cancel.failed') : t('tasks.retry.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`,
+        bad: true,
+      })
+    } finally {
+      setActing(null)
+    }
+  }, [acting, postStudioApi, load, t])
 
   // Initial load + 5s polling; hidden-page ticks are skipped, and unmount
   // (tab switch unmounts the view) clears the interval.
@@ -198,6 +223,11 @@ export function TasksView({ fetchStudioApi, t }: TasksViewProps) {
           {t('refresh')}
         </button>
       </div>
+        {actionNote !== null && (
+          <div className={css.notice}>
+            <span className={actionNote.bad ? css.errorText : undefined}>{actionNote.text}</span>
+          </div>
+        )}
       <div className={css.body}>
         {state === 'loading' && payload === null && <div className={css.notice}>{t('loading')}</div>}
         {state === 'error' && (
@@ -221,6 +251,32 @@ export function TasksView({ fetchStudioApi, t }: TasksViewProps) {
               <span className={css.taskPhase}>{t('tasks.attempt')} {task.attempt}</span>
             )}
             <span className={css.taskSummary}>{task.inputSummary}</span>
+            <span className={css.taskActions}>
+              {(task.status === 'pending' || task.status === 'running' || task.status === 'awaiting_confirmation') && (
+                <button
+                  type="button"
+                  className={css.actionButton}
+                  disabled={acting !== null}
+                  title={t('tasks.cancel.title')}
+                  onClick={() => {
+                    if (window.confirm(t('tasks.cancel.confirm'))) void runAction(task, 'cancel')
+                  }}
+                >
+                  {acting === `${task.taskId}:cancel` ? '…' : t('tasks.cancel')}
+                </button>
+              )}
+              {task.status === 'failed' && (
+                <button
+                  type="button"
+                  className={css.actionButton}
+                  disabled={acting !== null || !task.recoverable}
+                  title={task.recoverable ? t('tasks.retry.title') : t('tasks.retry.notRecoverable')}
+                  onClick={() => { void runAction(task, 'retry') }}
+                >
+                  {acting === `${task.taskId}:retry` ? '…' : t('tasks.retry')}
+                </button>
+              )}
+            </span>
             <span className={css.taskTime}>{shortTime(task.createdAt)}</span>
             {task.status === 'failed' && task.errorMessage !== '' && (
               <div className={css.taskError}>{task.errorMessage}</div>

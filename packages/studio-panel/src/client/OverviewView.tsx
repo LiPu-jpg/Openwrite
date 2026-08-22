@@ -61,7 +61,7 @@ export function OverviewView({ postStudioApi, resolveStudioUrl, t }: OverviewVie
   const [importOpen, setImportOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
   /** Which Studio surface the single iframe shows: dashboard or chapter editor. */
-  const [mode, setMode] = useState<'overview' | 'chapters'>('overview')
+  const [mode, setMode] = useState<'overview' | 'chapters' | 'review'>('overview')
 
   const say = (text: string, bad = false) => {
     setStatus({ text, bad })
@@ -267,9 +267,13 @@ export function OverviewView({ postStudioApi, resolveStudioUrl, t }: OverviewVie
           onClick={() => { setMode('chapters') }}>
           {t('view.studio')}
         </button>
+        <button type="button" className={css.modeButton} data-active={mode === 'review'}
+          onClick={() => { setMode('review') }}>
+          {t('view.reviewWs')}
+        </button>
       </div>
       <div className={css.toolsFrame}>
-        <EmbeddedDashboard resolveStudioUrl={resolveStudioUrl} t={t} view={mode === 'chapters' ? 'chapters' : undefined} />
+        <EmbeddedDashboard resolveStudioUrl={resolveStudioUrl} t={t} view={mode === 'overview' ? undefined : mode} />
       </div>
     </div>
   )

@@ -6,6 +6,7 @@ export const NS = 'studio-panel'
 /** The studio-panel dictionary key set (the source of truth for both locales). */
 export type StudioPanelKey =
   | 'view.overview'
+  | 'view.writing'
   | 'view.studio'
   | 'view.reviewWs'
   | 'view.outline'
@@ -53,6 +54,16 @@ export type StudioPanelKey =
   | 'tools.import.conflicts'
   | 'tools.import.force'
   | 'tools.import.confirm'
+  | 'tasks.cancel'
+  | 'tasks.cancel.title'
+  | 'tasks.cancel.confirm'
+  | 'tasks.cancel.done'
+  | 'tasks.cancel.failed'
+  | 'tasks.retry'
+  | 'tasks.retry.title'
+  | 'tasks.retry.notRecoverable'
+  | 'tasks.retry.done'
+  | 'tasks.retry.failed'
   | 'assets.empty'
   | 'assets.other'
   | 'assets.stages'
@@ -222,6 +233,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh: Record<StudioPanelKey, string> = {
   'view.overview': '总览',
+  'view.writing': '写作',
   'view.studio': '正文',
   'view.reviewWs': '审稿',
   'view.outline': '大纲',
@@ -269,6 +281,16 @@ export const zh: Record<StudioPanelKey, string> = {
   'tools.import.conflicts': '冲突：{ids} 已存在。',
   'tools.import.force': '强制覆盖导入',
   'tools.import.confirm': '确认导入',
+  'tasks.cancel': '取消',
+  'tasks.cancel.title': '取消该任务',
+  'tasks.cancel.confirm': '确认取消这个正在排队的任务？',
+  'tasks.cancel.done': '任务已取消',
+  'tasks.cancel.failed': '取消失败',
+  'tasks.retry': '重试',
+  'tasks.retry.title': '重试该任务',
+  'tasks.retry.notRecoverable': '该失败不可恢复，无法重试',
+  'tasks.retry.done': '任务已重新排队',
+  'tasks.retry.failed': '重试提交失败',
   'assets.empty': '暂无资产。让 agent 用 novel_asset_* 工具创建后刷新。',
   'assets.other': '其他',
   'assets.stages': '阶段',
@@ -432,6 +454,7 @@ export const zh: Record<StudioPanelKey, string> = {
 /** English dictionary. */
 export const en: Record<StudioPanelKey, string> = {
   'view.overview': 'Overview',
+  'view.writing': 'Writing',
   'view.studio': 'Manuscript',
   'view.reviewWs': 'Review',
   'view.outline': 'Outline',
@@ -479,6 +502,16 @@ export const en: Record<StudioPanelKey, string> = {
   'tools.import.conflicts': 'Conflicts: {ids} already exist.',
   'tools.import.force': 'Force overwrite import',
   'tools.import.confirm': 'Confirm import',
+  'tasks.cancel': 'Cancel',
+  'tasks.cancel.title': 'Cancel this task',
+  'tasks.cancel.confirm': 'Cancel this queued/running task?',
+  'tasks.cancel.done': 'Task cancelled',
+  'tasks.cancel.failed': 'Cancel failed',
+  'tasks.retry': 'Retry',
+  'tasks.retry.title': 'Retry this task',
+  'tasks.retry.notRecoverable': 'This failure is not recoverable',
+  'tasks.retry.done': 'Task re-queued',
+  'tasks.retry.failed': 'Retry submission failed',
   'assets.empty': 'No assets yet. Ask the agent to create some with the novel_asset_* tools, then refresh.',
   'assets.other': 'Other',
   'assets.stages': 'stages',

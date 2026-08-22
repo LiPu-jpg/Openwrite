@@ -2,6 +2,12 @@
 
 ## 未发布
 
+- 「审稿」tab 并入「写作」（原总览）三分段：总览 ⇄ 正文 ⇄ 审稿，Studio iframe
+  三合一；tab 总数 10 → 9，标签更名「写作」
+- 任务 tab 补管理闭环：行悬停 取消（pending/running/awaiting_confirmation，
+  confirm 门）与 重试（failed 且 recoverable）按钮，走 host 代理新增的模式
+  白名单 `tasks/{id}/cancel|retry`
+- 设计令牌归一：本轮新增样式全部映射回平台既有词汇，清除自造令牌
 - 「总览」「正文」两个 tab 合并为一个「总览」：原生工具箱条 + 分段切换
   （总览 ⇄ 正文），单一 Studio iframe 经 hash 片段导航切换（不整页重载，
   编辑器状态保留）；tab 总数 11 → 10

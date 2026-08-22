@@ -125,6 +125,23 @@ try {
   assert.equal(seenUrl, 'http://127.0.0.1:4567/api/outline/edit', 'outline edit forwarded')
   assert.equal(Buffer.from(seenOptions.body).toString('utf8'), outlineBody, 'outline body verbatim')
 
+  // Pattern-allowlisted task lifecycle actions: POST tasks/{id}/cancel|retry.
+  const taskReq = {
+    method: 'POST',
+    url: '/studio-panel/api/tasks/tsk_20260822023413_0d18e7bcb0/cancel',
+    async *[Symbol.asyncIterator]() { yield Buffer.from('{}') },
+  }
+  const taskRes = capture()
+  await proxyRoute.handler(taskReq, taskRes)
+  assert.equal(seenUrl, 'http://127.0.0.1:4567/api/tasks/tsk_20260822023413_0d18e7bcb0/cancel', 'task cancel forwarded')
+  const taskRetry = capture()
+  await proxyRoute.handler({ ...taskReq, url: '/studio-panel/api/tasks/tsk_x/retry' }, taskRetry)
+  assert.equal(seenUrl.endsWith('/retry'), true, 'task retry forwarded')
+  // 但未列入模式的写路径依旧拒绝
+  const deniedTask = capture()
+  await proxyRoute.handler({ ...taskReq, url: '/studio-panel/api/tasks/tsk_x/delete' }, deniedTask)
+  assert.equal(deniedTask.status, 405, 'non-pattern task write refused')
+
   // Upstream error status/body pass through untouched.
   globalThis.fetch = async () => new Response('{"error":"nope","code":"X"}', { status: 409 })
   const conflict = capture()
@@ -274,7 +291,7 @@ assert.equal(dictionaries[0].dicts.zh['search.indexed'], '已索引')
 const views = registrations.filter(entry => entry.options.name === 'conversation.view')
 assert.deepEqual(
   views.map(entry => [entry.options.id, entry.options.order]),
-  [['overview', 19], ['review-ws', 21], ['outline', 22], ['assets', 23], ['tasks', 24], ['graph', 25], ['research', 26], ['search', 27]],
+  [['overview', 19], ['outline', 22], ['assets', 23], ['tasks', 24], ['graph', 25], ['research', 26], ['search', 27]],
   'ten conversation.view tabs in order (总览/正文 merged into one)',
 )
 // The merged 总览 tab carries the full API face (toolbox) with no hash pin;
@@ -282,7 +299,6 @@ assert.deepEqual(
 const injected = Object.fromEntries(views.map(entry => [entry.options.id, entry.options.inject()]))
 assert.equal(injected['overview'].view, undefined)
 assert.equal(typeof injected['overview'].postStudioApi, 'function', 'overview toolbox API face')
-assert.equal(injected['review-ws'].view, 'review')
 for (const view of views) assert.equal(typeof view.component, 'function')
 const toolviews = registrations.filter(entry => entry.options.name === 'tool.call.toolview')
 assert.deepEqual(toolviews.map(entry => entry.options.key), ['novel_review_chapter'])
@@ -290,6 +306,6 @@ assert.deepEqual(toolviews.map(entry => entry.options.key), ['novel_review_chapt
 const tasksView = views.find(entry => entry.options.id === 'tasks')
 assert.equal(tasksView.options.label(), 'view.tasks', 'tasks label thunk reads view.tasks')
 const overviewView = views.find(entry => entry.options.id === 'overview')
-assert.equal(overviewView.options.label(), 'view.overview', 'merged tab keeps the 总览 label')
+assert.equal(overviewView.options.label(), 'view.writing', 'merged tab relabeled 写作')
 
 console.log('studio-panel smoke: all assertions passed')

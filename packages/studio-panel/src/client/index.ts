@@ -21,7 +21,6 @@ import { ResearchView } from './ResearchView.tsx'
 import { NovelReviewCard } from './ReviewCard.tsx'
 import { GraphView } from './GraphView.tsx'
 import { SearchView } from './SearchView.tsx'
-import { StudioView, type StudioViewInjected } from './StudioView.tsx'
 import { TasksView } from './TasksView.tsx'
 
 /** Required services: the conversation/tool slots and the locale service. */
@@ -77,17 +76,9 @@ export function apply(ctx: Context): void {
       id: 'overview',
       order: 19,
       locale: NS,
-      label: () => t('view.overview'),
+      label: () => t('view.writing'),
       inject: (): OverviewInjected => ({ ...studioApi }),
     }, OverviewView)
-    yield ctx.slots.register({
-      name: 'conversation.view',
-      id: 'review-ws',
-      order: 21,
-      locale: NS,
-      label: () => t('view.reviewWs'),
-      inject: (): StudioViewInjected => ({ resolveStudioUrl, view: 'review' }),
-    }, StudioView)
     yield ctx.slots.register({
       name: 'conversation.view',
       id: 'outline',
