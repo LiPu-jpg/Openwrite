@@ -1,8 +1,9 @@
 /**
  * Search view (搜索): native project search over the OpenWrite library —
  * debounced query input + scope selector, results with the query highlighted
- * in the snippet. Read-only (GET only); this is the panel's one interactive
- * (non-mutating) view.
+ * in the snippet. Click-to-read: any result opens an inline preview pane
+ * (document via GET /api/document?path=…, hit line highlighted). GET-only;
+ * this is the panel's one interactive (non-mutating) view.
  *
  * Wire shape (verified against OpenWrite tools/studio_http.py do_GET +
  * tools/studio_application.py search_project + tools/project_search.py
@@ -16,13 +17,16 @@
  *   indexed, engine (lightrag/literal-fallback/none),
  *   warning, warning_code, retrieval_stats, index_updates, embedding,
  * }
+ * GET /api/document?path=<p> answers WITHOUT an envelope —
+ * { path, title, content, version, revision, ... } (any project document:
+ * outline / manuscript chapters / character & world sources).
  * Canonical scopes (library_catalog.py CANONICAL_SEARCH_SCOPES): all /
  * outline / core / characters / settings / continuity / chapters / sources.
  * The payload carries no match offsets, so highlighting re-matches the
  * (server-normalized) query inside the snippet client-side.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
@@ -63,47 +67,54 @@ interface SearchPayload {
 
 type LoadState = 'idle' | 'loading' | 'error' | 'ready'
 
+/** Inline preview state for one clicked result. */
+interface PreviewState {
+  result: SearchResult
+  status: 'loading' | 'ready' | 'error'
+  content: string
+  message: string
+}
+
 /** Narrow the search payload, tolerating missing/extra fields. */
 function parseSearch(data: unknown): SearchPayload {
   const root = (data !== null && typeof data === 'object' ? data : {}) as Record<string, unknown>
-  const text = (value: unknown): string => (typeof value === 'string' ? value : '')
-  const results: SearchResult[] = (Array.isArray(root['results']) ? root['results'] : [])
-    .map((raw): SearchResult => {
-      const record = (raw !== null && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-      return {
-        path: text(record['path']),
-        title: text(record['title']) || text(record['path']),
-        line: typeof record['line'] === 'number' ? record['line'] : 0,
-        heading: text(record['heading']),
-        snippet: text(record['snippet']) || text(record['excerpt']),
-        scopeLabel: text(record['scope_label']),
-        categoryLabel: text(record['category_label']),
-      }
-    })
+  const results = Array.isArray(root['results']) ? root['results'] : []
   return {
-    query: text(root['query']),
-    results,
-    indexed: typeof root['indexed'] === 'number' ? root['indexed'] : 0,
-    warning: text(root['warning']),
+    query: String(root['query'] ?? ''),
+    results: results.map(item => {
+      const r = (item !== null && typeof item === 'object' ? item : {}) as Record<string, unknown>
+      return {
+        path: String(r['path'] ?? ''),
+        title: String(r['title'] ?? ''),
+        line: typeof r['line'] === 'number' ? r.line : 0,
+        heading: String(r['heading'] ?? ''),
+        snippet: String(r['snippet'] ?? ''),
+        scopeLabel: String(r['scope_label'] ?? ''),
+        categoryLabel: String(r['category_label'] ?? ''),
+      }
+    }),
+    indexed: typeof root['indexed'] === 'number' ? root.indexed : 0,
+    warning: String(root['warning'] ?? ''),
   }
 }
 
 /** Split a snippet around case-insensitive query matches for highlighting. */
 function highlight(snippet: string, query: string): { text: string; match: boolean }[] {
-  const needle = query.trim()
-  if (needle === '') return [{ text: snippet, match: false }]
+  const trimmed = query.trim()
+  if (trimmed === '') return [{ text: snippet, match: false }]
   const parts: { text: string; match: boolean }[] = []
-  const lower = snippet.toLowerCase()
-  const target = needle.toLowerCase()
-  let cursor = 0
-  for (;;) {
-    const found = lower.indexOf(target, cursor)
-    if (found === -1) break
-    if (found > cursor) parts.push({ text: snippet.slice(cursor, found), match: false })
-    parts.push({ text: snippet.slice(found, found + needle.length), match: true })
-    cursor = found + needle.length
+  let rest = snippet
+  while (rest !== '') {
+    const index = rest.toLowerCase().indexOf(trimmed.toLowerCase())
+    if (index < 0) {
+      parts.push({ text: rest, match: false })
+      break
+    }
+    if (index > 0) parts.push({ text: rest.slice(0, index), match: false })
+    parts.push({ text: rest.slice(index, index + trimmed.length), match: true })
+    rest = rest.slice(index + trimmed.length)
   }
-  if (cursor < snippet.length) parts.push({ text: snippet.slice(cursor), match: false })
+  if (parts.length === 0) parts.push({ text: snippet, match: false })
   return parts
 }
 
@@ -120,6 +131,8 @@ export function SearchView({ fetchStudioApi, t }: SearchViewProps) {
   const [timedOut, setTimedOut] = useState(false)
   // Retry signal: bumping re-runs the effect with unchanged query/scope.
   const [nonce, setNonce] = useState(0)
+  /** Inline preview for one clicked result (null = list mode). */
+  const [preview, setPreview] = useState<PreviewState | null>(null)
 
   // Debounced live search: fires 350ms after the last keystroke, immediately
   // (well, one debounce tick) on scope change. Empty query returns to idle.
@@ -166,6 +179,32 @@ export function SearchView({ fetchStudioApi, t }: SearchViewProps) {
     }
   }, [input, scope, nonce, fetchStudioApi])
 
+  /** Open the inline preview: fetch the hit document, keep the hit line. */
+  const openPreview = useCallback((result: SearchResult) => {
+    setPreview({ result, status: 'loading', content: '', message: '' })
+    let cancelled = false
+    fetchStudioApi(`/document?path=${encodeURIComponent(result.path)}`)
+      .then((data) => {
+        if (cancelled) return
+        const record = (data !== null && typeof data === 'object' ? data : {}) as Record<string, unknown>
+        setPreview({
+          result,
+          status: 'ready',
+          content: typeof record['content'] === 'string' ? record.content : '',
+          message: '',
+        })
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return
+        setPreview({
+          result,
+          status: 'error',
+          content: '',
+          message: cause instanceof Error ? cause.message : String(cause),
+        })
+      })
+  }, [fetchStudioApi])
+
   const meta = useMemo(() => {
     if (state !== 'ready' || payload === null) return ''
     return `${payload.results.length} / ${t('search.indexed')} ${payload.indexed}`
@@ -195,44 +234,108 @@ export function SearchView({ fetchStudioApi, t }: SearchViewProps) {
         </span>
       </div>
       <div className={css.body}>
-        {state === 'idle' && <div className={css.notice}>{t('search.hint')}</div>}
-        {state === 'loading' && <div className={css.notice}>{t('loading')}</div>}
-        {state === 'error' && (
-          <div className={css.notice}>
-            <span className={css.errorText}>{timedOut ? t('search.timeout') : error}</span>
-            <button type="button" className={css.button} onClick={() => { setNonce(value => value + 1) }}>
-              {t('retry')}
-            </button>
-          </div>
-        )}
-        {state === 'ready' && payload !== null && (
-          <>
-            {payload.warning !== '' && <div className={css.truncatedNote}>{payload.warning}</div>}
-            {payload.results.length === 0
-              ? <div className={css.notice}>{t('search.empty')}</div>
-              : payload.results.map(result => (
-                <div key={`${result.path}:${result.line}`} className={css.searchResult}>
-                  <div className={css.searchResultHead}>
-                    <span className={css.searchResultTitle}>{result.title}</span>
-                    {result.scopeLabel !== '' && <span className={css.tag}>{result.scopeLabel}</span>}
-                    {result.categoryLabel !== '' && <span className={css.tag}>{result.categoryLabel}</span>}
-                    <span className={css.searchResultPath}>
-                      {result.path}{result.line > 0 ? `:${result.line}` : ''}
-                    </span>
-                  </div>
-                  {result.heading !== '' && <div className={css.searchResultHeading}>{result.heading}</div>}
-                  {result.snippet !== '' && (
+        {preview !== null ? (
+          <div className={css.previewPane}>
+            <div className={css.previewHead}>
+              <button type="button" className={css.actionButton}
+                onClick={() => { setPreview(null) }}>
+                {t('search.preview.back')}
+              </button>
+              <span className={css.searchResultPath}>
+                {preview.result.path}{preview.result.line > 0 ? `:${preview.result.line}` : ''}
+              </span>
+              <span className={css.searchResultTitle}>{preview.result.title}</span>
+            </div>
+            {preview.status === 'loading' && <div className={css.notice}>{t('loading')}</div>}
+            {preview.status === 'error' && (
+              <div className={css.notice}>
+                <span className={css.errorText}>{preview.message}</span>
+                <button type="button" className={css.button}
+                  onClick={() => { openPreview(preview.result) }}>
+                  {t('retry')}
+                </button>
+              </div>
+            )}
+            {preview.status === 'ready' && function renderPreviewWindow() {
+              const lines = preview.content.split('\n')
+              const hit = Math.max(1, preview.result.line)
+              const from = Math.max(1, hit - 2)
+              const to = Math.min(lines.length, hit + 2)
+              const rows: { line: number; text: string }[] = []
+              for (let n = from; n <= to; n++) {
+                rows.push({ line: n, text: lines[n - 1] ?? '' })
+              }
+              const query = input.trim()
+              return (
+                <>
+                  {rows.map(row => (
+                    <pre
+                      key={row.line}
+                      className={row.line === hit ? css.previewHit : css.previewLine}
+                    >
+                      {String(row.line).padStart(4)}  {row.text}
+                    </pre>
+                  ))}
+                  {query.trim() !== '' && (
                     <div className={css.searchSnippet}>
-                      {highlight(result.snippet, payload.query).map((part, index) => (
+                      {highlight(rows.find(row => row.line === hit)?.text ?? '', query).map((part, index) => (
                         part.match
                           ? <mark key={index} className={css.searchMark}>{part.text}</mark>
                           : <span key={index}>{part.text}</span>
                       ))}
                     </div>
                   )}
-                </div>
-              ))
-            }
+                </>
+              )
+            }()}
+          </div>
+        ) : (
+          <>
+            {state === 'idle' && <div className={css.notice}>{t('search.hint')}</div>}
+            {state === 'loading' && <div className={css.notice}>{t('loading')}</div>}
+            {state === 'error' && (
+              <div className={css.notice}>
+                <span className={css.errorText}>{timedOut ? t('search.timeout') : error}</span>
+                <button type="button" className={css.button} onClick={() => { setNonce(value => value + 1) }}>
+                  {t('retry')}
+                </button>
+              </div>
+            )}
+            {state === 'ready' && payload !== null && (
+              <>
+                {payload.warning !== '' && <div className={css.truncatedNote}>{payload.warning}</div>}
+                {payload.results.length === 0
+                  ? <div className={css.notice}>{t('search.empty')}</div>
+                  : payload.results.map(result => (
+                    <button
+                      key={`${result.path}:${result.line}`}
+                      type="button"
+                      className={css.searchResult}
+                      onClick={() => { openPreview(result) }}
+                    >
+                      <div className={css.searchResultHead}>
+                        <span className={css.searchResultTitle}>{result.title}</span>
+                        {result.scopeLabel !== '' && <span className={css.tag}>{result.scopeLabel}</span>}
+                        {result.categoryLabel !== '' && <span className={css.tag}>{result.categoryLabel}</span>}
+                        <span className={css.searchResultPath}>
+                          {result.path}{result.line > 0 ? `:${result.line}` : ''}
+                        </span>
+                      </div>
+                      {result.heading !== '' && <div className={css.searchResultHeading}>{result.heading}</div>}
+                      {result.snippet !== '' && (
+                        <div className={css.searchSnippet}>
+                          {highlight(result.snippet, payload.query).map((part, index) => (
+                            part.match
+                              ? <mark key={index} className={css.searchMark}>{part.text}</mark>
+                              : <span key={index}>{part.text}</span>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  ))
+                }
+              </>
+            )}
           </>
         )}
       </div>

@@ -5116,3 +5116,41 @@
   padding: 8px 10px;
   border-bottom: 1px solid var(--dsw-alias-border-l);
 }
+
+/* ── 搜索·点击即读预览（SearchView preview pane) ───────────────────────── */
+
+.searchResultActive,
+button.searchResultActive {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-layer-2);
+  cursor: default;
+}
+
+.previewPane {
+  border-top: 1px solid var(--dsw-alias-border-l);
+  padding: 8px 10px;
+  overflow: auto;
+}
+
+.previewHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.previewLine,
+.previewHit {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--dsw-alias-label-secondary);
+  margin: 0 0 0 0;
+}
+
+.previewHit {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+}
