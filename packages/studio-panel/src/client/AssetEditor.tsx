@@ -19,9 +19,9 @@
  *   reputation/curse/custom.
  */
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { VditorBody, VditorLoading } from './VditorBody.tsx'
+import { VditorBody } from './VditorBody.tsx'
 import css from './views.module.css'
 
 /** The summary fields the editor needs from the parsed detail. */
@@ -142,13 +142,11 @@ interface AssetEditorProps {
   fieldBusy: string | null
   onCancel: () => void
   onRefresh: () => void
-  /** Resolve the Studio base URL (Vditor assets load from that origin). */
-  resolveStudioUrl: () => Promise<string>
   t: TFunc
 }
 
 /** Read-write editor over one asset's allowed front-matter fields. */
-export function AssetEditor({ kind, source, candidates, saving, saveError, conflict, onSave, onFieldSave, fieldBusy, onCancel, onRefresh, resolveStudioUrl, t }: AssetEditorProps) {
+export function AssetEditor({ kind, source, candidates, saving, saveError, conflict, onSave, onFieldSave, fieldBusy, onCancel, onRefresh, t }: AssetEditorProps) {
   const [name, setName] = useState(source.name)
   const [summary, setSummary] = useState(source.summary)
   const [aliasesText, setAliasesText] = useState(source.aliases.join('、'))
@@ -165,19 +163,8 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
   const [newTarget, setNewTarget] = useState('')
   const [newNote, setNewNote] = useState('')
   const [bodyDraft, setBodyDraft] = useState(source.body)
-  /** Studio origin for the Vditor asset load; resolved lazily on mount. */
-  const [studioUrl, setStudioUrl] = useState<string | null>(null)
   /** True after the Vditor script failed — the body falls back to a textarea with a notice. */
   const [liveFailed, setLiveFailed] = useState(false)
-
-  useEffect(() => {
-    if (studioUrl !== null || liveFailed) return
-    let cancelled = false
-    void resolveStudioUrl().then((url) => {
-      if (!cancelled) setStudioUrl(url)
-    })
-    return () => { cancelled = true }
-  }, [studioUrl, liveFailed, resolveStudioUrl])
 
   const scalarKeys = Object.keys(scalars)
 
@@ -387,11 +374,9 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
               />
             </>
           )}
-          {!liveFailed && studioUrl === null && <VditorLoading t={t} />}
-          {!liveFailed && studioUrl !== null && (
+          {!liveFailed && (
             <VditorBody
               initial={bodyDraft}
-              studioUrl={studioUrl}
               disabled={saving}
               onChange={setBodyDraft}
               onFailed={() => { setLiveFailed(true) }}

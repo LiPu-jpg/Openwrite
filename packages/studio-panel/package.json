@@ -1,6 +1,6 @@
 {
   "name": "@dsh-novel/studio-panel",
-  "description": "dsh web client plugin adding a 稿件 (Manuscript) view tab embedding the local OpenWrite Studio in the session UI",
+  "description": "Native dsh writing workbenches backed by the headless OpenWrite domain service",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -37,6 +37,7 @@
     "lib/client.js",
     "lib/client.js.map",
     "lib/types/**/*.d.ts",
+    "vendor/vditor/**/*",
     "cordis.patch.yml"
   ],
   "scripts": {
@@ -108,7 +109,8 @@
     "@deepseek-ai/dsh-workspace": "0.1.0-rc.7"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "lucide-react": "^0.468.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

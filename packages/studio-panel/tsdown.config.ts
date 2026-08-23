@@ -43,6 +43,10 @@ const GENERATED_REMOTE = /^@deepseek-ai\/dsh-[a-z0-9]+(?:-[a-z0-9]+)*\/remote$/
  */
 const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
 const CSS_VIRTUAL_SUFFIX = '.mjs'
+const VDITOR_RUNTIME_SPECIFIER = 'dsh-vditor-runtime'
+const VDITOR_RUNTIME_VIRTUAL_ID = '\0dsh-vditor-runtime.mjs'
+const VDITOR_RUNTIME_FILE = resolvePath('vendor/vditor/dist/index.min.js')
+const VDITOR_ICONS_FILE = resolvePath('vendor/vditor/dist/js/icons/ant.js')
 
 /** Node half: the host-side cordis plugin (Config schema + config route). */
 const lib: UserConfig = {
@@ -74,6 +78,32 @@ const client: UserConfig = {
   // a guaranteed runtime throw.
   noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
   plugins: [{
+    name: 'dsh-vditor-runtime-inline',
+    resolveId(source: string) {
+      return source === VDITOR_RUNTIME_SPECIFIER ? VDITOR_RUNTIME_VIRTUAL_ID : null
+    },
+    async load(id: string) {
+      if (id !== VDITOR_RUNTIME_VIRTUAL_ID) return null
+      this.addWatchFile(VDITOR_RUNTIME_FILE)
+      this.addWatchFile(VDITOR_ICONS_FILE)
+      const [source, icons] = await Promise.all([
+        readFile(VDITOR_RUNTIME_FILE, 'utf8'),
+        readFile(VDITOR_ICONS_FILE, 'utf8'),
+      ])
+      return [
+        'const vditorModule = { exports: {} };',
+        '(function (exports, module, define) {',
+        source,
+        '}).call(globalThis, vditorModule.exports, vditorModule, undefined);',
+        'const Vditor = vditorModule.exports;',
+        'export function installVditorIcons() {',
+        '  if (document.getElementById("vditor-icon-undo") !== null) return;',
+        icons,
+        '}',
+        'export default Vditor;',
+      ].join('\n')
+    },
+  }, {
     // Bundle purity gate (build-time mirror of the module-edge rules):
     // platform seed entries stay external, inline-safe wire layers inline,
     // every other @deepseek-ai value import is a build error.

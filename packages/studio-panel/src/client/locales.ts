@@ -15,6 +15,59 @@ export type StudioPanelKey =
   | 'view.graph'
   | 'view.research'
   | 'view.search'
+  | 'view.creation'
+  | 'view.library'
+  | 'view.operations'
+  | 'creation.chapters'
+  | 'creation.searchChapters'
+  | 'creation.clearSearch'
+  | 'creation.chaptersEmpty'
+  | 'creation.showChapters'
+  | 'creation.hideChapters'
+  | 'creation.inspector'
+  | 'creation.showInspector'
+  | 'creation.hideInspector'
+  | 'creation.editorLoading'
+  | 'creation.documentLoading'
+  | 'creation.inspectorLoading'
+  | 'creation.inspectorLoadingSlow'
+  | 'creation.empty'
+  | 'creation.context'
+  | 'creation.review'
+  | 'creation.revisions'
+  | 'creation.contextEmpty'
+  | 'creation.reviewEmpty'
+  | 'creation.revisionsEmpty'
+  | 'creation.issues'
+  | 'creation.changedElsewhere'
+  | 'creation.conflict'
+  | 'creation.reload'
+  | 'creation.overwrite'
+  | 'creation.discardConfirm'
+  | 'creation.overwriteConfirm'
+  | 'creation.closePanel'
+  | 'creation.status.idle'
+  | 'creation.status.loading'
+  | 'creation.status.saved'
+  | 'creation.status.dirty'
+  | 'creation.status.saving'
+  | 'creation.status.conflict'
+  | 'creation.status.offline'
+  | 'operations.transfer'
+  | 'operations.transferHint'
+  | 'tool.family.status'
+  | 'tool.family.context'
+  | 'tool.family.manuscript'
+  | 'tool.family.revision'
+  | 'tool.family.task'
+  | 'tool.family.search'
+  | 'tool.family.asset'
+  | 'tool.family.outline'
+  | 'tool.running'
+  | 'tool.failed'
+  | 'tool.succeeded'
+  | 'tool.openChapter'
+  | 'turn.changed'
   | 'resolving'
   | 'loading'
   | 'unreachable'
@@ -253,8 +306,61 @@ export const zh: Record<StudioPanelKey, string> = {
   'view.graph': '图谱',
   'view.research': '研究',
   'view.search': '搜索',
+  'view.creation': '创作',
+  'view.library': '资料',
+  'view.operations': '任务',
+  'creation.chapters': '章节',
+  'creation.searchChapters': '搜索章节',
+  'creation.clearSearch': '清除章节搜索',
+  'creation.chaptersEmpty': '没有匹配的章节。',
+  'creation.showChapters': '展开章节栏',
+  'creation.hideChapters': '收起章节栏',
+  'creation.inspector': '检查器',
+  'creation.showInspector': '展开检查器',
+  'creation.hideInspector': '收起检查器',
+  'creation.editorLoading': '正在准备编辑器…',
+  'creation.documentLoading': '正在载入正文…',
+  'creation.inspectorLoading': '正在整理本章上下文…',
+  'creation.inspectorLoadingSlow': '上下文仍在整理，正文编辑不受影响。',
+  'creation.empty': '尚无章节',
+  'creation.context': '上下文',
+  'creation.review': '审稿',
+  'creation.revisions': '修订',
+  'creation.contextEmpty': '本章暂无可用上下文。',
+  'creation.reviewEmpty': '本章暂无审稿结果。',
+  'creation.revisionsEmpty': '本章暂无修订提案。',
+  'creation.issues': '个问题',
+  'creation.changedElsewhere': '正文已在其他位置变化；当前草稿未被覆盖。',
+  'creation.conflict': '保存冲突：服务端正文已变化，当前草稿仍保留。',
+  'creation.reload': '载入服务端版本',
+  'creation.overwrite': '覆盖保存',
+  'creation.discardConfirm': '当前草稿尚未保存，确认放弃并载入其他内容？',
+  'creation.overwriteConfirm': '确认以当前草稿覆盖服务端的较新版本？此操作会创建检查点。',
+  'creation.closePanel': '关闭面板',
+  'creation.status.idle': '未打开',
+  'creation.status.loading': '载入中',
+  'creation.status.saved': '已保存',
+  'creation.status.dirty': '未保存',
+  'creation.status.saving': '保存中',
+  'creation.status.conflict': '有冲突',
+  'creation.status.offline': '离线',
+  'operations.transfer': '导入与导出',
+  'operations.transferHint': '在当前作品范围内执行导出、同步和章节导入。',
+  'tool.family.status': '作品状态',
+  'tool.family.context': '章节上下文',
+  'tool.family.manuscript': '正文',
+  'tool.family.revision': '修订',
+  'tool.family.task': '任务',
+  'tool.family.search': '搜索',
+  'tool.family.asset': '资料',
+  'tool.family.outline': '大纲',
+  'tool.running': '执行中',
+  'tool.failed': '执行失败',
+  'tool.succeeded': '已完成',
+  'tool.openChapter': '打开章节',
+  'turn.changed': '本轮已更新',
   resolving: '正在读取 Studio 配置…',
-  loading: '正在连接 OpenWrite Studio…',
+  loading: '正在载入…',
   unreachable: '无法连接 OpenWrite Studio。请确认 Studio 已启动（默认 http://127.0.0.1:4567）。',
   retry: '重试',
   refresh: '刷新',
@@ -485,8 +591,61 @@ export const en: Record<StudioPanelKey, string> = {
   'view.graph': 'Graph',
   'view.research': 'Research',
   'view.search': 'Search',
+  'view.creation': 'Create',
+  'view.library': 'Library',
+  'view.operations': 'Tasks',
+  'creation.chapters': 'Chapters',
+  'creation.searchChapters': 'Search chapters',
+  'creation.clearSearch': 'Clear chapter search',
+  'creation.chaptersEmpty': 'No matching chapters.',
+  'creation.showChapters': 'Show chapter rail',
+  'creation.hideChapters': 'Hide chapter rail',
+  'creation.inspector': 'Inspector',
+  'creation.showInspector': 'Show inspector',
+  'creation.hideInspector': 'Hide inspector',
+  'creation.editorLoading': 'Preparing editor…',
+  'creation.documentLoading': 'Loading manuscript…',
+  'creation.inspectorLoading': 'Preparing chapter context…',
+  'creation.inspectorLoadingSlow': 'Context is still being prepared. You can keep editing.',
+  'creation.empty': 'No chapters',
+  'creation.context': 'Context',
+  'creation.review': 'Review',
+  'creation.revisions': 'Revisions',
+  'creation.contextEmpty': 'No context is available for this chapter.',
+  'creation.reviewEmpty': 'This chapter has not been reviewed.',
+  'creation.revisionsEmpty': 'No revision proposals for this chapter.',
+  'creation.issues': 'issues',
+  'creation.changedElsewhere': 'The manuscript changed elsewhere; your draft was preserved.',
+  'creation.conflict': 'Save conflict: the server manuscript changed and your draft is preserved.',
+  'creation.reload': 'Load server version',
+  'creation.overwrite': 'Overwrite',
+  'creation.discardConfirm': 'This draft is not saved. Discard it and load other content?',
+  'creation.overwriteConfirm': 'Overwrite the newer server version with this draft? A checkpoint will be created.',
+  'creation.closePanel': 'Close panel',
+  'creation.status.idle': 'Not open',
+  'creation.status.loading': 'Loading',
+  'creation.status.saved': 'Saved',
+  'creation.status.dirty': 'Unsaved',
+  'creation.status.saving': 'Saving',
+  'creation.status.conflict': 'Conflict',
+  'creation.status.offline': 'Offline',
+  'operations.transfer': 'Import & export',
+  'operations.transferHint': 'Export, sync, or import chapters within the current project.',
+  'tool.family.status': 'Project status',
+  'tool.family.context': 'Chapter context',
+  'tool.family.manuscript': 'Manuscript',
+  'tool.family.revision': 'Revision',
+  'tool.family.task': 'Task',
+  'tool.family.search': 'Search',
+  'tool.family.asset': 'Library',
+  'tool.family.outline': 'Outline',
+  'tool.running': 'Running',
+  'tool.failed': 'Failed',
+  'tool.succeeded': 'Completed',
+  'tool.openChapter': 'Open chapter',
+  'turn.changed': 'Updated this turn',
   resolving: 'Reading Studio configuration…',
-  loading: 'Connecting to OpenWrite Studio…',
+  loading: 'Loading…',
   unreachable: 'OpenWrite Studio is unreachable. Make sure Studio is running (default http://127.0.0.1:4567).',
   retry: 'Retry',
   refresh: 'Refresh',

@@ -38,6 +38,8 @@ export interface StudioClientOptions {
   baseUrl: string
   /** Per-request timeout in milliseconds (backstop; the dsh timeout policy owns the budget). */
   timeoutMs: number
+  /** Notify the owning domain service after a successful mutation. */
+  onMutation?: (path: string) => void
 }
 
 /** A downloaded export file. */
@@ -86,10 +88,12 @@ function applyParams(url: URL, params: QueryParams): void {
 export class StudioClient {
   private readonly baseUrl: string
   private readonly timeoutMs: number
+  private readonly onMutation: ((path: string) => void) | undefined
 
   constructor(options: StudioClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
     this.timeoutMs = options.timeoutMs
+    this.onMutation = options.onMutation
   }
 
   /** GET a JSON endpoint. `params` entries are URL-encoded; undefined values are dropped. */
@@ -111,7 +115,9 @@ export class StudioClient {
       },
       signal,
     )
-    return this.readJson(response)
+    const result = await this.readJson(response)
+    this.onMutation?.(path)
+    return result
   }
 
   /** PUT a JSON object with the Studio write credential header. */
@@ -125,7 +131,9 @@ export class StudioClient {
       },
       signal,
     )
-    return this.readJson(response)
+    const result = await this.readJson(response)
+    this.onMutation?.(path)
+    return result
   }
 
   /** GET a file-download endpoint (export), returning the raw bytes and filename. */

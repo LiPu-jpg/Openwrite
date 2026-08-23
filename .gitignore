@@ -1,6 +1,8 @@
 node_modules/
 lib/
 dist/
+!packages/studio-panel/vendor/vditor/dist/
+!packages/studio-panel/vendor/vditor/dist/**
 .venv/
 .tmp-*/
 *.log

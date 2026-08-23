@@ -1,6 +1,7 @@
 // Smoke check for the built plugin: asserts the dsh plugin export contract
 // (name / inject / apply / Config) without starting any server.
 import assert from 'node:assert/strict'
+import { Context, Service } from '@deepseek-ai/cordis'
 import * as mod from '../lib/index.js'
 
 assert.equal(mod.name, '@dsh-novel/openwrite-bridge', 'name export')
@@ -14,10 +15,20 @@ assert.equal(resolved.baseUrl, 'http://127.0.0.1:4567')
 assert.equal(resolved.timeoutMs, 600000)
 assert.equal(typeof resolved.outputDir, 'string')
 
-// Run apply against a stub tools registry: defineTool compiles the parameter
-// and output schemas at registration time, so this catches DSL misuse.
 const registered = []
-mod.apply({ tools: { register: (tool) => registered.push(tool) } }, resolved)
+const routes = []
+class ToolsService extends Service {
+  constructor(ctx) { super(ctx, 'tools') }
+  register(tool) { registered.push(tool) }
+}
+class WebServerService extends Service {
+  constructor(ctx) { super(ctx, 'webServer') }
+  register(route) { routes.push(route); return () => {} }
+}
+const root = new Context()
+await root.plugin(ToolsService)
+await root.plugin(WebServerService)
+await root.plugin(mod, resolved)
 const expected = [
   // reads, then writes — the registration order in src/tools.ts
   'novel_status', 'novel_context_preview', 'novel_outline_read', 'novel_assets_list',
@@ -58,5 +69,71 @@ assert.deepEqual(registered.map((t) => t.name), expected, 'registered novel_* to
 for (const tool of registered) {
   assert.ok(tool.description && tool.parameters && tool.output?.schema, `${tool.name} is fully defined`)
 }
+
+assert.deepEqual(routes.map(route => [route.kind, route.path]), [
+  ['exact', '/studio-panel/config.json'],
+  ['prefix', '/studio-panel/api'],
+  ['exact', '/studio-panel/invalidation.json'],
+  ['exact', '/studio-panel/events'],
+], 'domain service owns config, API and invalidation routes')
+
+function capture() {
+  const listeners = {}
+  return {
+    status: 0, headers: {}, body: '', chunks: [],
+    writeHead(status, headers) { this.status = status; Object.assign(this.headers, headers ?? {}) },
+    write(body) { this.chunks.push(String(body)) },
+    end(body) { if (body !== undefined) this.body = Buffer.from(body).toString('utf8') },
+    on(event, listener) { listeners[event] = listener },
+  }
+}
+
+const configRoute = routes.find(route => route.path === '/studio-panel/config.json')
+const configResponse = capture()
+await configRoute.handler({ method: 'GET' }, configResponse)
+assert.equal(configResponse.status, 200)
+assert.deepEqual(JSON.parse(configResponse.body), { studioUrl: resolved.baseUrl })
+
+const invalidationRoute = routes.find(route => route.path === '/studio-panel/invalidation.json')
+const initialInvalidation = capture()
+await invalidationRoute.handler({ method: 'GET' }, initialInvalidation)
+assert.deepEqual(JSON.parse(initialInvalidation.body), { revision: 0, resource: 'workspace', path: '' })
+assert.equal(Number(initialInvalidation.headers['content-length']), Buffer.byteLength(initialInvalidation.body))
+
+const eventsRoute = routes.find(route => route.path === '/studio-panel/events')
+const eventResponse = capture()
+await eventsRoute.handler({ method: 'GET' }, eventResponse)
+assert.equal(eventResponse.status, 200)
+assert.match(eventResponse.headers['content-type'], /text\/event-stream/)
+assert.match(eventResponse.chunks.join(''), /event: ready/)
+
+const proxyRoute = routes.find(route => route.path === '/studio-panel/api')
+const originalFetch = globalThis.fetch
+globalThis.fetch = async () => new Response(JSON.stringify({ ok: true }), {
+  status: 200,
+  headers: { 'content-type': 'application/json' },
+})
+try {
+  const mutationResponse = capture()
+  await proxyRoute.handler({
+    method: 'PUT',
+    url: '/studio-panel/api/document',
+    async *[Symbol.asyncIterator]() { yield Buffer.from('{}') },
+  }, mutationResponse)
+  assert.equal(mutationResponse.status, 200)
+  assert.equal(Number(mutationResponse.headers['content-length']), Buffer.byteLength(mutationResponse.body))
+} finally {
+  globalThis.fetch = originalFetch
+}
+const changedInvalidation = capture()
+await invalidationRoute.handler({ method: 'GET' }, changedInvalidation)
+assert.deepEqual(JSON.parse(changedInvalidation.body), {
+  revision: 1,
+  resource: 'manuscript',
+  path: '/api/document',
+})
+assert.match(eventResponse.chunks.join(''), /event: invalidate/)
+
+await root.fiber.dispose()
 
 console.log('smoke ok:', { name: mod.name, inject: mod.inject, tools: registered.length, config: resolved })

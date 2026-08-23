@@ -24,7 +24,7 @@ if [[ ! -x "$VENV/bin/openwrite" ]]; then
 fi
 
 echo "==> 启动 OpenWrite Studio: http://127.0.0.1:$STUDIO_PORT (project: $PROJECT)"
-# 允许 dsh web (3080) 把 Studio 嵌入 iframe 面板
+# Studio 仅作为 dsh 原生工作台的领域 HTTP 后端
 export OPENWRITE_FRAME_ANCESTORS="${OPENWRITE_FRAME_ANCESTORS:-http://127.0.0.1:3080}"
 "$VENV/bin/openwrite" studio --project "$PROJECT" --port "$STUDIO_PORT" --no-open &
 STUDIO_PID=$!

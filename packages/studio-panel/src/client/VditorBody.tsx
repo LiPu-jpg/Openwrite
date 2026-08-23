@@ -1,9 +1,7 @@
 /**
- * Vditor live (IR) body editor, loaded at runtime from the Studio server
- * origin — the exact engine and options OpenWrite Studio's manuscript editor
- * uses (tools/studio_assets/js/markdown-editor.js), NOT bundled: the script
- * and CSS arrive via injected <script>/<link> tags, so the purity gate's
- * external list stays react / react-dom / ui-primitives only.
+ * Vditor live (IR) body editor. The engine is vendored with this plugin and
+ * served by the dsh host at a same-origin route; Studio remains a headless
+ * domain backend and never supplies browser assets.
  *
  * Mirrors Studio's options: mode 'ir', lang zh_CN, cache off, dark theme
  * mapped from the dsh shell's `body[data-ds-dark-theme]` (ui-theme's
@@ -14,12 +12,13 @@
 
 import { useEffect, useRef } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import VditorRuntime, { installVditorIcons } from 'dsh-vditor-runtime'
 import css from './views.module.css'
 
-/** The slice of the Vditor API this editor uses (arrives as window.Vditor). */
+/** The slice of the bundled Vditor API this editor uses. */
 interface VditorInstance {
   getValue: () => string
-  setTheme: (theme: string) => void
+  setTheme: (theme: string, contentTheme?: string, codeTheme?: string, contentThemePath?: string) => void
   destroy: () => void
 }
 
@@ -27,41 +26,68 @@ type VditorCtor = new (host: HTMLElement, options: Record<string, unknown>) => V
 
 type TFunc = PropsLocale<'studio-panel'>['t']
 
-/** Cached loader promise — one script injection per page, shared by all editors. */
+/** Cached constructor promise shared by all editor instances. */
 let loading: Promise<VditorCtor> | null = null
+const VDITOR_BASE = '/studio-panel/vendor/vditor'
+const CONTENT_THEME_PATH = `${VDITOR_BASE}/dist/css/content-theme`
+
+function applyTheme(instance: VditorInstance, dark: boolean): void {
+  instance.setTheme(dark ? 'dark' : 'classic', dark ? 'dark' : 'light', undefined, CONTENT_THEME_PATH)
+}
+
+async function installPackagedGlobal(path: string, globalName: 'Lute' | 'VditorI18n'): Promise<void> {
+  const win = window as unknown as Record<string, unknown>
+  if (win[globalName] !== undefined) return
+  const response = await fetch(path, { headers: { accept: 'text/javascript' } })
+  if (!response.ok) {
+    throw new Error(`studio-panel: failed to load ${globalName} (${String(response.status)})`)
+  }
+  const source = await response.text()
+  if (win[globalName] !== undefined) return
+  new Function(source).call(window)
+  if (win[globalName] === undefined) throw new Error(`studio-panel: ${globalName} did not initialize`)
+}
 
 /**
- * Inject Vditor's CSS + script from the Studio origin and resolve with the
- * constructor. Rejects (and clears the cache, so a later retry can reload)
- * when the script fails or the global is missing.
- * @param studioUrl - Studio base URL (serves /vendor/vditor/dist/*).
+ * Attach Vditor's packaged CSS and resolve the constructor bundled into this
+ * plugin. Auxiliary language/theme assets continue to use the same-origin
+ * vendor route.
  */
-export function loadVditor(studioUrl: string): Promise<VditorCtor> {
+export function loadVditor(): Promise<VditorCtor> {
   if (loading !== null) return loading
-  loading = new Promise<VditorCtor>((resolve, reject) => {
-    const win = window as unknown as { Vditor?: VditorCtor }
-    if (win.Vditor !== undefined) {
-      resolve(win.Vditor)
-      return
+  loading = (async () => {
+    const win = window as unknown as { Vditor?: VditorCtor; VditorI18n?: Record<string, string> }
+    const packaged = VditorRuntime as VditorCtor
+    if (win.Vditor === undefined) win.Vditor = packaged
+    if (document.querySelector(`link[href="${VDITOR_BASE}/dist/index.css"]`) === null) {
+      const link = document.createElement('link')
+      link.rel = 'stylesheet'
+      link.href = `${VDITOR_BASE}/dist/index.css`
+      document.head.appendChild(link)
     }
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = `${studioUrl}/vendor/vditor/dist/index.css`
-    document.head.appendChild(link)
-    const script = document.createElement('script')
-    script.src = `${studioUrl}/vendor/vditor/dist/index.min.js`
-    script.onload = () => {
-      if (win.Vditor !== undefined) resolve(win.Vditor)
-      else {
-        loading = null
-        reject(new Error('studio-panel: Vditor script loaded but window.Vditor is missing'))
-      }
+    await Promise.all([
+      installPackagedGlobal(`${VDITOR_BASE}/dist/js/i18n/zh_CN.js`, 'VditorI18n'),
+      installPackagedGlobal(`${VDITOR_BASE}/dist/js/lute/lute.min.js`, 'Lute'),
+    ])
+    if (document.getElementById('vditorLuteScript') === null) {
+      const marker = document.createElement('script')
+      marker.id = 'vditorLuteScript'
+      marker.type = 'application/json'
+      document.head.appendChild(marker)
     }
-    script.onerror = () => {
-      loading = null
-      reject(new Error(`studio-panel: failed to load Vditor from ${studioUrl}`))
+    installVditorIcons()
+    if (document.getElementById('vditorIconScript') === null) {
+      const marker = document.createElement('script')
+      marker.id = 'vditorIconScript'
+      marker.type = 'application/json'
+      document.head.appendChild(marker)
     }
-    document.head.appendChild(script)
+    if (typeof packaged !== 'function') throw new Error('studio-panel: packaged Vditor constructor is missing')
+    return packaged
+  })()
+  const current = loading
+  void current.catch(() => {
+    if (loading === current) loading = null
   })
   return loading
 }
@@ -69,15 +95,14 @@ export function loadVditor(studioUrl: string): Promise<VditorCtor> {
 interface VditorBodyProps {
   /** Initial markdown (the editor is the source of truth afterwards). */
   initial: string
-  /** Studio origin (CDN root for Vditor assets and content themes). */
-  studioUrl: string
   onChange: (value: string) => void
+  onReady?: () => void
   onFailed: () => void
   disabled: boolean
 }
 
 /** One Vditor IR instance bound to the shell theme; destroyed on unmount. */
-export function VditorBody({ initial, onChange, studioUrl, onFailed, disabled }: VditorBodyProps) {
+export function VditorBody({ initial, onChange, onReady = () => {}, onFailed, disabled }: VditorBodyProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const instanceRef = useRef<VditorInstance | null>(null)
   // onChange identity changes every keystroke upstream; keep the latest in a
@@ -86,19 +111,22 @@ export function VditorBody({ initial, onChange, studioUrl, onFailed, disabled }:
   onChangeRef.current = onChange
   const onFailedRef = useRef(onFailed)
   onFailedRef.current = onFailed
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
 
   useEffect(() => {
     let disposed = false
     let observer: MutationObserver | null = null
-    void loadVditor(studioUrl)
+    void loadVditor()
       .then((Vditor) => {
         if (disposed || hostRef.current === null) return
         const dark = document.body.hasAttribute('data-ds-dark-theme')
         const instance = new Vditor(hostRef.current, {
           value: initial,
-          cdn: `${studioUrl}/vendor/vditor`,
+          cdn: VDITOR_BASE,
           lang: 'zh_CN',
-          icon: '',
+          i18n: (window as unknown as { VditorI18n?: Record<string, string> }).VditorI18n,
+          icon: 'ant',
           mode: 'ir',
           theme: dark ? 'dark' : 'classic',
           cache: { enable: false },
@@ -120,16 +148,16 @@ export function VditorBody({ initial, onChange, studioUrl, onFailed, disabled }:
             markdown: { codeBlockPreview: false, mathBlockPreview: false },
             theme: {
               current: dark ? 'dark' : 'light',
-              path: `${studioUrl}/vendor/vditor/dist/css/content-theme`,
+              path: CONTENT_THEME_PATH,
             },
           },
+          after: () => { onReadyRef.current() },
           input: (value: string) => { onChangeRef.current(value) },
         })
         instanceRef.current = instance
         observer = new MutationObserver(() => {
-          instanceRef.current?.setTheme(
-            document.body.hasAttribute('data-ds-dark-theme') ? 'dark' : 'classic',
-          )
+          const current = instanceRef.current
+          if (current !== null) applyTheme(current, document.body.hasAttribute('data-ds-dark-theme'))
         })
         observer.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
       })
@@ -147,7 +175,7 @@ export function VditorBody({ initial, onChange, studioUrl, onFailed, disabled }:
     }
     // initial seeds the editor once; later external value changes do not reset it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioUrl])
+  }, [])
 
   return <div className={css.vditorHost} ref={hostRef} aria-disabled={disabled} />
 }

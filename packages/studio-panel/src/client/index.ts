@@ -1,135 +1,85 @@
-/**
- * Browser studio-panel plugin: the 稿件 (Studio iframe), 大纲 (outline tree)
- * and 资产 (asset board) conversation view tabs, plus the keyed
- * novel_review_chapter report card — all registered through the slot system,
- * and a native 工具箱 strip (export/sync/import) on the 总览 tab.
- */
+/** Browser half: three native writing workbenches plus dsh-native chrome/tool views. */
 import type { Context } from '@deepseek-ai/cordis'
-// Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-// Type-only: the 'conversation.view' SlotMap row (declared by the slot's
-// owning package) must be in the program for the register calls to type.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-// Type-only: the 'tool.call.toolview' SlotMap row (declared by ui-tool).
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
-import { fetchStudioApi, postStudioApi, type StudioApiInjected } from './api.ts'
-import { AssetsView } from './AssetsView.tsx'
-import { OverviewView, type OverviewInjected } from './OverviewView.tsx'
+import { fetchStudioApi, postStudioApi, putStudioApi, type StudioApiInjected } from './api.ts'
+import { CreationView } from './CreationView.tsx'
+import { LibraryView } from './LibraryView.tsx'
+import { OperationsView } from './OperationsView.tsx'
+import { ComposerContextChip, HeaderProjectStatus, HeaderUtilities } from './HeaderChrome.tsx'
+import { createDomainToolCard, type ToolFamily } from './DomainToolCard.tsx'
 import { en, NS, zh } from './locales.ts'
-import { OutlineView } from './OutlineView.tsx'
-import { ResearchView } from './ResearchView.tsx'
 import { NovelReviewCard } from './ReviewCard.tsx'
-import { GraphView } from './GraphView.tsx'
-import { SearchView } from './SearchView.tsx'
-import { TasksView } from './TasksView.tsx'
+import { novelMutationDefinition, TurnMutationSummaryView } from './TurnMutationSummary.tsx'
 
-/** Required services: the conversation/tool slots and the locale service. */
-export const inject = ['slots', 'locale']
+export const inject = ['slots', 'locale', 'conversationEvents']
 
-/**
- * Schema default baked into the bundle: the fallback when the host half's
- * config route is absent (server-less profile) or unreadable. Keep in sync
- * with the host-side Config schema default in src/index.ts.
- */
-const DEFAULT_STUDIO_URL = 'http://127.0.0.1:4567'
+const studioApi: StudioApiInjected = { fetchStudioApi, postStudioApi, putStudioApi }
 
-/** Host-half config endpoint (same-origin; see src/index.ts CONFIG_ROUTE). */
-const CONFIG_ENDPOINT = '/studio-panel/config.json'
-
-/**
- * Resolve the configured Studio base URL through the host half's config
- * route. Any failure (route absent, non-JSON, malformed payload) falls back
- * to the schema default — the iframe then simply shows Studio's absence.
- */
-async function resolveStudioUrl(): Promise<string> {
-  try {
-    const response = await fetch(CONFIG_ENDPOINT, { headers: { accept: 'application/json' } })
-    if (!response.ok) throw new Error(`studio-panel: config route answered ${String(response.status)}`)
-    const data: unknown = await response.json()
-    const url = (data as { studioUrl?: unknown }).studioUrl
-    return typeof url === 'string' && url !== '' ? url : DEFAULT_STUDIO_URL
-  } catch {
-    return DEFAULT_STUDIO_URL
-  }
+const FAMILY_TOOLS: Readonly<Record<ToolFamily, readonly string[]>> = {
+  status: ['novel_status', 'novel_focus', 'novel_writing_targets', 'novel_continuity', 'novel_diagnostics'],
+  context: ['novel_context_preview'],
+  manuscript: ['novel_doc_read', 'novel_doc_write', 'novel_doc_create', 'novel_write_chapter', 'novel_multi_write', 'novel_chapter_delete', 'novel_manuscript_edit_action', 'novel_import', 'novel_import_preview'],
+  revision: ['novel_revisions_list', 'novel_revision_get', 'novel_revision_create_selection', 'novel_revision_create_from_review', 'novel_revision_apply', 'novel_revision_reject', 'novel_revision_regenerate'],
+  task: ['novel_tasks_list', 'novel_task_get', 'novel_task_create', 'novel_task_cancel', 'novel_task_retry', 'novel_task_confirm', 'novel_chapter_run_action'],
+  search: ['novel_search'],
+  asset: ['novel_assets_list', 'novel_asset_read', 'novel_asset_create', 'novel_asset_update', 'novel_assets_package_preview', 'novel_assets_package_import', 'novel_reference_library_action', 'novel_source_action'],
+  outline: ['novel_outline_read', 'novel_outline_edit', 'novel_foreshadowing', 'novel_rolling_plan_action', 'novel_narrative_forecast_action'],
 }
 
-/** The data views share one read-only Studio fetch face plus the allowlisted write face. */
-const studioApi: StudioApiInjected = { fetchStudioApi, postStudioApi, resolveStudioUrl }
+const FAMILY_CARDS: Readonly<Record<ToolFamily, ReturnType<typeof createDomainToolCard>>> = {
+  status: createDomainToolCard('status'),
+  context: createDomainToolCard('context'),
+  manuscript: createDomainToolCard('manuscript'),
+  revision: createDomainToolCard('revision'),
+  task: createDomainToolCard('task'),
+  search: createDomainToolCard('search'),
+  asset: createDomainToolCard('asset'),
+  outline: createDomainToolCard('outline'),
+}
 
-/**
- * Client plugin body: register the three view tabs and the review tool card.
- * Registrations ride the slot service's inject wrapper, so they wait on the
- * owning packages' declarations and plugin unload removes the entries.
- * @param ctx - client root context.
- */
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'studio-panel: dictionaries')
-  // Registration-time text (the view tab labels) reads through the bound
-  // translate as a thunk, so it follows the active locale without
-  // re-registration.
   const t = ctx.locale.bind(NS)
+  ctx.effect(() => ctx.conversationEvents.register(novelMutationDefinition), 'studio-panel: novel mutation turn data')
+
   ctx.slots.inject('conversation.view', function* () {
-    // The three pinned-iframe tabs first (Studio hash routing), then the
-    // native data views.
     yield ctx.slots.register({
-      name: 'conversation.view',
-      id: 'overview',
-      order: 19,
-      locale: NS,
-      label: () => t('view.writing'),
-      inject: (): OverviewInjected => ({ ...studioApi }),
-    }, OverviewView)
+      name: 'conversation.view', id: 'creation', order: 22, locale: NS,
+      label: () => t('view.creation'), inject: (): StudioApiInjected => studioApi,
+    }, CreationView)
     yield ctx.slots.register({
-      name: 'conversation.view',
-      id: 'outline',
-      order: 22,
-      locale: NS,
-      label: () => t('view.outline'),
-      inject: (): StudioApiInjected => studioApi,
-    }, OutlineView)
+      name: 'conversation.view', id: 'library', order: 23, locale: NS,
+      label: () => t('view.library'), inject: (): StudioApiInjected => studioApi,
+    }, LibraryView)
     yield ctx.slots.register({
-      name: 'conversation.view',
-      id: 'assets',
-      order: 23,
-      locale: NS,
-      label: () => t('view.assets'),
-      inject: (): StudioApiInjected => studioApi,
-    }, AssetsView)
-    yield ctx.slots.register({
-      name: 'conversation.view',
-      id: 'tasks',
-      order: 24,
-      locale: NS,
-      label: () => t('view.tasks'),
-      inject: (): StudioApiInjected => studioApi,
-    }, TasksView)
-    yield ctx.slots.register({
-      name: 'conversation.view',
-      id: 'graph',
-      order: 25,
-      locale: NS,
-      label: () => t('view.graph'),
-      inject: (): StudioApiInjected => studioApi,
-    }, GraphView)
-    yield ctx.slots.register({
-      name: 'conversation.view',
-      id: 'research',
-      order: 26,
-      locale: NS,
-      label: () => t('view.research'),
-      inject: (): StudioApiInjected => studioApi,
-    }, ResearchView)
-    yield ctx.slots.register({
-      name: 'conversation.view',
-      id: 'search',
-      order: 27,
-      locale: NS,
-      label: () => t('view.search'),
-      inject: (): StudioApiInjected => studioApi,
-    }, SearchView)
+      name: 'conversation.view', id: 'tasks', order: 24, locale: NS,
+      label: () => t('view.operations'), inject: (): StudioApiInjected => studioApi,
+    }, OperationsView)
   })
-  // The novel_review_chapter report card: keyed entry of the Tool-owned
-  // toolview hole (the bash-sample registrant posture).
-  ctx.slots.inject('tool.call.toolview', () =>
-    ctx.slots.register({ name: 'tool.call.toolview', key: 'novel_review_chapter', locale: NS }, NovelReviewCard))
+
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions', id: 'novel-project-status', order: -20, locale: NS,
+  }, HeaderProjectStatus))
+  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+    name: 'conversation.session.header.utilities', id: 'novel-utilities', order: 20, locale: NS,
+    inject: () => ({ postStudioApi }),
+  }, HeaderUtilities))
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+    name: 'conversation.input.left', id: 'novel-context', order: 20, locale: NS,
+  }, ComposerContextChip))
+  ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
+    name: 'conversation.chat.turnTail', locale: NS,
+    select: owner => owner.turn.data.get('novelMutations') ?? null,
+  }, TurnMutationSummaryView))
+
+  ctx.slots.inject('tool.call.toolview', function* () {
+    yield ctx.slots.register({ name: 'tool.call.toolview', key: 'novel_review_chapter', locale: NS }, NovelReviewCard)
+    for (const [family, tools] of Object.entries(FAMILY_TOOLS) as [ToolFamily, readonly string[]][]) {
+      for (const tool of tools) {
+        yield ctx.slots.register({ name: 'tool.call.toolview', key: tool, locale: NS }, FAMILY_CARDS[family])
+      }
+    }
+  })
 }

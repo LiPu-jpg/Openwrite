@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import { StudioClient } from './client.js'
+import { NovelDomainService } from './domain.js'
 import { registerNovelTools } from './tools.js'
 
 export const name = '@dsh-novel/openwrite-bridge'
@@ -31,6 +31,7 @@ export const Config: Schema<Config> = Schema.object({
 })
 
 export function apply(ctx: Context, config: Config) {
-  const client = new StudioClient({ baseUrl: config.baseUrl, timeoutMs: config.timeoutMs })
-  registerNovelTools(ctx, client, { timeoutMs: config.timeoutMs, outputDir: config.outputDir })
+  const domain = new NovelDomainService(ctx, { baseUrl: config.baseUrl, timeoutMs: config.timeoutMs })
+  registerNovelTools(ctx, domain.client, { timeoutMs: config.timeoutMs, outputDir: config.outputDir })
+  ctx.inject(['webServer'], webCtx => domain.registerWebRoutes(webCtx))
 }

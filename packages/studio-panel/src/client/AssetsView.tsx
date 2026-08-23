@@ -321,7 +321,7 @@ function matchesQuery(asset: AssetSummary, query: string): boolean {
 export type AssetsViewProps =
   ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
 
-export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t }: AssetsViewProps) {
+export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps) {
   const [state, setState] = useState<LoadState>('loading')
   const [assets, setAssets] = useState<AssetSummary[]>([])
   const [references, setReferences] = useState<ReferenceEntry[]>([])
@@ -704,7 +704,6 @@ export function AssetsView({ fetchStudioApi, postStudioApi, resolveStudioUrl, t 
             setSaveError(null)
             fetchDetail(asset, true)
           }}
-          resolveStudioUrl={resolveStudioUrl}
           t={t}
         />
       )

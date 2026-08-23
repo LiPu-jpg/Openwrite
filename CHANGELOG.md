@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-23 - dsh 原生创作工作台
+
+- OpenWrite 改为无界面领域后端；`NovelDomainService` 统一工具、同源 API 代理和轻量 revision 失效流。
+- 顶层插件视图收敛为「创作 / 资料 / 任务」，默认工作流彻底移除 iframe 与重复导航。
+- 新增原生 Vditor 正文编辑器：1.2 秒自动保存、version 乐观锁、409 草稿保护、显式覆盖。
+- 新增共享 `NovelWorkbenchStore`、会话头作品状态、输入章节上下文、Turn 写操作汇总。
+- 44 个常用工具归入八类原生卡片；大纲默认只展开当前章节路径。
+- Vditor 主运行时随插件打包，辅助资源由 dsh 同源提供；增加原生路由、无 iframe 与多工作台 smoke 门禁。
+
 ## 未发布
 
 - 「审稿」tab 并入「写作」（原总览）三分段：总览 ⇄ 正文 ⇄ 审稿，Studio iframe

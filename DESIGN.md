@@ -1,17 +1,17 @@
 # dsh-novel 架构设计
 
 把 OpenWrite 的完整小说创作能力接入 DeepSeek Harness (dsh) 的 agent 运行时：
-**dsh 负责 agent 编排（预设、子代理、技能、长上下文），OpenWrite 负责小说领域能力（大纲、章节流水线、评审、正典状态），Studio 继续担当文本编辑器。**
+**OpenWrite 提供无界面的小说领域后端，dsh 负责唯一的 agent 编排、交互壳与创作工作台。**
 
 ## 总体架构
 
 ```
 ┌─────────────────────────────┐      ┌──────────────────────────────┐
 │ dsh web (127.0.0.1:3080)    │      │ OpenWrite Studio             │
-│ agent 控制台                 │      │ (127.0.0.1:4567)             │
+│ agent 控制台 + 创作工作台    │      │ (127.0.0.1:4567)             │
 │                             │      │                              │
-│  goethe 预设 ──┐            │      │  文本编辑器 / 大纲树 / 资产  │
-│  dante 预设 ───┤  会话      │      │  / 修订 / 导出               │
+│  goethe 预设 ──┐            │      │  无界面领域 HTTP 服务         │
+│  dante 预设 ───┤  会话      │      │  存储 / 校验 / 流水线         │
 │  (persona +   │            │      │                              │
 │   技能 + 工具) │            │      │  HTTP 动作面 (POST /api/*)   │
 └──────┬────────┼────────────┘      └──────────────┬───────────────┘
@@ -35,14 +35,13 @@
   全部使用 dsh 的机制。OpenWrite 自带的 ReAct agent 层（Goethe/Dante Python 循环、
   /api/chat、Studio 助手面板）不参与本方案——草案生成等创作推理由 dsh agent 自身完成，
   OpenWrite 只暴露确定性领域服务（存储、校验、上下文装配、章节流水线、评审）。
-  嵌入模式下 Studio 的内置 agent 入口会被皮肤隐藏，保证只有一个 agent 界面。
-- **双前端并存**：dsh web 是对话/编排控制台；Studio 是稿件编辑器与资产看板。
-  两者读写同一份 `data/novels/{id}`，经 OpenWrite 的修订门控保证一致。
+- **唯一前端**：dsh web 同时承担对话、编排和创作编辑。Studio UI 不进入默认工作流，
+  只保留为外部高级维护出口；所有读写仍经 OpenWrite 修订门控作用于同一事实来源。
 
 ## 功能迁移对照（Studio 界面 → dsh 原生机制）
 
 原生融入原则：能力本身成为 dsh 的一等公民（agent 工具 / 原生视图 / 工具卡片），
-嵌入的 Studio 只做编辑器，不承载任何在 dsh 里已有原生形态的功能。
+默认工作流不嵌入 Studio；能力按写作者工作流进入 dsh 原生视图。
 
 | OpenWrite Studio 界面 | dsh 原生形态 | 状态 |
 |---|---|---|
@@ -60,7 +59,7 @@
 | 模型与设置 | `novel_model_*` 工具 | ✅ |
 | 项目搜索 | `novel_search` 工具 | ✅ |
 | 滚动大纲 / 叙事预测 | `novel_rolling_plan_action` / `novel_narrative_forecast_action` | ✅ |
-| 总览仪表盘 + 正文编辑器（Vditor） | 「总览」tab：原生工具箱条 + 单 iframe 分段切换（hash 片段导航不重载） | ✅ |
+| 总览仪表盘 + 正文编辑器（Vditor） | 「创作」三栏工作台 + 本地 Vditor + 上下文/审稿/修订检查器 | ✅ |
 | 导入/导出 | `novel_import*` / `novel_export` 工具 | ✅ |
 | 项目初始化/切换 | `novel_project_init` / `novel_project_open` 工具 | ✅ |
 
@@ -120,16 +119,14 @@ TS 插件，`apply(ctx)` 中 `ctx.tools.register(defineTool({...}))` 注册一�
 
 dsh web 的 client 插件，把 Studio 的关键界面原生融入会话 UI（细节见包内 README）：
 
-- **Host 半边**：最小 cordis 插件，在 dsh web server 上注册同源路由：
-  `GET /studio-panel/config.json` 下发配置；`GET /studio-panel/api/<path>` 只读代理
-  到 Studio（透传状态码与错误体；写通道白名单仅资产域，其余变更一律走 agent 工具）。
-  Studio 不发 CORS 头，浏览器数据视图必须经此代理。
-- **Client 半边**：九个 `conversation.view` 视图 tab——总览 / 正文 / 审稿
-  （内嵌 Studio iframe，hash 钉路由）、大纲（只读树）、资产（主从布局 +
-  乐观锁编辑 + Vditor 正文实时渲染）、任务（后台任务中心）、图谱（伏笔分层板 /
-  人物关系环形图 / 事实账本 / 章节工作流）、研究（深度研究报告库）、搜索
-  （项目资料检索）；另有 `novel_review_chapter` 评审报告卡
-  （`tool.call.toolview` 键控渲染，37 维评审 JSON → 报告卡）。
+- **Host 领域边界**：`openwrite-bridge` 的 `NovelDomainService` 独占 Studio HTTP 客户端，
+  同时提供同源 API 代理、轻量失效快照/SSE 兼容出口与配置出口。`studio-panel` host 半边只提供随包
+  Vditor 静态文件。
+- **Client 半边**：三个 `conversation.view` 工作台——创作（章节树 + 正文编辑器 +
+  检查器）、资料（资产/大纲/图谱/研究/搜索内部导航）、任务（后台任务/研究/导入导出）。
+  单一 `NovelWorkbenchStore` 集中缓存并每 1.5 秒轮询轻量 revision，revision 变化才刷新资源，
+  每 15 秒兜底全量同步；会话头、composer context、
+  八类工具卡和 Turn 写操作汇总复用同一状态。
 
 ### 3. 双 agent 预设（`presets/goethe/`、`presets/dante/`）
 
@@ -164,7 +161,7 @@ novel-reviewer、oh-story-long-write/deslop/review、truth-validation、workflow
   各包内 `cordis.patch.yml` 仅作 `--patch` 手动挂载的备用通道）。
 - `scripts/dev.sh`：启动 `openwrite studio --port 4567 --project ~/my_novel --no-open`
   + `dsh web`（导出 `NO_PROXY`，本机探活不被系统代理劫持）。
-- `scripts/verify.sh`：一键集成验证（服务存活、插件装载、代理路由、嵌入皮肤）；
+- `scripts/verify.sh`：一键集成验证（服务、领域代理、失效快照、本地 Vditor、无 iframe）；
   `scripts/e2e-web.py`：Playwright 走查面板视图。
 
 ### 6. Python 编排器 conductor（`conductor/`，已落地）
@@ -201,7 +198,7 @@ dsh-novel/
 ├── DESIGN.md                  # 本文档
 ├── README.md                  # 使用说明
 ├── packages/openwrite-bridge/ # TS 桥接插件：62 个 novel_* 工具
-├── packages/studio-panel/     # dsh web 原生视图插件（9 tab + 评审卡）
+├── packages/studio-panel/     # dsh web 原生工作台（3 tab + 8 类工具卡）
 ├── presets/goethe/            # Goethe 规划 agent 预设（含自带 skills/）
 ├── presets/dante/             # Dante 写作 agent 预设（含自带 skills/）
 ├── scripts/install.sh, dev.sh, verify.sh, e2e-web.py

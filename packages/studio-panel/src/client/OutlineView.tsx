@@ -7,7 +7,7 @@
  * tools/outline_tree.py mutate_outline_structure):
  *
  * - title input  blur/Enter → rename        (chapters must carry a number)
- * - body textarea blur       → update_summary (replaces the node's body block)
+ * - body textarea blur       → update_summary (updates prose synopsis, preserving metadata)
  * - hover buttons → add_child / add_after / delete (server renumbers on delete)
  * - toolbar      → add a top-level volume (add_child with empty node_id)
  *
@@ -26,6 +26,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { StudioApiError, type StudioApiInjected } from './api.ts'
+import { useWorkbench } from './WorkbenchStore.ts'
 import css from './views.module.css'
 
 /** One outline tree node (the fields this view reads; the payload carries more). */
@@ -92,10 +93,12 @@ export type OutlineViewProps =
   ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
 
 export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewProps) {
+  const workbench = useWorkbench()
   const [state, setState] = useState<LoadState>('loading')
   const [payload, setPayload] = useState<OutlinePayload | null>(null)
   const [error, setError] = useState('')
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [selectedNodeId, setSelectedNodeId] = useState('')
   const [drafts, setDrafts] = useState<Record<string, FieldDraft>>({})
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<{ text: string, bad: boolean } | null>(null)
@@ -107,7 +110,20 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
     fetchStudioApi('/outline')
       .then((data) => {
         if (cancelled) return
-        setPayload(parseOutline(data))
+        const next = parseOutline(data)
+        setPayload(next)
+        let selected = workbench.currentChapterId
+        const collapsedNodes = new Set<string>()
+        const visit = (node: OutlineNode): boolean => {
+          const childContains = node.children.map(visit).some(Boolean)
+          const containsTarget = node.id === selected || childContains
+          if (node.children.length > 0 && !containsTarget) collapsedNodes.add(node.id)
+          return containsTarget
+        }
+        const found = next.roots.map(visit).some(Boolean)
+        if (!found) selected = next.roots[0]?.id ?? ''
+        setSelectedNodeId(selected)
+        setCollapsed(collapsedNodes)
         setState('ready')
       })
       .catch((cause: unknown) => {
@@ -116,7 +132,7 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
         setState('error')
       })
     return () => { cancelled = true }
-  }, [fetchStudioApi])
+  }, [fetchStudioApi, workbench.currentChapterId])
 
   useEffect(() => load(), [load])
 
@@ -264,7 +280,7 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
     const summaryDirty = (drafts[node.id]?.summary ?? '') !== '' && summaryValue !== node.summary
     return (
       <li key={node.id} className={css.treeItem}>
-        <div className={css.treeRow}>
+        <div className={css.treeRow} data-selected={selectedNodeId === node.id} onClick={() => setSelectedNodeId(node.id)}>
           {hasChildren
             ? (
               <button
@@ -334,7 +350,7 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
             </span>
           )}
         </div>
-        {editable
+        {selectedNodeId === node.id && (editable
           ? (
             <textarea
               className={`${css.bodyTextarea}${summaryDirty ? ` ${css.bodyTextareaDirty}` : ''}`}
@@ -345,7 +361,7 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
               onBlur={() => { void commitSummary(node) }}
             />
           )
-          : node.summary !== '' && <div className={css.nodeSummary}>{node.summary}</div>}
+          : node.summary !== '' && <div className={css.nodeSummary}>{node.summary}</div>)}
         {addForm !== null && addForm.mode === 'after' && addForm.nodeId === node.id && renderAddForm()}
         {hasChildren && !isCollapsed && (
           <ul className={css.treeChildren}>

@@ -12,10 +12,6 @@
  * null, attempt, created_at, started_at, completed_at, updated_at, ... }.
  * There is NO numeric progress field — `phase` (queued/reading/preparing/
  * model/validating/committing/complete) is the progress signal.
- *
- * Polling: 5s interval while mounted; the tick is skipped while
- * document.hidden. Inactive conversation views unmount (the view ring renders
- * `only: <active id>`), so switching tabs stops polling via effect cleanup.
  */
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
@@ -23,9 +19,6 @@ import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/clie
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
 import css from './views.module.css'
-
-/** Poll cadence while the tab is mounted and the page is visible. */
-const POLL_INTERVAL_MS = 5_000
 
 /** Server-side status vocabulary (task_store.py TASK_STATUSES), display order. */
 const STATUSES = [
@@ -207,18 +200,11 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
     }
   }, [acting, postStudioApi, load, t])
 
-  // Initial load + 5s polling; hidden-page ticks are skipped, and unmount
-  // (tab switch unmounts the view) clears the interval.
+  // The shared WorkbenchStore owns centralized revision polling. This
+  // view remounts on its resource epoch and performs one focused fetch.
   useEffect(() => {
     const cancelInitial = load(false)
-    const timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return
-      load(true)
-    }, POLL_INTERVAL_MS)
-    return () => {
-      cancelInitial?.()
-      clearInterval(timer)
-    }
+    return () => { cancelInitial?.() }
   }, [load])
 
   const typeLabel = (type: string): string => {
@@ -249,6 +235,7 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
             type="button"
             className={css.chip}
             data-active={filter === 'all'}
+            aria-pressed={filter === 'all'}
             onClick={() => { setFilter('all') }}
           >
             {t('tasks.filter.all')} {tasks.length}
@@ -259,6 +246,7 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
               type="button"
               className={css.chip}
               data-active={filter === status}
+              aria-pressed={filter === status}
               onClick={() => { setFilter(status) }}
             >
               {t(`tasks.status.${status}`)} {payload?.counts[status] ?? 0}

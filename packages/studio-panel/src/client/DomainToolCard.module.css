@@ -1,0 +1,83 @@
+.card {
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+.card[data-state='error'] { border-color: var(--dsw-alias-state-error-tertiary); }
+.head {
+  display: grid;
+  grid-template-columns: 16px auto minmax(80px, auto) minmax(0, 1fr) 14px 14px;
+  min-height: 36px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.family { font-size: 12px; font-weight: 600; }
+.toolName,
+.summary {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.summary { text-align: right; }
+.chevron { transition: transform 140ms ease; }
+.head[aria-expanded='true'] .chevron { transform: rotate(180deg); }
+.spin { animation: spin 1.1s linear infinite; }
+
+.body {
+  display: grid;
+  gap: 1px;
+  padding: 7px 9px 9px 32px;
+  border-top: 1px solid var(--dsw-alias-border-l);
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr);
+  gap: 10px;
+  min-height: 24px;
+  align-items: baseline;
+  font-size: 11px;
+}
+.row span { color: var(--dsw-alias-label-tertiary); }
+.row strong { overflow-wrap: anywhere; font-weight: 500; }
+.action {
+  display: inline-flex;
+  width: max-content;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.action:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.head:focus-visible,
+.action:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-info-primary);
+  outline-offset: 2px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 600px) {
+  .head { grid-template-columns: 16px auto minmax(0, 1fr) 14px 14px; }
+  .toolName { display: none; }
+  .summary { text-align: left; }
+  .body { padding-left: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron { transition: none; }
+  .spin { animation: none; }
+}

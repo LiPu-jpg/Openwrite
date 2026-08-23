@@ -2,7 +2,7 @@
   "name": "dsh-novel",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenWrite 长篇小说能力接入 DeepSeek Harness：双 agent 预设 + 桥接插件 + Studio 内嵌面板",
+  "description": "OpenWrite 长篇小说领域后端接入 DeepSeek Harness：双 agent 预设 + 原生创作工作台",
   "type": "module",
   "scripts": {
     "build": "npm --prefix packages/openwrite-bridge run build && npm --prefix packages/studio-panel run build",

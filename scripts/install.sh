@@ -55,4 +55,4 @@ echo
 echo "安装完成。下一步："
 echo "  scripts/dev.sh        # 启动 OpenWrite Studio + dsh web"
 echo "  在 dsh web (http://127.0.0.1:3080) 新建会话时选择 Goethe 规划 / Dante 写作 预设，"
-echo "  会话头部的「稿件」tab 即内嵌的 Studio 编辑器"
+echo "  会话头部使用「创作 / 资料 / 任务」原生工作台；Studio 仅作为高级维护出口"

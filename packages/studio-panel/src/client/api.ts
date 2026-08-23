@@ -6,6 +6,7 @@
 
 /** Host-half proxy prefix (kept in sync with src/index.ts). */
 export const API_PROXY_BASE = '/studio-panel/api'
+const READ_TIMEOUT_MS = 20_000
 
 /**
  * Injected share of the data views (大纲 / 资产): JSON fetches against the
@@ -15,14 +16,19 @@ export const API_PROXY_BASE = '/studio-panel/api'
 export interface StudioApiInjected {
   fetchStudioApi: (path: string) => Promise<unknown>
   postStudioApi: (path: string, body: unknown) => Promise<unknown>
-  /** Resolve the Studio base URL (config route with baked-in default fallback). */
-  resolveStudioUrl: () => Promise<string>
+  putStudioApi: (path: string, body: unknown) => Promise<unknown>
 }
 
 /** Pull a human-readable message out of a Studio error payload when present. */
 function errorMessage(data: unknown, status: number): string {
   if (data !== null && typeof data === 'object') {
-    const message = (data as { error?: unknown }).error
+    const error = (data as { error?: unknown }).error
+    if (typeof error === 'string' && error !== '') return error
+    if (error !== null && typeof error === 'object') {
+      const message = (error as { message?: unknown }).message
+      if (typeof message === 'string' && message !== '') return message
+    }
+    const message = (data as { message?: unknown }).message
     if (typeof message === 'string' && message !== '') return message
   }
   return `HTTP ${String(status)}`
@@ -48,7 +54,22 @@ export class StudioApiError extends Error {
  * @returns the parsed JSON payload.
  */
 export async function fetchStudioApi(path: string): Promise<unknown> {
-  const response = await fetch(`${API_PROXY_BASE}${path}`, { headers: { accept: 'application/json' } })
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), READ_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(`${API_PROXY_BASE}${path}`, {
+      headers: { accept: 'application/json' },
+      signal: controller.signal,
+    })
+  } catch (cause: unknown) {
+    if (controller.signal.aborted) {
+      throw new StudioApiError(`Studio API request timed out (${String(READ_TIMEOUT_MS / 1_000)}s)`, 408)
+    }
+    throw cause
+  } finally {
+    window.clearTimeout(timer)
+  }
   const text = await response.text()
   let data: unknown = null
   if (text !== '') {
@@ -73,8 +94,17 @@ export async function fetchStudioApi(path: string): Promise<unknown> {
  * @returns the parsed JSON payload.
  */
 export async function postStudioApi(path: string, body: unknown): Promise<unknown> {
+  return mutateStudioApi('POST', path, body)
+}
+
+/** PUT a JSON body to one allowlisted Studio API path. */
+export async function putStudioApi(path: string, body: unknown): Promise<unknown> {
+  return mutateStudioApi('PUT', path, body)
+}
+
+async function mutateStudioApi(method: 'POST' | 'PUT', path: string, body: unknown): Promise<unknown> {
   const response = await fetch(`${API_PROXY_BASE}${path}`, {
-    method: 'POST',
+    method,
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify(body),
   })
