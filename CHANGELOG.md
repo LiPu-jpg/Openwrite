@@ -4,6 +4,8 @@
 
 - 「审稿」tab 并入「写作」（原总览）三分段：总览 ⇄ 正文 ⇄ 审稿，Studio iframe
   三合一；tab 总数 10 → 9，标签更名「写作」
+- 搜索 tab 点击即读：结果行可点击，内联预览经 GET /api/document 取全文，
+  命中行 ±2 行带行号高亮，返回钮回列表——查到的资料不再需要跳去别处看
 - 任务 tab 补管理闭环：行悬停 取消（pending/running/awaiting_confirmation，
   confirm 门）与 重试（failed 且 recoverable）按钮，走 host 代理新增的模式
   白名单 `tasks/{id}/cancel|retry`
