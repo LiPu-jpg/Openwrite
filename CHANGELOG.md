@@ -13,6 +13,9 @@
   点击展开问题清单（severity 着色 + 维度 + 摘要，≤10 条）——conductor 经 HTTP
   跑的评审与 agent 工具跑的同样可见
 - 设计令牌归一：本轮新增样式全部映射回平台既有词汇，清除自造令牌
+- conductor 新增 dsh 原生深度研究路线（`research.py`）：headless 会话用平台
+  自带 web_search 联网调研并综合成报告，落库 OpenWrite 报告目录（研究 tab
+  直接可见）——绕开博查 Key 依赖，零额外凭据；实测两份真实报告入库
 - 研究 tab 补「发起研究」：问题输入 → type=research 托管任务（进度在任务 tab，
   可恢复错误如搜索凭据缺失原样透传）；host 白名单增补 `tasks` 写路径
   （修复研究提交被代理 405 拦截的遗漏）
