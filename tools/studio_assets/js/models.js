@@ -12,6 +12,7 @@ const routeLabels = {
 };
 
 let selectedProfileId = "";
+let profileSavedCallback = null;
 
 const embeddingPresets = {
   local: [
@@ -426,8 +427,10 @@ async function saveProfile(event) {
       body: JSON.stringify(profilePayload()),
     });
     state.workspace.model_profiles = result.model_profiles;
+    if (result.workspace) state.workspace = result.workspace;
     selectedProfileId = result.profile.id;
     renderModelProfilesUI();
+    if (profileSavedCallback) profileSavedCallback(result);
     $("#model-progress").textContent = "档案已保存，任务路由立即生效。";
     showToast(`已保存模型档案 ${result.profile.label}`);
   } catch (error) {
@@ -572,7 +575,10 @@ export function openModelProfilesDialog(tab = "profiles") {
   $("#model-dialog").showModal();
 }
 
-export function bindModelProfilesUI() {
+export function bindModelProfilesUI(options = {}) {
+  profileSavedCallback = typeof options.onProfileSaved === "function"
+    ? options.onProfileSaved
+    : null;
   $("#model-form").addEventListener("submit", saveProfile);
   $("#model-profile-new").addEventListener("click", () => {
     selectedProfileId = "";

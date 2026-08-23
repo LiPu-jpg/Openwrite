@@ -5982,7 +5982,16 @@ function bindEvents() {
   $("#writing-targets-form").addEventListener("submit", saveWritingTargets);
   $("#writing-targets-close").addEventListener("click", () => $("#writing-targets-dialog").close());
   $("#writing-targets-cancel").addEventListener("click", () => $("#writing-targets-dialog").close());
-  bindModelProfilesUI();
+  bindModelProfilesUI({
+    onProfileSaved: () => {
+      renderWorkspace();
+      if (state.workspace?.model?.configured) {
+        advanceProductTourAfterAction("model");
+      } else {
+        renderProductTour();
+      }
+    },
+  });
   $("#project-form").addEventListener("submit", initializeProject);
   $("#open-project-form").addEventListener("submit", openProject);
   $("#onboarding-open").addEventListener("click", () => startProductTour("workspace"));
