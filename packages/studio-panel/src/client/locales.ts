@@ -68,6 +68,10 @@ export type StudioPanelKey =
   | 'operations.create.done'
   | 'operations.create.failed'
   | 'operations.cancel'
+  | 'project.switcher.label'
+  | 'project.switcher.new'
+  | 'project.switcher.newTitle'
+  | 'project.switcher.create'
   | 'operations.create.titleHint'
   | 'tool.family.status'
   | 'tool.family.context'
@@ -385,6 +389,10 @@ export const zh: Record<StudioPanelKey, string> = {
   'operations.create.done': '「{title}」已创建',
   'operations.create.failed': '创建失败',
   'operations.cancel': '取消',
+  'project.switcher.label': '小说项目',
+  'project.switcher.new': '+ 新建作品',
+  'project.switcher.newTitle': '书名…',
+  'project.switcher.create': '创建',
   'tool.family.status': '作品状态',
   'tool.family.context': '章节上下文',
   'tool.family.manuscript': '正文',
@@ -686,6 +694,10 @@ export const en: Record<StudioPanelKey, string> = {
   'operations.create.submit': 'Create project',
   'operations.create.done': '"{title}" created',
   'operations.create.failed': 'Create failed',
+  'project.switcher.label': 'Novel project',
+  'project.switcher.new': '+ New project',
+  'project.switcher.newTitle': 'Title…',
+  'project.switcher.create': 'Create',
   'operations.cancel': 'Cancel',
   'tool.family.status': 'Project status',
   'tool.family.context': 'Chapter context',

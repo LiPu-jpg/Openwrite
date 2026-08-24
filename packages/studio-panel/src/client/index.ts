@@ -7,7 +7,7 @@ import { fetchStudioApi, postStudioApi, putStudioApi, type StudioApiInjected } f
 import { CreationView } from './CreationView.tsx'
 import { LibraryView } from './LibraryView.tsx'
 import { OperationsView } from './OperationsView.tsx'
-import { ComposerContextChip, HeaderProjectStatus, HeaderUtilities } from './HeaderChrome.tsx'
+import { ProjectSwitcherChip, HeaderProjectStatus, HeaderUtilities } from './HeaderChrome.tsx'
 import { createDomainToolCard, type ToolFamily } from './DomainToolCard.tsx'
 import { en, NS, zh } from './locales.ts'
 import { NovelReviewCard } from './ReviewCard.tsx'
@@ -67,8 +67,9 @@ export function apply(ctx: Context): void {
     inject: () => ({ postStudioApi }),
   }, HeaderUtilities))
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
-    name: 'conversation.input.left', id: 'novel-context', order: 20, locale: NS,
-  }, ComposerContextChip))
+    name: 'conversation.input.left', id: 'novel-project-switcher', order: 20, locale: NS,
+    inject: () => ({ fetchStudioApi, postStudioApi }),
+  }, ProjectSwitcherChip))
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
     name: 'conversation.chat.turnTail', locale: NS,
     select: owner => owner.turn.data.get('novelMutations') ?? null,

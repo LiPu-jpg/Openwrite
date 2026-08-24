@@ -850,3 +850,101 @@
 }
 .projectSwitchRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .projectCurrent { font-size: 13px; color: var(--dsw-alias-label-primary); }
+
+/* ── 项目切换 chip（输入栏左侧）────────────────────────────────────────── */
+
+.contextChipRoot {
+  position: relative;
+  display: inline-flex;
+}
+
+.contextChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.contextChip:hover {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-label-secondary);
+}
+
+.contextChipMenu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  box-shadow: 0 4px 16px rgba(0,0,0,.15);
+  z-index: 100;
+  padding: 4px;
+}
+
+.contextChipLabel {
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+  padding: 4px 8px 2px;
+}
+
+.contextChipMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.contextChipMenuItem:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.contextChipMenuItem[data-active='true'] {
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 500;
+}
+
+.contextChipCurrentMark {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.contextChipDivider {
+  height: 1px;
+  background: var(--dsw-alias-border-l);
+  margin: 4px 0;
+}
+
+.contextChipCreateForm {
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contextChipCreateForm input {
+  width: 100%;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+}
