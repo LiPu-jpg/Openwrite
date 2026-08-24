@@ -139,7 +139,8 @@ dsh web 的 client 插件，把 Studio 的关键界面原生融入会话 UI（�
 - `presets/dante/`：persona 移植自 `DEFAULT_DANTE_SYSTEM_PROMPT`
   （正文创作 Agent：预检→写章→评审→结算；资产不齐时回退 Goethe）。
   工具集：bridge 写章/评审/上下文/文档工具 + `subagent_goethe` 委派工具；
-  技能：oh-story-long-write、oh-story-deslop、oh-story-review、dialogue 等。
+  技能：oh-story-long-write、oh-story-deslop、oh-story-review、dialogue、
+  `dog-review-query` 等。
 
 预设经 `scripts/install.sh` 复制到 `~/.dsh/.agent-presets/`（dsh 的用户预设根，
 copy-only 语义，不在原地改）。
@@ -185,6 +186,43 @@ uv 环境 + `deepseek-harness-sdk`（自带单文件 Node 运行时，macOS arm6
 - 可选 --agent-guidance：dsh SDK 起 bundled 运行时会话把评审 JSON 综合成改写指导
   （cordis.yml 为最小组合；无需自定义插件载体——生产 exe 编译期内置插件集，
   自定义闭包需重建 deploy root，收益不抵成本，刻意不做）。
+
+### 6.1 37 维审查进入 dsh-dog 查询图
+
+`dsh-dog` 是审查结果的查询/验收层，不重复调用 OpenWrite 的 37 维审查模型：
+
+```text
+OpenWrite chapter_review
+        │
+        ▼
+data/novels/{id}/data/dog/reviews/{chapter}/
+  review.json       # 总体分数、门禁结果、完整维度聚合
+  dim_01.json ... dim_37.json
+  dog-graph.json    # schemaVersion 0.9
+        │
+        ▼
+dog_create → dog_run → dog_status / dog_wait
+```
+
+`conductor/dog_review.py` 把每个维度映射为一个 DoG leaf：维度文件中的
+`critical`/`blocker` 问题为 `fail`，未被本次部分审查选中的维度为
+`inconclusive`，没有硬问题的维度为 `pass`。根 composite 保留一个
+agentic whole-object assertion，只检查 37 维报告的聚合一致性，不重新阅读正文。
+因此 37 个维度可单独查询、带证据、按内容 digest 继承；原有的
+`review_gate` 和修订回炉仍是写作流水线的权威门禁。
+
+安装脚本会把 `scripts/dog/review-dimension.js` 复制到 DoG 的
+`~/.dsh/dog/scripts/`。dsh-dog 的 agentic run 必须在常驻 web/tui 会话中执行，
+不放入 `smart_import.py` 的 headless 子流程。安装脚本在启用 dsh-dog 时会自动
+写入 `~/.dsh/settings.yaml` 的 `dog.workspaceRoot`（也可用
+`DSH_DOG_WORKSPACE_ROOT=/path/to/novel` 覆盖）。由于 graph 的 target 是相对于
+OpenWrite 项目根目录的路径，DoG 设置应由宿主配置（示例）：
+
+```yaml
+dog:
+  workspaceRoot: /absolute/path/to/my_novel
+  scriptsDirectory: dog/scripts
+```
 
 实测记录（~/my_novel）：ch_001~005 全流程跑通；ch_003 经修订回炉 0 分 → 35 分
 （blocker 人设矛盾被精准修复）。上游问题（OpenWrite 仓库，未动）：ch_004 评审系统性

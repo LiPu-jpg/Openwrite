@@ -33,6 +33,14 @@ scripts/install.sh   # 一次性安装（幂等）
 scripts/dev.sh       # 启动两端服务
 ```
 
+如需启用 37 维 DoG 查询，先准备朋友的 `dsh-dog` 工作树，再执行
+`DSH_DOG_DIR=/path/to/dsh-dog scripts/install.sh`；它只安装 web profile，
+并不会把 dsh-dog 源码复制进本项目。
+安装脚本会先构建该工作树，再挂载插件。
+安装时会把 `dog.workspaceRoot` 写入 `~/.dsh/settings.yaml`；默认是本项目根目录，
+也可用 `DSH_DOG_WORKSPACE_ROOT=/path/to/novel scripts/install.sh` 指定。已有 `dog:`
+配置不会被覆盖，切换项目时需手动修改该字段并重启 dsh。
+
 然后打开 http://127.0.0.1:3080 ，新建会话时选择 **Goethe 规划** 或
 **Dante 写作** 预设。会话头部只增加「创作 / 资料 / 任务」三个工作流 tab；
 正文编辑、大纲、资产、图谱、研究、搜索与后台任务全部在 dsh 原生界面完成。
@@ -43,6 +51,10 @@ scripts/dev.sh       # 启动两端服务
    修订门控，重要改动先出 diff 再确认）。
 2. 切到 **Dante** 会话写正文：`novel_context_preview` 预检上下文包 →
    `novel_write_chapter` 写章 → `novel_review_chapter` 37 维评审。
+   每次评审同时生成 `data/novels/{id}/data/dog/reviews/{chapter}/dog-graph.json`；
+   在 web 会话中把该 graph 交给 `dog_create` / `dog_run`，即可按 37 个维度查询
+   证据、失败原因和继承状态。DoG 只查询已生成的评审结果，不重复跑 37 维模型审查。
+   DoG 的 `workspaceRoot` 需要指向 OpenWrite 项目根目录。
    资产不齐时 Dante 会建议回 Goethe，或经 `subagent_goethe` 子代理做只读咨询。
 3. 无人值守批量生产用 **conductor**（需 Studio 在跑）：
    `cd conductor && .venv/bin/python pipeline.py --chapters next --limit 3`——

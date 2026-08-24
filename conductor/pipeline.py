@@ -34,6 +34,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+try:
+    from .dog_review import write_review_artifacts
+except ImportError:  # direct ``python pipeline.py`` execution
+    from dog_review import write_review_artifacts
+
 DEFAULT_STUDIO = os.environ.get("OPENWRITE_STUDIO", "http://127.0.0.1:4567")
 WRITE_HEADER = "X-OpenWrite-Studio"
 HTTP_TIMEOUT = 30.0
@@ -100,6 +105,11 @@ class Studio:
         return self._request(path, method="POST", body=body or {}, timeout=timeout)
 
     # ── 领域操作 ──────────────────────────────────────────────────────────
+
+    def open_project(self, project_path: str) -> dict:
+        """切换 Studio 到指定的小说项目目录。"""
+        return self.post("/api/project/open", {"project_path": project_path},
+                         timeout=30)
 
     def recommendation(self, chapter: str | None = None) -> dict:
         outline = self.get("/api/outline", {"chapter": chapter} if chapter else None)
@@ -274,11 +284,13 @@ def anchored_ids(candidates: list[dict], content: str) -> list[str]:
 
 def review_gate(review: dict, threshold: int) -> bool:
     score = int(review.get("score") or 0)
-    has_blocker = any(
-        isinstance(i, dict) and str(i.get("severity")) == "blocker"
+    # OpenWrite's reviewer contract makes critical issues hard failures;
+    # blocker is retained for normalized reports from older integrations.
+    has_hard_issue = any(
+        isinstance(i, dict) and str(i.get("severity") or "").lower() in {"critical", "blocker"}
         for i in review.get("issue_details") or []
     )
-    return score >= threshold and not has_blocker
+    return score >= threshold and not has_hard_issue
 
 
 def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -> dict:
@@ -296,6 +308,9 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
     target_words = args.target_words or int(rec.get("target_words") or 3000)
     attempts: list[dict] = []
     final: dict = {}
+    dog_manifest = ""
+    dog_graph_path = ""
+    dog_graph: dict | None = None
     words: object = "?"
 
     for attempt in range(1 if args.review_only else 1 + args.max_retries):
@@ -331,6 +346,16 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
 
         review = studio.review(chapter_id)
         passed = review_gate(review, args.threshold)
+        try:
+            dog_artifacts = write_review_artifacts(studio, chapter_id, review, args.threshold)
+            dog_manifest = str(dog_artifacts["manifest"])
+            dog_graph_path = str(dog_artifacts["graph_path"])
+            dog_graph = dog_artifacts["graph"]
+            print(f"    DoG 37维查询快照: {dog_manifest}", flush=True)
+        except (OSError, ValueError, StudioError) as exc:
+            # The review remains authoritative; expose sidecar failure without
+            # pretending the DoG graph exists.
+            print(f"    DoG 快照写入失败（不影响本轮评审）: {exc}", flush=True)
         attempts.append({"score": review.get("score"), "passed": passed, "review": review})
         print(f"    评分 {review.get('score')}（阈值 {args.threshold}）→ "
               f"{'通过' if passed else '未达标'}", flush=True)
@@ -346,6 +371,9 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
         "passed": final.get("passed"),
         "attempts": len(attempts),
         "seconds": round(time.monotonic() - started, 1),
+        "dog_manifest": dog_manifest,
+        "dog_graph_path": dog_graph_path,
+        "dog_graph": dog_graph,
     }
 
 
@@ -358,6 +386,8 @@ def main() -> int:
     parser.add_argument("--max-retries", type=int, default=1, help="未达标回炉次数（默认 1）")
     parser.add_argument("--target-words", type=int, default=None, help="覆盖目标字数（默认取大纲）")
     parser.add_argument("--studio", default=DEFAULT_STUDIO, help="Studio 地址")
+    parser.add_argument("--project-root", default="",
+                        help="OpenWrite 项目根路径；指定时先切换 Studio 绑定到该目录")
     parser.add_argument("--agent-guidance", action="store_true",
                         help="回炉指导用 dsh SDK 会话综合（需 DEEPSEEK_API_KEY）")
     parser.add_argument("--review-only", action="store_true",
@@ -368,6 +398,12 @@ def main() -> int:
     args = parser.parse_args()
 
     studio = Studio(args.studio)
+    if args.project_root:
+        target = Path(args.project_root).expanduser().resolve()
+        print(f"==> 切换 Studio 项目: {target}", flush=True)
+        result = studio.open_project(str(target))
+        title = (result.get("project") or {}).get("title") or target.name
+        print(f"    已切换: {title}", flush=True)
     session_root = Path(__file__).parent / ".sessions"
 
     if args.chapters.strip().lower() == "next":

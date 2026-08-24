@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonObject, StudioClient } from './client.js'
+import { materializeDogReview, reviewChapterId } from './dog-review.js'
 
 /** Plugin-level config the tools need beyond the HTTP client. */
 export interface NovelToolsOptions {
@@ -211,6 +212,7 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
       chapter_id: { type: 'string', description: 'Chapter id (ch_<digits>), resolved client-side to data/manuscript/<id>.md.' },
       strict: { type: 'boolean', description: 'Enable strict review mode (default false).' },
       dimensions: { type: 'array', items: { type: 'string' }, description: 'Optional list of review dimensions to restrict to.' },
+      dog_threshold: { type: 'integer', description: 'DoG aggregate score threshold (default 70); this does not change OpenWrite review.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
@@ -218,7 +220,19 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
       const body: JsonObject = { path: resolveReviewPath(args) }
       if (args.strict !== undefined) body['strict'] = args.strict
       if (args.dimensions !== undefined) body['dimensions'] = args.dimensions
-      return await client.postJson('/api/review', body, exec.signal)
+      const response = await client.postJson('/api/review', body, exec.signal)
+      try {
+        const dogReview = await materializeDogReview(response, reviewChapterId(args), args.dog_threshold ?? 70)
+        const value = response !== null && typeof response === 'object' && !Array.isArray(response)
+          ? response as JsonObject
+          : { result: response }
+        return { ...value, dog_review: dogReview }
+      } catch (error) {
+        const value = response !== null && typeof response === 'object' && !Array.isArray(response)
+          ? response as JsonObject
+          : { result: response }
+        return { ...value, dog_review: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+      }
     },
   }))
 

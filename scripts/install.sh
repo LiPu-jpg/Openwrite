@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BRIDGE="$ROOT/packages/openwrite-bridge"
 PANEL="$ROOT/packages/studio-panel"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
+DSH_DOG_DIR="${DSH_DOG_DIR:-}"
+DSH_DOG_WORKSPACE_ROOT="${DSH_DOG_WORKSPACE_ROOT:-$ROOT}"
 # dsh 装在项目内（devDependency，pin 版本）；不走 npx——npx 的缓存自旋过
 DSH=("$ROOT/node_modules/.bin/dsh")
 
@@ -47,9 +49,49 @@ install_pkg() { # $1=profile $2=pkg-dir $3=pkg-name
     echo "    $1: $3 安装完成"
   fi
 }
+
+configure_dog_settings() {
+  local settings="$DSH_HOME/settings.yaml"
+  mkdir -p "$DSH_HOME"
+  touch "$settings"
+  if grep -Eq '^dog:[[:space:]]*$' "$settings"; then
+    echo "    dog.workspaceRoot 已存在，未覆盖: $settings"
+    echo "    如需切换项目，请手动设置 dog.workspaceRoot=$DSH_DOG_WORKSPACE_ROOT 后重启 dsh"
+    return
+  fi
+  {
+    printf '\n# dsh-novel DoG workspace (由 scripts/install.sh 写入)\n'
+    printf 'dog:\n'
+    printf '  workspaceRoot: %s\n' "$DSH_DOG_WORKSPACE_ROOT"
+    printf '  scriptsDirectory: dog/scripts\n'
+    printf '  storageDirectory: dog\n'
+  } >> "$settings"
+  echo "    dog.workspaceRoot 已配置为: $DSH_DOG_WORKSPACE_ROOT"
+}
+
 install_pkg web "$BRIDGE" '@dsh-novel/openwrite-bridge'
 install_pkg headless "$BRIDGE" '@dsh-novel/openwrite-bridge'
 install_pkg web "$PANEL" '@dsh-novel/studio-panel'
+
+if [[ -n "$DSH_DOG_DIR" ]]; then
+  if [[ ! -f "$DSH_DOG_DIR/package.json" ]]; then
+    echo "DSH_DOG_DIR 不是有效的 dsh-dog 仓库: $DSH_DOG_DIR" >&2
+    exit 2
+  fi
+  echo "    构建 dsh-dog（首次 clone 没有 lib/ 构建产物）"
+  (cd "$DSH_DOG_DIR" && pnpm install --no-frozen-lockfile && pnpm run build)
+  # DoG agentic verifiers need a resident host; deliberately mount web only.
+  install_pkg web "$DSH_DOG_DIR" '@dsh-external/dsh-dog'
+  configure_dog_settings
+else
+  echo "    未安装 dsh-dog（设置 DSH_DOG_DIR=/path/to/dsh-dog 可启用 web 插件）"
+fi
+
+# dsh-dog's programmatic kernel resolves scripts from the user-level library.
+# Install the novel review adapter even when dsh-dog itself is added separately.
+mkdir -p "$DSH_HOME/dog/scripts"
+cp "$ROOT/scripts/dog/review-dimension.js" "$DSH_HOME/dog/scripts/review-dimension.js"
+chmod 755 "$DSH_HOME/dog/scripts/review-dimension.js"
 
 echo
 echo "安装完成。下一步："
