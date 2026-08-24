@@ -18,6 +18,7 @@ const WRITABLE_PATHS = new Set([
   'import',
   'tasks',
   'document',
+  'project/open',
 ])
 const WRITABLE_PATH_RE = /^tasks\/[A-Za-z0-9_-]+\/(?:cancel|retry)$/
 

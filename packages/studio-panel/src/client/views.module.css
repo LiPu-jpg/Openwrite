@@ -538,6 +538,19 @@
   word-break: break-word;
 }
 
+.referenceReader {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.referenceUnits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
 /* --- search + editor --- */
 
 .searchInput {

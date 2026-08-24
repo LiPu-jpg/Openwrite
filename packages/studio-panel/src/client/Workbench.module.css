@@ -848,3 +848,5 @@
   .inspector,
   .contextSectionButton svg { transition: none; }
 }
+.projectSwitchRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.projectCurrent { font-size: 13px; color: var(--dsw-alias-label-primary); }

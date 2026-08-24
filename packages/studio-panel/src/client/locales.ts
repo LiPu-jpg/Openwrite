@@ -55,6 +55,10 @@ export type StudioPanelKey =
   | 'creation.status.offline'
   | 'operations.transfer'
   | 'operations.transferHint'
+  | 'operations.project'
+  | 'operations.switch'
+  | 'operations.switch.done'
+  | 'operations.switch.failed'
   | 'tool.family.status'
   | 'tool.family.context'
   | 'tool.family.manuscript'
@@ -273,6 +277,8 @@ export type StudioPanelKey =
   | 'reference.analysis.complete'
   | 'reference.analysis.pending'
   | 'reference.chars'
+  | 'reference.content.loading'
+  | 'reference.content.full'
   | 'review.running'
   | 'review.passed'
   | 'review.failed'
@@ -346,6 +352,10 @@ export const zh: Record<StudioPanelKey, string> = {
   'creation.status.offline': '离线',
   'operations.transfer': '导入与导出',
   'operations.transferHint': '在当前作品范围内执行导出、同步和章节导入。',
+  'operations.project': '当前作品',
+  'operations.switch': '切换',
+  'operations.switch.done': '项目已切换，页面即将刷新。',
+  'operations.switch.failed': '切换失败',
   'tool.family.status': '作品状态',
   'tool.family.context': '章节上下文',
   'tool.family.manuscript': '正文',
@@ -577,6 +587,8 @@ export const zh: Record<StudioPanelKey, string> = {
   'reference.analysis.complete': '分析完成',
   'reference.analysis.pending': '分析未完成',
   'reference.chars': '字符',
+  'reference.content.loading': '正在载入参考作品正文…',
+  'reference.content.full': '全文',
 }
 
 /** English dictionary. */
@@ -631,6 +643,10 @@ export const en: Record<StudioPanelKey, string> = {
   'creation.status.offline': 'Offline',
   'operations.transfer': 'Import & export',
   'operations.transferHint': 'Export, sync, or import chapters within the current project.',
+  'operations.project': 'Current project',
+  'operations.switch': 'Switch',
+  'operations.switch.done': 'Project switched. Reloading…',
+  'operations.switch.failed': 'Switch failed',
   'tool.family.status': 'Project status',
   'tool.family.context': 'Chapter context',
   'tool.family.manuscript': 'Manuscript',
@@ -862,4 +878,6 @@ export const en: Record<StudioPanelKey, string> = {
   'reference.analysis.complete': 'Analyzed',
   'reference.analysis.pending': 'Analysis incomplete',
   'reference.chars': 'chars',
+  'reference.content.loading': 'Loading reference text…',
+  'reference.content.full': 'Full text',
 }

@@ -58,6 +58,18 @@ interface ReferenceEntry {
   totalChars: number
 }
 
+interface ReferenceUnit {
+  unitId: string
+  kind: string
+  title: string
+  content: string
+}
+
+type ReferenceDetailState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; fullContent: string; content: string; units: ReferenceUnit[] }
+
 /** One 作品核心 document from workspace documents.core. */
 interface CoreDoc {
   path: string
@@ -181,6 +193,23 @@ function parseReference(raw: unknown): ReferenceEntry {
     analysisComplete: analysis['complete'] === true,
     totalChars: typeof record['total_chars'] === 'number' ? record['total_chars'] : 0,
   }
+}
+
+function parseReferenceDetail(data: unknown): { fullContent: string; units: ReferenceUnit[] } {
+  const envelope = (data !== null && typeof data === 'object' ? data : {}) as Record<string, unknown>
+  const inner = (envelope['data'] !== null && typeof envelope['data'] === 'object' ? envelope['data'] : envelope) as Record<string, unknown>
+  const text = (value: unknown): string => typeof value === 'string' ? value : ''
+  const units = (Array.isArray(inner['units']) ? inner['units'] : []).flatMap((raw): ReferenceUnit[] => {
+    if (raw === null || typeof raw !== 'object') return []
+    const unit = raw as Record<string, unknown>
+    return [{
+      unitId: text(unit['unit_id']),
+      kind: text(unit['kind']),
+      title: text(unit['title']),
+      content: text(unit['content']),
+    }]
+  })
+  return { fullContent: text(inner['content']), units }
 }
 
 /** Narrow one 作品核心 document summary. */
@@ -325,6 +354,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
   const [state, setState] = useState<LoadState>('loading')
   const [assets, setAssets] = useState<AssetSummary[]>([])
   const [references, setReferences] = useState<ReferenceEntry[]>([])
+  const [referenceDetails, setReferenceDetails] = useState<ReadonlyMap<string, ReferenceDetailState>>(new Map())
   const [coreDocs, setCoreDocs] = useState<CoreDoc[]>([])
   const [error, setError] = useState('')
   const [segment, setSegment] = useState<Segment>('characters')
@@ -348,6 +378,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
   // The detail cache doubles as the in-flight guard for keyed fetches.
   const detailsRef = useRef(details)
   detailsRef.current = details
+  const initialLoadRef = useRef(false)
 
   const load = useCallback((silent = false) => {
     if (!silent) setState('loading')
@@ -372,7 +403,11 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     return () => { cancelled = true }
   }, [fetchStudioApi])
 
-  useEffect(() => load(), [load])
+  useEffect(() => {
+    if (initialLoadRef.current) return
+    initialLoadRef.current = true
+    return load()
+  }, [])
 
   const fetchDetail = useCallback((asset: AssetSummary, resetDraft = false) => {
     if (resetDraft) setDraftEpoch(previous => previous + 1)
@@ -414,6 +449,30 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
       })
       .catch((cause: unknown) => {
         setDocuments(previous => new Map(previous).set(key, {
+          status: 'error',
+          message: cause instanceof Error ? cause.message : String(cause),
+        }))
+      })
+  }
+
+  const selectReference = (entry: ReferenceEntry, force = false) => {
+    const key = `ref:${entry.sourceId}`
+    setSelected(key)
+    setCreating(false)
+    if (!force && referenceDetails.has(key)) return
+    setReferenceDetails(previous => new Map(previous).set(key, { status: 'loading' }))
+    fetchStudioApi(`/reference-library/${encodeURIComponent(entry.sourceId)}`)
+      .then(data => {
+        const parsed = parseReferenceDetail(data)
+        setReferenceDetails(previous => new Map(previous).set(key, {
+          status: 'ready',
+          fullContent: parsed.fullContent,
+          content: parsed.fullContent,
+          units: parsed.units,
+        }))
+      })
+      .catch((cause: unknown) => {
+        setReferenceDetails(previous => new Map(previous).set(key, {
           status: 'error',
           message: cause instanceof Error ? cause.message : String(cause),
         }))
@@ -588,8 +647,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
             className={css.assetRow}
             data-active={selected === key}
             onClick={() => {
-              setSelected(key)
-              setCreating(false)
+              selectReference(entry)
             }}
           >
             <span className={`${css.assetRowName} ${css.mdInline}`}>
@@ -764,6 +822,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     if (selected.startsWith('ref:')) {
       const entry = references.find(item => `ref:${item.sourceId}` === selected)
       if (entry === undefined) return <div className={css.notice}>{t('assets.selectHint')}</div>
+      const detail = referenceDetails.get(selected)
       return (
         <div className={css.detail}>
           <div className={css.detailHeader}>
@@ -789,6 +848,23 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
               )}
             </div>
           </div>
+          {detail === undefined || detail.status === 'loading'
+            ? <div className={css.notice}>{t('reference.content.loading')}</div>
+            : detail.status === 'error'
+              ? <div className={css.notice}><span className={css.errorText}>{detail.message}</span><button type="button" className={css.button} onClick={() => { selectReference(entry, true) }}>{t('retry')}</button></div>
+              : (
+                <div className={css.referenceReader}>
+                  <div className={css.referenceUnits}>
+                    <button type="button" className={css.button} onClick={() => { setReferenceDetails(previous => new Map(previous).set(selected, { ...detail, content: detail.fullContent })) }}>{t('reference.content.full')}</button>
+                    {detail.units.map(unit => (
+                      <button key={unit.unitId} type="button" className={css.button} onClick={() => {
+                        setReferenceDetails(previous => new Map(previous).set(selected, { ...detail, status: 'ready', content: unit.content, units: detail.units }))
+                      }}>{unit.title || unit.unitId}</button>
+                    ))}
+                  </div>
+                  <div className={css.detailBody}><MarkdownText text={detail.content} /></div>
+                </div>
+              )}
         </div>
       )
     }
