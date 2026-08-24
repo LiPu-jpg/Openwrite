@@ -462,7 +462,21 @@ class LLMClient:
         )
         if tools:
             params["tools"] = tools
-        params.update(self.config.extra)
+        # DeepSeek 推理模型的思维链会挤占 max_tokens 导致 content 截断/为空
+        # （finish=length 而 reasoning_content 巨大）。结构化输出场景（JSON 审计、
+        # 批量修订）默认关闭 thinking；调用方仍可通过 config.extra 显式覆盖。
+        extra = dict(self.config.extra.get("extra_body") or {}) if isinstance(
+            self.config.extra, dict
+        ) else {}
+        if "thinking" not in extra:
+            # DeepSeek 推理模型的思维链会挤占 max_tokens 导致 content 截断/为空
+            # （finish=length 而 reasoning_content 巨大）。结构化输出场景（JSON 审计、
+            # 批量修订）默认关闭 thinking；调用方仍可通过 config.extra 显式覆盖。
+            extra["thinking"] = {"type": "disabled"}
+        if extra:
+            existing_extra_body = dict(params.get("extra_body") or {})
+            existing_extra_body.update(extra)
+            params["extra_body"] = existing_extra_body
         return params
 
     def _call(self, operation: Callable[..., Any], params: dict[str, Any]) -> Any:

@@ -108,7 +108,9 @@ class ReviewerAgent(BaseAgent):
         36: "关系动态",
         37: "正典事件一致性",
     }
-    LLM_AUDIT_BATCH_SIZE = 8
+    # 8 维/批在推理模型上会因思维链挤占输出预算而截断（实测 37 维全量时
+    # reasoning_content 可达 13K+ 字符），降到 4 维/批给 JSON 输出留足空间。
+    LLM_AUDIT_BATCH_SIZE = 4
     LLM_AUDIT_INPUT_CEILING = 32_000
     LLM_AUDIT_OUTPUT_TOKENS_PER_DIMENSION = 1024
     _AUDIT_CONTEXT_SPECS = (
@@ -764,10 +766,10 @@ description 和 suggestion 各不超过 80 字，evidence 不超过 60 字。
                     f"第 {index} 个审稿问题 severity 无效",
                 )
             if not isinstance(dimension, int) or dimension not in allowed_dimensions:
-                raise ProviderResponseError(
-                    "MALFORMED_STRUCTURED_OUTPUT",
-                    f"第 {index} 个审稿问题 dimension 不在请求范围内",
-                )
+                # 模型偶发把问题标到请求批次之外。整批失败会让章节评审随机翻车
+                # （dsh-novel conductor 实测：同章多次重试均命中），改为丢弃该条，
+                # 其余问题照常进入报告。
+                continue
             issues.append(
                 ReviewIssue(
                     severity=severity,

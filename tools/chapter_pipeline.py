@@ -1343,17 +1343,20 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
         }
     except Exception as exc:
         scheduler.fail_stage(workflow, "review", str(exc))
+        code = str(getattr(exc, "code", "REVIEW_FAILED") or "REVIEW_FAILED")
         if run_v2_manifest is not None:
             try:
                 run_v2_store.fail_stage(
                     run_v2_manifest,
                     "review",
-                    code=str(getattr(exc, "code", "REVIEW_FAILED") or "REVIEW_FAILED"),
+                    code=code,
                     message=str(exc),
                 )
             except Exception:
                 pass
-        return {"ok": False, "chapter_id": chapter_id, "error": str(exc)}
+        # 保留真实错误码（如 MODEL_OUTPUT_TRUNCATED / MALFORMED_STRUCTURED_OUTPUT）：
+        # 任务系统据此展示可恢复性与根因，而非一律 OPERATION_FAILED。
+        return {"ok": False, "chapter_id": chapter_id, "error": str(exc), "code": code}
 
 
 def execute_multi_agent_chapter(
