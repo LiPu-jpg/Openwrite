@@ -110,7 +110,7 @@ class ReviewerAgent(BaseAgent):
     }
     # 8 维/批在推理模型上会因思维链挤占输出预算而截断（实测 37 维全量时
     # reasoning_content 可达 13K+ 字符），降到 4 维/批给 JSON 输出留足空间。
-    LLM_AUDIT_BATCH_SIZE = 4
+    LLM_AUDIT_BATCH_SIZE = 2
     LLM_AUDIT_INPUT_CEILING = 32_000
     LLM_AUDIT_OUTPUT_TOKENS_PER_DIMENSION = 1024
     _AUDIT_CONTEXT_SPECS = (
