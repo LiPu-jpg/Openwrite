@@ -57,6 +57,10 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
   const [currentProject, setCurrentProject] = useState('')
   const [projectPath, setProjectPath] = useState('')
   const [projects, setProjects] = useState<{ path: string; title: string; novel_id: string }[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [newNovelId, setNewNovelId] = useState('')
+  const [newTitle, setNewTitle] = useState('')
+  const [newPath, setNewPath] = useState('')
 
   const loadProjects = useCallback(() => {
     fetchStudioApi('/project/list').then((data: unknown) => {
@@ -87,6 +91,27 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
 
   const switchProject = async () => {
     if (projectPath.trim() !== '') void doSwitch(projectPath.trim())
+  }
+
+  const createProject = async () => {
+    if (busy !== '' || newNovelId.trim() === '' || newTitle.trim() === '') return
+    setBusy('create')
+    try {
+      await postStudioApi('/project/init', {
+        project_path: newPath.trim() || newNovelId.trim(),
+        novel_id: newNovelId.trim(),
+        title: newTitle.trim(),
+      })
+      say(t('operations.create.done').replace('{title}', newTitle.trim()))
+      setShowCreate(false)
+      setNewNovelId('')
+      setNewTitle('')
+      setNewPath('')
+      loadProjects()
+      window.location.reload()
+    } catch (cause: unknown) {
+      say(`${t('operations.create.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
+    } finally { setBusy('') }
   }
 
   const runExport = async (format: ExportFormat) => {
@@ -186,7 +211,25 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
           <button type="button" className={css.commandButton} disabled={busy !== ''}
             onClick={() => void switchProject()}>{t('operations.switch')}</button>
         )}
+        <button type="button" className={css.actionButton} disabled={busy !== ''}
+          onClick={() => { setShowCreate(previous => !previous) }}>
+          {showCreate ? t('operations.cancel') : t('operations.create.new')}
+        </button>
       </div>
+      {showCreate && (
+        <div className={css.projectSwitchRow}>
+          <label>{t('operations.create.id')}<input value={newNovelId} placeholder="my-novel"
+            onChange={e => setNewNovelId(e.target.value)} /></label>
+          <label>{t('operations.create.title')}<input value={newTitle}
+            placeholder={t('operations.create.titleHint')}
+            maxLength={120} onChange={e => setNewTitle(e.target.value)} /></label>
+          <label>{t('operations.create.path')}<input value={newPath}
+            placeholder={t('operations.create.pathHint')}
+            onChange={e => setNewPath(e.target.value)} /></label>
+          <button type="button" className={css.commandButton} disabled={busy !== '' || newNovelId.trim() === '' || newTitle.trim() === ''}
+            onClick={() => void createProject()}>{t('operations.create.submit')}</button>
+        </div>
+      )}
     </section>
     <section className={css.operationSection}>
       <div><Download size={18} /><strong>{t('tools.export')}</strong></div>

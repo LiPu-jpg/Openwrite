@@ -59,6 +59,16 @@ export type StudioPanelKey =
   | 'operations.switch'
   | 'operations.switch.done'
   | 'operations.switch.failed'
+  | 'operations.create.new'
+  | 'operations.create.id'
+  | 'operations.create.title'
+  | 'operations.create.path'
+  | 'operations.create.pathHint'
+  | 'operations.create.submit'
+  | 'operations.create.done'
+  | 'operations.create.failed'
+  | 'operations.cancel'
+  | 'operations.create.titleHint'
   | 'tool.family.status'
   | 'tool.family.context'
   | 'tool.family.manuscript'
@@ -132,6 +142,14 @@ export type StudioPanelKey =
   | 'tasks.result.score'
   | 'tasks.result.issues'
   | 'operations.switch.select'
+  | 'operations.create.new'
+  | 'operations.create.id'
+  | 'operations.create.title'
+  | 'operations.create.path'
+  | 'operations.create.pathHint'
+  | 'operations.create.submit'
+  | 'operations.create.done'
+  | 'operations.create.failed'
   | 'search.preview.back'
   | 'assets.empty'
   | 'assets.other'
@@ -357,6 +375,16 @@ export const zh: Record<StudioPanelKey, string> = {
   'operations.switch': '切换',
   'operations.switch.done': '项目已切换，页面即将刷新。',
   'operations.switch.failed': '切换失败',
+  'operations.create.new': '+ 新建项目',
+  'operations.create.id': '小说 ID',
+  'operations.create.title': '书名',
+  'operations.create.path': '项目路径（可空，默认在工作目录下创建）',
+  'operations.create.pathHint': '留空自动创建',
+  'operations.create.titleHint': '书名',
+  'operations.create.submit': '创建项目',
+  'operations.create.done': '「{title}」已创建',
+  'operations.create.failed': '创建失败',
+  'operations.cancel': '取消',
   'tool.family.status': '作品状态',
   'tool.family.context': '章节上下文',
   'tool.family.manuscript': '正文',
@@ -649,6 +677,16 @@ export const en: Record<StudioPanelKey, string> = {
   'operations.switch': 'Switch',
   'operations.switch.done': 'Project switched. Reloading…',
   'operations.switch.failed': 'Switch failed',
+  'operations.create.new': '+ New project',
+  'operations.create.id': 'Novel ID',
+  'operations.create.title': 'Title',
+  'operations.create.path': 'Project path (optional, defaults to workspace)',
+  'operations.create.pathHint': 'Leave empty to auto-create',
+  'operations.create.titleHint': 'Title',
+  'operations.create.submit': 'Create project',
+  'operations.create.done': '"{title}" created',
+  'operations.create.failed': 'Create failed',
+  'operations.cancel': 'Cancel',
   'tool.family.status': 'Project status',
   'tool.family.context': 'Chapter context',
   'tool.family.manuscript': 'Manuscript',

@@ -19,6 +19,7 @@ const WRITABLE_PATHS = new Set([
   'tasks',
   'document',
   'project/open',
+  'project/init',
 ])
 const WRITABLE_PATH_RE = /^tasks\/[A-Za-z0-9_-]+\/(?:cancel|retry)$/
 
