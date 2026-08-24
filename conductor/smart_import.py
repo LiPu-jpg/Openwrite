@@ -29,6 +29,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+try:
+    from .dog_import import write_import_artifacts
+except ImportError:  # direct ``python smart_import.py`` execution
+    from dog_import import write_import_artifacts
+
 DEFAULT_STUDIO = os.environ.get("OPENWRITE_STUDIO", "http://127.0.0.1:4567")
 WRITE_HEADER = "X-OpenWrite-Studio"
 AGENT_TIMEOUT_S = 600
@@ -216,6 +221,8 @@ def main():
     if len(chapters) > 5:
         print(f"    … 及后续 {len(chapters)-5} 章", flush=True)
 
+    ai_check = {"status": "skipped", "summary": ""}
+
     # 3) AI 差错校验（headless dsh）
     if not args.skip_ai_check:
         print("==> 3/5 AI 差错校验（headless dsh web_search 辅助核查）…", flush=True)
@@ -232,8 +239,14 @@ def main():
                 cwd=str(Path(__file__).resolve().parent),
             )
             issues_text = proc.stdout.strip()[:500]
+            if proc.returncode == 0:
+                ai_check = {"status": "completed", "summary": issues_text}
+            else:
+                detail = (proc.stderr.strip() or issues_text or f"headless dsh exited {proc.returncode}")[:500]
+                ai_check = {"status": "failed", "summary": detail}
             print(f"    校验结果:\n{issues_text}\n", flush=True)
         except Exception as exc:
+            ai_check = {"status": "failed", "summary": str(exc)}
             print(f"    AI 校验失败（不影响导入）: {exc}", flush=True)
     else:
         print("==> 3/5 跳过 AI 校验", flush=True)
@@ -273,6 +286,9 @@ def main():
     # 5) 正式导入为章节
     print("==> 5/5 导入为正式章节…", flush=True)
     studio = Studio(base_url)
+    imported_records: list[dict] = []
+    imported_arc = "arc_001"
+    import_error = ""
     for i, (title, body) in enumerate(chapters):
         start_number = i + 1
         payload = {
@@ -281,10 +297,37 @@ def main():
             "start_number": start_number,
             "force": True,
         }
-        result = studio.post("/api/import", payload)
+        try:
+            result = studio.post("/api/import", payload)
+        except Exception as exc:
+            import_error = str(exc)
+            print(f"    导入失败（保留已导入章节）: {exc}", flush=True)
+            break
+        imported_arc = str(result.get("arc_id") or imported_arc)
+        imported_records.extend(item for item in result.get("imported") or [] if isinstance(item, dict))
         print(f"    已导入: {title}", flush=True)
 
-    print(f"\n==> 完成！共导入 {len(chapters)} 章到 OpenWrite 项目。")
+    import_status = (
+        "completed"
+        if not import_error and len(imported_records) == len(chapters)
+        else ("partial" if imported_records else "failed")
+    )
+    meta["status"] = import_status
+    if import_error:
+        meta["error"] = import_error[:2000]
+    (report_dir / f"{report_id}.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        dog_artifacts = write_import_artifacts(
+            root, novel_id, report_id, src, fmt, imported_arc, imported_records, ai_check,
+            import_status, import_error,
+        )
+        print(f"    DoG 拆书验收图: {dog_artifacts['manifest']}", flush=True)
+    except (OSError, ValueError) as exc:
+        print(f"    DoG 拆书验收图写入失败（不影响导入）: {exc}", flush=True)
+
+    print(f"\n==> 导入结束（{import_status}），共导入 {len(imported_records)} 章到 OpenWrite 项目。")
+    if import_error:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

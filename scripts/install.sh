@@ -90,8 +90,8 @@ fi
 # dsh-dog's programmatic kernel resolves scripts from the user-level library.
 # Install the novel review adapter even when dsh-dog itself is added separately.
 mkdir -p "$DSH_HOME/dog/scripts"
-cp "$ROOT/scripts/dog/review-dimension.js" "$DSH_HOME/dog/scripts/review-dimension.js"
-chmod 755 "$DSH_HOME/dog/scripts/review-dimension.js"
+cp "$ROOT/scripts/dog/"*.js "$DSH_HOME/dog/scripts/"
+chmod 755 "$DSH_HOME/dog/scripts/"*.js
 
 echo
 echo "安装完成。下一步："

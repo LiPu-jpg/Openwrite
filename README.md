@@ -56,6 +56,9 @@ scripts/dev.sh       # 启动两端服务
    证据、失败原因和继承状态。DoG 只查询已生成的评审结果，不重复跑 37 维模型审查。
    DoG 的 `workspaceRoot` 需要指向 OpenWrite 项目根目录。
    资产不齐时 Dante 会建议回 Goethe，或经 `subagent_goethe` 子代理做只读咨询。
+   拆书导入则先执行 `conductor/smart_import.py`，对输出的
+   `data/novels/{id}/data/dog/imports/{IMPORT_ID}/dog-graph.json` 做 DoG 验收；
+   验收通过后再由 Goethe 建立大纲、角色、世界观、进度和正典事件，最后重新跑 37 维审查。
 3. 无人值守批量生产用 **conductor**（需 Studio 在跑）：
    `cd conductor && .venv/bin/python pipeline.py --chapters next --limit 3`——
    连续写章 → 37 维评审 → 低于阈值/含 blocker 自动经修订闭环回炉；

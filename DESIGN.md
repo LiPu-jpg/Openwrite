@@ -140,7 +140,7 @@ dsh web 的 client 插件，把 Studio 的关键界面原生融入会话 UI（�
   （正文创作 Agent：预检→写章→评审→结算；资产不齐时回退 Goethe）。
   工具集：bridge 写章/评审/上下文/文档工具 + `subagent_goethe` 委派工具；
   技能：oh-story-long-write、oh-story-deslop、oh-story-review、dialogue、
-  `dog-review-query` 等。
+  `dog-review-query`、`dog-import-query` 等。
 
 预设经 `scripts/install.sh` 复制到 `~/.dsh/.agent-presets/`（dsh 的用户预设根，
 copy-only 语义，不在原地改）。
@@ -211,8 +211,23 @@ agentic whole-object assertion，只检查 37 维报告的聚合一致性，不�
 因此 37 个维度可单独查询、带证据、按内容 digest 继承；原有的
 `review_gate` 和修订回炉仍是写作流水线的权威门禁。
 
-安装脚本会把 `scripts/dog/review-dimension.js` 复制到 DoG 的
-`~/.dsh/dog/scripts/`。dsh-dog 的 agentic run 必须在常驻 web/tui 会话中执行，
+### 6.2 拆书导入进入 dsh-dog 查询图
+
+`smart_import.py` 在正式导入章节后写出（中途失败也会保留 `partial/failed` manifest）：
+
+```text
+data/novels/{id}/data/dog/imports/{IMPORT_ID}/
+  import.json       # 来源 digest、AI 预检、章节清单、建模待办
+  dog-graph.json
+```
+
+图中每个 `chapter-ch_*` leaf 检查对应 Markdown 是否存在且有标题，`manifest`
+leaf 检查章节数量与 target 是否一致；根节点保留 agentic 聚合断言，报告
+`error`、`aiCheck` 和 `construction.nextActions`。这使拆书错误、AI 预检异常和“尚未建
+大纲/资产/正典索引”进入同一个可查询结果，但不让 DoG 直接写入 OpenWrite。
+
+安装脚本会把 `scripts/dog/*.js` 复制到 DoG 的
+`~/.dsh/dog/scripts/`（37 维审查 verifier 与拆书导入 verifier）。dsh-dog 的 agentic run 必须在常驻 web/tui 会话中执行，
 不放入 `smart_import.py` 的 headless 子流程。安装脚本在启用 dsh-dog 时会自动
 写入 `~/.dsh/settings.yaml` 的 `dog.workspaceRoot`（也可用
 `DSH_DOG_WORKSPACE_ROOT=/path/to/novel` 覆盖）。由于 graph 的 target 是相对于
