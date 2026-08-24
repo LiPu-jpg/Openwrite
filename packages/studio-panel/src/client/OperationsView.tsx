@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { Download, ExternalLink, FileUp, FlaskConical, ListTodo, RefreshCw } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -56,28 +56,37 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
   const fileRef = useRef<HTMLInputElement>(null)
   const [currentProject, setCurrentProject] = useState('')
   const [projectPath, setProjectPath] = useState('')
+  const [projects, setProjects] = useState<{ path: string; title: string; novel_id: string }[]>([])
 
-  useEffect(() => {
+  const loadProjects = useCallback(() => {
+    fetchStudioApi('/project/list').then((data: unknown) => {
+      if (Array.isArray(data)) setProjects(data as { path: string; title: string; novel_id: string }[])
+    }).catch(() => {})
     fetchStudioApi('/workspace').then((data: unknown) => {
-      const ws = data as { project?: { root?: string; title?: string } }
+      const ws = data as { project?: { title?: string } }
       if (ws.project?.title) setCurrentProject(ws.project.title)
-      else if (ws.project?.root) setCurrentProject(ws.project.root)
     }).catch(() => {})
   }, [fetchStudioApi])
 
+  useEffect(() => { loadProjects() }, [loadProjects])
+
   const say = (text: string, bad = false) => setNote({ text, bad })
 
-  const switchProject = async () => {
-    if (projectPath.trim() === '' || busy !== '') return
+  const doSwitch = async (path: string) => {
+    if (path === '' || busy !== '') return
     setBusy('switch')
     try {
-      await postStudioApi('/project/open', { project_path: projectPath.trim() })
+      await postStudioApi('/project/open', { project_path: path })
       say(t('operations.switch.done'))
       window.location.reload()
     } catch (cause: unknown) {
       say(`${t('operations.switch.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
       setBusy('')
     }
+  }
+
+  const switchProject = async () => {
+    if (projectPath.trim() !== '') void doSwitch(projectPath.trim())
   }
 
   const runExport = async (format: ExportFormat) => {
@@ -167,9 +176,16 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
       <div><strong>{t('operations.project')}</strong></div>
       <div className={css.projectSwitchRow}>
         <span className={css.projectCurrent}>{currentProject || '—'}</span>
-        <input value={projectPath} placeholder="/path/to/project" onChange={e => setProjectPath(e.target.value)} />
-        <button type="button" className={css.commandButton} disabled={busy !== '' || projectPath.trim() === ''}
-          onClick={() => void switchProject()}>{t('operations.switch')}</button>
+        <select value={projectPath} onChange={e => { setProjectPath(e.target.value); void doSwitch(e.target.value) }}>
+          <option value="">{t('operations.switch.select')}</option>
+          {projects.filter(p => p.title !== currentProject).map(p => (
+            <option key={p.path} value={p.path}>{p.title}</option>
+          ))}
+        </select>
+        {projectPath !== '' && (
+          <button type="button" className={css.commandButton} disabled={busy !== ''}
+            onClick={() => void switchProject()}>{t('operations.switch')}</button>
+        )}
       </div>
     </section>
     <section className={css.operationSection}>

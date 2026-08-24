@@ -131,6 +131,7 @@ export type StudioPanelKey =
   | 'tasks.result.toggle'
   | 'tasks.result.score'
   | 'tasks.result.issues'
+  | 'operations.switch.select'
   | 'search.preview.back'
   | 'assets.empty'
   | 'assets.other'
@@ -428,6 +429,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'tasks.result.toggle': '展开或收起评审问题',
   'tasks.result.score': '评分',
   'tasks.result.issues': '问题',
+  'operations.switch.select': '选择要切换的作品…',
   'search.preview.back': '返回结果',
   'assets.empty': '暂无资产。让 agent 用 novel_asset_* 工具创建后刷新。',
   'assets.other': '其他',
@@ -719,6 +721,7 @@ export const en: Record<StudioPanelKey, string> = {
   'tasks.result.toggle': 'Expand or collapse review issues',
   'tasks.result.score': 'Score',
   'tasks.result.issues': 'Issues',
+  'operations.switch.select': 'Select project to switch to…',
   'search.preview.back': 'Back to results',
   'assets.empty': 'No assets yet. Ask the agent to create some with the novel_asset_* tools, then refresh.',
   'assets.other': 'Other',
