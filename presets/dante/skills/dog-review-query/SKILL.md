@@ -19,8 +19,9 @@ description: Query an existing OpenWrite 37-dimension chapter review through dsh
 4. 用 `dog_status` 汇报根状态和每个维度的 evidence。`inherited` 表示对象和
    判据未变，复用了上一轮结果；`needs_human` 表示本次只审查了部分维度或
    verifier 无法判定，不能描述为通过。
-5. 只有 OpenWrite 的审查问题才能进入 `novel_revisions_*` 回炉闭环。DoG 的
-   `failure` 只负责定位问题，不直接改正文或资产。
+5. 只有 OpenWrite 的审查问题才能进入 `novel_revisions_*` 回炉闭环。应用修订后
+   必须复评，再用 `dog-delivery-query` 确认 `closure.closed`。DoG 的 `failure`
+   只负责定位问题，不直接改正文或资产。
 
 ## 维度状态约定
 

@@ -1,8 +1,14 @@
 // Smoke check for the built plugin: asserts the dsh plugin export contract
 // (name / inject / apply / Config) without starting any server.
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import * as mod from '../lib/index.js'
+import { materializeChapterDelivery } from '../lib/dog-delivery.js'
+import { materializeCompletedDogTaskReview } from '../lib/dog-review.js'
 
 assert.equal(mod.name, '@dsh-novel/openwrite-bridge', 'name export')
 assert.deepEqual(mod.inject, ['tools'], 'inject export')
@@ -133,6 +139,52 @@ assert.deepEqual(JSON.parse(changedInvalidation.body), {
   path: '/api/document',
 })
 assert.match(eventResponse.chunks.join(''), /event: invalidate/)
+
+const dogWorkspace = await mkdtemp(join(tmpdir(), 'dsh-novel-dog-smoke-'))
+try {
+  const dogReview = await materializeCompletedDogTaskReview({
+    task: {
+      type: 'chapter_review', status: 'completed', chapter_id: 'ch_009',
+      result: {
+        passed: false, score: 81, dimensions: [1, 2], summary: 'fixture',
+        issue_details: [
+          { id: 'issue-1', dimension: 1, severity: 'critical', description: 'OOC' },
+          { id: 'issue-general', dimension: null, severity: 'warning', description: 'unmapped' },
+        ],
+      },
+    },
+  }, {
+    project: { root: dogWorkspace }, snapshot: { novel_id: 'smoke-book' },
+  })
+  assert.equal(dogReview.status, 'ready')
+  const graph = JSON.parse(await readFile(dogReview.graphPath, 'utf8'))
+  assert.equal(Object.keys(graph.nodes).length, 38)
+  assert.equal(JSON.parse(await readFile(join(dogWorkspace, 'data/novels/smoke-book/data/dog/reviews/ch_009/dim_01.json'), 'utf8')).verdict, 'fail')
+  assert.equal(JSON.parse(await readFile(join(dogWorkspace, 'data/novels/smoke-book/data/dog/reviews/ch_009/dim_03.json'), 'utf8')).verdict, 'inconclusive')
+  const manifest = JSON.parse(await readFile(join(dogWorkspace, 'data/novels/smoke-book/data/dog/reviews/ch_009/review.json'), 'utf8'))
+  assert.equal(manifest.issueCount, 2)
+  assert.equal(manifest.unmappedIssueCount, 1)
+  assert.equal(await materializeCompletedDogTaskReview({ task: { type: 'chapter_write', status: 'completed' } }, {}), undefined)
+
+  const manuscript = join(dogWorkspace, 'data/novels/smoke-book/data/manuscript/arc_001/ch_009.md')
+  await mkdir(join(dogWorkspace, 'data/novels/smoke-book/data/manuscript/arc_001'), { recursive: true })
+  await writeFile(manuscript, '# 第九章\n\n正文', 'utf8')
+  const revision = `sha256:${createHash('sha256').update(await readFile(manuscript)).digest('hex')}`
+  await mkdir(join(dogWorkspace, 'data/novels/smoke-book/data/reviews'), { recursive: true })
+  await writeFile(join(dogWorkspace, 'data/novels/smoke-book/data/reviews/ch_009.json'), JSON.stringify({
+    score: 90, passed: true, source_revision: revision, issue_details: [],
+  }), 'utf8')
+  const delivery = await materializeChapterDelivery({
+    project: { root: dogWorkspace }, snapshot: { novel_id: 'smoke-book' },
+  }, 'ch_009', 70)
+  assert.equal(delivery.readyForDelivery, true)
+  const deliveryGraph = JSON.parse(await readFile(delivery.graphPath, 'utf8'))
+  assert.deepEqual(deliveryGraph.dependsOn.map(edge => `${edge.source}->${edge.target}`), [
+    'review->manuscript', 'revision->review', 'closure->revision',
+  ])
+} finally {
+  await rm(dogWorkspace, { recursive: true, force: true })
+}
 
 await root.fiber.dispose()
 

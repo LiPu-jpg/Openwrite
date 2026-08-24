@@ -35,8 +35,10 @@ import urllib.request
 from pathlib import Path
 
 try:
+    from .dog_delivery import write_delivery_artifacts_from_studio
     from .dog_review import write_review_artifacts
 except ImportError:  # direct ``python pipeline.py`` execution
+    from dog_delivery import write_delivery_artifacts_from_studio
     from dog_review import write_review_artifacts
 
 DEFAULT_STUDIO = os.environ.get("OPENWRITE_STUDIO", "http://127.0.0.1:4567")
@@ -311,7 +313,23 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
     dog_manifest = ""
     dog_graph_path = ""
     dog_graph: dict | None = None
+    delivery_manifest = ""
+    delivery_graph_path = ""
+    delivery_graph: dict | None = None
+    delivery_stages: dict = {}
     words: object = "?"
+
+    def refresh_delivery() -> None:
+        nonlocal delivery_manifest, delivery_graph_path, delivery_graph, delivery_stages
+        try:
+            artifacts = write_delivery_artifacts_from_studio(studio, chapter_id, args.threshold)
+            delivery_manifest = str(artifacts["manifest"])
+            delivery_graph_path = str(artifacts["graph_path"])
+            delivery_graph = artifacts["graph"]
+            delivery_stages = artifacts["stages"]
+            print(f"    DoG 章节交付快照: {delivery_manifest}", flush=True)
+        except (OSError, ValueError, StudioError) as exc:
+            print(f"    DoG 章节交付快照写入失败（不影响领域流程）: {exc}", flush=True)
 
     for attempt in range(1 if args.review_only else 1 + args.max_retries):
         guidance = base_guidance
@@ -322,6 +340,7 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
                                         outline_revision)
             words = write_result.get("word_count", "?")
             print(f"    成稿 {words} 字，评审中…", flush=True)
+            refresh_delivery()
         elif attempt > 0:
             mode = "agent" if args.agent_guidance else "rules"
             print(f"    修订回炉 #{attempt}（指导来源: {mode}）…", flush=True)
@@ -342,6 +361,7 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
                       flush=True)
                 break
             studio.rework(chapter_id, issue_ids, guidance)
+            refresh_delivery()
             print("    修订已应用，复评中…", flush=True)
 
         review = studio.review(chapter_id)
@@ -356,6 +376,7 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
             # The review remains authoritative; expose sidecar failure without
             # pretending the DoG graph exists.
             print(f"    DoG 快照写入失败（不影响本轮评审）: {exc}", flush=True)
+        refresh_delivery()
         attempts.append({"score": review.get("score"), "passed": passed, "review": review})
         print(f"    评分 {review.get('score')}（阈值 {args.threshold}）→ "
               f"{'通过' if passed else '未达标'}", flush=True)
@@ -374,6 +395,10 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
         "dog_manifest": dog_manifest,
         "dog_graph_path": dog_graph_path,
         "dog_graph": dog_graph,
+        "dog_delivery_manifest": delivery_manifest,
+        "dog_delivery_graph_path": delivery_graph_path,
+        "dog_delivery_graph": delivery_graph,
+        "dog_delivery_stages": delivery_stages,
     }
 
 

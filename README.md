@@ -52,8 +52,13 @@ scripts/dev.sh       # 启动两端服务
 2. 切到 **Dante** 会话写正文：`novel_context_preview` 预检上下文包 →
    `novel_write_chapter` 写章 → `novel_review_chapter` 37 维评审。
    每次评审同时生成 `data/novels/{id}/data/dog/reviews/{chapter}/dog-graph.json`；
+   通过 `novel_task_create(type=chapter_review)` 启动的后台评审，也会在
+   `novel_task_get` 读到完成态时生成同样的图；
    在 web 会话中把该 graph 交给 `dog_create` / `dog_run`，即可按 37 个维度查询
    证据、失败原因和继承状态。DoG 只查询已生成的评审结果，不重复跑 37 维模型审查。
+   写章、评审和 `novel_revision_*` 操作还会维护
+   `data/novels/{id}/data/dog/deliveries/{chapter}/dog-graph.json`：它把正文、
+   当前评审、修订应用和复评关闭串成章节交付总图；修订应用后必须复评通过才算交付。
    DoG 的 `workspaceRoot` 需要指向 OpenWrite 项目根目录。
    资产不齐时 Dante 会建议回 Goethe，或经 `subagent_goethe` 子代理做只读咨询。
    拆书导入则先执行 `conductor/smart_import.py`，对输出的

@@ -5,6 +5,9 @@ description = "dsh-novel 无人值守流水线：按大纲连续写章 → 37 �
 requires-python = ">=3.10"
 dependencies = [
   "deepseek-harness-sdk>=0.1.1rc1",
+  "beautifulsoup4>=4.12",
+  "EbookLib>=0.18",
+  "python-docx>=1.1",
 ]
 
 [tool.uv]

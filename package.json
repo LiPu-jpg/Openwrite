@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "npm --prefix packages/openwrite-bridge run build && npm --prefix packages/studio-panel run build",
+    "test:dog": ".venv/bin/python conductor/test_dog_artifacts.py",
     "install-dsh": "bash scripts/install.sh",
     "dev": "bash scripts/dev.sh"
   },

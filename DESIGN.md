@@ -208,8 +208,13 @@ dog_create → dog_run → dog_status / dog_wait
 `critical`/`blocker` 问题为 `fail`，未被本次部分审查选中的维度为
 `inconclusive`，没有硬问题的维度为 `pass`。根 composite 保留一个
 agentic whole-object assertion，只检查 37 维报告的聚合一致性，不重新阅读正文。
+缺少合法维度编号的问题保存在 manifest 的 `unmappedIssues`，仍参与总体门禁且不丢证据。
 因此 37 个维度可单独查询、带证据、按内容 digest 继承；原有的
 `review_gate` 和修订回炉仍是写作流水线的权威门禁。
+
+交互式 `novel_review_chapter` 和 conductor 会立即生成该快照；后台
+`chapter_review` 任务则在 `novel_task_get` 读取完成态时幂等物化同一格式，保证
+同步、托管任务和无人值守三条评审入口都进入同一查询框架。
 
 ### 6.2 拆书导入进入 dsh-dog 查询图
 
@@ -238,6 +243,31 @@ dog:
   workspaceRoot: /absolute/path/to/my_novel
   scriptsDirectory: dog/scripts
 ```
+
+### 6.3 章节交付总图与修订闭环
+
+写章、评审和修订操作会幂等重建：
+
+```text
+data/novels/{id}/data/dog/deliveries/{chapter}/
+  delivery.json
+  review.json
+  revision.json
+  closure.json
+  dog-graph.json
+
+manuscript → review → revision → closure
+```
+
+交付图直接读取 OpenWrite 的 canonical manuscript、review 和 revision 文件。当前正文
+SHA 必须与 review 的 `source_revision` 一致；应用修订会令旧评审 `stale`，此时
+`revision=applied_requires_rereview`、`closure=rereview_required`，不会因提案已经
+`applied` 就误判成功。只有修订后复评通过，`closure=closed` 且
+`readyForDelivery=true`。
+
+`conductor/pipeline.py` 在写章、应用修订和每轮评审后刷新交付图；交互工具和后台
+`chapter_write` / `chapter_review` / `revision_from_review` 任务也返回 `dog_delivery`。
+DoG 仍只负责验收与取证，不生成提案、不应用修订、不重新评审正文。
 
 实测记录（~/my_novel）：ch_001~005 全流程跑通；ch_003 经修订回炉 0 分 → 35 分
 （blocker 人设矛盾被精准修复）。上游问题（OpenWrite 仓库，未动）：ch_004 评审系统性

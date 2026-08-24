@@ -9,8 +9,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { JsonObject, StudioClient } from './client.js'
-import { materializeDogReview, reviewChapterId } from './dog-review.js'
+import type { JsonObject, JsonValue, StudioClient } from './client.js'
+import { materializeChapterDelivery } from './dog-delivery.js'
+import { materializeCompletedDogTaskReview, materializeDogReview, reviewChapterId } from './dog-review.js'
 
 /** Plugin-level config the tools need beyond the HTTP client. */
 export interface NovelToolsOptions {
@@ -42,6 +43,24 @@ function resolveReviewPath(args: { path?: string; chapter_id?: string }): string
   if (!chapterId) throw new Error('either path or chapter_id is required')
   if (!CHAPTER_ID_PATTERN.test(chapterId)) throw new Error(`chapter_id must match ch_<digits>, got "${chapterId}"`)
   return `data/manuscript/${chapterId}.md`
+}
+
+function objectValue(value: unknown): JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {}
+}
+
+async function deliveryForResponse(
+  client: StudioClient,
+  response: JsonValue,
+  chapterId: string,
+  signal: AbortSignal,
+  threshold?: number,
+): Promise<JsonValue> {
+  const embedded = objectValue(response)['workspace']
+  const workspace = embedded !== null && typeof embedded === 'object' && !Array.isArray(embedded)
+    ? embedded
+    : await client.getJson('/api/workspace', {}, signal)
+  return await materializeChapterDelivery(workspace, chapterId, threshold)
 }
 
 /** Register every `novel_*` tool into the host tools registry. */
@@ -198,7 +217,16 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
       if (chapterId) body['chapter_id'] = chapterId
       if (args.temperature !== undefined) body['temperature'] = args.temperature
       if (args.outline_revision !== undefined) body['outline_revision'] = args.outline_revision
-      return await client.postJson('/api/write', body, exec.signal)
+      const response = await client.postJson('/api/write', body, exec.signal)
+      const writeValue = objectValue(response)
+      const writeResult = objectValue(writeValue['result'] ?? response)
+      const writtenChapterId = chapterId || String(writeResult['chapter_id'] ?? '')
+      try {
+        const dogDelivery = await deliveryForResponse(client, response, writtenChapterId, exec.signal)
+        return { ...objectValue(response), dog_delivery: dogDelivery }
+      } catch (error) {
+        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+      }
     },
   }))
 
@@ -211,28 +239,39 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
       path: { type: 'string', description: 'Manuscript path relative to the novel data root. Takes precedence over chapter_id.' },
       chapter_id: { type: 'string', description: 'Chapter id (ch_<digits>), resolved client-side to data/manuscript/<id>.md.' },
       strict: { type: 'boolean', description: 'Enable strict review mode (default false).' },
-      dimensions: { type: 'array', items: { type: 'string' }, description: 'Optional list of review dimensions to restrict to.' },
+      dimensions: { type: 'array', items: { type: 'integer' }, description: 'Optional list of review dimension numbers (1-37) to restrict to.' },
       dog_threshold: { type: 'integer', description: 'DoG aggregate score threshold (default 70); this does not change OpenWrite review.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
     async execute(args, exec) {
+      if (args.dimensions !== undefined && args.dimensions.some(value => !Number.isInteger(value) || value < 1 || value > 37)) {
+        throw new Error('dimensions must contain only integers from 1 to 37')
+      }
+      const dogThreshold = args.dog_threshold ?? 70
+      if (!Number.isInteger(dogThreshold) || dogThreshold < 0 || dogThreshold > 100) {
+        throw new Error(`dog_threshold must be an integer between 0 and 100, got ${String(args.dog_threshold)}`)
+      }
       const body: JsonObject = { path: resolveReviewPath(args) }
       if (args.strict !== undefined) body['strict'] = args.strict
       if (args.dimensions !== undefined) body['dimensions'] = args.dimensions
       const response = await client.postJson('/api/review', body, exec.signal)
+      const value = response !== null && typeof response === 'object' && !Array.isArray(response)
+        ? response as JsonObject
+        : { result: response }
+      let dogReview: JsonValue
       try {
-        const dogReview = await materializeDogReview(response, reviewChapterId(args), args.dog_threshold ?? 70)
-        const value = response !== null && typeof response === 'object' && !Array.isArray(response)
-          ? response as JsonObject
-          : { result: response }
-        return { ...value, dog_review: dogReview }
+        dogReview = await materializeDogReview(response, reviewChapterId(args), dogThreshold)
       } catch (error) {
-        const value = response !== null && typeof response === 'object' && !Array.isArray(response)
-          ? response as JsonObject
-          : { result: response }
-        return { ...value, dog_review: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+        dogReview = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
       }
+      let dogDelivery: JsonValue
+      try {
+        dogDelivery = await deliveryForResponse(client, response, reviewChapterId(args), exec.signal, dogThreshold)
+      } catch (error) {
+        dogDelivery = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+      }
+      return { ...value, dog_review: dogReview, dog_delivery: dogDelivery }
     },
   }))
 
@@ -569,7 +608,12 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
       const body: JsonObject = { chapter_id: args.chapter_id, issue_ids: args.issue_ids }
       if (args.instruction !== undefined) body['instruction'] = args.instruction
       if (args.target_units !== undefined) body['target_units'] = args.target_units
-      return await client.postJson('/api/revisions/from-review', body, exec.signal)
+      const response = await client.postJson('/api/revisions/from-review', body, exec.signal)
+      try {
+        return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, args.chapter_id, exec.signal) }
+      } catch (error) {
+        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+      }
     },
   }))
 
@@ -590,7 +634,15 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
       const body: JsonObject = {}
       if (args.replacement_text !== undefined) body['replacement_text'] = args.replacement_text
       if (args.selected_hunk_ids !== undefined) body['selected_hunk_ids'] = args.selected_hunk_ids
-      return await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/apply`, body, exec.signal)
+      const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/apply`, body, exec.signal)
+      const responseValue = objectValue(response)
+      const proposal = objectValue(responseValue['proposal'] ?? response)
+      const chapterId = String(proposal['chapter_id'] ?? '')
+      try {
+        return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
+      } catch (error) {
+        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+      }
     },
   }))
 
@@ -606,7 +658,13 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
     timeoutMs,
     async execute(args, exec) {
       if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
-      return await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/reject`, {}, exec.signal)
+      const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/reject`, {}, exec.signal)
+      const chapterId = String(objectValue(response)['chapter_id'] ?? '')
+      try {
+        return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
+      } catch (error) {
+        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+      }
     },
   }))
 
@@ -620,7 +678,13 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
     timeoutMs,
     async execute(args, exec) {
       if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
-      return await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/regenerate`, {}, exec.signal)
+      const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/regenerate`, {}, exec.signal)
+      const chapterId = String(objectValue(response)['chapter_id'] ?? '')
+      try {
+        return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
+      } catch (error) {
+        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+      }
     },
   }))
 
@@ -644,16 +708,59 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
 
   ctx.tools.register(defineTool({
     name: 'novel_task_get',
-    description: 'Get one background task with its event log by task id (tsk_*).',
+    description: 'Get one background task with its event log by task id (tsk_*). Completed chapter write/review/revision tasks refresh the chapter-delivery DoG graph; chapter reviews also materialize the 37-dimension graph.',
     parameters: {
       task_id: { type: 'string', required: true, description: 'Task id (tsk_*).' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
     async execute(args, exec) {
       if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
-      return await client.getJson(`/api/tasks/${encodeURIComponent(args.task_id)}`, {}, exec.signal)
+      const response = await client.getJson(`/api/tasks/${encodeURIComponent(args.task_id)}`, {}, exec.signal)
+      const responseRecord = response !== null && typeof response === 'object' && !Array.isArray(response)
+        ? response as JsonObject
+        : {}
+      const taskValue = responseRecord['task'] ?? response
+      const taskRecord = taskValue !== null && typeof taskValue === 'object' && !Array.isArray(taskValue)
+        ? taskValue as JsonObject
+        : {}
+      if (taskRecord['status'] !== 'completed') return response
+      const taskType = String(taskRecord['type'] ?? '')
+      if (!['chapter_write', 'chapter_review', 'revision_from_review'].includes(taskType)) return response
+      const taskResult = objectValue(taskRecord['result'])
+      const taskInput = objectValue(taskRecord['input'])
+      const chapterId = String(taskRecord['chapter_id'] ?? taskResult['chapter_id'] ?? '').trim()
+        || String(taskInput['path'] ?? '').match(/(?:^|\/)(ch_\d+)\.md$/)?.[1]
+        || ''
+      const value = response !== null && typeof response === 'object' && !Array.isArray(response)
+        ? response as JsonObject
+        : { task: response }
+      if (!/^ch_\d+$/.test(chapterId)) {
+        return { ...value, dog_delivery: { status: 'unavailable', error: 'completed chapter task lacks a resolvable chapter id' } }
+      }
+      let workspace: JsonValue
+      try {
+        workspace = await client.getJson('/api/workspace', {}, exec.signal)
+      } catch (error) {
+        const unavailable = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+        return taskType === 'chapter_review'
+          ? { ...value, dog_review: unavailable, dog_delivery: unavailable }
+          : { ...value, dog_delivery: unavailable }
+      }
+      let dogDelivery: JsonValue
+      try {
+        dogDelivery = await materializeChapterDelivery(workspace, chapterId)
+      } catch (error) {
+        dogDelivery = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+      }
+      if (taskType !== 'chapter_review') return { ...value, dog_delivery: dogDelivery }
+      let dogReview: JsonValue
+      try {
+        dogReview = await materializeCompletedDogTaskReview(response, workspace) ?? { status: 'unavailable', error: 'review task was not materialized' }
+      } catch (error) {
+        dogReview = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+      }
+      return { ...value, dog_review: dogReview, dog_delivery: dogDelivery }
     },
   }))
 

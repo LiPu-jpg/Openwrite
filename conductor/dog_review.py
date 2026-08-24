@@ -126,14 +126,20 @@ def build_review_manifest(
     are marked ``inconclusive`` so the DoG graph never turns a partial audit
     into a false pass.
     """
+    if not 0 <= threshold <= 100:
+        raise ValueError("review threshold must be between 0 and 100")
     selected = _selected_dimensions(review)
     grouped: dict[int, list[dict[str, Any]]] = {number: [] for number in DIMENSION_NAMES}
+    unmapped: list[dict[str, Any]] = []
     for raw_issue in review.get("issue_details") or []:
         if not isinstance(raw_issue, dict):
             continue
         number = _as_dimension(raw_issue.get("dimension"))
-        if number is not None:
-            grouped[number].append(_normalized_issue(raw_issue))
+        normalized = _normalized_issue(raw_issue)
+        if number is None:
+            unmapped.append(normalized)
+        else:
+            grouped[number].append(normalized)
 
     dimensions: dict[int, dict[str, Any]] = {}
     for number, name in DIMENSION_NAMES.items():
@@ -168,7 +174,9 @@ def build_review_manifest(
         "summary": str(review.get("summary") or ""),
         "requestedDimensions": sorted(selected),
         "dimensionCount": len(DIMENSION_NAMES),
-        "issueCount": sum(len(items) for items in grouped.values()),
+        "issueCount": sum(len(items) for items in grouped.values()) + len(unmapped),
+        "unmappedIssueCount": len(unmapped),
+        "unmappedIssues": unmapped,
         "dimensions": list(dimensions.values()),
     }
     return manifest, dimensions
@@ -177,10 +185,13 @@ def build_review_manifest(
 def _workspace_project(workspace: dict[str, Any]) -> tuple[Path, str]:
     project = workspace.get("project") if isinstance(workspace.get("project"), dict) else {}
     snapshot = workspace.get("snapshot") if isinstance(workspace.get("snapshot"), dict) else {}
-    root = Path(str(project.get("root") or "")).expanduser().resolve()
+    root_text = str(project.get("root") or "").strip()
     novel_id = str(snapshot.get("novel_id") or "").strip()
-    if not root.is_dir() or not novel_id:
+    if not root_text or not novel_id:
         raise ValueError("Studio workspace lacks project.root or snapshot.novel_id")
+    root = Path(root_text).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"Studio project root is not a directory: {root}")
     return root, novel_id
 
 
@@ -216,7 +227,7 @@ def write_review_artifacts(
                 "mode": "agentic",
                 "instruction": (
                     "只检查这份 OpenWrite 37 维审查 manifest 的聚合一致性：确认 dimensionCount、"
-                    "requestedDimensions、各维 verdict、总分与总体 verdict 没有互相矛盾。"
+                    "requestedDimensions、unmappedIssues、各维 verdict、总分与总体 verdict 没有互相矛盾。"
                     "不要重新审查正文；给出证据。"
                 ),
             },

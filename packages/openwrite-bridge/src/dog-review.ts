@@ -60,6 +60,9 @@ export async function materializeDogReview(
   chapterId: string,
   threshold: number,
 ): Promise<JsonValue> {
+  if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100) {
+    throw new Error('review threshold must be an integer between 0 and 100')
+  }
   const outer = record(response)
   const review = record(outer['result'] ?? response)
   const workspace = record(outer['workspace'])
@@ -71,11 +74,14 @@ export async function materializeDogReview(
 
   const selected = selectedDimensions(review)
   const grouped = new Map<number, RecordValue[]>()
+  const unmappedIssues: RecordValue[] = []
   for (const number of Object.keys(DOG_REVIEW_DIMENSIONS).map(Number)) grouped.set(number, [])
   const issues = Array.isArray(review['issue_details']) ? review['issue_details'] : []
   for (const item of issues) {
     const number = dimension(record(item)['dimension'])
-    if (number !== undefined) grouped.get(number)?.push(normalizedIssue(item))
+    const normalized = normalizedIssue(item)
+    if (number === undefined) unmappedIssues.push(normalized)
+    else grouped.get(number)?.push(normalized)
   }
 
   const dimensionRecords = Object.entries(DOG_REVIEW_DIMENSIONS).map(([key, name]) => {
@@ -94,7 +100,9 @@ export async function materializeDogReview(
     schemaVersion: 'dsh-novel.review.manifest.v1', recordType: 'review', chapterId, threshold,
     verdict: gatePassed(review, threshold) ? 'pass' : 'fail', sourceReviewPassed: Boolean(review['passed']),
     score: review['score'], summary: String(review['summary'] ?? ''), requestedDimensions: [...selected].sort((a, b) => a - b),
-    dimensionCount: 37, issueCount: dimensionRecords.reduce((sum, item) => sum + Number(item.issueCount), 0),
+    dimensionCount: 37,
+    issueCount: dimensionRecords.reduce((sum, item) => sum + Number(item.issueCount), 0) + unmappedIssues.length,
+    unmappedIssueCount: unmappedIssues.length, unmappedIssues,
     dimensions: dimensionRecords,
   }
 
@@ -110,7 +118,7 @@ export async function materializeDogReview(
     root: {
       kind: 'composite', title: `${chapterId} 37维审查`, constraint: 'hard', target: manifestTarget,
       completion: { op: 'all', items: dimensionRecords.map(item => ({ op: 'ref', id: `dim-${String(item.dimension).padStart(2, '0')}` })) },
-      verifier: { mode: 'agentic', instruction: '只检查这份 OpenWrite 37 维审查 manifest 的聚合一致性，不重新审查正文；给出证据。' },
+      verifier: { mode: 'agentic', instruction: '只检查这份 OpenWrite 37 维审查 manifest 的聚合一致性，包括 unmappedIssues，不重新审查正文；给出证据。' },
     },
   }
   const contains: RecordValue[] = []
@@ -130,6 +138,25 @@ export async function materializeDogReview(
     status: 'ready', graphPath, manifestPath: join(directory, 'review.json'),
     graphTarget: relative(root, graphPath), manifestTarget, dimensions: 37,
   } as unknown as JsonValue
+}
+
+/** Materialize a terminal background chapter_review task, if this payload is one. */
+export async function materializeCompletedDogTaskReview(
+  response: unknown,
+  workspace: unknown,
+  threshold = 70,
+): Promise<JsonValue | undefined> {
+  const outer = record(response)
+  const task = record(outer['task'] ?? response)
+  if (task['type'] !== 'chapter_review' || task['status'] !== 'completed') return undefined
+  const review = record(task['result'])
+  const input = record(task['input'])
+  const chapterId = String(task['chapter_id'] ?? review['chapter_id'] ?? '').trim()
+    || String(input['path'] ?? '').match(/(?:^|\/)(ch_\d+)\.md$/)?.[1]
+  if (!chapterId || !/^ch_\d+$/.test(chapterId)) {
+    throw new Error('completed chapter_review task lacks a resolvable chapter id')
+  }
+  return await materializeDogReview({ result: review, workspace }, chapterId, threshold)
 }
 
 export function reviewChapterId(args: { path?: string; chapter_id?: string }): string {

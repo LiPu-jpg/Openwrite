@@ -11,6 +11,15 @@
 
 ## 未发布
 
+- dsh-dog 进一步融合：同步评审、conductor 与后台 `chapter_review` 任务统一物化
+  37 维查询图；修正维度参数为 OpenWrite 要求的 `1..37` 整数数组并加入阈值校验。
+- 新增章节交付总图：以正文 SHA、评审 `source_revision`、修订提案状态和复评结果
+  串联 `manuscript → review → revision → closure`；应用修订后强制进入待复评，
+  只有当前正文复评通过才标记 `readyForDelivery`。同步工具、后台任务和 conductor
+  均会刷新交付快照，并新增 `dog-delivery-query` 技能。
+- 修复智能导入的 DOCX/EPUB 二进制文件被提前文本解码、空任务项目无法解析
+  `novel_id` 的问题；补齐导入格式依赖和 DoG 契约测试（含真实 dsh-dog 图校验）。
+
 - 「审稿」tab 并入「写作」（原总览）三分段：总览 ⇄ 正文 ⇄ 审稿，Studio iframe
   三合一；tab 总数 10 → 9，标签更名「写作」
 - 搜索 tab 点击即读：结果行可点击，内联预览经 GET /api/document 取全文，

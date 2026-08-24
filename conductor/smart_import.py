@@ -44,6 +44,15 @@ AGENT_TIMEOUT_S = 600
 def detect_and_convert(file_path: Path) -> tuple[str, str]:
     """返回 (markdown_text, detected_format)"""
     suffix = file_path.suffix.lower()
+
+    # DOCX/EPUB are container formats.  Decode text only after handling them;
+    # attempting UTF-8/GB18030 first makes every normal binary document fail
+    # with an encoding error before its converter can run.
+    if suffix == ".docx":
+        return _docx_to_md(file_path), "docx"
+    if suffix == ".epub":
+        return _epub_to_md(file_path), "epub"
+
     raw = file_path.read_bytes()
 
     # 编码探测
@@ -59,10 +68,6 @@ def detect_and_convert(file_path: Path) -> tuple[str, str]:
 
     if suffix in (".md", ".markdown", ".txt"):
         return text, suffix.lstrip(".")
-    if suffix == ".docx":
-        return _docx_to_md(file_path), "docx"
-    if suffix == ".epub":
-        return _epub_to_md(file_path), "epub"
     if suffix in (".html", ".htm"):
         return _html_to_md(text), "html"
     raise SystemExit(f"不支持的格式: {suffix}（支持 docx/epub/html/txt/md）")
@@ -254,17 +259,25 @@ def main():
     # 4) 写入报告库（作为导入记录）
     print("==> 4/5 落库导入记录…", flush=True)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    ws_data = json.loads(urllib.request.urlopen(
+    ws_data = json.loads(opener.open(
         urllib.request.Request(base_url + "/api/workspace", headers={"Accept": "application/json"}),
         timeout=30).read().decode())
     inner = ws_data.get("data") if isinstance(ws_data, dict) and "data" in ws_data else ws_data
-    project = (inner or {}).get("project") or {}
-    root = Path(str(project.get("root") or "")).expanduser()
+    workspace = inner if isinstance(inner, dict) else {}
+    project = workspace.get("project") or {}
+    root_text = str(project.get("root") or "").strip()
+    root = Path(root_text).expanduser().resolve() if root_text else None
+    snapshot = workspace.get("snapshot") or {}
+    snapshot_novel_id = str(snapshot.get("novel_id") or "").strip()
     tasks_data = json.loads(opener.open(urllib.request.Request(
         base_url + "/api/tasks", headers={"Accept": "application/json"}), timeout=30).read().decode())
     inner_t = tasks_data.get("data") if isinstance(tasks_data, dict) and "data" in tasks_data else tasks_data
     task_list = (inner_t or {}).get("tasks") or []
-    novel_id = next((str(t.get("novel_id")) for t in task_list if t.get("novel_id")), "")
+    # A fresh project can have no tasks yet.  Prefer the workspace snapshot,
+    # then retain the task-list fallback for older Studio versions.
+    novel_id = snapshot_novel_id or next((str(t.get("novel_id")) for t in task_list if t.get("novel_id")), "")
+    if root is None or not root.is_dir() or not novel_id:
+        raise SystemExit("Studio workspace 未提供有效的 project.root 或 novel_id")
     report_dir = root / "data" / "novels" / novel_id / "data" / "research" / "reports"
 
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -288,7 +301,7 @@ def main():
     studio = Studio(base_url)
     imported_records: list[dict] = []
     imported_arc = "arc_001"
-    import_error = ""
+    import_error = "未识别到可导入章节" if not chapters else ""
     for i, (title, body) in enumerate(chapters):
         start_number = i + 1
         payload = {
