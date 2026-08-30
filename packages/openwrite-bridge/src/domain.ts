@@ -17,9 +17,16 @@ const WRITABLE_PATHS = new Set([
   'import/preview',
   'import',
   'tasks',
+  'benchmarks',
   'document',
   'project/open',
   'project/init',
+  'model',
+  'model/test',
+  'model/embedding/test',
+  'model/profiles',
+  'model/profiles/delete',
+  'model/routes',
 ])
 const WRITABLE_PATH_RE = /^tasks\/[A-Za-z0-9_-]+\/(?:cancel|retry)$/
 
@@ -69,6 +76,8 @@ function resourceForPath(path: string): string {
   if (path.startsWith('/api/outline')) return 'outline'
   if (path.startsWith('/api/assets')) return 'assets'
   if (path.startsWith('/api/tasks') || path.startsWith('/api/review')) return 'tasks'
+  if (path.startsWith('/api/benchmarks')) return 'benchmark'
+  if (path.startsWith('/api/model')) return 'models'
   if (path.startsWith('/api/research')) return 'research'
   if (path.startsWith('/api/revisions')) return 'revisions'
   return 'workspace'
@@ -86,20 +95,49 @@ function compactTaskList(bytes: Buffer, pathPart: string, method: string): Buffe
       const result = task['result'] !== null && typeof task['result'] === 'object' && !Array.isArray(task['result'])
         ? task['result'] as Record<string, unknown>
         : null
+      const reviewV2 = result?.['review_v2'] !== null && typeof result?.['review_v2'] === 'object' && !Array.isArray(result?.['review_v2'])
+        ? result['review_v2'] as Record<string, unknown>
+        : null
       const reviewResult = task['type'] === 'chapter_review' && result !== null
         ? {
             score: result['score'],
             passed: result['passed'],
             issues: result['issues'],
             summary: result['summary'],
+            review_v2: reviewV2 === null ? undefined : {
+              schema_version: reviewV2['schema_version'],
+              execution_status: reviewV2['execution_status'],
+              quality_score: reviewV2['quality_score'],
+              coverage: reviewV2['coverage'],
+              gate_status: reviewV2['gate_status'],
+              delivery_status: reviewV2['delivery_status'],
+              production_gate_status: reviewV2['production_gate_status'],
+              freshness_status: reviewV2['freshness_status'],
+              source_revision: reviewV2['source_revision'],
+              current_source_revision: reviewV2['current_source_revision'],
+            },
             issue_details: Array.isArray(result['issue_details'])
               ? result['issue_details'].map((rawIssue: unknown) => {
                   const issue = rawIssue !== null && typeof rawIssue === 'object' && !Array.isArray(rawIssue)
                     ? rawIssue as Record<string, unknown>
                     : {}
-                  return { severity: issue['severity'], dimension: issue['dimension'], summary: issue['summary'] }
+                  return {
+                    severity: issue['severity'],
+                    review_severity: issue['review_severity'],
+                    revision_priority: issue['revision_priority'],
+                    legacy_severity: issue['legacy_severity'],
+                    dimension: issue['dimension'],
+                    category: issue['category'],
+                    summary: issue['summary'] ?? issue['description'],
+                  }
                 })
               : [],
+          }
+        : null
+      const benchmarkResult = task['type'] === 'model_benchmark' && result !== null
+        ? {
+            run_id: result['run_id'], status: result['status'], artifact_path: result['artifact_path'],
+            context_hash: result['context_hash'], summary: result['summary'],
           }
         : null
       return {
@@ -114,7 +152,7 @@ function compactTaskList(bytes: Buffer, pathPart: string, method: string): Buffe
         attempt: task['attempt'],
         created_at: task['created_at'],
         updated_at: task['updated_at'],
-        result: reviewResult,
+        result: reviewResult ?? benchmarkResult,
       }
     })
     return Buffer.from(JSON.stringify({ ...envelope, data: { ...data, tasks } }))

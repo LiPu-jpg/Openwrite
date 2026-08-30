@@ -1424,6 +1424,52 @@ export function registerNovelTools(ctx: Context, client: StudioClient, options: 
   }))
 
   ctx.tools.register(defineTool({
+    name: 'novel_model_benchmark',
+    description:
+      'Run or inspect an isolated chapter-model benchmark through OpenWrite profiles and LiteLLM. ' +
+      'The run action creates a background task and never changes model routes or canonical manuscript files.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'get', 'run'], description: 'Benchmark operation.' },
+      run_id: { type: 'string', description: 'Benchmark run id for get.' },
+      chapter_id: { type: 'string', description: 'Chapter context anchor for run (default next).' },
+      writer_profile_ids: { type: 'array', items: { type: 'string' }, description: 'Writing profiles to compare (run).' },
+      reviewer_profile_ids: { type: 'array', items: { type: 'string' }, description: 'Independent blind-review profiles (run).' },
+      execution_mode: { type: 'string', enum: ['framework', 'creative'], description: 'Execution path: full production framework (default) or creative-only diagnostic.' },
+      repeats: { type: 'integer', description: 'Repeats per writing profile, 1-5.' },
+      target_words: { type: 'integer', description: 'Candidate target length, 200-12000.' },
+      concurrency: { type: 'integer', description: 'Concurrent model jobs, 1-4.' },
+      limit: { type: 'integer', description: 'List limit, default 20.' },
+    },
+    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
+    timeoutMs,
+    isConcurrencySafe: args => args.action !== 'run',
+    async execute(args, exec) {
+      if (args.action === 'list') {
+        return await client.getJson('/api/benchmarks', args.limit === undefined ? {} : { limit: String(args.limit) }, exec.signal)
+      }
+      if (args.action === 'get') {
+        if (!args.run_id?.trim()) throw new Error('run_id is required for get')
+        return await client.getJson(`/api/benchmarks/${encodeURIComponent(args.run_id.trim())}`, {}, exec.signal)
+      }
+      if (!Array.isArray(args.writer_profile_ids) || args.writer_profile_ids.length === 0) {
+        throw new Error('writer_profile_ids is required for run')
+      }
+      if (!Array.isArray(args.reviewer_profile_ids) || args.reviewer_profile_ids.length === 0) {
+        throw new Error('reviewer_profile_ids is required for run')
+      }
+      const body: JsonObject = {
+        writer_profile_ids: args.writer_profile_ids,
+        reviewer_profile_ids: args.reviewer_profile_ids,
+      }
+      for (const key of ['chapter_id', 'execution_mode', 'repeats', 'target_words', 'concurrency'] as const) {
+        const value = args[key]
+        if (value !== undefined) body[key] = value
+      }
+      return await client.postJson('/api/benchmarks', body, exec.signal)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'novel_model_configure',
     description:
       'Apply and persist the server\'s active model connection (OpenWrite\'s own LLM for writing/review — ' +
