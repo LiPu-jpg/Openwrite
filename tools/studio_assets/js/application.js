@@ -2122,6 +2122,8 @@ function preferredTourStep() {
 function startProductTour(forcedStep = "") {
   const isAutomatic = !forcedStep;
   const debugMode = productTourDebugMode();
+  // Embed mode (dsh shell): never auto-start the tour inside the iframe.
+  if (isAutomatic && document.documentElement.dataset.embed === "dsh") return;
   if (isAutomatic && !debugMode && readLocalValue(productTourStorageKey)) return;
   const step = forcedStep || "workspace";
   const guide = productTourSteps[step];
@@ -4750,6 +4752,11 @@ function renderContinuity() {
 const relationshipKinds = {
   character: "人物", faction: "势力", place: "地点", concept: "概念", unknown: "其他",
 };
+const RELATIONSHIP_NODE_SCALE = 0.76;
+
+function relationshipNodeSize(value) {
+  return Math.round(value * RELATIONSHIP_NODE_SCALE);
+}
 
 function renderRelationshipGraph(graph) {
   stopRelationshipSimulation();
@@ -4814,6 +4821,7 @@ function renderRelationshipGraph(graph) {
   renderRelationshipDetail();
   applyRelationshipTransform();
   updateRelationshipPositions();
+  highlightRelationshipNeighborhood(state.relationship.selectedId);
 
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   state.relationship.paused = reduceMotion;
@@ -4875,7 +4883,10 @@ function initializeRelationshipPositions(nodes, reset = false) {
 function relationshipNodeCollisionWidth(node) {
   const labelLength = Array.from(String(node.label || "")).length;
   const displayedLength = Math.min(labelLength, 8);
-  return Math.max(54, Math.min(104, displayedLength * 11 + 16));
+  return Math.max(
+    relationshipNodeSize(54),
+    Math.min(relationshipNodeSize(104), relationshipNodeSize(displayedLength * 11 + 16)),
+  );
 }
 
 function buildRelationshipSvg(nodes, edges) {
@@ -4883,25 +4894,36 @@ function buildRelationshipSvg(nodes, edges) {
   const nodeRoot = $("#relationship-nodes");
   edgeRoot.replaceChildren();
   nodeRoot.replaceChildren();
+  const degreeById = new Map(nodes.map((node) => [node.id, 0]));
   edges.forEach((edge) => {
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.classList.add("relationship-edge");
-    line.classList.toggle("annotation", edge.origin === "annotation");
-    line.classList.toggle("canonical", edge.origin === "canonical");
-    line.dataset.edgeId = edge.id;
+    degreeById.set(edge.source, (degreeById.get(edge.source) || 0) + 1);
+    degreeById.set(edge.target, (degreeById.get(edge.target) || 0) + 1);
+  });
+  const maxDegree = Math.max(0, ...degreeById.values());
+  const labelThreshold = nodes.length > 32 ? Math.max(2, Math.ceil(maxDegree * 0.45)) : 0;
+  edges.forEach((edge) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.classList.add("relationship-edge");
+    path.classList.toggle("annotation", edge.origin === "annotation");
+    path.classList.toggle("canonical", edge.origin === "canonical");
+    path.dataset.edgeId = edge.id;
+    path.dataset.sourceId = edge.source;
+    path.dataset.targetId = edge.target;
     const searchRelated = Boolean(state.relationship.query) && (
       state.relationship.matchIds.has(edge.source) || state.relationship.matchIds.has(edge.target)
     );
-    line.classList.toggle("search-related", searchRelated);
-    line.classList.toggle("search-context", Boolean(state.relationship.query) && !searchRelated);
+    path.classList.toggle("search-related", searchRelated);
+    path.classList.toggle("search-context", Boolean(state.relationship.query) && !searchRelated);
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
     title.textContent = `${edge.label} · ${edge.origin === "canonical" ? "资料字段" : (edge.source_label || "内联注册")}`;
-    line.append(title);
-    edgeRoot.append(line);
+    path.append(title);
+    edgeRoot.append(path);
   });
   nodes.forEach((node) => {
     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
     group.classList.add("relationship-node");
+    group.classList.toggle("label-prominent", (degreeById.get(node.id) || 0) >= labelThreshold);
+    group.classList.toggle("selected", node.id === state.relationship.selectedId);
     group.classList.toggle("search-match", state.relationship.matchIds.has(node.id));
     group.classList.toggle(
       "search-context",
@@ -4918,11 +4940,13 @@ function buildRelationshipSvg(nodes, edges) {
     shape.classList.add("relationship-node-shape");
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
     label.classList.add("relationship-node-label");
-    label.setAttribute("y", "34");
+    label.setAttribute("y", String(relationshipNodeSize(34)));
     const labelCharacters = Array.from(node.label);
     label.textContent = labelCharacters.length > 8 ? `${labelCharacters.slice(0, 7).join("")}…` : node.label;
     group.append(title, shape, label);
     group.addEventListener("pointerdown", beginRelationshipNodeDrag);
+    group.addEventListener("pointerenter", () => highlightRelationshipNeighborhood(node.id));
+    group.addEventListener("pointerleave", () => highlightRelationshipNeighborhood(state.relationship.selectedId));
     group.addEventListener("keydown", moveRelationshipNodeWithKeyboard);
     group.addEventListener("click", () => selectRelationshipNode(node.id));
     nodeRoot.append(group);
@@ -4932,30 +4956,74 @@ function buildRelationshipSvg(nodes, edges) {
 function relationshipNodeShape(kind) {
   const ns = "http://www.w3.org/2000/svg";
   if (kind === "faction") {
+    const halfSize = relationshipNodeSize(18);
     const shape = document.createElementNS(ns, "rect");
-    shape.setAttribute("x", "-18"); shape.setAttribute("y", "-18");
-    shape.setAttribute("width", "36"); shape.setAttribute("height", "36"); shape.setAttribute("rx", "5");
+    shape.setAttribute("x", String(-halfSize)); shape.setAttribute("y", String(-halfSize));
+    shape.setAttribute("width", String(halfSize * 2)); shape.setAttribute("height", String(halfSize * 2));
+    shape.setAttribute("rx", String(relationshipNodeSize(5)));
     return shape;
   }
   if (kind === "place" || kind === "concept") {
     const shape = document.createElementNS(ns, "polygon");
-    shape.setAttribute("points", kind === "place" ? "0,-22 22,0 0,22 -22,0" : "-20,-12 0,-23 20,-12 20,12 0,23 -20,12");
+    const halfWidth = relationshipNodeSize(kind === "place" ? 22 : 20);
+    const halfHeight = relationshipNodeSize(kind === "place" ? 22 : 23);
+    const shoulder = relationshipNodeSize(12);
+    shape.setAttribute("points", kind === "place"
+      ? `0,${-halfHeight} ${halfWidth},0 0,${halfHeight} ${-halfWidth},0`
+      : `${-halfWidth},${-shoulder} 0,${-halfHeight} ${halfWidth},${-shoulder} ${halfWidth},${shoulder} 0,${halfHeight} ${-halfWidth},${shoulder}`);
     return shape;
   }
   const shape = document.createElementNS(ns, "circle");
-  shape.setAttribute("r", kind === "character" ? "19" : "17");
+  shape.setAttribute("r", String(relationshipNodeSize(kind === "character" ? 19 : 17)));
   return shape;
+}
+
+function relationshipNodeBoundaryRadius(node) {
+  if (node?.kind === "place" || node?.kind === "concept") return relationshipNodeSize(23);
+  if (node?.kind === "faction") return relationshipNodeSize(21);
+  return relationshipNodeSize(node?.kind === "character" ? 19 : 17);
+}
+
+function relationshipEdgePath(edge, source, target, sourceNode, targetNode) {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const distance = Math.max(Math.hypot(dx, dy), 1);
+  const ux = dx / distance;
+  const uy = dy / distance;
+  const sourceRadius = relationshipNodeBoundaryRadius(sourceNode) + 3;
+  const targetRadius = relationshipNodeBoundaryRadius(targetNode) + 7;
+  if (distance <= sourceRadius + targetRadius + 2) {
+    return `M ${source.x} ${source.y} L ${target.x} ${target.y}`;
+  }
+  const startX = source.x + ux * sourceRadius;
+  const startY = source.y + uy * sourceRadius;
+  const endX = target.x - ux * targetRadius;
+  const endY = target.y - uy * targetRadius;
+  const hash = Array.from(String(edge.id || `${edge.source}:${edge.target}`))
+    .reduce((value, char) => ((value * 33) ^ char.charCodeAt(0)) >>> 0, 5381);
+  const direction = hash % 2 ? 1 : -1;
+  const bendRatio = 0.075 + ((hash >>> 1) % 4) * 0.018;
+  const bend = direction * Math.min(36, Math.max(6, distance * bendRatio));
+  const controlX = (startX + endX) / 2 - uy * bend;
+  const controlY = (startY + endY) / 2 + ux * bend;
+  return `M ${startX.toFixed(2)} ${startY.toFixed(2)} Q ${controlX.toFixed(2)} ${controlY.toFixed(2)} ${endX.toFixed(2)} ${endY.toFixed(2)}`;
 }
 
 function updateRelationshipPositions() {
   const byId = state.relationship.positions;
-  $$(".relationship-edge").forEach((line, index) => {
+  const nodeById = new Map(state.relationship.nodes.map((node) => [node.id, node]));
+  $$(".relationship-edge").forEach((path, index) => {
     const edge = state.relationship.edges[index];
     const source = byId.get(edge?.source);
     const target = byId.get(edge?.target);
     if (!source || !target) return;
-    line.setAttribute("x1", String(source.x)); line.setAttribute("y1", String(source.y));
-    line.setAttribute("x2", String(target.x)); line.setAttribute("y2", String(target.y));
+    path.setAttribute("d", relationshipEdgePath(
+      edge,
+      source,
+      target,
+      nodeById.get(edge.source),
+      nodeById.get(edge.target),
+    ));
   });
   $$(".relationship-node").forEach((group) => {
     const point = byId.get(group.dataset.nodeId);
@@ -5001,7 +5069,7 @@ function simulateRelationshipStep() {
       if (!b.fixed) { b.vx -= dx * force; b.vy -= dy * force; }
 
       const minX = (collisionWidths[i] + collisionWidths[j]) / 2;
-      const minY = 58;
+      const minY = relationshipNodeSize(58);
       const overlapX = minX - Math.abs(a.x - b.x);
       const overlapY = minY - Math.abs(a.y - b.y);
       if (overlapX > 0 && overlapY > 0) {
@@ -5017,14 +5085,14 @@ function simulateRelationshipStep() {
         }
       }
     }
-    a.vx += (480 - a.x) * 0.0008; a.vy += (265 - a.y) * 0.0008;
+    a.vx += (480 - a.x) * 0.0012; a.vy += (265 - a.y) * 0.0012;
   }
   state.relationship.edges.forEach((edge) => {
     const source = positions.get(edge.source); const target = positions.get(edge.target);
     if (!source || !target) return;
     const dx = target.x - source.x; const dy = target.y - source.y;
     const distance = Math.max(Math.hypot(dx, dy), 1);
-    const force = (distance - 145) * 0.0025;
+    const force = (distance - 132) * 0.0025;
     if (!source.fixed) { source.vx += (dx / distance) * force; source.vy += (dy / distance) * force; }
     if (!target.fixed) { target.vx -= (dx / distance) * force; target.vy -= (dy / distance) * force; }
   });
@@ -5033,8 +5101,52 @@ function simulateRelationshipStep() {
     if (!point || point.fixed) return;
     point.vx *= 0.84; point.vy *= 0.84;
     const halfWidth = collisionWidths[index] / 2;
-    point.x = Math.max(halfWidth + 8, Math.min(952 - halfWidth, point.x + point.vx));
-    point.y = Math.max(28, Math.min(510, point.y + point.vy));
+    const radiusX = Math.max(360, 442 - halfWidth);
+    const radiusY = 222;
+    const normalizedX = (point.x - 480) / radiusX;
+    const normalizedY = (point.y - 265) / radiusY;
+    const normalizedDistance = Math.hypot(normalizedX, normalizedY);
+    if (normalizedDistance > 1) {
+      const boundaryX = 480 + (normalizedX / normalizedDistance) * radiusX;
+      const boundaryY = 265 + (normalizedY / normalizedDistance) * radiusY;
+      point.vx += (boundaryX - point.x) * 0.045;
+      point.vy += (boundaryY - point.y) * 0.045;
+    }
+    point.x += point.vx;
+    point.y += point.vy;
+    const nextNormalizedX = (point.x - 480) / radiusX;
+    const nextNormalizedY = (point.y - 265) / radiusY;
+    const nextDistance = Math.hypot(nextNormalizedX, nextNormalizedY);
+    if (nextDistance > 1.12) {
+      point.x = 480 + (nextNormalizedX / nextDistance) * radiusX * 1.12;
+      point.y = 265 + (nextNormalizedY / nextDistance) * radiusY * 1.12;
+      point.vx *= 0.35;
+      point.vy *= 0.35;
+    }
+  });
+}
+
+function highlightRelationshipNeighborhood(id) {
+  const connectedNodeIds = new Set(id ? [id] : []);
+  const connectedEdgeIds = new Set();
+  if (id) {
+    state.relationship.edges.forEach((edge) => {
+      if (edge.source !== id && edge.target !== id) return;
+      connectedEdgeIds.add(edge.id);
+      connectedNodeIds.add(edge.source);
+      connectedNodeIds.add(edge.target);
+    });
+  }
+  $$(".relationship-edge").forEach((path) => {
+    const highlighted = Boolean(id) && connectedEdgeIds.has(path.dataset.edgeId);
+    path.classList.toggle("is-highlighted", highlighted);
+    path.classList.toggle("is-dimmed", Boolean(id) && !highlighted);
+  });
+  $$(".relationship-node").forEach((node) => {
+    const nodeId = node.dataset.nodeId;
+    node.classList.toggle("is-highlighted", Boolean(id) && nodeId === id);
+    node.classList.toggle("is-neighbor", Boolean(id) && nodeId !== id && connectedNodeIds.has(nodeId));
+    node.classList.toggle("is-dimmed", Boolean(id) && !connectedNodeIds.has(nodeId));
   });
 }
 
@@ -5157,6 +5269,7 @@ function selectRelationshipNode(id) {
   state.relationship.selectedId = id;
   $$(".relationship-node").forEach((node) => node.classList.toggle("selected", node.dataset.nodeId === id));
   $$("#relationship-node-list button").forEach((button) => button.setAttribute("aria-current", String(button.dataset.nodeId === id)));
+  highlightRelationshipNeighborhood(id);
   renderRelationshipDetail();
 }
 
@@ -5872,6 +5985,15 @@ function applyTheme(theme) {
   writeLocalValue("openwrite-theme", theme);
 }
 
+function applyShellTheme(theme) {
+  // Embed mode (dsh shell): theme follows the shell and never touches the
+  // standalone openwrite-theme preference.
+  const normalized = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = normalized;
+  $(".brand-logo").src = normalized === "dark" ? "/brand/logo-dark.svg" : "/brand/logo.svg";
+  setMarkdownEditorTheme(normalized);
+}
+
 function setToolHelpExpanded(button, expanded) {
   const panel = document.getElementById(button.getAttribute("aria-controls") || "");
   if (!panel) return;
@@ -6242,9 +6364,23 @@ async function routeFromLocation() {
 }
 
 async function start() {
-  const storedTheme = readLocalValue("openwrite-theme");
-  const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  applyTheme(storedTheme || (systemDark ? "dark" : "light"));
+  const embedded = document.documentElement.dataset.embed === "dsh";
+  if (embedded) {
+    // Embed mode: the boot script already applied the shell's initial theme;
+    // keep Vditor in sync and follow live shell theme switches.
+    setMarkdownEditorTheme(document.documentElement.dataset.theme);
+    $(".brand-logo").src = document.documentElement.dataset.theme === "dark"
+      ? "/brand/logo-dark.svg"
+      : "/brand/logo.svg";
+    window.addEventListener("message", (event) => {
+      const data = event.data;
+      if (data && data.type === "studio-theme") applyShellTheme(data.theme);
+    });
+  } else {
+    const storedTheme = readLocalValue("openwrite-theme");
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    applyTheme(storedTheme || (systemDark ? "dark" : "light"));
+  }
   try {
     bindEvents();
   } catch (error) {

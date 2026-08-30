@@ -43,6 +43,7 @@ from tools.model_profiles import (
     ModelProfileStore,
     activate_model_profile,
 )
+from tools.model_benchmark import ModelBenchmarkService
 from tools.novel_service import NovelApplicationService, NovelServiceError
 from tools.novel_workspace import (
     count_writing_units,
@@ -68,7 +69,13 @@ from tools.reference_library import (
     default_reference_library_root,
 )
 from tools.research_service import ResearchService, ResearchServiceError
-from tools.review_store import normalize_review_issues
+from tools.review_store import (
+    issue_revision_priority,
+    normalize_review_issues,
+    review_delivery_status,
+    review_gate_status,
+    review_quality_score,
+)
 from tools.revision_service import RevisionError, RevisionService
 from tools.structured_assets import StructuredAssetError, StructuredAssetService
 from tools.studio_contracts import (
@@ -76,6 +83,7 @@ from tools.studio_contracts import (
     STATIC_ROOT,
     WRITE_HEADER,
     StudioError,
+    apply_security_headers,
     missing_required_static_assets,
 )
 from tools.studio_http import (
@@ -174,6 +182,7 @@ class StudioApplication:
         self._structured_asset_service: StructuredAssetService | None = None
         self._asset_package_service: AssetPackageService | None = None
         self._research_service: ResearchService | None = None
+        self._benchmark_service: ModelBenchmarkService | None = None
         self._activate_project(self.project_root)
 
     def _activate_project(self, project_root: Path) -> None:
@@ -215,6 +224,15 @@ class StudioApplication:
             if self.initialized
             else None
         )
+        self._benchmark_service = (
+            ModelBenchmarkService(
+                self.project_root,
+                self.novel_id,
+                self._model_profile_store,
+            )
+            if self.initialized
+            else None
+        )
         if self.initialized and self._project_registry is not None:
             self._project_registry.remember(self.project_root)
         self._configure_debug_mode()
@@ -240,6 +258,7 @@ class StudioApplication:
         self._revision_service = None
         self._structured_asset_service = None
         self._asset_package_service = None
+        self._benchmark_service = None
 
     def _configure_debug_mode(self) -> None:
         if not self.debug_enabled:
@@ -650,6 +669,22 @@ class StudioApplication:
         slug = re.sub(r"[^\w\u4e00-\u9fff]+", "_", title.lower()).strip("_")
         return (self.launch_root.parent / "OpenWriteNovels" / (slug[:64] or novel_id)).resolve()
 
+    def list_projects(self) -> list[dict[str, Any]]:
+        if self._project_registry is not None:
+            return self._project_registry.list()
+        import yaml as _yaml
+        registry_path = Path.home() / ".config" / "openwrite" / "recent_projects.yaml"
+        if not registry_path.is_file():
+            return []
+        try:
+            cfg = _yaml.safe_load(registry_path.read_text(encoding="utf-8")) or {}
+            return [
+                {"path": str(item.get("path") or ""), "title": str(item.get("title") or ""), "novel_id": str(item.get("novel_id") or "")}
+                for item in (cfg.get("projects") or []) if isinstance(item, dict)
+            ]
+        except Exception:
+            return []
+
     def open_project(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_no_active_tasks()
         raw_path = str(payload.get("project_path") or "").strip()
@@ -785,6 +820,7 @@ class StudioApplication:
                 "manuscript_import": self._task_import_manuscript,
                 "continuous_write": self._task_continuous_write,
                 "research": self._task_research,
+                "model_benchmark": self._task_model_benchmark,
             },
         )
 
@@ -793,6 +829,16 @@ class StudioApplication:
         if self._task_runner is None:
             self._task_runner = self._build_task_runner()
         return self._task_runner
+
+    def _benchmarks(self) -> ModelBenchmarkService:
+        self.require_project()
+        if self._benchmark_service is None:
+            self._benchmark_service = ModelBenchmarkService(
+                self.project_root,
+                self.novel_id,
+                self._model_profile_store,
+            )
+        return self._benchmark_service
 
     def _assets(self) -> StructuredAssetService:
         self.require_project()
@@ -1433,10 +1479,17 @@ class StudioApplication:
         return self.workspace()
 
     def model_profiles(self) -> dict[str, Any]:
+        from tools.canonical_contracts import validate_model_profile_surface
+
         try:
-            return self._model_profile_store.surface(self._project_model_routes())
+            surface = self._model_profile_store.surface(self._project_model_routes())
         except ModelProfileError as exc:
             raise self._translate_model_profile_error(exc) from exc
+        try:
+            validate_model_profile_surface(surface)
+        except ValueError as exc:
+            raise StudioError(f"模型档案契约校验失败: {exc}", code="CONTRACT_INVALID") from exc
+        return surface
 
     def save_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -1998,6 +2051,140 @@ class StudioApplication:
             return self._service().continuity()
         except NovelServiceError as exc:
             raise self._translate_service_error(exc) from exc
+
+    def dog_graphs(self, chapter_id: str = "") -> dict[str, Any]:
+        """Read materialized review/delivery graphs without executing verifiers or models."""
+        self.require_project()
+        dog_root = self.novel_root / "data" / "dog"
+        review_root = dog_root / "reviews"
+        delivery_root = dog_root / "deliveries"
+        chapters = sorted(
+            {
+                path.name
+                for root in (review_root, delivery_root)
+                if root.is_dir()
+                for path in root.iterdir()
+                if path.is_dir() and re.fullmatch(r"ch_\d+", path.name)
+            }
+        )
+        selected = str(chapter_id or "").strip()
+        if not selected and chapters:
+            selected = chapters[-1]
+        if selected and not re.fullmatch(r"ch_\d+", selected):
+            raise StudioError("章节 ID 格式无效", code="INVALID_CHAPTER_ID")
+
+        def read_json(path: Path) -> dict[str, Any] | None:
+            """Read an artifact. Only a missing file is tolerated (None).
+            Syntax errors, non-object roots, and empty objects are contract
+            failures — a corrupt artifact must never look like an absent one."""
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                return None
+            except (OSError, json.JSONDecodeError) as exc:
+                raise StudioError(
+                    f"DoG 产物损坏或不可读: {path.name}", code="CONTRACT_INVALID"
+                ) from exc
+            if not isinstance(value, dict):
+                raise StudioError(
+                    f"DoG 产物顶层必须是 JSON 对象: {path.name}",
+                    code="CONTRACT_INVALID",
+                )
+            if not value:
+                raise StudioError(
+                    f"DoG 产物为空对象: {path.name}", code="CONTRACT_INVALID"
+                )
+            return value
+
+        def validate_graph(graph: dict[str, Any]) -> None:
+            """A graph artifact must carry typed nodes/contains/dependsOn."""
+            if not isinstance(graph.get("nodes"), dict):
+                raise StudioError(
+                    "DoG graph nodes 必须是对象", code="CONTRACT_INVALID"
+                )
+            for key in ("contains", "dependsOn"):
+                if not isinstance(graph.get(key), list):
+                    raise StudioError(
+                        f"DoG graph {key} 必须是数组", code="CONTRACT_INVALID"
+                    )
+
+        def versioned(
+            manifest: dict[str, Any] | None,
+            *,
+            schema_version: str,
+            validator: Callable[[Any], dict[str, Any]],
+            label: str,
+        ) -> dict[str, Any]:
+            # Version policy: a present manifest must declare the supported
+            # version; unknown versions are rejected so malformed artifacts
+            # can never pass through as canonical. Empty objects already fail
+            # in read_json, so None here strictly means "file absent".
+            if manifest is None:
+                return {}
+            if manifest.get("schemaVersion") != schema_version:
+                raise StudioError(
+                    f"不支持的 DoG {label} 版本: "
+                    f"{manifest.get('schemaVersion')!r}",
+                    code="CONTRACT_INVALID",
+                )
+            try:
+                validator(manifest)
+            except ValueError as exc:
+                raise StudioError(
+                    f"DoG {label} 契约校验失败: {exc}",
+                    code="CONTRACT_INVALID",
+                ) from exc
+            return manifest
+
+        def graph_payload(kind: str) -> dict[str, Any] | None:
+            from tools import canonical_contracts
+
+            if not selected:
+                return None
+            directory = dog_root / ("reviews" if kind == "review" else "deliveries") / selected
+            graph = read_json(directory / "dog-graph.json")
+            manifest_file = "review.json" if kind == "review" else "delivery.json"
+            manifest = read_json(directory / manifest_file)
+            graph_absent = graph is None
+            manifest_absent = manifest is None
+            if kind == "review":
+                manifest = versioned(
+                    manifest,
+                    schema_version="dsh-novel.review.manifest.v2",
+                    validator=canonical_contracts.validate_review_manifest_v2,
+                    label="review manifest",
+                )
+            else:
+                manifest = versioned(
+                    manifest,
+                    schema_version="dsh-novel.delivery.manifest.v2",
+                    validator=canonical_contracts.validate_delivery_v2,
+                    label="delivery manifest",
+                )
+            if graph is not None:
+                validate_graph(graph)
+            if graph_absent and manifest_absent:
+                return None
+            records: dict[str, dict[str, Any]] = {}
+            nodes = graph.get("nodes") if isinstance(graph, dict) else {}
+            for node_id, raw_node in nodes.items():
+                if not isinstance(raw_node, dict):
+                    continue
+                target = str(raw_node.get("target") or "")
+                candidate = (self.project_root / target).resolve()
+                if self.project_root not in candidate.parents or candidate.suffix != ".json":
+                    continue
+                record = read_json(candidate)
+                if record is not None:
+                    records[str(node_id)] = record
+            return {"graph": graph or {}, "manifest": manifest, "records": records}
+
+        return {
+            "chapter_id": selected,
+            "chapters": chapters,
+            "review": graph_payload("review"),
+            "delivery": graph_payload("delivery"),
+        }
 
     def manage_foreshadowing(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -2623,6 +2810,19 @@ class StudioApplication:
             raise StudioError(str(exc), status, code=exc.code) from exc
         return {"result": result, "workspace": self.workspace()}
 
+    def read_reference_library_content(self, source_id: str) -> dict[str, Any]:
+        from tools.source_analysis import SourceAnalysisError
+
+        try:
+            return self._reference_library().read_content(source_id)
+        except SourceAnalysisError as exc:
+            status = {
+                "NOT_FOUND": HTTPStatus.NOT_FOUND,
+                "INVALID_INPUT": HTTPStatus.BAD_REQUEST,
+                "SOURCE_CHANGED": HTTPStatus.CONFLICT,
+            }.get(exc.code, HTTPStatus.BAD_GATEWAY)
+            raise StudioError(str(exc), status, code=exc.code) from exc
+
     def write_next_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile = self._operation_profile(
             "chapter_write",
@@ -2724,6 +2924,31 @@ class StudioApplication:
         result["issue_details"] = normalize_review_issues(
             path.stem, result.get("issue_details", [])
         )
+        review_v2 = result.get("review_v2")
+        if review_v2 is not None:
+            # Type policy: a present review_v2 must be a non-empty JSON object
+            # declaring the supported schema version; null/list/string/empty
+            # values are rejected outright so a malformed decision can never
+            # pass through as canonical.
+            if not isinstance(review_v2, dict) or not review_v2:
+                raise StudioError(
+                    f"review_v2 必须是非空 JSON 对象，得到 "
+                    f"{type(review_v2).__name__}",
+                    code="CONTRACT_INVALID",
+                )
+            if review_v2.get("schema_version") != "openwrite.review.v2":
+                raise StudioError(
+                    f"不支持的评审 v2 版本: {review_v2.get('schema_version')!r}",
+                    code="CONTRACT_INVALID",
+                )
+            from tools.canonical_contracts import validate_review_v2
+
+            try:
+                validate_review_v2(review_v2)
+            except ValueError as exc:
+                raise StudioError(
+                    f"评审 v2 契约校验失败: {exc}", code="CONTRACT_INVALID"
+                ) from exc
         self._debug_event(
             "review_chapter_completed",
             chapter_id=path.stem,
@@ -2874,6 +3099,38 @@ class StudioApplication:
             )
         }
         return {"tasks": tasks, "counts": counts}
+
+    def benchmark_surface(self, limit: int = 20) -> dict[str, Any]:
+        return self._benchmarks().surface(limit)
+
+    def benchmark_run(self, run_id: str) -> dict[str, Any]:
+        result = self._benchmarks().store.load(run_id)
+        if result is None:
+            raise StudioError(
+                "模型测试记录不存在",
+                HTTPStatus.NOT_FOUND,
+                code="BENCHMARK_NOT_FOUND",
+            )
+        # Version policy: artifacts produced by the current service always
+        # declare schema_version; unknown or missing versions are rejected so
+        # malformed artifacts can never masquerade as canonical.
+        if result.get("schema_version") != "openwrite.model-benchmark.v1":
+            raise StudioError(
+                f"不支持的 benchmark 产物版本: {result.get('schema_version')!r}",
+                code="CONTRACT_INVALID",
+            )
+        from tools.canonical_contracts import validate_benchmark_v1
+
+        try:
+            validate_benchmark_v1(result)
+        except ValueError as exc:
+            raise StudioError(
+                f"benchmark 契约校验失败: {exc}", code="CONTRACT_INVALID"
+            ) from exc
+        return result
+
+    def create_benchmark(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.create_task({"type": "model_benchmark", "input": dict(payload)})
 
     def get_task(self, task_id: str) -> dict[str, Any]:
         try:
@@ -3040,6 +3297,25 @@ class StudioApplication:
                 chapter_id, result.get("issue_details", [])
             ),
         }
+
+    def _task_model_benchmark(
+        self, payload: dict[str, Any], context: TaskContext
+    ) -> dict[str, Any]:
+        chapter_id = str(payload.get("chapter_id") or "next")
+        context.phase("preparing", "冻结章节上下文快照")
+        context.checkpoint()
+        profile = self._operation_profile("chapter_write")
+        with self._model_context(profile):
+            snapshot = self._service().context_preview(chapter_id)
+        packet = snapshot.get("packet")
+        if isinstance(packet, dict):
+            snapshot["manifest"] = build_context_manifest(self.novel_root, packet)
+        return self._benchmarks().run(
+            payload,
+            snapshot,
+            progress=context.progress_callback,
+            cancelled=context.cancellation_requested,
+        )
 
     def _task_revision_selection(
         self, payload: dict[str, Any], context: TaskContext
@@ -3376,10 +3652,12 @@ class StudioApplication:
                 stop_reason = "max_cost_reached"
                 break
             issue_details = review_result.get("issue_details") or []
-            has_blocker = any(item.get("severity") == "blocker" for item in issue_details)
+            has_blocker = review_gate_status(review_result) == "blocked" or any(
+                issue_revision_priority(item) == "blocker" for item in issue_details
+            )
             has_continuity = any(
                 str(item.get("dimension") or "").startswith("continuity")
-                and item.get("severity") in {"blocker", "high"}
+                and issue_revision_priority(item) in {"blocker", "high"}
                 for item in issue_details
             )
             if bool(payload.get("stop_on_blocker", True)) and has_blocker:
@@ -3388,7 +3666,15 @@ class StudioApplication:
             if bool(payload.get("stop_on_continuity_error", True)) and has_continuity:
                 stop_reason = "continuity_error"
                 break
-            if float(review_result.get("score") or 0) < minimum_score:
+            delivery_status = review_delivery_status(
+                review_result,
+                quality_threshold=float(minimum_score),
+            )
+            score = review_quality_score(review_result)
+            if delivery_status == "inconclusive":
+                stop_reason = "review_inconclusive"
+                break
+            if score is None or score < minimum_score:
                 stop_reason = "review_score_below_minimum"
                 break
             if (
@@ -3428,6 +3714,7 @@ class StudioApplication:
             "manuscript_import": "导入旧稿",
             "continuous_write": "受控连续写作",
             "research": "深度研究",
+            "model_benchmark": "模型横评",
         }
         return " · ".join(item for item in (labels.get(task_type, task_type), chapter) if item)
 
@@ -3684,17 +3971,25 @@ class StudioApplication:
         }
 
     def _load_review_result(self, chapter_id: str) -> dict[str, Any] | None:
-        from tools.review_store import ReviewStore
+        from tools.review_store import (
+            ReviewStore,
+            review_v2_contract,
+        )
 
         data = ReviewStore(self.project_root, self.novel_id).load(chapter_id)
         if data is None:
             return None
-        return {
+        v2 = review_v2_contract(data)
+        stale = bool(data.get("stale"))
+        if v2:
+            freshness = str(v2.get("freshness_status") or "")
+            stale = stale or freshness == "stale"
+        result = {
             "score": float(data.get("score") or 0),
             "passed": bool(data.get("passed")),
             "issues": int(data.get("issues") or 0),
             "reviewed_at": str(data.get("reviewed_at") or ""),
-            "stale": bool(data.get("stale")),
+            "stale": stale,
             "issue_details": normalize_review_issues(
                 chapter_id, data.get("issue_details", [])
             ),
@@ -3704,6 +3999,21 @@ class StudioApplication:
                 else None
             ),
         }
+        if v2:
+            # Canonical v2 surface: the legacy score/passed aliases above are
+            # compatibility only; clients prefer these independent statuses.
+            result["review_v2"] = {
+                "schema_version": v2.get("schema_version"),
+                "execution_status": v2.get("execution_status"),
+                "quality_score": v2.get("quality_score"),
+                "coverage": v2.get("coverage"),
+                "gate_status": v2.get("gate_status"),
+                "delivery_status": "stale" if stale else v2.get("delivery_status"),
+                "production_gate_status": v2.get("production_gate_status"),
+                "freshness_status": v2.get("freshness_status"),
+                "source_revision": v2.get("source_revision"),
+            }
+        return result
 
     def _collect_documents(self, root: Path, *, recursive: bool) -> list[dict[str, Any]]:
         if not root.exists():
@@ -4042,15 +4352,7 @@ class LegacyStudioRequestHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _security_headers(self) -> None:
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data:; style-src 'self'; "
-            "script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
-        )
-        self.send_header("Cache-Control", "no-store")
+        apply_security_headers(self.send_header)
 
 
 class LegacyOpenWriteStudioServer(ThreadingHTTPServer):

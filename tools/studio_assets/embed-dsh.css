@@ -1,0 +1,93 @@
+/* Embed skin: applied only when Studio runs inside the dsh web shell
+ * (`<html data-embed="dsh">`, set by the boot script in index.html from
+ * `?embed=dsh`). Re-skins Studio's custom properties to the DeepSeek Harness
+ * design tokens (dsh ui-theme design-platform.css) so the embedded panel
+ * matches the surrounding shell. Standalone Studio is unaffected.
+ */
+
+:root[data-embed="dsh"] {
+  /* dsh light theme (neutral-bluish + deepseek accent) */
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-subtle: rgb(249, 250, 251);
+  --surface-strong: rgb(241, 243, 245);
+  --text: rgb(15, 17, 21);
+  --muted: rgb(97, 102, 107);
+  --faint: rgb(129, 133, 140);
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --accent: rgb(65, 118, 230);
+  --accent-strong: rgb(14, 48, 116);
+  --accent-soft: rgb(237, 243, 254);
+  --success: rgb(34, 197, 94);
+  --success-soft: rgba(34, 197, 94, 0.12);
+  --danger: rgb(236, 19, 19);
+  --danger-soft: rgba(236, 19, 19, 0.08);
+  --focus: rgb(65, 118, 230);
+}
+
+:root[data-embed="dsh"][data-theme="dark"] {
+  /* dsh dark theme (body[data-ds-dark-theme] in the shell) */
+  --bg: rgb(21, 21, 23);
+  --surface: rgb(35, 35, 36);
+  --surface-subtle: rgb(44, 44, 46);
+  --surface-strong: rgb(56, 56, 60);
+  --text: rgb(249, 250, 251);
+  --muted: rgb(173, 178, 184);
+  --faint: rgb(129, 133, 140);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --accent: rgb(103, 158, 254);
+  --accent-strong: rgb(103, 158, 254);
+  --accent-soft: rgba(103, 158, 254, 0.16);
+  --success: rgb(34, 197, 94);
+  --success-soft: rgba(34, 197, 94, 0.16);
+  --danger: rgb(239, 68, 68);
+  --danger-soft: rgba(239, 68, 68, 0.16);
+  --focus: rgb(103, 158, 254);
+}
+
+:root[data-embed="dsh"] body {
+  /* dsh --dsw-font-family (ui-theme base.css) */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* When embedded, the agent layer lives in the dsh shell (Goethe/Dante
+ * presets). Hide Studio's built-in agent surfaces so there is exactly one
+ * agent UI: the "AI 协作" nav view, the editor's Dante-assistant toggle, and
+ * the inspector's assistant tab. */
+:root[data-embed="dsh"] [data-view="agents"],
+:root[data-embed="dsh"] #editor-assistant-toggle,
+:root[data-embed="dsh"] #inspector-toggle,
+:root[data-embed="dsh"] [data-inspector-tab="assistant"],
+:root[data-embed="dsh"] [data-inspector-pane="assistant"] {
+  display: none;
+}
+
+/* The shell owns the light/dark theme when embedded; Studio's own toggle
+ * would fight the postMessage sync (and persist a standalone preference). */
+:root[data-embed="dsh"] #theme-toggle {
+  display: none;
+}
+
+/* 资料库 fully lives in the dsh 资产 tab (browse/search/edit/create); the
+ * embedded Studio drops its library nav entry to avoid two editors. */
+:root[data-embed="dsh"] [data-view="core"][data-nav-section="library"] {
+  display: none;
+}
+
+/* Module selection lives at the dsh tab level (总览/正文/审稿 are pinned
+ * iframes; 大纲/资产/任务/图谱 are native views) — the embedded page drops its
+ * own top-level module nav entirely. The 工具与设置 utility drawer and the
+ * contextual sections (正文章节列表等) stay. */
+:root[data-embed="dsh"] .view-nav .nav-primary {
+  display: none;
+}
+
+/* 工具与设置 is also fully decomposed at the dsh level: 连续性→图谱 tab,
+ * 深度研究→研究 tab, 项目搜索→搜索 tab, 任务中心→任务 tab, 参考库→资产 tab,
+ * 模型与设置→agent 工具 + dsh 设置。嵌入页不再保留这个抽屉。 */
+:root[data-embed="dsh"] .view-nav .nav-tools {
+  display: none;
+}

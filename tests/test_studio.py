@@ -209,7 +209,7 @@ def test_studio_continuity_distinguishes_field_and_registered_relations():
     assert '<option value="annotation">内联注册</option>' in html
     assert "//**A~&gt;B:具体关系**" in html
     assert "同章以正文事实为准" in html
-    assert 'line.classList.toggle("annotation", edge.origin === "annotation")' in javascript
+    assert 'path.classList.toggle("annotation", edge.origin === "annotation")' in javascript
     assert 'refreshContinuity: loadContinuity' in javascript
     assert ".relationship-edge.annotation" in styles
     assert html.index('class="tool-card relationship-card"') < html.index('class="truth-grid"')
@@ -427,6 +427,23 @@ def test_relationship_topology_includes_search_and_context_controls():
     assert "相邻上下文" in javascript
     assert "search-match" in javascript
     assert ".relationship-node.search-match" in styles
+
+
+def test_relationship_topology_uses_compact_node_metrics():
+    assets = Path(__file__).parent.parent / "tools" / "studio_assets"
+    javascript = _studio_javascript(assets)
+    styles = (assets / "styles.css").read_text(encoding="utf-8")
+
+    assert "const RELATIONSHIP_NODE_SCALE = 0.76;" in javascript
+    assert 'label.setAttribute("y", String(relationshipNodeSize(34)))' in javascript
+    assert "const minY = relationshipNodeSize(58);" in javascript
+    assert 'relationshipNodeSize(kind === "character" ? 19 : 17)' in javascript
+    assert 'createElementNS("http://www.w3.org/2000/svg", "path")' in javascript
+    assert "function relationshipEdgePath(" in javascript
+    assert "function highlightRelationshipNeighborhood(" in javascript
+    assert ".relationship-edge.is-highlighted" in styles
+    assert ".relationship-node.label-prominent" in styles
+    assert "#relationship-graph { min-height: 430px; height: 430px; }" in styles
 
 
 def test_outline_tree_ui_supports_direct_text_editing():

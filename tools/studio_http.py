@@ -17,6 +17,7 @@ from tools.studio_contracts import (
     STATIC_ROOT,
     WRITE_HEADER,
     StudioError,
+    apply_security_headers,
     internal_error_payload,
     new_request_id,
     studio_error_payload,
@@ -69,6 +70,7 @@ POST_ROUTES = {
         "import_asset_package", envelope=True
     ),
     "/api/tasks": StudioPostRoute("create_task", envelope=True),
+    "/api/benchmarks": StudioPostRoute("create_benchmark", envelope=True),
     "/api/sync": StudioPostRoute("sync_project", accepts_payload=False),
     "/api/document/create": StudioPostRoute("create_document"),
     "/api/import": StudioPostRoute("import_text"),
@@ -151,12 +153,44 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/workspace":
                 self._json(self.app.workspace())
                 return
+            if parsed.path == "/api/project/list":
+                self._json(self.app.list_projects())
+                return
             if parsed.path == "/api/model/profiles":
                 self._json(studio_success_payload(self.app.model_profiles(), self.request_id))
                 return
             if parsed.path == "/api/continuity":
                 self.app.require_project()
                 self._json(self.app.continuity())
+                return
+            if parsed.path == "/api/dog/graphs":
+                self.app.require_project()
+                chapter_id = parse_qs(parsed.query).get("chapter", [""])[0]
+                self._json(self.app.dog_graphs(chapter_id))
+                return
+            if parsed.path == "/api/benchmarks":
+                self.app.require_project()
+                raw_limit = parse_qs(parsed.query).get("limit", ["20"])[0]
+                try:
+                    limit = int(raw_limit)
+                except ValueError as exc:
+                    raise StudioError(
+                        "测试记录数量必须是整数", code="INVALID_INPUT"
+                    ) from exc
+                self._json(
+                    studio_success_payload(
+                        self.app.benchmark_surface(limit), self.request_id
+                    )
+                )
+                return
+            benchmark_match = re.fullmatch(
+                r"/api/benchmarks/(?P<run_id>bench_[A-Za-z0-9_-]+)",
+                parsed.path,
+            )
+            if benchmark_match:
+                self.app.require_project()
+                result = self.app.benchmark_run(benchmark_match.group("run_id"))
+                self._json(studio_success_payload(result, self.request_id))
                 return
             if parsed.path == "/api/research":
                 self.app.require_project()
@@ -216,6 +250,17 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 self.app.require_project()
                 kind = parse_qs(parsed.query).get("kind", [""])[0]
                 result = self.app.asset_surface(kind)
+                self._json(studio_success_payload(result, self.request_id))
+                return
+            reference_match = re.fullmatch(
+                r"/api/reference-library/(?P<source_id>[A-Za-z0-9][A-Za-z0-9_-]{1,63})",
+                parsed.path,
+            )
+            if reference_match:
+                self.app.require_project()
+                result = self.app.read_reference_library_content(
+                    reference_match.group("source_id")
+                )
                 self._json(studio_success_payload(result, self.request_id))
                 return
             asset_match = re.fullmatch(
@@ -475,15 +520,7 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _security_headers(self) -> None:
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data:; style-src 'self'; "
-            "script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
-        )
-        self.send_header("Cache-Control", "no-store")
+        apply_security_headers(self.send_header)
 
 
 class OpenWriteStudioServer(ThreadingHTTPServer):

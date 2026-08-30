@@ -2922,12 +2922,11 @@ select:focus-visible {
 .relationship-workspace {
   display: grid;
   min-height: 620px;
-  margin-top: 12px;
+  margin-top: 4px;
   grid-template-columns: minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-subtle);
+  overflow: visible;
+  border: 0;
+  background: transparent;
 }
 
 .relationship-stage {
@@ -2935,8 +2934,7 @@ select:focus-visible {
   min-width: 0;
   min-height: clamp(620px, 68vh, 760px);
   overflow: hidden;
-  background-image: radial-gradient(var(--border) 0.7px, transparent 0.7px);
-  background-size: 18px 18px;
+  background: transparent;
   touch-action: none;
 }
 
@@ -2952,8 +2950,15 @@ select:focus-visible {
 #relationship-graph.dragging-node { cursor: grabbing; }
 
 .relationship-edge {
+  fill: none;
   stroke: color-mix(in srgb, var(--muted) 55%, transparent);
-  stroke-width: 1.3;
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.58;
+  pointer-events: none;
+  transition: opacity 160ms ease, stroke 160ms ease, stroke-width 160ms ease;
+  vector-effect: non-scaling-stroke;
   marker-end: url(#relationship-arrow);
 }
 
@@ -2963,12 +2968,24 @@ select:focus-visible {
 
 .relationship-edge.search-context,
 .relationship-node.search-context {
-  opacity: 0.38;
+  opacity: 0.26;
 }
 
 .relationship-edge.search-related {
   stroke: var(--accent-strong);
-  stroke-width: 2.4;
+  stroke-width: 1.8;
+  opacity: 0.9;
+}
+
+.relationship-edge.is-highlighted {
+  stroke: var(--accent-strong);
+  stroke-width: 2;
+  opacity: 0.94;
+}
+
+.relationship-edge.is-dimmed,
+.relationship-node.is-dimmed {
+  opacity: 0.1;
 }
 
 .relationship-node.search-match .relationship-node-shape {
@@ -2976,11 +2993,12 @@ select:focus-visible {
   stroke-width: 4;
 }
 
-#relationship-arrow path { fill: var(--muted); }
+#relationship-arrow path { fill: context-stroke; }
 
 .relationship-node {
   cursor: pointer;
   outline: none;
+  transition: opacity 160ms ease;
 }
 
 .relationship-node-shape {
@@ -2996,7 +3014,8 @@ select:focus-visible {
 
 .relationship-node:hover .relationship-node-shape,
 .relationship-node:focus-visible .relationship-node-shape,
-.relationship-node.selected .relationship-node-shape {
+.relationship-node.selected .relationship-node-shape,
+.relationship-node.is-highlighted .relationship-node-shape {
   fill: color-mix(in srgb, var(--relationship-color) 35%, var(--surface));
   stroke-width: 3;
 }
@@ -3010,6 +3029,17 @@ select:focus-visible {
   stroke-linejoin: round;
   stroke-width: 3.5px;
   text-anchor: middle;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.relationship-node.label-prominent .relationship-node-label,
+.relationship-node:hover .relationship-node-label,
+.relationship-node:focus-visible .relationship-node-label,
+.relationship-node.selected .relationship-node-label,
+.relationship-node.search-match .relationship-node-label,
+.relationship-node.is-highlighted .relationship-node-label {
+  opacity: 1;
 }
 
 .relationship-empty {
@@ -6861,7 +6891,7 @@ button.asset-relation-identity:focus-visible {
 
   .relationship-stage { min-height: 430px; height: 430px; }
 
-  #relationship-graph { height: 430px; }
+  #relationship-graph { min-height: 430px; height: 430px; }
 
   .relationship-inspector {
     max-height: none;

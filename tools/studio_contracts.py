@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import uuid
+from collections.abc import Callable
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,31 @@ REQUIRED_STATIC_ASSETS = (
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 MAX_ASSET_PACKAGE_REQUEST_BYTES = 35 * 1024 * 1024
 WRITE_HEADER = "X-OpenWrite-Studio"
+
+# Space-separated origins allowed to embed Studio (e.g. "http://127.0.0.1:3080").
+# Unset keeps the default deny-all frame policy.
+FRAME_ANCESTORS_ENV = "OPENWRITE_FRAME_ANCESTORS"
+
+
+def apply_security_headers(send_header: Callable[[str, str], None]) -> None:
+    """Emit the standard security headers.
+
+    When OPENWRITE_FRAME_ANCESTORS lists origins, `X-Frame-Options: DENY` is
+    omitted and CSP `frame-ancestors` names those origins instead of 'none',
+    so Studio can be embedded by a trusted local shell (e.g. dsh web).
+    """
+    allow = os.environ.get(FRAME_ANCESTORS_ENV, "").strip()
+    send_header("X-Content-Type-Options", "nosniff")
+    if not allow:
+        send_header("X-Frame-Options", "DENY")
+    send_header("Referrer-Policy", "no-referrer")
+    send_header(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data:; style-src 'self'; "
+        "script-src 'self'; connect-src 'self'; "
+        f"frame-ancestors {allow if allow else chr(39) + 'none' + chr(39)}",
+    )
+    send_header("Cache-Control", "no-store")
 
 
 def missing_required_static_assets(root: Path = STATIC_ROOT) -> list[str]:

@@ -333,7 +333,6 @@ class TestContextVisualization:
             [
                 f"章节: {context.chapter_id or 'N/A'}",
                 f"戏剧位置: {dramatic.get('position', 'N/A')}",
-                f"节结构: {dramatic.get('section', {}).get('structure', 'N/A')}",
                 f"篇结构: {dramatic.get('arc', {}).get('structure', 'N/A')}",
                 "",
                 f"出场角色: {len(context.active_characters or [])} 人",
