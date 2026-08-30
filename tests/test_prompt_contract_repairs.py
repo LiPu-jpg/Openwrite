@@ -276,21 +276,36 @@ def test_runtime_delta_rejects_generic_object_for_collection(collection: str):
 
 def test_reviewer_strict_dimensions_and_malformed_output():
     reviewer = ReviewerAgent.__new__(ReviewerAgent)
+    reviewer.ctx = SimpleNamespace(client=SimpleNamespace(config=SimpleNamespace(model="fake")))
     reviewer._rule_based_check = lambda content, target_words=0: [
         ReviewIssue("warning", "节奏检查", "拖沓", "收紧", dimension=7)
     ]
     reviewer._detect_ai_tells = lambda content: []
     reviewer._check_sensitive_words = lambda content: []
 
-    async def audit(content, context, dimensions=None):
-        return [ReviewIssue("warning", "OOC检查", "越界", "修正", dimension=1)]
+    async def audit_domains(content, context, domains, deterministic_issues):
+        assert [domain.id for domain in domains] == ["pacing"]
+        return [
+            {
+                "id": "pacing",
+                "criteria": [
+                    {
+                        "id": "scene_function",
+                        "status": "evaluated",
+                        "earned": 2,
+                        "evidence": ["正文"],
+                    }
+                ],
+            }
+        ], []
 
-    reviewer._llm_audit = audit
+    reviewer._llm_review_domains = audit_domains
     result = asyncio.run(
         reviewer.review("正文", {}, dimensions=[7], strict=True)
     )
     assert result.passed is False
     assert [issue.dimension for issue in result.issues] == [7]
+    assert result.review_v2["schema_version"] == "openwrite.review.v2"
 
     with pytest.raises(ProviderResponseError):
         reviewer._parse_llm_issues("不是 JSON", allowed_dimensions={1})

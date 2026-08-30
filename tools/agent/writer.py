@@ -45,6 +45,9 @@ class WritingResult:
     chapter_summary: str = ""
     validation_issues: list = field(default_factory=list)
     token_usage: dict = field(default_factory=dict)
+    finish_reason: str = ""
+    model: str = ""
+    provider: str = ""
 
 
 class WriterAgent(BaseAgent):
@@ -138,6 +141,9 @@ class WriterAgent(BaseAgent):
                 creative_result.get("usage", {}),
                 settlement_result.get("usage", {}),
             ),
+            finish_reason=str(creative_result.get("finish_reason") or ""),
+            model=str(creative_result.get("model") or ""),
+            provider=str(creative_result.get("provider") or ""),
         )
 
     async def _creative_write(
@@ -166,12 +172,20 @@ class WriterAgent(BaseAgent):
         )
         first_usage = response.usage if response.usage else {}
         try:
-            return self._parse_creative_output(
+            parsed = self._parse_creative_output(
                 response.content,
                 chapter_number,
                 first_usage,
                 target_words=target_words,
             )
+            parsed.update(
+                {
+                    "finish_reason": str(getattr(response, "finish_reason", "") or ""),
+                    "model": str(getattr(response, "model", "") or ""),
+                    "provider": str(getattr(response, "provider", "") or ""),
+                }
+            )
+            return parsed
         except Exception as exc:
             from ..llm.response import ProviderResponseError
 
@@ -180,28 +194,64 @@ class WriterAgent(BaseAgent):
             ):
                 raise
 
+        # 长度不达标时循环反馈字数差让模型自纠（最多 3 次续写）
         minimum_words = max(1, int(target_words * 0.8))
         maximum_words = max(minimum_words, int(target_words * 1.2))
-        retry = self.chat(
-            messages=[
-                *messages,
-                Message("assistant", response.content),
-                Message(
-                    "user",
-                    "上一版正文长度不合格。请完整重写本章，保留既定情节、人物状态与章末悬念，"
-                    f"正文必须控制在 {minimum_words}-{maximum_words} 个中文字符内；"
-                    "不要解释修改过程，只输出章节标题和完整正文。",
-                ),
-            ],
-            temperature=max(0.2, temperature - 0.2),
-            max_tokens=max(16384, target_words * 2),
-        )
-        return self._parse_creative_output(
-            retry.content,
+        current_content = response.content
+        final_response = response
+        all_usage = [first_usage]
+
+        for attempt in range(3):
+            chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", current_content))
+            if minimum_words <= chinese_chars <= maximum_words:
+                break
+            comparison = "低于" if chinese_chars < minimum_words else "超过"
+            action = "扩充" if chinese_chars < minimum_words else "精简"
+            detail = (
+                "补充场景描写、人物互动和心理活动"
+                if chinese_chars < minimum_words
+                else "删除重复和冗余描写"
+            )
+            hint = (
+                f"长度不合格：你上一版正文约 {chinese_chars} 个中文字符，{comparison}"
+                f"目标区间 {minimum_words}-{maximum_words}。请{action}"
+                f"正文至 {target_words} 字左右：保留既定情节与章末悬念，"
+                f"{detail}。"
+                "只输出章节标题和完整正文，不要解释。"
+            )
+            getattr(self, "log", logger).info(
+                f"Length retry #{attempt + 1}: {chinese_chars} chars "
+                f"(target {minimum_words}-{maximum_words})"
+            )
+            retry_response = self.chat(
+                messages=[
+                    *messages,
+                    Message("assistant", current_content),
+                    Message("user", hint),
+                ],
+                temperature=max(0.2, temperature - 0.15),
+                max_tokens=max(16384, target_words * 2),
+            )
+            if retry_response.usage:
+                all_usage.append(retry_response.usage)
+            current_content = retry_response.content
+            final_response = retry_response
+
+        merged_usage = self._merge_usage(*all_usage)
+        parsed = self._parse_creative_output(
+            current_content,
             chapter_number,
-            self._merge_usage(first_usage, retry.usage if retry.usage else {}),
+            merged_usage,
             target_words=target_words,
         )
+        parsed.update(
+            {
+                "finish_reason": str(getattr(final_response, "finish_reason", "") or ""),
+                "model": str(getattr(final_response, "model", "") or ""),
+                "provider": str(getattr(final_response, "provider", "") or ""),
+            }
+        )
+        return parsed
 
     def _build_creative_system_prompt(self, context: dict) -> str:
         """构建创意写作系统提示"""
@@ -261,10 +311,7 @@ class WriterAgent(BaseAgent):
             parts.append(f"## 作者意图（长期约束）\n{context['author_intent']}\n")
 
         if context.get("creative_focus"):
-            parts.append(
-                "## 创作罗盘（本次最高优先级）\n"
-                f"{context['creative_focus']}\n"
-            )
+            parts.append(f"## 创作罗盘（本次最高优先级）\n{context['creative_focus']}\n")
 
         # 大纲
         if context.get("outline"):
@@ -301,8 +348,7 @@ class WriterAgent(BaseAgent):
         # 伏笔
         if context.get("foreshadowing_summary"):
             parts.append(
-                "## 规范伏笔摘要（只推进与本章相关的条目）\n"
-                f"{context['foreshadowing_summary']}\n"
+                f"## 规范伏笔摘要（只推进与本章相关的条目）\n{context['foreshadowing_summary']}\n"
             )
         elif context.get("foreshadowing"):
             pending = context["foreshadowing"].get("pending", [])
@@ -312,10 +358,7 @@ class WriterAgent(BaseAgent):
 
         # 真相文件
         if context.get("character_states"):
-            parts.append(
-                "## 人物当前状态（内联批注）\n"
-                f"{context['character_states']}\n"
-            )
+            parts.append(f"## 人物当前状态（内联批注）\n{context['character_states']}\n")
 
         if context.get("current_state"):
             parts.append(f"## 世界当前状态\n{context['current_state']}\n")
@@ -607,10 +650,7 @@ chapter_summary: "80-150字章节摘要"
             parts.append(f"## current_state.md\n{context['current_state']}\n")
 
         if context.get("character_states"):
-            parts.append(
-                "## 人物当前状态（内联批注，只读）\n"
-                f"{context['character_states']}\n"
-            )
+            parts.append(f"## 人物当前状态（内联批注，只读）\n{context['character_states']}\n")
 
         ledger_text = context.get("ledger") or context.get("particle_ledger")
         if ledger_text:
@@ -626,8 +666,7 @@ chapter_summary: "80-150字章节摘要"
 
         if context.get("chapter_summaries"):
             parts.append(
-                "## hierarchy.yaml / compressed/*.md（摘要）\n"
-                f"{context['chapter_summaries']}\n"
+                f"## hierarchy.yaml / compressed/*.md（摘要）\n{context['chapter_summaries']}\n"
             )
 
         if context.get("active_characters"):
@@ -641,9 +680,7 @@ chapter_summary: "80-150字章节摘要"
                     character_parts.append(item.to_context_text())
             if character_parts:
                 parts.append(
-                    "## 角色正典（不得改写身份与关系）\n"
-                    + "\n\n".join(character_parts)
-                    + "\n"
+                    "## 角色正典（不得改写身份与关系）\n" + "\n\n".join(character_parts) + "\n"
                 )
 
         return "\n".join(parts) if parts else "（无现有真相文件）"
@@ -695,9 +732,7 @@ chapter_summary: "80-150字章节摘要"
                     text = str(value or "").strip()
                     if text:
                         result["state_updates"][canonical] = text
-            result["chapter_summary"] = str(
-                payload.get("chapter_summary") or ""
-            ).strip()
+            result["chapter_summary"] = str(payload.get("chapter_summary") or "").strip()
 
             if not result["state_delta"] and result["state_updates"]:
                 from ..runtime_state import legacy_updates_to_delta
@@ -713,10 +748,7 @@ chapter_summary: "80-150字章节摘要"
                     "MALFORMED_STRUCTURED_OUTPUT",
                     "模型返回的状态增量不符合 runtime-delta-v1",
                 ) from delta_error
-            elif (
-                result["state_delta"].get("operations")
-                and not result["state_updates"]
-            ):
+            elif result["state_delta"].get("operations") and not result["state_updates"]:
                 from ..llm.response import ProviderResponseError
 
                 raise ProviderResponseError(
@@ -726,9 +758,7 @@ chapter_summary: "80-150字章节摘要"
 
         if not result["chapter_summary"] and observations:
             compact = " ".join(
-                line.strip("- ")
-                for line in observations.splitlines()
-                if line.strip()
+                line.strip("- ") for line in observations.splitlines() if line.strip()
             )
             result["chapter_summary"] = compact[:500]
 
@@ -747,14 +777,26 @@ chapter_summary: "80-150字章节摘要"
     @staticmethod
     def _merge_usage(*usages: dict) -> dict:
         merged: dict = {}
+        usage_items: list[dict] = []
+        has_cost_contract = False
         for usage in usages:
             if not isinstance(usage, dict):
                 continue
+            if usage:
+                usage_items.append(usage)
+                has_cost_contract = has_cost_contract or "cost_reported" in usage
             for key, value in usage.items():
+                if key == "cost_reported":
+                    continue
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     merged[key] = merged.get(key, 0) + value
                 elif key not in merged and value is not None:
                     merged[key] = value
+        if usage_items and has_cost_contract:
+            cost_reports = [usage.get("cost_reported") is True for usage in usage_items]
+            merged["cost_reported"] = all(cost_reports)
+            merged["cost_reported_calls"] = sum(cost_reports)
+            merged["usage_calls"] = len(cost_reports)
         return merged
 
     def _post_write_validation(self, content: str) -> list:

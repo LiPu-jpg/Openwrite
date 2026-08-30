@@ -80,6 +80,7 @@ class BaseAgent(ABC):
         messages: list[Message],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        operation: str = "",
     ) -> LLMResponse:
         """调用 LLM 进行对话
 
@@ -94,13 +95,16 @@ class BaseAgent(ABC):
         self.log.debug(f"[{self.name}] Calling chat with {len(messages)} messages")
 
         try:
-            response = self.ctx.client.chat(
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=False,
-                on_progress=self.ctx.on_progress,
-            )
+            kwargs = {
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False,
+                "on_progress": self.ctx.on_progress,
+            }
+            if operation:
+                kwargs["operation"] = operation
+            response = self.ctx.client.chat(**kwargs)
             from ..llm.response import classify_response
 
             classify_response(

@@ -1,0 +1,174 @@
+"""Versioned, credential-free contracts shared at the OpenWrite boundary.
+
+The domain service is the only producer of these payloads. Consumers (dsh,
+conductor and DoG) validate and present them; they must not recalculate the
+review rubric or delivery decision.
+"""
+
+import re
+from collections.abc import Mapping
+from typing import Any
+
+REVIEW_SCHEMA_VERSION = "openwrite.review.v2"
+DELIVERY_SCHEMA_VERSION = "dsh-novel.delivery.manifest.v2"
+MODEL_PROFILE_SCHEMA_VERSION = "openwrite.model-profile.v1"
+BENCHMARK_SCHEMA_VERSION = "openwrite.model-benchmark.v1"
+REVIEW_STATUSES = frozenset({"completed", "partial", "failed"})
+GATE_STATUSES = frozenset({"pass", "blocked", "inconclusive"})
+DELIVERY_STATUSES = frozenset({"pass", "revise", "blocked", "inconclusive", "stale"})
+FRESHNESS_STATUSES = frozenset({"current", "stale", "unknown"})
+
+# JSON-Schema-equivalent metadata: keeping these field lists in Python lets
+# boundary tests assert parity without making runtime consumers depend on a
+# particular schema library.
+CONTRACT_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    REVIEW_SCHEMA_VERSION: (
+        "schema_version",
+        "execution_status",
+        "quality_score",
+        "coverage",
+        "gate_status",
+        "delivery_status",
+        "production_gate_status",
+    ),
+    DELIVERY_SCHEMA_VERSION: ("schemaVersion", "recordType", "chapterId", "stages"),
+    MODEL_PROFILE_SCHEMA_VERSION: ("id", "label", "provider", "model", "configured"),
+    BENCHMARK_SCHEMA_VERSION: (
+        "schema_version",
+        "run_id",
+        "status",
+        "context_hash",
+        "config",
+        "candidates",
+        "evaluations",
+    ),
+}
+
+
+def _require_mapping(value: Any, name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a JSON object")
+    return value
+
+
+def validate_review_v2(value: Any) -> dict[str, Any]:
+    """Validate the consumer-facing review decision without changing it."""
+    review = dict(_require_mapping(value, "review_v2"))
+    missing = [key for key in CONTRACT_REQUIRED_FIELDS[REVIEW_SCHEMA_VERSION] if key not in review]
+    if missing:
+        raise ValueError(f"review_v2 missing fields: {', '.join(missing)}")
+    if review["schema_version"] != REVIEW_SCHEMA_VERSION:
+        raise ValueError("unsupported review schema version")
+    if review["execution_status"] not in REVIEW_STATUSES:
+        raise ValueError("invalid review execution_status")
+    if review["gate_status"] not in GATE_STATUSES:
+        raise ValueError("invalid review gate_status")
+    if review["delivery_status"] not in DELIVERY_STATUSES:
+        raise ValueError("invalid review delivery_status")
+    allowed_production = DELIVERY_STATUSES | {"disabled", "disabled_uncalibrated"}
+    if review["production_gate_status"] not in allowed_production:
+        raise ValueError("invalid review production_gate_status")
+    coverage = review["coverage"]
+    if not isinstance(coverage, (int, float)) or not 0 <= float(coverage) <= 1:
+        raise ValueError("review coverage must be between 0 and 1")
+    score = review["quality_score"]
+    if score is not None and (
+        not isinstance(score, (int, float)) or not 0 <= float(score) <= 100
+    ):
+        raise ValueError("review quality_score must be null or between 0 and 100")
+    return review
+
+
+DELIVERY_STAGE_VERDICTS = frozenset({"pass", "fail", "inconclusive"})
+BENCHMARK_STATUSES = frozenset({"completed", "partial", "failed"})
+REVIEW_MANIFEST_SCHEMA_VERSION = "dsh-novel.review.manifest.v2"
+
+
+def validate_delivery_v2(value: Any) -> dict[str, Any]:
+    delivery = dict(_require_mapping(value, "delivery"))
+    missing = [
+        key for key in CONTRACT_REQUIRED_FIELDS[DELIVERY_SCHEMA_VERSION] if key not in delivery
+    ]
+    if missing:
+        raise ValueError(f"delivery missing fields: {', '.join(missing)}")
+    if delivery["schemaVersion"] != DELIVERY_SCHEMA_VERSION:
+        raise ValueError("unsupported delivery schema version")
+    # Real materialized manifests (conductor dog_delivery.py and the bridge)
+    # use "chapter-delivery"; the contract follows the artifacts.
+    if delivery["recordType"] != "chapter-delivery":
+        raise ValueError("invalid delivery recordType")
+    stages = delivery["stages"]
+    if not isinstance(stages, Mapping) or not stages:
+        raise ValueError("delivery stages must be a non-empty object")
+    for name, stage in stages.items():
+        if not isinstance(stage, Mapping):
+            raise ValueError(f"delivery stage {name} must be an object")
+        if str(stage.get("recordType") or "") != "delivery-stage":
+            raise ValueError(f"delivery stage {name} has invalid recordType")
+        if str(stage.get("verdict") or "") not in DELIVERY_STAGE_VERDICTS:
+            raise ValueError(f"delivery stage {name} has invalid verdict")
+        if not str(stage.get("status") or "").strip():
+            raise ValueError(f"delivery stage {name} has empty status")
+    return delivery
+
+
+def validate_model_profile_surface(value: Any) -> dict[str, Any]:
+    surface = _require_mapping(value, "model profile")
+    if surface.get("schema_version") != MODEL_PROFILE_SCHEMA_VERSION:
+        raise ValueError("unsupported model profile schema version")
+    profiles = surface.get("profiles")
+    if not isinstance(profiles, list):
+        raise ValueError("model profile surface profiles must be an array")
+    for profile in profiles:
+        item = _require_mapping(profile, "model profile")
+        if not {"id", "label", "provider", "model", "configured"} <= item.keys():
+            raise ValueError("model profile surface has incomplete profile")
+        if any(secret in item for secret in ("api_key", "embedding_api_key", "secret")):
+            raise ValueError("model profile surface must not contain credentials")
+    return dict(surface)
+
+
+def validate_benchmark_v1(value: Any) -> dict[str, Any]:
+    benchmark = dict(_require_mapping(value, "benchmark"))
+    missing = [
+        key for key in CONTRACT_REQUIRED_FIELDS[BENCHMARK_SCHEMA_VERSION]
+        if key not in benchmark
+    ]
+    if missing:
+        raise ValueError(f"benchmark missing fields: {', '.join(missing)}")
+    if benchmark["schema_version"] != BENCHMARK_SCHEMA_VERSION:
+        raise ValueError("unsupported benchmark schema version")
+    if benchmark["status"] not in BENCHMARK_STATUSES:
+        raise ValueError("invalid benchmark status")
+    for key in ("candidates", "evaluations"):
+        if not isinstance(benchmark[key], list):
+            raise ValueError(f"benchmark {key} must be an array")
+    config = _require_mapping(benchmark["config"], "benchmark config")
+    if not isinstance(config.get("writer_profile_ids"), list) or not isinstance(
+        config.get("reviewer_profile_ids"), list
+    ):
+        raise ValueError("benchmark config must declare writer and reviewer profile ids")
+    return benchmark
+
+
+def validate_review_manifest_v2(value: Any) -> dict[str, Any]:
+    manifest = dict(_require_mapping(value, "review manifest"))
+    if manifest.get("schemaVersion") != REVIEW_MANIFEST_SCHEMA_VERSION:
+        raise ValueError("unsupported review manifest schema version")
+    if manifest.get("recordType") != "review":
+        raise ValueError("invalid review manifest recordType")
+    chapter_id = str(manifest.get("chapterId") or "")
+    if not chapter_id:
+        raise ValueError("review manifest chapterId must be non-empty")
+    if re.fullmatch(r"ch_\d+", chapter_id) is None:
+        raise ValueError(f"invalid review manifest chapterId: {chapter_id!r}")
+    if str(manifest.get("verdict") or "") not in {"pass", "fail", "inconclusive"}:
+        raise ValueError("invalid review manifest verdict")
+    return manifest
+
+
+def validate_canonical_artifacts(*, review: Any | None = None, delivery: Any | None = None) -> None:
+    if review is not None:
+        validate_review_v2(review)
+    if delivery is not None:
+        validate_delivery_v2(delivery)

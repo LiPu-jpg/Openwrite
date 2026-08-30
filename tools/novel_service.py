@@ -451,7 +451,19 @@ class NovelApplicationService:
         if self._review_executor is not None:
             from tools.review_store import ReviewStore
 
-            ReviewStore(self.project_root, self.novel_id).save(target, result)
+            store = ReviewStore(self.project_root, self.novel_id)
+            store.save(target, result)
+            persisted = store.load(target)
+            if isinstance(persisted, dict):
+                persisted_v2 = persisted.get("review_v2")
+                result = {
+                    **result,
+                    "source_revision": persisted.get("source_revision", ""),
+                    "reviewed_at": persisted.get("reviewed_at", ""),
+                    "issue_delta": persisted.get("issue_delta", result.get("issue_delta", {})),
+                }
+                if isinstance(persisted_v2, dict) and persisted_v2:
+                    result["review_v2"] = persisted_v2
             self._record_review_lifecycle(target, result)
         return result
 
@@ -882,8 +894,18 @@ class NovelApplicationService:
     def _record_review_lifecycle(
         self, chapter_id: str, result: dict[str, Any]
     ) -> None:
+        from tools.review_store import (
+            ReviewStore,
+            issue_review_severity,
+            review_is_deliverable,
+        )
         from tools.workflow_scheduler import WorkflowScheduler
 
+        store = ReviewStore(self.project_root, self.novel_id)
+        current_revision = store._source_revision(chapter_id)
+        deliverable = review_is_deliverable(
+            result, current_source_revision=current_revision
+        )
         scheduler = WorkflowScheduler(self.project_root, self.novel_id)
         workflow = scheduler.load_or_create(chapter_id)
         errors: list[str] = []
@@ -894,7 +916,7 @@ class NovelApplicationService:
             description = str(issue.get("description") or "").strip()
             if not description:
                 continue
-            if str(issue.get("severity") or "").lower() == "critical":
+            if issue_review_severity(issue) == "critical":
                 errors.append(description)
             else:
                 warnings.append(description)
@@ -904,14 +926,14 @@ class NovelApplicationService:
             "review",
             message="chapter reviewed via application service",
             data={
-                "passed": bool(result.get("passed")),
+                "passed": deliverable,
                 "errors": errors,
                 "warnings": warnings,
             },
         )
         self._sync_book_state(
             chapter_id,
-            review_passed=bool(result.get("passed")),
+            review_passed=deliverable,
             action_prefix="application_review",
         )
 

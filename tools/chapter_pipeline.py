@@ -62,24 +62,20 @@ def apply_runtime_delta_with_fallback(
 
     effective_delta = state_delta
     if not effective_delta and updates:
-        effective_delta = legacy_updates_to_delta(
-            updates, chapter_id=chapter_id
-        ).model_dump(mode="json")
+        effective_delta = legacy_updates_to_delta(updates, chapter_id=chapter_id).model_dump(
+            mode="json"
+        )
     if not effective_delta:
         return {}, ""
 
     try:
-        truth_manager.apply_runtime_delta(
-            effective_delta, known_entities=known_entities
-        )
+        truth_manager.apply_runtime_delta(effective_delta, known_entities=known_entities)
         return dict(effective_delta), ""
     except (RuntimeStateError, ValueError) as exc:
         fallback = legacy_updates_to_delta(updates, chapter_id=chapter_id)
         if not fallback.operations:
             raise
-        truth_manager.apply_runtime_delta(
-            fallback, known_entities=known_entities
-        )
+        truth_manager.apply_runtime_delta(fallback, known_entities=known_entities)
         return fallback.model_dump(mode="json"), str(exc)
 
 
@@ -178,9 +174,7 @@ def save_chapter(
     content: str,
 ) -> Path:
     """Atomically save a chapter in the canonical manuscript layout."""
-    return _save_chapter(
-        Path(project_root).resolve(), novel_id, chapter_id, title, content
-    )
+    return _save_chapter(Path(project_root).resolve(), novel_id, chapter_id, title, content)
 
 
 def _restore(path: Path, previous: bytes | None) -> None:
@@ -224,11 +218,7 @@ def _style_profile(
             used.add(key)
             continue
         raw = documents.get(key, "")
-        value = (
-            render_style_manifest_summary(raw)
-            if key == "work.manifest"
-            else str(raw).strip()
-        )
+        value = render_style_manifest_summary(raw) if key == "work.manifest" else str(raw).strip()
         if value:
             used.add(key)
             parts.append(f"## {label}\n{value[:limit]}")
@@ -310,9 +300,7 @@ def _context_characters(context: Any) -> list[dict[str, str]]:
     characters: list[dict[str, str]] = []
     for index, item in enumerate(getattr(context, "active_characters", []) or [], start=1):
         name = str(
-            getattr(item, "name", "")
-            or getattr(item, "character_id", "")
-            or f"角色{index}"
+            getattr(item, "name", "") or getattr(item, "character_id", "") or f"角色{index}"
         ).strip()
         if hasattr(item, "to_context_text"):
             description = str(item.to_context_text()).strip()
@@ -422,9 +410,7 @@ def build_writer_payload(
         if not isinstance(core_documents, dict):
             core_documents = {}
         payload["author_intent"] = str(
-            packet.get("author_intent")
-            or sections.get("作者意图")
-            or payload["author_intent"]
+            packet.get("author_intent") or sections.get("作者意图") or payload["author_intent"]
         )
         payload["creative_focus"] = str(
             packet.get("creative_focus")
@@ -528,44 +514,27 @@ def build_review_payload(
             or 0
         ),
         "character_profiles": character_text,
-        "current_state": str(
-            continuity.get("current_state") or packet.get("current_state") or ""
-        ),
-        "relationships": str(
-            continuity.get("relationships") or packet.get("relationships") or ""
-        ),
-        "author_intent": str(
-            packet.get("author_intent") or sections.get("作者意图") or ""
-        ),
+        "current_state": str(continuity.get("current_state") or packet.get("current_state") or ""),
+        "relationships": str(continuity.get("relationships") or packet.get("relationships") or ""),
+        "author_intent": str(packet.get("author_intent") or sections.get("作者意图") or ""),
         "creative_focus": str(
-            packet.get("creative_focus")
-            or sections.get("创作罗盘（当前最高优先级）")
-            or ""
+            packet.get("creative_focus") or sections.get("创作罗盘（当前最高优先级）") or ""
         ),
     }
     if context is not None:
         payload.update(
             {
-                "author_intent": getattr(context, "author_intent", "")
-                or payload["author_intent"],
+                "author_intent": getattr(context, "author_intent", "") or payload["author_intent"],
                 "creative_focus": getattr(context, "creative_focus", "")
                 or payload["creative_focus"],
                 "chapter_goals": getattr(context, "chapter_goals", []),
-                "chapter_beats": getattr(
-                    getattr(context, "current_chapter", None), "beats", []
-                ),
-                "chapter_hooks": getattr(
-                    getattr(context, "current_chapter", None), "hooks", []
-                ),
+                "chapter_beats": getattr(getattr(context, "current_chapter", None), "beats", []),
+                "chapter_hooks": getattr(getattr(context, "current_chapter", None), "hooks", []),
                 "emotion_arc": getattr(context, "emotion_arc", ""),
-                "foreshadowing_summary": getattr(
-                    context, "foreshadowing_summary", ""
-                ),
+                "foreshadowing_summary": getattr(context, "foreshadowing_summary", ""),
                 "ledger": getattr(context, "ledger", ""),
-                "relationships": getattr(context, "relationships", "")
-                or payload["relationships"],
-                "current_state": getattr(context, "current_state", "")
-                or payload["current_state"],
+                "relationships": getattr(context, "relationships", "") or payload["relationships"],
+                "current_state": getattr(context, "current_state", "") or payload["current_state"],
             }
         )
     if outline:
@@ -694,9 +663,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
     run_manifest = None
     run_v2_store = ChapterRunV2Store(project_root, novel_id)
     requested_run_v2_id = str(args.get("run_id_v2") or "").strip()
-    run_v2_manifest = (
-        run_v2_store.load(requested_run_v2_id) if requested_run_v2_id else None
-    )
+    run_v2_manifest = run_v2_store.load(requested_run_v2_id) if requested_run_v2_id else None
     if requested_run_v2_id and run_v2_manifest is None:
         return {
             "ok": False,
@@ -727,9 +694,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             _raise_if_task_cancelled(args)
             active_stage = "context_assembly"
             scheduler.start_stage(workflow, active_stage)
-            context = ContextBuilder(project_root, novel_id).build_generation_context(
-                chapter_id
-            )
+            context = ContextBuilder(project_root, novel_id).build_generation_context(chapter_id)
             truth_manager = TruthFilesManager(project_root, novel_id)
             truth = truth_manager.load_truth_files()
             baseline_state = truth_manager.load_runtime_state()
@@ -777,12 +742,8 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             )
             current_revisions = {
                 "context": run_v2_store.content_revision(writer_payload),
-                "outline": run_v2_store.content_revision(
-                    writer_payload.get("chapter_goals", [])
-                ),
-                "runtime_state": str(
-                    getattr(baseline_state, "revision", 0) or 0
-                ),
+                "outline": run_v2_store.content_revision(writer_payload.get("chapter_goals", [])),
+                "runtime_state": str(getattr(baseline_state, "revision", 0) or 0),
                 "prompt": "writer-creative-v1",
             }
             if run_v2_manifest is None:
@@ -807,9 +768,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                         comparable_context[key] = stored_context[key]
                     else:
                         comparable_context.pop(key, None)
-                current_revisions["context"] = run_v2_store.content_revision(
-                    comparable_context
-                )
+                current_revisions["context"] = run_v2_store.content_revision(comparable_context)
                 stale = run_v2_store.mark_stale(
                     run_v2_manifest,
                     {
@@ -817,10 +776,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                         **current_revisions,
                     },
                 )
-                if any(
-                    stage in stale
-                    for stage in ("context", "plan", "draft", "fact_extract")
-                ):
+                if any(stage in stale for stage in ("context", "plan", "draft", "fact_extract")):
                     from tools.chapter_run_v2 import ChapterRunV2Error
 
                     raise ChapterRunV2Error(
@@ -835,9 +791,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     "context",
                     input_revisions={
                         "context": run_v2_manifest.input_revisions["context"],
-                        "runtime_state": run_v2_manifest.input_revisions[
-                            "runtime_state"
-                        ],
+                        "runtime_state": run_v2_manifest.input_revisions["runtime_state"],
                     },
                 )
                 context_artifact = run_v2_store.write_artifact(
@@ -854,9 +808,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 run_v2_store.start_stage(
                     run_v2_manifest,
                     "plan",
-                    input_revisions={
-                        "outline": run_v2_manifest.input_revisions["outline"]
-                    },
+                    input_revisions={"outline": run_v2_manifest.input_revisions["outline"]},
                     prompt_version="writer-plan-v1",
                 )
                 run_v2_store.complete_stage(
@@ -870,9 +822,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 )
             run_v2_active_stage = "draft"
             if run_v2_manifest.stages["draft"].status == "completed":
-                result = _load_resumable_writer_result(
-                    run_v2_store, run_v2_manifest
-                )
+                result = _load_resumable_writer_result(run_v2_store, run_v2_manifest)
             else:
                 run_v2_store.start_stage(
                     run_v2_manifest,
@@ -899,15 +849,12 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                         "title": result.title,
                         "content": result.content,
                         "word_count": result.word_count,
-                        "chapter_summary": str(
-                            getattr(result, "chapter_summary", "") or ""
-                        ),
-                        "observations": str(
-                            getattr(result, "observations", "") or ""
-                        ),
-                        "token_usage": dict(
-                            getattr(result, "token_usage", {}) or {}
-                        ),
+                        "chapter_summary": str(getattr(result, "chapter_summary", "") or ""),
+                        "observations": str(getattr(result, "observations", "") or ""),
+                        "token_usage": dict(getattr(result, "token_usage", {}) or {}),
+                        "finish_reason": str(getattr(result, "finish_reason", "") or ""),
+                        "model": str(getattr(result, "model", "") or ""),
+                        "provider": str(getattr(result, "provider", "") or ""),
                     },
                 )
                 run_v2_store.complete_stage(
@@ -952,9 +899,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             previous_memory = memory_path.read_bytes() if memory_path.is_file() else None
             try:
                 _task_phase(args, "committing", "原子提交章节与运行态")
-                _save_chapter(
-                    project_root, novel_id, chapter_id, result.title, result.content
-                )
+                _save_chapter(project_root, novel_id, chapter_id, result.title, result.content)
                 run_v2_active_stage = "settle"
                 run_v2_store.start_stage(
                     run_v2_manifest,
@@ -997,8 +942,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                         "chapter_id": chapter_id,
                         "word_count": int(getattr(result, "word_count", 0) or 0),
                         "runtime_state": int(
-                            getattr(truth_manager.load_runtime_state(), "revision", 0)
-                            or 0
+                            getattr(truth_manager.load_runtime_state(), "revision", 0) or 0
                         ),
                     },
                 )
@@ -1022,8 +966,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     output={
                         "draft_revision": run_store.text_revision(result.content),
                         "runtime_state_revision": int(
-                            getattr(truth_manager.load_runtime_state(), "revision", 0)
-                            or 0
+                            getattr(truth_manager.load_runtime_state(), "revision", 0) or 0
                         ),
                     },
                     artifact=str(draft_path),
@@ -1050,6 +993,9 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 "truth_updates": updates,
                 "run_id_v2": run_v2_manifest.run_id,
                 "usage": dict(getattr(result, "token_usage", {}) or {}),
+                "finish_reason": str(getattr(result, "finish_reason", "") or ""),
+                "model": str(getattr(result, "model", "") or ""),
+                "provider": str(getattr(result, "provider", "") or ""),
             }
             if state_delta_fallback:
                 response_payload["state_delta"] = state_delta
@@ -1060,9 +1006,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             scheduler.fail_stage(workflow, active_stage, str(exc))
         if run_v2_manifest is not None:
             try:
-                run_v2_store.request_cancel(
-                    run_v2_manifest, reason="write_cancelled"
-                )
+                run_v2_store.request_cancel(run_v2_manifest, reason="write_cancelled")
                 if run_v2_active_stage:
                     run_v2_store.fail_stage(
                         run_v2_manifest,
@@ -1087,6 +1031,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             "code": "PROJECT_BUSY",
         }
     except Exception as exc:
+        code = str(getattr(exc, "code", "RUN_FAILED") or "RUN_FAILED")
         if run_manifest is not None:
             try:
                 run_store.fail(run_manifest, stage=active_stage or "write")
@@ -1097,14 +1042,20 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 run_v2_store.fail_stage(
                     run_v2_manifest,
                     run_v2_active_stage,
-                    code=str(getattr(exc, "code", "RUN_FAILED") or "RUN_FAILED"),
+                    code=code,
                     message=str(exc),
                 )
             except Exception:
                 pass
         if active_stage:
             scheduler.fail_stage(workflow, active_stage, str(exc))
-        return {"ok": False, "chapter_id": chapter_id, "error": str(exc)}
+        return {
+            "ok": False,
+            "chapter_id": chapter_id,
+            "error": str(exc),
+            "code": code,
+            "run_id_v2": run_v2_manifest.run_id if run_v2_manifest else "",
+        }
 
 
 def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str, Any]:
@@ -1144,9 +1095,7 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
     run_manifest = (
         run_store.load(requested_run_id)
         if requested_run_id
-        else run_store.latest_for_chapter(
-            chapter_id, statuses={"written", "reviewed"}
-        )
+        else run_store.latest_for_chapter(chapter_id, statuses={"written", "reviewed"})
     )
     if requested_run_id and run_manifest is None:
         return {
@@ -1182,8 +1131,10 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
             "error": "Chapter Run V2 与待审章节不匹配",
             "code": "INVALID_CHAPTER_RUN",
         }
-    if requested_run_v2_id and run_v2_manifest is not None and (
-        run_v2_manifest.status not in {"committed", "reviewed"}
+    if (
+        requested_run_v2_id
+        and run_v2_manifest is not None
+        and (run_v2_manifest.status not in {"committed", "reviewed"})
     ):
         return {
             "ok": False,
@@ -1213,9 +1164,9 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                 novel_id=novel_id,
                 style_id=str(config.get("style_id") or novel_id),
             ).assemble(chapter_id)
-            generation_context = ContextBuilder(
-                project_root, novel_id
-            ).build_generation_context(chapter_id)
+            generation_context = ContextBuilder(project_root, novel_id).build_generation_context(
+                chapter_id
+            )
             review_context = build_review_payload(
                 _packet_payload(packet),
                 context=generation_context,
@@ -1236,7 +1187,7 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                         "chapter": run_v2_store.content_revision(content),
                         "review_context": run_v2_store.content_revision(review_context),
                     },
-                    prompt_version="reviewer-v1",
+                    prompt_version="reviewer-v2",
                     model_profile=str(getattr(llm_config, "model", "")),
                 )
             _task_phase(args, "model", "执行章节审稿")
@@ -1254,6 +1205,12 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
             issues: list[dict[str, Any]] = [
                 {
                     "severity": str(getattr(issue, "severity", "warning")),
+                    "review_severity": str(getattr(issue, "severity", "warning")),
+                    "revision_priority": {
+                        "critical": "blocker",
+                        "warning": "medium",
+                        "info": "low",
+                    }.get(str(getattr(issue, "severity", "warning")).lower(), "medium"),
                     "category": str(getattr(issue, "category", "未知")),
                     "description": str(getattr(issue, "description", "")),
                     "suggestion": str(getattr(issue, "suggestion", "")),
@@ -1278,6 +1235,7 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                 "run_id_v2": run_v2_manifest.run_id if run_v2_manifest else "",
                 "effective_target_words": int(review_context.get("target_words") or 0),
                 "token_usage": dict(getattr(result, "token_usage", {}) or {}),
+                "review_v2": dict(getattr(result, "review_v2", {}) or {}),
                 "strict": strict,
                 "dimensions": dimensions,
             }
@@ -1307,9 +1265,7 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
             if run_manifest is not None:
                 run_store.complete_review(run_manifest, review_payload=payload)
             if run_v2_manifest is not None:
-                review_artifact = run_v2_store.write_artifact(
-                    run_v2_manifest, "review", payload
-                )
+                review_artifact = run_v2_store.write_artifact(run_v2_manifest, "review", payload)
                 run_v2_store.complete_stage(
                     run_v2_manifest,
                     "review",
@@ -1356,7 +1312,13 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                 pass
         # 保留真实错误码（如 MODEL_OUTPUT_TRUNCATED / MALFORMED_STRUCTURED_OUTPUT）：
         # 任务系统据此展示可恢复性与根因，而非一律 OPERATION_FAILED。
-        return {"ok": False, "chapter_id": chapter_id, "error": str(exc), "code": code}
+        return {
+            "ok": False,
+            "chapter_id": chapter_id,
+            "error": str(exc),
+            "code": code,
+            "run_id_v2": run_v2_manifest.run_id if run_v2_manifest else "",
+        }
 
 
 def execute_multi_agent_chapter(
@@ -1398,9 +1360,7 @@ def execute_multi_agent_chapter(
         ):
             llm_config = LLMConfig.from_env()
             director = MultiAgentDirector(
-                AgentContext(
-                    LLMClient(llm_config), llm_config.model, str(project_root)
-                ),
+                AgentContext(LLMClient(llm_config), llm_config.model, str(project_root)),
                 novel_id=novel_id,
                 style_id=str(config.get("style_id") or novel_id),
             )
@@ -1479,6 +1439,12 @@ def execute_multi_agent_chapter(
                 issues: list[dict[str, Any]] = [
                     {
                         "severity": str(getattr(issue, "severity", "warning")),
+                        "review_severity": str(getattr(issue, "severity", "warning")),
+                        "revision_priority": {
+                            "critical": "blocker",
+                            "warning": "medium",
+                            "info": "low",
+                        }.get(str(getattr(issue, "severity", "warning")).lower(), "medium"),
                         "category": str(getattr(issue, "category", "未知")),
                         "description": str(getattr(issue, "description", "")),
                         "suggestion": str(getattr(issue, "suggestion", "")),
@@ -1499,6 +1465,7 @@ def execute_multi_agent_chapter(
                     "issues": len(issues),
                     "summary": str(getattr(result.review, "summary", "") or ""),
                     "issue_details": issues,
+                    "review_v2": dict(getattr(result.review, "review_v2", {}) or {}),
                     "strict": bool(args.get("strict", False)),
                     "dimensions": dimensions,
                 }

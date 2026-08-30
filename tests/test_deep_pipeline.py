@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ from tools.context_builder import ContextBuilder
 from tools.init_project import init_project
 from tools.llm.response import ProviderResponseError
 from tools.project_lock import ProjectBusyError, ProjectWriteLock
+from tools.review_rubric import QUALITY_DOMAINS
 from tools.truth_manager import TruthFiles, TruthFilesManager
 
 
@@ -117,6 +119,47 @@ chapter_summary: |
         {"prompt_tokens": 10, "total_tokens": 15},
         {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25},
     ) == {"prompt_tokens": 30, "total_tokens": 40, "completion_tokens": 5}
+    assert writer._merge_usage(
+        {"prompt_tokens": 10, "cost_usd": 0, "cost_reported": True},
+        {"completion_tokens": 5, "cost_reported": False},
+    ) == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost_usd": 0,
+        "cost_reported": False,
+        "cost_reported_calls": 1,
+        "usage_calls": 2,
+    }
+
+
+def test_reviewer_usage_summary_preserves_partial_cost_reporting():
+    reviewer = ReviewerAgent.__new__(ReviewerAgent)
+    reviewer._audit_context_reports = [
+        {
+            "provider_usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 4,
+                "cost_usd": 0,
+                "cost_reported": True,
+            }
+        },
+        {
+            "provider_usage": {
+                "prompt_tokens": 12,
+                "completion_tokens": 6,
+                "cost_reported": False,
+            }
+        },
+    ]
+
+    usage = reviewer._audit_usage_summary()
+
+    assert usage["prompt_tokens"] == 22
+    assert usage["completion_tokens"] == 10
+    assert usage["cost_usd"] == 0
+    assert usage["cost_reported"] is False
+    assert usage["cost_reported_calls"] == 1
+    assert usage["usage_calls"] == 2
 
 
 def test_writer_settlement_accepts_unfenced_yaml():
@@ -280,66 +323,132 @@ def test_reviewer_context_keeps_author_compass_and_quality_constraints():
     assert payload["relationships"].startswith("陈默")
 
 
-def test_reviewer_batches_full_dimension_audit_to_bound_each_output():
+def test_reviewer_v2_reviews_six_domains_and_one_gate():
     reviewer = ReviewerAgent.__new__(ReviewerAgent)
+    reviewer.ctx = SimpleNamespace(
+        client=SimpleNamespace(config=SimpleNamespace(model="fake", max_tokens=12_000, context_tokens=64_000))
+    )
+    reviewer._rule_based_check = lambda content, target_words=0: []
+    reviewer._detect_ai_tells = lambda content: []
+    reviewer._check_sensitive_words = lambda content: []
     calls: list[str] = []
 
     def fake_chat(**kwargs):
-        calls.append(kwargs["messages"][0].content)
-        return SimpleNamespace(content="[]")
+        prompt = kwargs["messages"][0].content
+        calls.append(prompt)
+        if "硬门禁评审员" in prompt:
+            return SimpleNamespace(content='{"id":"safety","status":"pass","findings":[]}', usage={})
+        domain = next(domain for domain in QUALITY_DOMAINS if f'“{domain.name}”' in prompt)
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "id": domain.id,
+                    "criteria": [
+                        {
+                            "id": criterion.id,
+                            "status": "evaluated",
+                            "earned": criterion.max_points,
+                            "evidence": ["正文"],
+                            "rationale": "证据充分",
+                            "issues": [],
+                        }
+                        for criterion in domain.criteria
+                    ],
+                    "issues": [],
+                },
+                ensure_ascii=False,
+            ),
+            usage={},
+        )
 
     reviewer.chat = fake_chat
 
-    issues = asyncio.run(reviewer._llm_audit("正文", {}))
+    result = asyncio.run(reviewer.review("正文", {}))
 
-    assert issues == []
-    assert len(calls) == 5
-    assert "1. OOC检查" in calls[0]
-    assert "8. 文风检查" in calls[0]
-    assert "9. 信息越界" in calls[1]
-    assert "33. 大纲偏离检测" in calls[-1]
-    assert "37. 正典事件一致性" in calls[-1]
+    assert result.issues == []
+    assert result.score == 100
+    assert result.passed is True
+    assert len(calls) == 7
+    assert sum("硬门禁评审员" in prompt for prompt in calls) == 1
+    assert result.review_v2["coverage"] == 1
+    assert result.review_v2["provenance"]["audit_calls"] == 7
 
 
-def test_reviewer_bisects_a_dimension_batch_after_output_truncation():
+def test_reviewer_bisects_a_domain_after_output_truncation():
     reviewer = ReviewerAgent.__new__(ReviewerAgent)
-    calls: list[list[int]] = []
+    reviewer.ctx = SimpleNamespace(
+        client=SimpleNamespace(config=SimpleNamespace(max_tokens=12_000, context_tokens=64_000))
+    )
+    calls: list[list[str]] = []
 
     def fake_chat(**kwargs):
         system_prompt = kwargs["messages"][0].content
-        requested = [
-            number
-            for number, name in reviewer.DIMENSION_MAP.items()
-            if f"{number}. {name}" in system_prompt
-        ]
+        requested = [criterion.id for criterion in QUALITY_DOMAINS[0].criteria if f"- {criterion.id}:" in system_prompt]
         calls.append(requested)
-        if len(requested) > 1:
+        if len(requested) > 2:
             raise ProviderResponseError(
                 "MODEL_OUTPUT_TRUNCATED",
                 "模型输出因长度限制被截断",
             )
-        return SimpleNamespace(content="[]")
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "id": "coherence",
+                    "criteria": [
+                        {"id": criterion_id, "status": "evaluated", "earned": 5, "evidence": ["正文"]}
+                        for criterion_id in requested
+                    ],
+                    "issues": [],
+                },
+                ensure_ascii=False,
+            ),
+            usage={},
+        )
 
     reviewer.chat = fake_chat
 
-    issues = asyncio.run(reviewer._llm_audit("正文", {}, dimensions=[1, 2, 3, 4]))
+    raw, issues = reviewer._llm_review_domain("正文", {}, QUALITY_DOMAINS[0], [])
 
     assert issues == []
-    assert calls == [[1, 2, 3, 4], [1, 2], [1], [2], [3, 4], [3], [4]]
+    assert [item["id"] for item in raw["criteria"]] == [
+        "temporal_continuity",
+        "rules_power_numbers",
+        "knowledge_boundary",
+        "causality_motivation",
+    ]
+    assert calls == [
+        ["temporal_continuity", "rules_power_numbers", "knowledge_boundary", "causality_motivation"],
+        ["temporal_continuity", "rules_power_numbers"],
+        ["knowledge_boundary", "causality_motivation"],
+    ]
 
 
-def test_reviewer_uses_profile_ceiling_and_structured_context_compression():
+def test_reviewer_uses_profile_budget_and_structured_context_compression():
     reviewer = ReviewerAgent.__new__(ReviewerAgent)
     reviewer.ctx = SimpleNamespace(
         client=SimpleNamespace(
-            config=SimpleNamespace(max_tokens=12_000, context_tokens=64_000)
+            config=SimpleNamespace(max_tokens=12_000, context_tokens=1_000_000, extra={})
         )
     )
     calls: list[dict] = []
 
     def fake_chat(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(content="[]", usage={})
+        domain = QUALITY_DOMAINS[4]
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "id": domain.id,
+                    "criteria": [
+                        {"id": item.id, "status": "evaluated", "earned": 5, "evidence": ["章节正文"]}
+                        for item in domain.criteria
+                    ],
+                    "issues": [],
+                },
+                ensure_ascii=False,
+            ),
+            usage={},
+        )
 
     reviewer.chat = fake_chat
     context = {
@@ -350,22 +459,17 @@ def test_reviewer_uses_profile_ceiling_and_structured_context_compression():
         "style_profile": "风格约束" * 20_000,
     }
 
-    issues = asyncio.run(
-        reviewer._llm_audit(
-            "章节正文" * 1000,
-            context,
-            dimensions=[17, 19, 20, 21, 22, 23, 24, 26],
-        )
-    )
+    _, issues = reviewer._llm_review_domain("章节正文" * 1000, context, QUALITY_DOMAINS[4], [])
 
     assert issues == []
-    assert calls[0]["max_tokens"] == 8192
+    assert calls[0]["max_tokens"] == 7168
     assert "角色设定" not in calls[0]["messages"][1].content
-    assert "审稿上下文已按 Token 预算压缩" in calls[0]["messages"][1].content
+    assert "审稿上下文已按 Token 预算压缩" not in calls[0]["messages"][1].content
     report = reviewer._audit_context_reports[0]
     assert report["compressed"] is True
     assert report["final_estimated_tokens"] <= report["target_input_tokens"]
     assert report["final_estimated_tokens"] < report["original_estimated_tokens"]
+    assert report["target_input_tokens"] > 32_000
 
 
 def test_write_commit_rolls_back_truth_and_draft_when_memory_fails(
@@ -388,6 +492,9 @@ def test_write_commit_rolls_back_truth_and_draft_when_memory_fails(
                 chapter_summary="章节摘要",
                 observations="观察",
                 token_usage={"total_tokens": 10},
+                finish_reason="stop",
+                model="reported-model",
+                provider="reported-provider",
             )
 
     monkeypatch.setattr(agent_module, "WriterAgent", FakeWriter)
@@ -467,6 +574,9 @@ def test_write_commit_handles_null_current_chapter_in_book_state(
                 chapter_summary="章节摘要",
                 observations="观察",
                 token_usage={"total_tokens": 10},
+                finish_reason="stop",
+                model="reported-model",
+                provider="reported-provider",
             )
 
     monkeypatch.setattr(agent_module, "WriterAgent", FakeWriter)
@@ -490,5 +600,8 @@ def test_write_commit_handles_null_current_chapter_in_book_state(
     )
 
     assert result["ok"] is True
+    assert result["finish_reason"] == "stop"
+    assert result["model"] == "reported-model"
+    assert result["provider"] == "reported-provider"
     assert cli_module._load_chapter(tmp_path, "demo", "ch_001") is not None
     assert BookStateStore(tmp_path, "demo").load_or_create().current_chapter == "ch_001"

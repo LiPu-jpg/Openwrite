@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -24,6 +25,15 @@ from models.context_package import estimate_text_tokens
 
 from ..llm import Message
 from ..llm.context import ContextBudgetPolicy
+from ..review_rubric import (
+    DIMENSION_NAMES,
+    GATE_CHECK_IDS,
+    REVIEW_SCHEMA_VERSION,
+    DomainSpec,
+    aggregate_review,
+    legacy_adapter,
+    selected_domains,
+)
 from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
@@ -50,6 +60,7 @@ class ReviewResult:
     summary: str
     score: float = 0.0  # 0-100
     token_usage: dict = field(default_factory=dict)
+    review_v2: dict = field(default_factory=dict)
 
 
 class ReviewerAgent(BaseAgent):
@@ -68,50 +79,10 @@ class ReviewerAgent(BaseAgent):
         )
     """
 
-    # 33维度映射
-    DIMENSION_MAP = {
-        1: "OOC检查",
-        2: "时间线检查",
-        3: "设定冲突",
-        4: "战力崩坏",
-        5: "数值检查",
-        6: "伏笔检查",
-        7: "节奏检查",
-        8: "文风检查",
-        9: "信息越界",
-        10: "词汇疲劳",
-        11: "利益链断裂",
-        12: "年代考据",
-        13: "配角降智",
-        14: "配角工具人化",
-        15: "爽点虚化",
-        16: "台词失真",
-        17: "流水账",
-        18: "知识库污染",
-        19: "视角一致性",
-        20: "段落等长",
-        21: "套话密度",
-        22: "公式化转折",
-        23: "列表式结构",
-        24: "支线停滞",
-        25: "弧线平坦",
-        26: "节奏单调",
-        27: "敏感词检查",
-        28: "正传事件冲突",
-        29: "未来信息泄露",
-        30: "世界规则跨书一致性",
-        31: "番外伏笔隔离",
-        32: "读者期待管理",
-        33: "大纲偏离检测",
-        34: "角色还原度",
-        35: "世界规则遵守",
-        36: "关系动态",
-        37: "正典事件一致性",
-    }
+    DIMENSION_MAP = DIMENSION_NAMES
     # 8 维/批在推理模型上会因思维链挤占输出预算而截断（实测 37 维全量时
     # reasoning_content 可达 13K+ 字符），降到 4 维/批给 JSON 输出留足空间。
     LLM_AUDIT_BATCH_SIZE = 2
-    LLM_AUDIT_INPUT_CEILING = 32_000
     LLM_AUDIT_OUTPUT_TOKENS_PER_DIMENSION = 1024
     _AUDIT_CONTEXT_SPECS = (
         ("author_intent", "作者意图", 6.0, None),
@@ -190,7 +161,7 @@ class ReviewerAgent(BaseAgent):
         Returns:
             ReviewResult 审核结果
         """
-        all_issues = []
+        all_issues: list[ReviewIssue] = []
 
         # ── 规则类检查（零 LLM 成本）─
         rule_issues = self._rule_based_check(
@@ -203,13 +174,42 @@ class ReviewerAgent(BaseAgent):
         ai_issues = self._detect_ai_tells(content)
         all_issues.extend(ai_issues)
 
-        # ── LLM 驱动的深度审计 ─
-        llm_issues = await self._llm_audit(content, context, dimensions)
+        domains = selected_domains(dimensions)
+        domain_results, llm_issues = await self._llm_review_domains(
+            content,
+            context,
+            domains,
+            rule_issues + ai_issues,
+        )
         all_issues.extend(llm_issues)
 
-        # ── 敏感词检查 ─
+        # Deterministic matches are signals for the dedicated gate call, not an
+        # automatic policy block by themselves.
         sensitive_issues = self._check_sensitive_words(content)
-        all_issues.extend(sensitive_issues)
+        gate_enabled = dimensions is None or any(item in GATE_CHECK_IDS for item in dimensions)
+        gate_result: dict = {"id": "safety", "status": "pass", "findings": []}
+        if gate_enabled:
+            try:
+                gate_result, gate_issues = await asyncio.to_thread(
+                    self._llm_review_gate,
+                    content,
+                    context,
+                    sensitive_issues,
+                )
+            except Exception as exc:
+                gate_result = {
+                    "id": "safety",
+                    "name": "硬门禁",
+                    "status": "inconclusive",
+                    "legacy_check_ids": list(GATE_CHECK_IDS),
+                    "findings": [],
+                    "error": {
+                        "code": str(getattr(exc, "code", "GATE_REVIEW_FAILED")),
+                        "message": str(exc),
+                    },
+                }
+                gate_issues = []
+            all_issues.extend(gate_issues)
 
         if dimensions is not None:
             selected = {
@@ -219,20 +219,330 @@ class ReviewerAgent(BaseAgent):
             }
             all_issues = [issue for issue in all_issues if issue.dimension in selected]
 
-        # 计算总分
-        critical_count = sum(1 for i in all_issues if i.severity == "critical")
-        warning_count = sum(1 for i in all_issues if i.severity == "warning")
-
-        passed = critical_count == 0 and (not strict or warning_count == 0)
-        score = max(0, 100 - critical_count * 20 - warning_count * 5)
+        issue_payloads = [self._issue_payload(issue) for issue in all_issues]
+        review_v2 = aggregate_review(
+            domain_results,
+            issue_payloads,
+            domains=domains,
+            gates=[gate_result] if gate_enabled else [],
+            quality_threshold=float(context.get("quality_threshold") or 70),
+            min_coverage=float(context.get("min_review_coverage") or 0.80),
+            production_gate_enabled=context.get("review_production_gate_enabled") is True,
+            calibration_status=str(context.get("review_threshold_calibration_status") or "uncalibrated"),
+        )
+        review_v2["strict"] = bool(strict)
+        review_v2["requested_dimensions"] = (
+            list(dimensions) if dimensions is not None else list(self.DIMENSION_MAP)
+        )
+        runtime_config = getattr(
+            getattr(getattr(self, "ctx", None), "client", None),
+            "config",
+            None,
+        )
+        review_v2["provenance"] = {
+            "model": str(getattr(runtime_config, "model", "") or ""),
+            "audit_calls": len(getattr(self, "_audit_context_reports", [])),
+            "errors": list(getattr(self, "_review_errors", [])),
+        }
+        legacy = legacy_adapter(review_v2)
+        score = float(legacy["score"])
+        passed = bool(legacy["passed"])
 
         return ReviewResult(
             passed=passed,
             issues=all_issues,
-            summary=self._generate_summary(all_issues, score),
+            summary=self._generate_v2_summary(review_v2, all_issues),
             score=score,
             token_usage=self._audit_usage_summary(),
+            review_v2=review_v2,
         )
+
+    @staticmethod
+    def _issue_payload(issue: ReviewIssue) -> dict:
+        priority = {"critical": "blocker", "warning": "medium", "info": "low"}.get(
+            issue.severity,
+            "medium",
+        )
+        return {
+            "review_severity": issue.severity,
+            "revision_priority": priority,
+            "severity": issue.severity,
+            "category": issue.category,
+            "description": issue.description,
+            "suggestion": issue.suggestion,
+            "dimension": issue.dimension,
+            "evidence": issue.evidence,
+        }
+
+    async def _llm_review_domains(
+        self,
+        content: str,
+        context: dict,
+        domains: tuple[DomainSpec, ...],
+        deterministic_issues: list[ReviewIssue],
+    ) -> tuple[list[dict], list[ReviewIssue]]:
+        self._audit_context_reports = []
+        tasks = [
+            asyncio.to_thread(
+                self._llm_review_domain,
+                content,
+                context,
+                domain,
+                [issue for issue in deterministic_issues if issue.dimension in domain.legacy_check_ids],
+            )
+            for domain in domains
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+        self._review_errors = []
+        domain_results: list[dict] = []
+        issues: list[ReviewIssue] = []
+        for domain, result in zip(domains, results, strict=True):
+            if isinstance(result, BaseException):
+                self._review_errors.append(
+                    {
+                        "domain": domain.id,
+                        "code": str(getattr(result, "code", "DOMAIN_REVIEW_FAILED")),
+                        "message": str(result),
+                    }
+                )
+                domain_results.append(
+                    {
+                        "id": domain.id,
+                        "criteria": [
+                            {"id": criterion.id, "status": "inconclusive", "earned": 0, "evidence": []}
+                            for criterion in domain.criteria
+                        ],
+                    }
+                )
+                continue
+            domain_results.append(result[0])
+            issues.extend(result[1])
+        return domain_results, issues
+
+    def _llm_review_domain(
+        self,
+        content: str,
+        context: dict,
+        domain: DomainSpec,
+        deterministic_issues: list[ReviewIssue],
+    ) -> tuple[dict, list[ReviewIssue]]:
+        from ..llm.response import ProviderResponseError
+
+        criteria_contract = "\n".join(
+            f'- {criterion.id}: {criterion.name}, max={criterion.max_points:g}, '
+            f'legacy_check_ids={list(criterion.legacy_check_ids)}'
+            for criterion in domain.criteria
+        )
+        system_prompt = f"""你是小说质量评审员。只评审“{domain.name}”域，并按正向证据累加得分。
+
+评分标准：
+{criteria_contract}
+
+每个 criterion 必须返回且只能返回一次。status 只能是 evaluated、not_applicable、inconclusive。
+evaluated 时 earned 必须在 0 与 max 之间；earned>0 必须提供至少一段可在正文中逐字定位的短引用。
+not_applicable 表示题材或正典条件确实不适用；缺少必要上下文必须用 inconclusive，不能按 0 分。
+问题不参与扣分。只报告有正文证据的问题，severity 只能是 critical、warning、info。
+critical 仅用于明确事实矛盾、连续性破坏或使章节不可用的问题。
+
+只输出以下 JSON 对象：
+{{
+  "id": "{domain.id}",
+  "criteria": [
+    {{"id":"criterion_id","status":"evaluated","earned":0,"evidence":["正文短引用"],"rationale":"评分理由","issues":[]}}
+  ],
+  "issues": [
+    {{"dimension":1,"severity":"warning","category":"检查名","description":"问题","suggestion":"建议","evidence":"正文短引用"}}
+  ]
+}}"""
+        checks = list(domain.legacy_check_ids)
+        output_budget = self._audit_output_budget(checks)
+        user_prompt, context_report = self._build_audit_user_prompt(
+            content,
+            context,
+            checks,
+            system_prompt=system_prompt,
+            output_budget=output_budget,
+        )
+        if deterministic_issues:
+            signals = json.dumps(
+                [self._issue_payload(issue) for issue in deterministic_issues],
+                ensure_ascii=False,
+            )
+            user_prompt += f"\n\n确定性检查信号（请验证后纳入评分或问题）：\n{signals}"
+        if not hasattr(self, "_audit_context_reports"):
+            self._audit_context_reports = []
+        self._audit_context_reports.append(context_report)
+        try:
+            response = self.chat(
+                messages=[Message("system", system_prompt), Message("user", user_prompt)],
+                temperature=0.2,
+                max_tokens=output_budget,
+                operation="review",
+            )
+        except ProviderResponseError as exc:
+            if exc.code != "MODEL_OUTPUT_TRUNCATED" or len(domain.criteria) <= 1:
+                raise
+            midpoint = len(domain.criteria) // 2
+            parts = []
+            issues: list[ReviewIssue] = []
+            for criteria in (domain.criteria[:midpoint], domain.criteria[midpoint:]):
+                part = DomainSpec(
+                    domain.id,
+                    domain.name,
+                    sum(item.max_points for item in criteria),
+                    tuple(criteria),
+                )
+                raw, found = self._llm_review_domain(content, context, part, deterministic_issues)
+                parts.extend(raw.get("criteria") or [])
+                issues.extend(found)
+            return {"id": domain.id, "criteria": parts}, issues
+        usage = dict(getattr(response, "usage", {}) or {})
+        if usage:
+            context_report["provider_usage"] = usage
+        raw = self._parse_json_object(response.content)
+        if str(raw.get("id") or "") != domain.id:
+            raise ProviderResponseError("MALFORMED_STRUCTURED_OUTPUT", "评审域 id 与请求不一致")
+        raw["criteria"] = self._validated_criteria(raw.get("criteria"), domain, content)
+        issues = self._parse_v2_issues(
+            raw.get("issues"),
+            allowed_dimensions=set(domain.legacy_check_ids),
+            content=content,
+        )
+        return raw, issues
+
+    def _llm_review_gate(
+        self,
+        content: str,
+        context: dict,
+        deterministic_signals: list[ReviewIssue],
+    ) -> tuple[dict, list[ReviewIssue]]:
+        from ..llm.response import ProviderResponseError
+
+        system_prompt = """你是小说交付硬门禁评审员。只检查敏感内容政策和明确使章节不可交付的事实。
+普通题材描写、人物讨论或可选优化不得阻断。只输出 JSON：
+{"id":"safety","status":"pass|blocked|inconclusive","findings":[{"dimension":27,"severity":"critical","category":"敏感内容","description":"原因","suggestion":"建议","evidence":"正文短引用"}]}。
+blocked 必须至少包含一条能在正文中逐字定位的 critical 证据；无问题返回 pass 和空 findings。"""
+        output_budget = min(4096, self._audit_output_budget(list(GATE_CHECK_IDS)))
+        user_prompt, context_report = self._build_audit_user_prompt(
+            content,
+            context,
+            list(GATE_CHECK_IDS),
+            system_prompt=system_prompt,
+            output_budget=output_budget,
+        )
+        if deterministic_signals:
+            user_prompt += "\n\n规则命中仅是待验证信号，不可直接视为阻断：\n" + json.dumps(
+                [self._issue_payload(issue) for issue in deterministic_signals],
+                ensure_ascii=False,
+            )
+        if not hasattr(self, "_audit_context_reports"):
+            self._audit_context_reports = []
+        self._audit_context_reports.append(context_report)
+        response = self.chat(
+            messages=[Message("system", system_prompt), Message("user", user_prompt)],
+            temperature=0.0,
+            max_tokens=output_budget,
+            operation="review",
+        )
+        usage = dict(getattr(response, "usage", {}) or {})
+        if usage:
+            context_report["provider_usage"] = usage
+        raw = self._parse_json_object(response.content)
+        if str(raw.get("id") or "") != "safety":
+            raise ProviderResponseError("MALFORMED_STRUCTURED_OUTPUT", "硬门禁 id 无效")
+        status = str(raw.get("status") or "inconclusive").lower()
+        if status not in {"pass", "blocked", "inconclusive"}:
+            raise ProviderResponseError("MALFORMED_STRUCTURED_OUTPUT", "硬门禁 status 无效")
+        findings = self._parse_v2_issues(
+            raw.get("findings"),
+            allowed_dimensions=set(GATE_CHECK_IDS),
+            content=content,
+        )
+        if status == "blocked" and not any(issue.severity == "critical" for issue in findings):
+            status = "inconclusive"
+        return {
+            "id": "safety",
+            "name": "硬门禁",
+            "status": status,
+            "legacy_check_ids": list(GATE_CHECK_IDS),
+            "findings": [self._issue_payload(issue) for issue in findings],
+        }, findings
+
+    @staticmethod
+    def _parse_json_object(content: str) -> dict:
+        from ..llm.response import ProviderResponseError
+
+        text = content.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text, count=1)
+            text = re.sub(r"\s*```$", "", text, count=1)
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ProviderResponseError("MALFORMED_STRUCTURED_OUTPUT", "评审结果不是合法 JSON") from exc
+        if not isinstance(value, dict):
+            raise ProviderResponseError("MALFORMED_STRUCTURED_OUTPUT", "评审结果必须是 JSON 对象")
+        return value
+
+    @staticmethod
+    def _validated_criteria(raw: object, domain: DomainSpec, content: str) -> list[dict]:
+        by_id = {
+            str(item.get("id") or ""): dict(item)
+            for item in raw or []
+            if isinstance(item, dict)
+        } if isinstance(raw, list) else {}
+        validated: list[dict] = []
+        for spec in domain.criteria:
+            item = by_id.get(spec.id, {"id": spec.id, "status": "inconclusive"})
+            evidence = [
+                str(quote).strip()
+                for quote in item.get("evidence") or []
+                if str(quote).strip() and str(quote).strip() in content
+            ]
+            item["evidence"] = evidence
+            validated.append(item)
+        return validated
+
+    @staticmethod
+    def _parse_v2_issues(
+        raw: object,
+        *,
+        allowed_dimensions: set[int],
+        content: str,
+    ) -> list[ReviewIssue]:
+        issues: list[ReviewIssue] = []
+        if not isinstance(raw, list):
+            return issues
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            dimension = item.get("dimension")
+            severity = str(item.get("severity") or "").lower()
+            evidence = str(item.get("evidence") or "").strip()
+            if dimension not in allowed_dimensions or severity not in {"critical", "warning", "info"}:
+                continue
+            if not evidence or evidence not in content:
+                continue
+            issues.append(
+                ReviewIssue(
+                    severity=severity,
+                    category=str(item.get("category") or DIMENSION_NAMES[dimension]),
+                    description=str(item.get("description") or ""),
+                    suggestion=str(item.get("suggestion") or ""),
+                    dimension=dimension,
+                    evidence=evidence,
+                )
+            )
+        return issues
+
+    @staticmethod
+    def _generate_v2_summary(review_v2: dict, issues: list[ReviewIssue]) -> str:
+        score = review_v2.get("quality_score")
+        score_text = "不可评分" if score is None else f"{float(score):.0f}分"
+        coverage = float(review_v2.get("coverage") or 0) * 100
+        status = str(review_v2.get("delivery_status") or "inconclusive")
+        hard = sum(issue.severity == "critical" for issue in issues)
+        return f"质量 {score_text}，覆盖率 {coverage:.0f}%，交付状态 {status}，硬问题 {hard} 项"
 
     def _rule_based_check(self, content: str, target_words: int = 0) -> list[ReviewIssue]:
         """基于规则的检查（零 LLM 成本）"""
@@ -365,7 +675,7 @@ class ReviewerAgent(BaseAgent):
                 for item in banned:
                     pattern = item.get("pattern", "")
                     if pattern in content:
-                        severity = "critical" if item.get("severity") == "high" else "warning"
+                        severity = "warning"
                         issues.append(
                             ReviewIssue(
                                 severity=severity,
@@ -557,8 +867,14 @@ description 和 suggestion 各不超过 80 字，evidence 不超过 60 字。
         config = getattr(getattr(getattr(self, "ctx", None), "client", None), "config", None)
         context_window = self._positive_int(getattr(config, "context_tokens", None), 64_000)
         policy = ContextBudgetPolicy(context_window, output_budget)
+        config_extra = getattr(config, "extra", {}) if config is not None else {}
+        configured_ceiling = (
+            self._positive_int(config_extra.get("review_input_ceiling"), policy.input_budget_tokens)
+            if isinstance(config_extra, dict) and config_extra.get("review_input_ceiling")
+            else policy.input_budget_tokens
+        )
         proactive_target = min(
-            self.LLM_AUDIT_INPUT_CEILING,
+            configured_ceiling,
             max(1024, int(policy.input_budget_tokens * 0.70)),
         )
         if selected_tokens <= proactive_target:
@@ -702,10 +1018,29 @@ description 和 suggestion 各不超过 80 字，evidence 不超过 60 字。
             int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
             for usage in provider_usage
         )
+        reasoning_tokens = sum(
+            int(
+                usage.get("reasoning_tokens")
+                or (
+                    usage.get("completion_tokens_details", {}).get("reasoning_tokens")
+                    if isinstance(usage.get("completion_tokens_details"), dict)
+                    else 0
+                )
+                or 0
+            )
+            for usage in provider_usage
+        )
+        reported_costs = [usage.get("cost_reported") is True for usage in provider_usage]
+        cost_usd = sum(float(usage.get("cost_usd") or 0) for usage in provider_usage)
         return {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
+            "reasoning_tokens": reasoning_tokens,
+            "cost_usd": round(cost_usd, 8),
+            "cost_reported": bool(reported_costs) and all(reported_costs),
+            "cost_reported_calls": sum(reported_costs),
+            "usage_calls": len(provider_usage),
             "audit_calls": len(reports),
             "compressed_calls": sum(bool(report.get("compressed")) for report in reports),
             "original_estimated_tokens": sum(
