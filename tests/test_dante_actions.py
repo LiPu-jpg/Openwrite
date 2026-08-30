@@ -23,9 +23,9 @@ def _bootstrap_planning_project(tmp_path: Path) -> tuple[BookStateStore, StoryPl
     planning_store.save_outline_draft(
         "# 测试小说\n\n"
         "## 第一篇\n\n"
-        "> 篇弧线: 觉醒\n\n"
+        "主角从公司异常事件中觉醒，并决定继续调查。\n\n"
         "### 第一节\n\n"
-        "> 节结构: 起承\n\n"
+        "主角在公司地下发现异常节点，并决定继续调查。\n\n"
         "#### 第一章\n\n"
         "> 内容焦点: 发现异常\n"
         "> 出场角色: char_001\n"
@@ -303,9 +303,9 @@ def test_orchestrator_public_actions_drive_planning_flow(
             return (
                 "# 测试小说\n\n"
                 "## 第一篇\n\n"
-                "> 篇弧线: 觉醒\n\n"
+                "主角从公司异常事件中觉醒，并决定继续调查。\n\n"
                 "### 第一节\n\n"
-                "> 节结构: 起承\n\n"
+                "主角在公司地下发现异常节点，并决定继续调查。\n\n"
                 "#### 第一章\n\n"
                 "> 戏剧位置: 起\n"
                 "> 内容焦点: 发现异常\n"

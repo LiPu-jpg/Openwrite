@@ -71,6 +71,43 @@ def test_outline_tree_projects_volume_act_section_chapter_and_appendix(tmp_path:
     assert result["roots"][0]["line"] == 5
 
 
+def test_outline_tree_exposes_one_prose_summary_format_at_all_four_levels(tmp_path: Path):
+    outline = tmp_path / "src" / "outline.md"
+    outline.parent.mkdir(parents=True)
+    outline.write_text(
+        """+++
+summary = "全书事件梗概。"
++++
+
+# 第一卷
+> 核心主题: 选择
+
+## 第一幕
+
+本幕事件梗概。
+
+### 第一节
+
+本节事件梗概。
+
+#### 第一章
+> 内容焦点: 本章事件梗概。
+> 情感弧线: 平静 -> 戒备
+""",
+        encoding="utf-8",
+    )
+
+    volume = build_outline_structure(tmp_path)["roots"][0]
+    act = volume["children"][0]
+    section = act["children"][0]
+    chapter = section["children"][0]
+
+    assert volume["summary"] == "全书事件梗概。"
+    assert act["summary"] == "本幕事件梗概。"
+    assert section["summary"] == "本节事件梗概。"
+    assert chapter["summary"] == "本章事件梗概。"
+
+
 def test_outline_tree_recommends_first_planned_chapter_and_recent_word_average(tmp_path: Path):
     _write_outline(tmp_path)
     manuscript = tmp_path / "data" / "manuscript" / "arc_001"
@@ -227,6 +264,29 @@ def test_outline_tree_can_update_node_content_without_touching_children(tmp_path
     section = build_outline_structure(tmp_path)["roots"][0]["children"][0]["children"][0]
     assert section["content"] == "这一节改成直接在树上维护。\n- 保留两个子章"
     assert "保留两个子章" in section["summary"]
+
+
+def test_outline_tree_updates_chapter_summary_without_removing_execution_metadata(tmp_path: Path):
+    outline = tmp_path / "src" / "outline.md"
+    outline.parent.mkdir(parents=True)
+    outline.write_text(
+        "# 第一卷\n## 第一幕\n### 第一节\n#### 第一章：开门\n"
+        "> 内容焦点: 发现门外脚印\n> 情感弧线: 平静 -> 戒备\n",
+        encoding="utf-8",
+    )
+    structure = build_outline_structure(tmp_path)
+
+    edited = mutate_outline_structure(
+        tmp_path,
+        operation="update_summary",
+        revision=structure["revision"],
+        node_id="ch_001",
+        summary="主角发现门外脚印，并决定追查来处。",
+    )
+
+    assert "#### 第一章：开门\n\n主角发现门外脚印，并决定追查来处。" in edited["content"]
+    assert "> 内容焦点: 发现门外脚印" in edited["content"]
+    assert "> 情感弧线: 平静 -> 戒备" in edited["content"]
 
 
 def test_deleting_chapter_fourteen_continuously_renumbers_later_chapters(

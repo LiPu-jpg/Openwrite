@@ -44,10 +44,6 @@ def serialize_outline_hierarchy(hierarchy: OutlineHierarchy) -> dict[str, Any]:
             entry["summary"] = arc.summary
         if arc.arc_theme:
             entry["theme"] = arc.arc_theme
-        if arc.arc_structure:
-            entry["arc_structure"] = arc.arc_structure
-        if arc.arc_emotional_arc:
-            entry["arc_emotional_arc"] = arc.arc_emotional_arc
         chapter_range = arc.chapter_range or _format_chapter_range(chapter_ids)
         if chapter_range:
             entry["description"] = chapter_range
@@ -67,12 +63,6 @@ def serialize_outline_hierarchy(hierarchy: OutlineHierarchy) -> dict[str, Any]:
             entry["summary"] = section.summary
         if section.purpose:
             entry["purpose"] = section.purpose
-        if section.section_structure:
-            entry["section_structure"] = section.section_structure
-        if section.section_emotional_arc:
-            entry["section_emotional_arc"] = section.section_emotional_arc
-        if section.section_tension:
-            entry["section_tension"] = section.section_tension
         if section.involved_characters:
             entry["involved_characters"] = list(section.involved_characters)
         sections.append(entry)
@@ -149,8 +139,6 @@ def deserialize_outline_hierarchy(data: dict[str, Any], novel_id: str) -> Outlin
                 parent_id=arc.get("parent_id") or "master",
                 children_ids=section_ids or chapter_ids,
                 arc_theme=arc.get("theme", ""),
-                arc_structure=arc.get("arc_structure", ""),
-                arc_emotional_arc=arc.get("arc_emotional_arc", ""),
                 chapter_range=arc.get("description", arc.get("chapter_range", "")),
             )
         )
@@ -167,9 +155,6 @@ def deserialize_outline_hierarchy(data: dict[str, Any], novel_id: str) -> Outlin
                     str(item).strip() for item in section.get("chapters", []) if str(item).strip()
                 ],
                 purpose=section.get("purpose", ""),
-                section_structure=section.get("section_structure", ""),
-                section_emotional_arc=section.get("section_emotional_arc", ""),
-                section_tension=section.get("section_tension", ""),
                 involved_characters=list(section.get("involved_characters", [])),
             )
         )

@@ -70,9 +70,9 @@ def _bootstrap_novel(tmp_path: Path, novel_id: str = "demo") -> tuple[Path, Path
     outline_path.write_text(
         "# 测试小说\n\n"
         "## 第一篇\n\n"
-        "> 篇弧线: 开篇\n\n"
+        "主角发现异常并决定追查。\n\n"
         "### 第一节\n\n"
-        "> 节结构: 起承\n\n"
+        "主角发现异常并开始追查。\n\n"
         "#### 第一章\n\n"
         "> 内容焦点: 开篇\n"
         "> 出场角色: char_001\n"
@@ -372,8 +372,8 @@ def test_summary_confirmation_and_outline_request_are_handled_in_one_message(
         orchestrator,
         "_generate_outline_draft",
         lambda text: (
-            "# 四卷大纲\n\n## 第一卷\n> 篇弧线: 低谷 -> 复出\n\n"
-            "### 第一节\n> 节结构: 起(ch_001) -> 合(ch_001)\n\n"
+            "# 四卷大纲\n\n## 第一卷\n\n主角遭遇雪藏后重新争取舞台并获得复出机会。\n\n"
+            "### 第一节\n主角遭遇雪藏危机，并决定重新争取舞台。\n\n"
             "#### 第一章：重新出发\n"
             "> 戏剧位置: 起\n> 内容焦点: 主角决定重新争取舞台。\n"
             "> 本章目标: 建立雪藏危机\n> 预估字数: 3000\n"
@@ -1110,8 +1110,8 @@ def test_outline_generation_request_writes_draft_and_requests_confirmation(
     state.stage = BookStage.FOUNDATION
     state_store.save(state)
     complete_outline = (
-        "# 新大纲\n\n## 第一篇\n> 篇弧线: 铺垫 -> 转折\n\n"
-        "### 第一节\n> 节结构: 起(ch_001) -> 合(ch_001)\n\n"
+        "# 新大纲\n\n## 第一篇\n\n主角接到异常来电并由此卷入新的冲突。\n\n"
+        "### 第一节\n主角接到异常来电，由此卷入新的冲突。\n\n"
         "#### 第一章：异常来电\n"
         "> 戏剧位置: 起\n> 内容焦点: 主角收到异常来电。\n"
         "> 本章目标: 建立核心冲突\n> 预估字数: 3000\n"

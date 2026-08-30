@@ -18,6 +18,8 @@ class OutlineMdSerializer:
     ```markdown
     # 城市异象录
 
+    一名普通人在异常世界中逐渐学会主动选择并承担代价。
+
     > 核心主题: 成长与选择
     > 结局走向: 开放式结局
     > 世界前提: 现代都市隐藏着异常世界
@@ -32,16 +34,21 @@ class OutlineMdSerializer:
 
     ## 第一篇：觉醒篇
 
-    > 主题: 从普通人到术师
+    主角意外觉醒异常感知能力，并在第一次危机中选择成为术师。
+
+    > 篇主题: 从普通人到术师
     > 起止章节: ch_001 - ch_020
-    > 摘要: 主角意外觉醒异常感知能力
 
     ### 第一节：初入术界
+
+    主角发现异常、接触术师组织，并完成第一次主动选择。
 
     > 目的: 展示主角的日常生活和意外觉醒
     > 涉及人物: 林岑, 周岚
 
     #### 第一章：平凡的早晨
+
+    主角在上学路上第一次看见异常，并被迫使用刚刚觉醒的能力。
 
     > 预估字数: 6000
     > 情感弧线: 平静 → 惊讶
@@ -103,6 +110,10 @@ class OutlineMdSerializer:
         lines.append(f"# {node.title}")
         lines.append("")
 
+        if node.summary:
+            lines.extend(node.summary.strip().splitlines())
+            lines.append("")
+
         # 元数据（引用格式）
         metadata = []
 
@@ -119,10 +130,6 @@ class OutlineMdSerializer:
 
         if metadata:
             lines.extend(metadata)
-            lines.append("")
-
-        if node.summary:
-            lines.extend(node.summary.strip().splitlines())
             lines.append("")
 
         return lines
@@ -145,19 +152,17 @@ class OutlineMdSerializer:
         lines.append(f"## {node.title}")
         lines.append("")
 
+        if node.summary:
+            lines.extend(node.summary.strip().splitlines())
+            lines.append("")
+
         # 元数据
         metadata = []
 
-        if node.summary:
-            metadata.append(f"> 主题: {node.summary}")
-        if node.arc_theme and node.arc_theme != node.summary:
+        if node.arc_theme:
             metadata.append(f"> 篇主题: {node.arc_theme}")
         if node.word_count_target:
             metadata.append(f"> 目标字数: {node.word_count_target}")
-        if node.arc_structure:
-            metadata.append(f"> 篇弧线: {node.arc_structure}")
-        if node.arc_emotional_arc:
-            metadata.append(f"> 篇情感: {node.arc_emotional_arc}")
 
         # 起止章节
         chapter_range = node.chapter_range
@@ -201,21 +206,15 @@ class OutlineMdSerializer:
         lines.append(f"### {node.title}")
         lines.append("")
 
+        if node.summary:
+            lines.extend(node.summary.splitlines())
+            lines.append("")
+
         # 元数据
         metadata = []
 
         if node.purpose:
             metadata.append(f"> 目的: {node.purpose}")
-        if node.summary:
-            metadata.append(
-                f"> 摘要: {node.summary[:100]}{'...' if len(node.summary) > 100 else ''}"
-            )
-        if node.section_structure:
-            metadata.append(f"> 节结构: {node.section_structure}")
-        if node.section_emotional_arc:
-            metadata.append(f"> 节情感: {node.section_emotional_arc}")
-        if node.section_tension:
-            metadata.append(f"> 节张力: {node.section_tension}")
         if node.involved_characters:
             metadata.append(f"> 涉及人物: {', '.join(node.involved_characters)}")
 
@@ -247,6 +246,10 @@ class OutlineMdSerializer:
         lines.append(f"#### {node.title}")
         lines.append("")
 
+        if node.summary:
+            lines.extend(node.summary.splitlines())
+            lines.append("")
+
         # 元数据
         metadata = []
 
@@ -264,11 +267,6 @@ class OutlineMdSerializer:
 
         if metadata:
             lines.extend(metadata)
-            lines.append("")
-
-        # 摘要
-        if node.summary:
-            lines.append(node.summary)
             lines.append("")
 
         # 节拍

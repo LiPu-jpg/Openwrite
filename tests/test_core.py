@@ -110,8 +110,7 @@ class TestOutlineParser:
 
 ## 第一篇：觉醒篇
 
-> 摘要: 主角觉醒
-> 篇情感弧线: 日常 → 震惊 → 接受
+主角从平静日常遭遇异常，在震惊后接受觉醒事实并主动进入术界。
 
 ### 第一节：初入术界
 
@@ -141,8 +140,7 @@ class TestOutlineParser:
         # 篇纲
         assert len(h.arcs) == 1
         assert h.arcs[0].title == "第一篇：觉醒篇"
-        assert h.arcs[0].summary == "主角觉醒"
-        assert h.arcs[0].arc_emotional_arc == "日常 → 震惊 → 接受"
+        assert h.arcs[0].summary == "主角从平静日常遭遇异常，在震惊后接受觉醒事实并主动进入术界。"
 
         # 节纲
         assert len(h.sections) == 1
@@ -233,13 +231,17 @@ class TestOutlineSerializer:
 
 ## 第一篇
 
-> 摘要: 第一篇摘要
+主角确认异常正在扩散，并决定主动追查源头。
 
 ### 第一节
 
 > 目的: 开篇
 
+主角在平静日常中发现异常，并决定追查线索。
+
 #### 第一章
+
+主角目睹异常显形，并决定先保护现场再追查来源。
 
 > 预估字数: 5000
 > 情感弧线: 平静 → 紧张
@@ -256,9 +258,16 @@ class TestOutlineSerializer:
         assert h2.master.core_theme == h1.master.core_theme
         assert h2.master.summary == h1.master.summary
         assert len(h2.arcs) == len(h1.arcs)
+        assert h2.arcs[0].summary == h1.arcs[0].summary
         assert len(h2.sections) == len(h1.sections)
+        assert h2.sections[0].summary == h1.sections[0].summary
         assert len(h2.chapters) == len(h1.chapters)
+        assert h2.chapters[0].summary == h1.chapters[0].summary
         assert h2.chapters[0].emotional_arc == h1.chapters[0].emotional_arc
+        assert "# 测试小说\n\n这是一个普通人在异常世界里慢慢成长的故事。" in md2
+        assert "## 第一篇\n\n主角确认异常正在扩散，并决定主动追查源头。" in md2
+        assert "### 第一节\n\n主角在平静日常中发现异常，并决定追查线索。" in md2
+        assert "#### 第一章\n\n主角目睹异常显形，并决定先保护现场再追查来源。" in md2
 
 
 # ── ForeshadowingDAGManager ─────────────────────────────────

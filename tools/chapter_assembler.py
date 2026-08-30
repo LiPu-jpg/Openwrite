@@ -752,7 +752,7 @@ class ChapterAssemblerV2:
 
         arc_lines: List[str] = []
         for arc in hierarchy.arcs[:3]:
-            arc_lines.append(f"{arc.title}：{arc.arc_structure or arc.summary}")
+            arc_lines.append(f"{arc.title}：{arc.summary}")
         if arc_lines:
             chunks.append("当前主线推进：" + "；".join(arc_lines))
 
@@ -774,8 +774,6 @@ class ChapterAssemblerV2:
                 [
                     f"篇标题：{arc.title}",
                     f"篇梗概：{arc.summary}",
-                    f"篇弧线：{arc.arc_structure}",
-                    f"篇情感：{arc.arc_emotional_arc}",
                     f"章节推进：{chapter_summaries}",
                 ]
             )
@@ -803,9 +801,6 @@ class ChapterAssemblerV2:
                 [
                     f"节标题：{sec.title}",
                     f"节梗概：{sec.summary}",
-                    f"节结构：{sec.section_structure}",
-                    f"节情感：{sec.section_emotional_arc}",
-                    f"节张力：{sec.section_tension}",
                     f"章节推进：{sec_text}",
                 ]
             )

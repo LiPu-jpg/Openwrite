@@ -272,20 +272,9 @@ class OutlineMdParser:
             node.chapter_range = value
         elif key_lower in ("摘要", "summary"):
             node.summary = value
-        elif key_lower in ("篇弧线", "篇结构", "arc_structure"):
-            node.arc_structure = value
-        elif key_lower in ("篇情感", "篇情感弧线", "arc_emotional_arc"):
-            node.arc_emotional_arc = value
-
         # 节纲字段
         elif key_lower in ("目的", "purpose"):
             node.purpose = value
-        elif key_lower in ("节结构", "节弧线", "section_structure"):
-            node.section_structure = value
-        elif key_lower in ("节情感", "节情感弧线", "section_emotional_arc"):
-            node.section_emotional_arc = value
-        elif key_lower in ("节张力", "张力", "section_tension"):
-            node.section_tension = value
         elif key_lower in ("涉及人物", "出场人物", "出场角色", "characters", "人物", "角色"):
             # 解析中英文逗号/顿号分隔的人物列表
             characters = [c.strip() for c in re.split(r"[，,、]", value) if c.strip()]

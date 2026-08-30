@@ -8,7 +8,7 @@
 注意：
 - 章节摘要 → outline/hierarchy.yaml + compressed/
 - 伏笔列表 → foreshadowing/dag.yaml
-- 情感弧线 → outline hierarchy 的 arc/section_emotional_arc
+- 大纲梗概 → outline hierarchy 的 summary
 - 支线进度 → outline hierarchy
 
 支持状态快照和回滚。

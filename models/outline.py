@@ -24,10 +24,10 @@ class OutlineNode(BaseModel):
     """统一大纲节点 — 通过 node_type 区分层级
 
     设计理念:
-      - 篇(Arc) 承载大弧线: 整卷的起承转合与情感走向
-      - 节(Section) 承载中弧线: 一段剧情的戏剧结构
+      - 总纲(Master)、篇(Arc)、节(Section) 都用普通梗概描述事件推进
+      - 节(Section) 用普通梗概归纳一组章节的主要事件与推进结果
       - 章(Chapter) 是最小写作单元: 只描述"这几千字写什么",
-        以及它在所属节弧线中的位置(dramatic_position)
+        以及本章的戏剧位置(dramatic_position)
     """
 
     node_id: str = Field(..., description="节点 ID")
@@ -46,37 +46,17 @@ class OutlineNode(BaseModel):
     key_turns: List[str] = Field(default_factory=list, description="关键转折点")
     word_count_target: int = Field(default=0, description="目标字数")
 
-    # ── 篇纲 (ARC) 字段 —— 大弧线 ──
-    arc_structure: str = Field(
-        default="",
-        description="本篇起承转合结构，如 '铺垫(ch01-03) → 发展(ch04-07) → 高潮(ch08-09) → 收束(ch10)'"
-    )
-    arc_emotional_arc: str = Field(
-        default="",
-        description="本篇情感走向，如 '平静 → 紧张 → 绝望 → 重燃希望'"
-    )
+    # ── 篇纲 (ARC) 字段 ──
     arc_theme: str = Field(default="", description="本篇主题")
     chapter_range: str = Field(default="", description="篇纲覆盖的章节范围")
 
-    # ── 节纲 (SECTION) 字段 —— 中弧线 ──
+    # ── 节纲 (SECTION) 字段 ──
     purpose: str = Field(default="", description="节目的")
-    section_structure: str = Field(
-        default="",
-        description="本节戏剧结构，如 '起(ch01) → 承(ch02-03) → 转(ch04) → 合(ch05)'"
-    )
-    section_emotional_arc: str = Field(
-        default="",
-        description="本节情感弧线，如 '好奇 → 震惊 → 接受'"
-    )
-    section_tension: str = Field(
-        default="",
-        description="本节张力走向，如 'low → rising → peak → falling'"
-    )
 
     # ── 章纲 (CHAPTER) 字段 —— 最小写作单元 ──
     dramatic_position: str = Field(
         default="",
-        description="本章在所属节弧线中的位置，如 '起'/'承'/'转'/'合'/'过渡'"
+        description="本章的戏剧位置，如 '起'/'承'/'转'/'合'/'过渡'"
     )
     content_focus: str = Field(
         default="",
@@ -187,16 +167,12 @@ class OutlineHierarchy(BaseModel):
     def get_dramatic_context(self, chapter_id: str) -> Dict[str, str]:
         """获取章节的完整戏剧位置上下文
 
-        返回该章在节弧线和篇弧线中的位置信息，
+        返回该章自身的戏剧位置信息，
         供 LLM 理解"这一章应该写出什么感觉"。
 
         Returns:
             {
-                "section_structure": "起(ch01) → 承(ch02-03) → 转(ch04) → 合(ch05)",
-                "section_emotional_arc": "好奇 → 震惊 → 接受",
                 "dramatic_position": "转",
-                "arc_structure": "铺垫 → 发展 → 高潮 → 收束",
-                "arc_emotional_arc": "平静 → 紧张 → 绝望 → 重燃希望",
                 "content_focus": "主角发现真相，内心崩溃",
             }
         """
@@ -208,21 +184,5 @@ class OutlineHierarchy(BaseModel):
                 result["dramatic_position"] = ch.dramatic_position
             if ch.content_focus:
                 result["content_focus"] = ch.content_focus
-
-        section = self.get_parent_section(chapter_id)
-        if section:
-            if section.section_structure:
-                result["section_structure"] = section.section_structure
-            if section.section_emotional_arc:
-                result["section_emotional_arc"] = section.section_emotional_arc
-            if section.section_tension:
-                result["section_tension"] = section.section_tension
-
-        arc = self.get_parent_arc(chapter_id)
-        if arc:
-            if arc.arc_structure:
-                result["arc_structure"] = arc.arc_structure
-            if arc.arc_emotional_arc:
-                result["arc_emotional_arc"] = arc.arc_emotional_arc
 
         return result

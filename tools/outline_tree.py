@@ -52,10 +52,15 @@ def build_outline_structure(
         return _empty_structure()
 
     text = outline_path.read_text(encoding="utf-8")
-    _, body = parse_toml_front_matter(text)
+    metadata, body = parse_toml_front_matter(text)
     drafted = {path.stem for path in (root / "data" / "manuscript").rglob("ch_*.md")}
     targets = normalize_writing_targets(writing_targets) if writing_targets else None
-    roots, flat = _parse_tree(body, drafted, writing_targets=targets)
+    roots, flat = _parse_tree(
+        body,
+        drafted,
+        writing_targets=targets,
+        document_summary=str(metadata.get("summary") or "").strip(),
+    )
     line_offset = text[: len(text) - len(body)].count("\n")
     for node in flat:
         node["line"] += line_offset
@@ -145,7 +150,11 @@ def mutate_outline_structure(
         clean_summary = _validate_summary(summary)
         start = int(target["line"])
         end = _direct_body_end(lines, start)
-        lines[start:end] = _summary_block(clean_summary, has_following=end < len(lines))
+        summary_start, summary_end = _direct_summary_span(lines, start, end)
+        lines[summary_start:summary_end] = _summary_block(
+            clean_summary,
+            has_following=summary_end < len(lines),
+        )
         selection_hint = {
             "kind": target["kind"],
             "title": target["title"],
@@ -231,6 +240,7 @@ def _parse_tree(
     drafted: set[str],
     *,
     writing_targets: dict[str, int] | None = None,
+    document_summary: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     lines = body.splitlines()
     headings: list[dict[str, Any]] = []
@@ -271,7 +281,11 @@ def _parse_tree(
         next_line = headings[position + 1]["line"] - 1 if position + 1 < len(headings) else len(lines)
         body_lines = lines[node["line"] : next_line]
         node["content"] = _body_block(body_lines)
-        node["summary"] = _summarize_block(body_lines)
+        node["summary"] = _summarize_block(
+            body_lines,
+            kind=node["kind"],
+            fallback=document_summary if node["kind"] == "volume" and not roots else "",
+        )
         node["content_units"] = _writing_units(node["content"])
         detail_key = f"outline_{node['kind']}_words"
         node["detail_target_words"] = int((writing_targets or {}).get(detail_key, 0))
@@ -470,6 +484,31 @@ def _direct_body_end(lines: list[str], start: int) -> int:
     return len(lines)
 
 
+def _direct_summary_span(lines: list[str], start: int, end: int) -> tuple[int, int]:
+    """Locate the prose synopsis before structured metadata in a node body."""
+    cursor = start
+    while cursor < end and not lines[cursor].strip():
+        cursor += 1
+    if cursor >= end or _is_structured_outline_line(lines[cursor]):
+        return start, start
+
+    cursor += 1
+    while cursor < end and not _is_structured_outline_line(lines[cursor]):
+        cursor += 1
+    return start, cursor
+
+
+def _is_structured_outline_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith(">") or bool(
+        re.match(
+            r"^\*\*(节拍|悬念|涉及人物|本章目标|beats|hooks)",
+            stripped,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _summary_block(summary: str, *, has_following: bool) -> list[str]:
     if not summary:
         return ["\n"] if has_following else []
@@ -523,19 +562,51 @@ def _kind_label(kind: str) -> str:
     }.get(kind, "项")
 
 
-def _summarize_block(lines: list[str], limit: int = 720) -> str:
+def _summarize_block(
+    lines: list[str],
+    *,
+    kind: str = "",
+    fallback: str = "",
+    limit: int = 720,
+) -> str:
     content: list[str] = []
+    metadata: dict[str, str] = {}
+    in_structured_list = False
     for raw in lines:
         line = raw.strip()
         if not line or line == "---" or line.startswith("<!--"):
             continue
-        line = re.sub(r"^[-*>\d.\s]+", "", line)
+        if line.startswith(">"):
+            cleaned = re.sub(r"^>\s*", "", line)
+            cleaned = re.sub(r"[*_`]", "", cleaned).strip()
+            match = re.match(r"^(.+?)\s*[:：]\s*(.+)$", cleaned)
+            if match:
+                metadata[match.group(1).strip()] = match.group(2).strip()
+            continue
+        if re.match(r"^\*\*(节拍|悬念|涉及人物|本章目标|beats|hooks)", line, re.IGNORECASE):
+            in_structured_list = True
+            continue
+        if in_structured_list and re.match(r"^(?:[-*]|\d+\.)\s+", line):
+            continue
+        in_structured_list = False
+        line = re.sub(r"^[-*\d.\s]+", "", line)
         line = re.sub(r"[*_`]", "", line).strip()
         if line:
             content.append(line)
         if sum(len(item) for item in content) >= limit:
             break
     summary = "\n".join(content).strip()
+    if not summary:
+        fallback_keys = {
+            "volume": ("故事简介", "简介"),
+            "act": ("摘要", "篇梗概", "篇主题", "主题"),
+            "section": ("摘要", "节梗概", "目的"),
+            "chapter": ("摘要", "章梗概", "内容焦点"),
+        }
+        summary = next(
+            (metadata[key] for key in fallback_keys.get(kind, ()) if metadata.get(key)),
+            fallback,
+        )
     return summary[:limit]
 
 

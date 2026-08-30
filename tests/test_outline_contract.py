@@ -12,8 +12,6 @@ from tools.outline_contract import INLINE_ANNOTATION_CONTRACT, OUTLINE_MARKDOWN_
 from tools.outline_parser import OutlineMdParser
 
 REQUIRED_MARKDOWN_FIELDS = (
-    "> 篇弧线:",
-    "> 节结构:",
     "> 戏剧位置:",
     "> 内容焦点:",
     "> 本章目标:",
@@ -86,13 +84,12 @@ def test_markdown_contract_fields_round_trip_through_parser() -> None:
         """# 测试作品
 
 ## 第1篇：开端
-> 篇弧线: 铺垫 -> 高潮
-> 篇情感: 平静 -> 紧张
+
+林岑从异常来客追查到钟楼危机，并在揭开真相后决定继续守护镜雨区。
 
 ### 第1节：入局
-> 节结构: 起(ch_001) -> 合(ch_002)
-> 节情感: 好奇 -> 决意
-> 节张力: low -> peak
+
+林岑在雨夜接待异常来客，循着停摆怀表的线索决定调查钟楼。
 
 #### 第1章：来客
 > 戏剧位置: 起
@@ -110,7 +107,11 @@ def test_markdown_contract_fields_round_trip_through_parser() -> None:
         "demo",
     )
 
+    section = hierarchy.sections[0]
+    arc = hierarchy.arcs[0]
     chapter = hierarchy.chapters[0]
+    assert arc.summary == "林岑从异常来客追查到钟楼危机，并在揭开真相后决定继续守护镜雨区。"
+    assert section.summary == "林岑在雨夜接待异常来客，循着停摆怀表的线索决定调查钟楼。"
     assert chapter.dramatic_position == "起"
     assert chapter.content_focus == "林岑发现异常来客"
     assert chapter.goals == ["建立冲突", "明确选择"]

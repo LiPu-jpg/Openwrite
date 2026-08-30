@@ -93,10 +93,10 @@ class GenerationContext(BaseModel):
     target_words: int = Field(default=6000, description="目标字数")
     emotion_arc: str = Field(default="", description="章内微观情绪变化")
 
-    # 戏剧位置（来自节/篇弧线）
+    # 章节自身的戏剧位置
     dramatic_context: Dict[str, str] = Field(
         default_factory=dict,
-        description="章节在节/篇弧线中的戏剧位置，由 OutlineHierarchy.get_dramatic_context() 生成",
+        description="章节的戏剧位置与内容焦点，由 OutlineHierarchy.get_dramatic_context() 生成",
     )
 
     # 大纲
@@ -255,20 +255,10 @@ class GenerationContext(BaseModel):
         if self.chapter_goals:
             sections["本章目标"] = "\n".join(f"- {g}" for g in self.chapter_goals)
 
-        # 戏剧位置（核心：告诉 LLM 这一章在整体弧线里的角色）
+        # 戏剧位置（核心：告诉 LLM 这一章在当前推进中的角色）
         if self.dramatic_context:
             dc = self.dramatic_context
             parts_dc: List[str] = []
-            if dc.get("arc_structure"):
-                parts_dc.append(f"篇弧线结构: {dc['arc_structure']}")
-            if dc.get("arc_emotional_arc"):
-                parts_dc.append(f"篇情感走向: {dc['arc_emotional_arc']}")
-            if dc.get("section_structure"):
-                parts_dc.append(f"节戏剧结构: {dc['section_structure']}")
-            if dc.get("section_emotional_arc"):
-                parts_dc.append(f"节情感弧线: {dc['section_emotional_arc']}")
-            if dc.get("section_tension"):
-                parts_dc.append(f"节张力走向: {dc['section_tension']}")
             if dc.get("dramatic_position"):
                 parts_dc.append(f"▶ 本章位于: {dc['dramatic_position']}")
             if dc.get("content_focus"):
