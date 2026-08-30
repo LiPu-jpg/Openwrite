@@ -14,7 +14,8 @@ description: Query a smart-import DoG graph after a novel has been split into ch
 2. 依次调用 `dog_validate`、`dog_create`、`dog_run`、`dog_wait`，直到终态。
 3. 用 `dog_status` 查看 `manifest` 和每个 `chapter-ch_*` 节点的 evidence。
 4. 根节点通过后，读取 manifest 的 `construction.nextActions`，再调用 Goethe 的规划和资产工具建立大纲、角色、世界观、进度和正典事件。
-5. 资产/大纲建立完成后重新运行 `novel_review_chapter`，再用 `dog-review-query` 查询 37 维审查。
+5. 资产/大纲建立完成后重新运行 `novel_review_chapter`，再用 `dog-review-query`
+   查询六域评审和 37 个 legacy leaf。
 
 ## 约束
 

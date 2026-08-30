@@ -49,6 +49,7 @@
 | 大纲视图 | 「大纲」原生视图 tab（studio-panel） | ✅ |
 | 人物/世界观资产看板 | 「资产」原生视图 tab + `novel_asset_*` 工具 | ✅ |
 | 审稿报告 | `novel_review_chapter` 自定义工具卡片 + 评审工具 | ✅ |
+| 评审/交付追踪 | 「图谱」中的 Review DAG / Delivery DAG（React Flow + ELK） | ✅ |
 | AI 协作 → 任务中心 | 「任务」原生视图 tab + `novel_tasks_*` / `novel_multi_write` 工具 | ✅ |
 | 连续性（伏笔 DAG / 关系图谱） | 「图谱」原生视图 tab + `novel_continuity` 工具 | ✅ |
 | 资料库（参考作品） | 「资产」tab 资料库分组 + `novel_reference_library_action` 工具 | ✅ |
@@ -56,7 +57,7 @@
 | 高级工具（风格/参考库/规则/迁移等） | `novel_source_action` / `novel_reference_library_action` / `novel_rule_action` 等 | ✅ |
 | 深度研究 | `novel_research_*` 工具 | ✅ |
 | 连续性检查 | `novel_continuity` 工具 | ✅ |
-| 模型与设置 | `novel_model_*` 工具 | ✅ |
+| 模型与设置 | `novel_model_*` 工具 + 「任务」中的框架内模型测试台 | ✅ |
 | 项目搜索 | `novel_search` 工具 | ✅ |
 | 滚动大纲 / 叙事预测 | `novel_rolling_plan_action` / `novel_narrative_forecast_action` | ✅ |
 | 总览仪表盘 + 正文编辑器（Vditor） | 「创作」三栏工作台 + 本地 Vditor + 上下文/审稿/修订检查器 | ✅ |
@@ -93,7 +94,7 @@ TS 插件，`apply(ctx)` 中 `ctx.tools.register(defineTool({...}))` 注册一�
 | `timeoutMs` | `600000` | 单工具超时（写章耗时长） |
 | `outputDir` | 系统临时目录下 `openwrite-exports/` | 导出文件保存目录 |
 
-工具集（62 个，覆盖 Studio 动作面全部端点；按域分组）：
+工具集（63 个，覆盖 Studio 动作面全部端点；按域分组）：
 
 | 域 | 工具 | 端点 |
 |---|---|---|
@@ -109,7 +110,7 @@ TS 插件，`apply(ctx)` 中 `ctx.tools.register(defineTool({...}))` 注册一�
 | 规划面 | `novel_chapter_run_action` / `novel_rolling_plan_action` / `novel_narrative_forecast_action` / `novel_manuscript_edit_action` | POST /api/chapter-runs-v2、/api/rolling-plans、/api/narrative-forecasts、/api/manuscript-editing（action 分发器） |
 | 风格/参考库 | `novel_source_action` / `novel_reference_library_action` / `novel_runtime_skill_action` / `novel_rule_action` | POST /api/source、/api/reference-library、/api/runtime-skills、/api/rules（action 分发器） |
 | 深度研究 | `novel_research_status` / `novel_research_report` / `novel_research_settings_save` | GET /api/research、/api/research/reports/{id}，POST /api/research/settings（跑研究用 novel_task_create type=research） |
-| 模型配置 | `novel_model_profiles` / `novel_model_configure` / `novel_model_test` / `novel_model_embedding_test` / `novel_model_profile_save` / `novel_model_profile_delete` / `novel_model_routes_save` | GET/POST /api/model* |
+| 模型配置与横评 | `novel_model_profiles` / `novel_model_benchmark` / `novel_model_configure` / `novel_model_test` / `novel_model_embedding_test` / `novel_model_profile_save` / `novel_model_profile_delete` / `novel_model_routes_save` | GET/POST /api/model*；GET/POST /api/benchmarks* |
 
 刻意不桥接：`/api/chat` 与 `/api/agent/session*`（agent 层完全归 dsh）、
 `/api/agents`、`/api/agent/activity`（OpenWrite 原生 agent 的运行面）、
@@ -124,6 +125,7 @@ dsh web 的 client 插件，把 Studio 的关键界面原生融入会话 UI（�
   Vditor 静态文件。
 - **Client 半边**：三个 `conversation.view` 工作台——创作（章节树 + 正文编辑器 +
   检查器）、资料（资产/大纲/图谱/研究/搜索内部导航）、任务（后台任务/研究/导入导出）。
+  图谱内含可筛选、折叠和展开 37 项的评审 DAG 与六阶段交付 DAG；任务区含隔离模型测试台。
   单一 `NovelWorkbenchStore` 集中缓存并每 1.5 秒轮询轻量 revision，revision 变化才刷新资源，
   每 15 秒兜底全量同步；会话头、composer context、
   八类工具卡和 Turn 写操作汇总复用同一状态。
@@ -168,7 +170,7 @@ novel-reviewer、oh-story-long-write/deslop/review、truth-validation、workflow
 ### 6. Python 编排器 conductor（`conductor/`，已落地）
 
 uv 环境 + `deepseek-harness-sdk`（自带单文件 Node 运行时，macOS arm64 有 wheel）。
-无人值守流水线：按大纲连续写章 → 37 维评审 → 低于阈值/含 blocker 自动回炉。
+无人值守流水线：按大纲连续写章 → 六域累加评审 → 低质量分、低覆盖率或含 blocker 自动回炉。
 
 架构要点（v2，实测迭代后的稳定形态）：
 
@@ -187,16 +189,28 @@ uv 环境 + `deepseek-harness-sdk`（自带单文件 Node 运行时，macOS arm6
   （cordis.yml 为最小组合；无需自定义插件载体——生产 exe 编译期内置插件集，
   自定义闭包需重建 deploy root，收益不抵成本，刻意不做）。
 
-### 6.1 37 维审查进入 dsh-dog 查询图
+### 6.1 六域评审进入分层 dsh-dog 查询图
 
-`dsh-dog` 是审查结果的查询/验收层，不重复调用 OpenWrite 的 37 维审查模型：
+OpenWrite review v2 使用六个质量域（权重合计 100）与一个不计分硬门禁。六域内保留
+原 37 个编号作为 `legacy_check_ids`，每个编号恰好归属一次；27 仅属于硬门禁。
+
+质量分从 0 累加，只有带正文证据的 `evaluated` criterion 可以得分。问题不参与扣分，
+`critical` 只改变 `gate_status`。`not_applicable` 排除出分母；`inconclusive` 不降低
+`quality_score`，但降低 `coverage`。因此执行、质量、覆盖、门禁和交付分别由
+`execution_status`、`quality_score`、`coverage`、`gate_status`、`delivery_status` 表达。
+
+`dsh-dog` 只读取并验证 materialized artifact，不调用 OpenWrite 的评审模型：
 
 ```text
 OpenWrite chapter_review
         │
         ▼
 data/novels/{id}/data/dog/reviews/{chapter}/
-  review.json       # 总体分数、门禁结果、完整维度聚合
+  review.json       # v2 质量分、覆盖率、门禁、交付状态与六域聚合
+  context.json
+  domain-*.json
+  gate.json
+  aggregate.json
   dim_01.json ... dim_37.json
   dog-graph.json    # schemaVersion 0.9
         │
@@ -204,13 +218,10 @@ data/novels/{id}/data/dog/reviews/{chapter}/
 dog_create → dog_run → dog_status / dog_wait
 ```
 
-`conductor/dog_review.py` 把每个维度映射为一个 DoG leaf：维度文件中的
-`critical`/`blocker` 问题为 `fail`，未被本次部分审查选中的维度为
-`inconclusive`，没有硬问题的维度为 `pass`。根 composite 保留一个
-agentic whole-object assertion，只检查 37 维报告的聚合一致性，不重新阅读正文。
-缺少合法维度编号的问题保存在 manifest 的 `unmappedIssues`，仍参与总体门禁且不丢证据。
-因此 37 个维度可单独查询、带证据、按内容 digest 继承；原有的
-`review_gate` 和修订回炉仍是写作流水线的权威门禁。
+评审图固定为 47 个节点：root、上下文完整性、六个域 composite、硬门禁、确定性聚合，
+以及 37 个 legacy leaves。所有节点使用 `review-record` 程序 verifier；不存在 agentic
+复核节点。六域节点汇总 criterion、evidence、issue、模型与 token/耗时，37 个 leaf
+保留细粒度查询和历史兼容。缺少合法编号的问题仍进入门禁且不丢证据。
 
 交互式 `novel_review_chapter` 和 conductor 会立即生成该快照；后台
 `chapter_review` 任务则在 `novel_task_get` 读取完成态时幂等物化同一格式，保证
@@ -232,7 +243,7 @@ leaf 检查章节数量与 target 是否一致；根节点保留 agentic 聚合�
 大纲/资产/正典索引”进入同一个可查询结果，但不让 DoG 直接写入 OpenWrite。
 
 安装脚本会把 `scripts/dog/*.js` 复制到 DoG 的
-`~/.dsh/dog/scripts/`（37 维审查 verifier 与拆书导入 verifier）。dsh-dog 的 agentic run 必须在常驻 web/tui 会话中执行，
+`~/.dsh/dog/scripts/`（评审、交付与拆书导入 verifier）。拆书导入仍可使用其独立的 agentic run，
 不放入 `smart_import.py` 的 headless 子流程。安装脚本在启用 dsh-dog 时会自动
 写入 `~/.dsh/settings.yaml` 的 `dog.workspaceRoot`（也可用
 `DSH_DOG_WORKSPACE_ROOT=/path/to/novel` 覆盖）。由于 graph 的 target 是相对于
@@ -251,17 +262,20 @@ dog:
 ```text
 data/novels/{id}/data/dog/deliveries/{chapter}/
   delivery.json
+  writing.json
   review.json
   revision.json
+  application.json
+  rereview.json
   closure.json
   dog-graph.json
 
-manuscript → review → revision → closure
+writing → review → revision → application → rereview → closure
 ```
 
 交付图直接读取 OpenWrite 的 canonical manuscript、review 和 revision 文件。当前正文
 SHA 必须与 review 的 `source_revision` 一致；应用修订会令旧评审 `stale`，此时
-`revision=applied_requires_rereview`、`closure=rereview_required`，不会因提案已经
+`application=applied`、`rereview=required`、`closure=rereview_required`，不会因提案已经
 `applied` 就误判成功。只有修订后复评通过，`closure=closed` 且
 `readyForDelivery=true`。
 
@@ -269,19 +283,48 @@ SHA 必须与 review 的 `source_revision` 一致；应用修订会令旧评审 
 `chapter_write` / `chapter_review` / `revision_from_review` 任务也返回 `dog_delivery`。
 DoG 仍只负责验收与取证，不生成提案、不应用修订、不重新评审正文。
 
-实测记录（~/my_novel）：ch_001~005 全流程跑通；ch_003 经修订回炉 0 分 → 35 分
-（blocker 人设矛盾被精准修复）。上游问题（OpenWrite 仓库，未动）：ch_004 评审系统性
-输出截断——模型无视单维度契约产出跨维度大 JSON 直至 finish=length，单维批无法再二分；
-且 chapter_pipeline.execute_review_chapter 兜底异常丢弃 exc.code，任务里只记到通用
-OPERATION_FAILED 而非 MODEL_OUTPUT_TRUNCATED（可观测性缺陷）。
+### 6.4 只读图 API 与框架内模型测试
+
+Studio 提供 `GET /api/dog/graphs?chapter=ch_NNN`，只读取 review/delivery graph、manifest
+和节点 record。缺失或损坏 record 以空/缺失数据返回，不触发 verifier 或模型。
+
+模型横评使用 `POST /api/benchmarks` 创建 `model_benchmark` 后台任务，使用
+`GET /api/benchmarks` 和 `GET /api/benchmarks/{run_id}` 查询。一次运行冻结同一
+`novel_context_preview` packet 和 SHA-256，经 OpenWrite model profile、run-scoped
+profile activation 与 LiteLLM-compatible gateway 调用多个写作/独立评审模型。
+`execution_mode=framework` 是默认模式：每个候选与重复轮次拥有独立的完整小说工作区，
+通过公共 `execute_write_chapter` 和 `execute_review_chapter` 入口运行生产上下文装配、写章、
+状态结算、记忆/工作流/Chapter Run V2、正文提交与评审。`execution_mode=creative` 仅保留为
+显式裸写诊断模式，不代表框架内表现。两种模式均不修改全局 routes；framework 的正文
+只提交到候选沙箱，不覆盖正典正文。artifact 隔离写入：
+
+```text
+data/novels/{id}/data/benchmarks/bench_*.json
+```
+
+framework 工作区位于
+`data/novels/{id}/data/benchmarks/{run_id}/workspaces/{candidate_id}/project/`，复制时排除源
+作品已有的 `data/benchmarks`，避免递归嵌套。artifact 记录执行模式、公共入口、工作区、
+Chapter Run V2、profile/实际响应 model、上下文 hash、prompt/rubric version、字数、finish
+reason、token/reasoning token、延迟、成本和错误。provider 失败属于 reliability failure，
+不产生伪造的低质量分；失败候选也保留 Run V2 阶段、失败阶段和安全错误码。只有生产
+`commit` 完成的候选才在同一沙箱中进入 `execute_review_chapter`；序列化前移除所有
+credential。
+
+usage 契约将 OpenRouter `usage.cost` 和 LiteLLM `response_cost` 归一为
+`cost_usd`，并用 `cost_reported` 区分明确 `$0` 与未知费用。artifact summary 分别汇总
+输入、输出、推理 token、已报告费用小计及费用覆盖数。UI 的 `/ 1M tokens` 为按单次真实
+总费用和总 token 计算的综合有效价，不代表 provider 目录的独立输入/输出单价；旧 artifact
+缺少费用来源字段时显示 `—`。
 
 ## 目录结构
 ```
 dsh-novel/
 ├── DESIGN.md                  # 本文档
 ├── README.md                  # 使用说明
-├── packages/openwrite-bridge/ # TS 桥接插件：62 个 novel_* 工具
-├── packages/studio-panel/     # dsh web 原生工作台（3 tab + 8 类工具卡）
+├── GOAL.md                    # 跨仓库目标、状态、凭据引用和验证日志
+├── packages/openwrite-bridge/ # TS 桥接插件：63 个 novel_* 工具
+├── packages/studio-panel/     # dsh web 原生工作台（3 tab、双 DAG、模型测试台）
 ├── presets/goethe/            # Goethe 规划 agent 预设（含自带 skills/）
 ├── presets/dante/             # Dante 写作 agent 预设（含自带 skills/）
 ├── scripts/install.sh, dev.sh, verify.sh, e2e-web.py
@@ -290,12 +333,12 @@ dsh-novel/
 
 ## 验证计划
 
-1. 桥接层：`curl` 直连 Studio 端点冒烟（无需 LLM）。
-2. 插件层：`dsh --profile web --dump-config` 确认插件行加载；headless 跑一次
-   `novel_status` 工具调用（需 DEEPSEEK_API_KEY，已具备）。
-3. 端到端：dsh web 中以 dante 预设对 `~/my_novel` 完成
-   "看状态 → 预览上下文 → 写一章 → 评审"（遵守 OpenWrite AGENTS.md：
-   手动/实机 QA 只用 `~/my_novel`）。
+1. 契约层：OpenWrite pytest 覆盖评分、HTTP、benchmark 隔离和 golden fixtures；
+   `npm run test:dog` 覆盖 Python/TypeScript 图一致性、无环和 stale review。
+2. 插件层：bridge build + smoke 验证 63 个工具、benchmark list/get/run、proxy、任务压缩，
+   再用 `dsh --profile web --dump-config` 确认插件加载。
+3. 端到端：只对 `~/my_novel` 启动 Studio 与 dsh，用 Playwright 验证桌面/移动双 DAG、
+   37 项展开、blocker 过滤、详情和模型测试任务；同时检查画布非空、节点不重叠和文字不溢出。
 
 ## 风险与边界
 
@@ -303,4 +346,9 @@ dsh-novel/
   插件只依赖 `ctx.tools`/`defineTool` 稳定面。
 - 写章耗时可达数分钟：bridge 的 `timeoutMs` 与 dsh 工具超时策略都要放宽。
 - OpenWrite 写操作有修订门控与项目写锁；bridge 不做任何绕过，全部走 HTTP 动作面。
-- 不在 OpenWrite 仓库内做任何改动；本仓库自包含，仅通过 HTTP 契约耦合。
+- 评审 v2 需要 OpenWrite 与本仓库协同改动；边界仍由版本化 HTTP/artifact 契约隔离，
+  Python/TypeScript parity 测试防止两侧漂移。
+- 最终质量阈值尚需 10–20 章真实人工标注校准；合成 golden fixtures 只验证契约，不能
+  代替人工判断或据此直接启用生产门禁。当前 Review v2 明确记录
+  `threshold_calibration.status=uncalibrated` 与
+  `production_gate_status=disabled_uncalibrated`；未校准时程序拒绝开启生产门禁。

@@ -9,7 +9,7 @@
   维护人物/设定/大纲/伏笔资产，所有写入走"暂存 diff → 用户确认 → 应用"的门控流程；
   资产成熟后提示用户切换到 Dante。
 - `dante/`（Dante 写作，order 20）：正文创作 Agent。基于已确认资产执行
-  预检（`novel_context_preview`）→ 写章（`novel_write_chapter`）→ 37 维评审
+  预检（`novel_context_preview`）→ 写章（`novel_write_chapter`）→ 六域累加评审
   （`novel_review_chapter`）→ 状态结算；资产不齐时退回 Goethe 补齐。
   另挂载 `subagent_goethe` 委派工具（`dsh-tool-subagent`，spawn provider，
   persona 为只读规划顾问，toolFilter 仅放行只读 novel 工具），

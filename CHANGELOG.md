@@ -11,10 +11,37 @@
 
 ## 未发布
 
+- 评审体系升级为 review v2：原 37 项恰好映射到六个计分域和一个硬门禁，使用有正文
+  证据才得分的累加机制；`quality_score`、`coverage`、`gate_status`、
+  `delivery_status` 分离，issue 不再直接扣分，severity 与 `revision_priority` 独立。
+- 评审 DoG 改为 47 节点分层图（上下文、六域、门禁、确定性聚合、37 个 legacy leaf），
+  全部使用程序 verifier；交付图扩为
+  `writing → review → revision → application → rereview → closure` 六阶段。
+- 「图谱」新增 React Flow + ELK 的评审/交付 DAG，可选章节、筛选异常/blocker、折叠六域、
+  展开 37 项并查看 score/coverage/evidence/issue/provenance；Studio 新增只读
+  `GET /api/dog/graphs`，不会运行 verifier 或模型。
+- 新增框架内模型测试台与第 63 个工具 `novel_model_benchmark`：通过 OpenWrite profile
+  和 LiteLLM-compatible gateway 固定上下文 hash，隔离运行多写作模型 × 独立评审模型，
+  artifact 写入 `data/novels/{id}/data/benchmarks/`，不修改全局路由或正式正文。
+- 模型测试默认进入 OpenWrite 公共生产写章与评审管线；每个候选/重复轮次使用完整作品
+  沙箱并保留 Chapter Run V2、记忆、工作流与提交证据。裸 `_creative_write` 路径仅作为
+  显式 `creative` 诊断模式。
+- 框架内候选失败现在也保留公共入口、Run V2 ID、阶段状态、失败阶段与安全错误码；未完成
+  `commit` 的可靠性失败不会进入评审或获得质量分，旧 artifact 在 UI 中仍按执行模式显示
+  正确入口。
+- 模型测试统一归一 OpenRouter/OpenAI-compatible/LiteLLM 的 token 与实际费用，汇总输入、
+  输出、推理用量和费用覆盖率；明确免费的 `$0` 与未知费用分开显示，并提供本次调用的综合
+  有效价 `/ 1M tokens`，不冒充模型目录单价。
+- 审稿卡和任务列表优先显示 v2 质量分、覆盖率、门禁/交付状态，并分别展示
+  `critical/warning/info` 评审严重度与 `blocker/high/medium/low` 修订优先级。
+- 新增 DAG/benchmark HTTP 生命周期测试、bridge tool/proxy smoke、Python/TypeScript
+  parity/无环/stale 测试，以及优质/当前/故障三类合成 golden fixtures 与 v1/v2 双轨校准。
+
 - dsh-dog 进一步融合：同步评审、conductor 与后台 `chapter_review` 任务统一物化
-  37 维查询图；修正维度参数为 OpenWrite 要求的 `1..37` 整数数组并加入阈值校验。
+  分层评审查询图（保留 `1..37` legacy leaf）；修正维度参数为 OpenWrite 要求的
+  `1..37` 整数数组并加入阈值校验。
 - 新增章节交付总图：以正文 SHA、评审 `source_revision`、修订提案状态和复评结果
-  串联 `manuscript → review → revision → closure`；应用修订后强制进入待复评，
+  串联 `writing → review → revision → application → rereview → closure`；应用修订后强制进入待复评，
   只有当前正文复评通过才标记 `readyForDelivery`。同步工具、后台任务和 conductor
   均会刷新交付快照，并新增 `dog-delivery-query` 技能。
 - 修复智能导入的 DOCX/EPUB 二进制文件被提前文本解码、空任务项目无法解析

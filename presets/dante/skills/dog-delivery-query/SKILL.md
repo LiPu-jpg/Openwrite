@@ -9,8 +9,8 @@ description: Query a chapter delivery DoG graph across manuscript, review, revis
 
 `data/novels/{id}/data/dog/deliveries/{chapter}/dog-graph.json`
 
-这张图查询四个阶段：正文已成形、当前正文已评审、修订动作已结算、问题经复评关闭。
-它不替代 OpenWrite 的写章、37 维评审或修订服务。
+这张图查询六个阶段：`writing → review → revision → application → rereview → closure`。
+它不替代 OpenWrite 的写章、六域累加评审或修订服务。
 
 ## 查询流程
 
@@ -28,7 +28,7 @@ description: Query a chapter delivery DoG graph across manuscript, review, revis
 - `closure.review_failed`：当前正文已评审但未通过门禁，进入修订闭环。
 - `revision.proposal_pending`：提案已生成，等待作者确认应用或驳回。
 - `revision.applied_requires_rereview`：修订已写入正文，但不能视为问题已解决。
-- `closure.rereview_required`：必须对修订后的正文重新跑 37 维评审。
+- `closure.rereview_required`：必须对修订后的正文重新跑六域评审。
 - `closure.closed`：当前正文的最新评审通过，可以交付。
 
 ## 约束

@@ -1,6 +1,9 @@
 node_modules/
 lib/
 dist/
+.env
+.env.*
+!.env.example
 !packages/studio-panel/vendor/vditor/dist/
 !packages/studio-panel/vendor/vditor/dist/**
 .venv/
