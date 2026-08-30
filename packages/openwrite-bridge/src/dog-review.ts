@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type { JsonValue } from './client.js'
+import { validateReviewV2Decision } from './contracts-generated.js'
 
 type RecordValue = Record<string, unknown>
 
@@ -145,6 +146,9 @@ export function buildDogReviewBundle(reviewValue: unknown, chapterId: string, th
     if (versionProbe['schema_version'] !== 'openwrite.review.v2') {
       throw new Error(`unsupported review_v2 schema version: ${String(versionProbe['schema_version'])}`)
     }
+    // Full schema-derived contract check (generated from
+    // OpenWrite contracts/review-v2-decision.schema.json).
+    validateReviewV2Decision(rawV2)
   }
   const selected = selectedDimensions(review)
   const grouped = new Map<number, RecordValue[]>()

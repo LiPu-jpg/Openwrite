@@ -186,6 +186,7 @@ class DogArtifactTests(unittest.TestCase):
                 "schema_version": "openwrite.review.v2",
                 "execution_status": "partial", "quality_score": 84, "coverage": 0.9,
                 "gate_status": "blocked", "delivery_status": "blocked",
+                "production_gate_status": "disabled_uncalibrated",
                 "requested_dimensions": list(range(1, 38)),
                 "domains": [{
                     "id": "character", "status": "evaluated", "earned": 12, "max": 15,

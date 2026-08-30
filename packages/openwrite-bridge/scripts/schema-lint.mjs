@@ -18,6 +18,7 @@ const TYPES = {
 function typeOk(value, name) {
   if (name === 'array') return Array.isArray(value)
   if (name === 'null') return value === null
+  if (name === 'object') return value !== null && typeof value === 'object' && !Array.isArray(value)
   if (name === 'integer') return Number.isInteger(value) && typeof value !== 'boolean'
   if (name === 'number') return typeof value === 'number' && !Number.isNaN(value)
   return typeof value === TYPES[name]

@@ -34,7 +34,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 try:
-    from tools.canonical_contracts import validate_review_v2
+    from tools.contracts_generated import validate_review_v2
 except ImportError:  # pragma: no cover - direct script keeps its local imports
     validate_review_v2 = None
 

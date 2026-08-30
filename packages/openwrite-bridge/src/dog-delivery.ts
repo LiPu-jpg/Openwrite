@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import type { JsonValue } from './client.js'
+import { validateReviewV2Decision } from './contracts-generated.js'
 
 type RecordValue = Record<string, unknown>
 
@@ -158,6 +159,9 @@ export async function materializeChapterDelivery(
     if (versionProbe['schema_version'] !== 'openwrite.review.v2') {
       throw new Error(`unsupported review_v2 schema version: ${String(versionProbe['schema_version'])}`)
     }
+    // Full schema-derived contract check (generated from
+    // OpenWrite contracts/review-v2-decision.schema.json).
+    validateReviewV2Decision(rawV2)
   }
   const reviewSourceRevision = String(review['source_revision'] ?? '')
   const reviewStale = Boolean(review['stale'])
