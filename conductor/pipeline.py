@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""dsh-novel conductor：按大纲连续写章 → 37 维评审 → 低于阈值回炉。
+"""dsh-novel conductor：按大纲连续写章 → 六域累加评审 → 未达交付门槛则回炉。
 
 架构（对齐 DESIGN.md 的职责划分，v2 起全部长操作走 OpenWrite 后台任务系统）：
 
@@ -33,6 +33,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+try:
+    from tools.canonical_contracts import validate_review_v2
+except ImportError:  # pragma: no cover - direct script keeps its local imports
+    validate_review_v2 = None
+
 
 try:
     from .dog_delivery import write_delivery_artifacts_from_studio
@@ -45,7 +50,7 @@ DEFAULT_STUDIO = os.environ.get("OPENWRITE_STUDIO", "http://127.0.0.1:4567")
 WRITE_HEADER = "X-OpenWrite-Studio"
 HTTP_TIMEOUT = 30.0
 POLL_SECONDS = 10.0
-# 评审按维度分批调模型，截断时服务端二分重试，最坏可达小时级：预算放宽到 90 分钟。
+# 评审按六域与硬门禁并行，截断时服务端自适应拆分，最坏可达小时级：预算放宽到 90 分钟。
 TASK_BUDGET = {"chapter_write": 2400.0, "chapter_review": 5400.0,
                "revision_from_review": 2400.0}
 REGENERATE_TIMEOUT = 2400.0  # regenerate 是同步模型操作
@@ -284,15 +289,29 @@ def anchored_ids(candidates: list[dict], content: str) -> list[str]:
     return ids
 
 
+def canonical_review_decision(review: dict) -> dict:
+    """Read OpenWrite's decision; never reproduce score/issue gate rules."""
+    value = review.get("review_v2")
+    if not isinstance(value, dict):
+        raise StudioError(0, "REVIEW_V2_REQUIRED", "OpenWrite 未返回 canonical review-v2 决策")
+    required = {
+        "schema_version", "execution_status", "quality_score", "coverage",
+        "gate_status", "delivery_status", "production_gate_status",
+    }
+    missing = sorted(required - value.keys())
+    if missing:
+        raise StudioError(0, "INVALID_REVIEW_V2", f"review-v2 缺少字段: {', '.join(missing)}")
+    if validate_review_v2 is not None:
+        try:
+            validate_review_v2(value)
+        except ValueError as exc:
+            raise StudioError(0, "INVALID_REVIEW_V2", str(exc)) from exc
+    return value
 def review_gate(review: dict, threshold: int) -> bool:
-    score = int(review.get("score") or 0)
-    # OpenWrite's reviewer contract makes critical issues hard failures;
-    # blocker is retained for normalized reports from older integrations.
-    has_hard_issue = any(
-        isinstance(i, dict) and str(i.get("severity") or "").lower() in {"critical", "blocker"}
-        for i in review.get("issue_details") or []
-    )
-    return score >= threshold and not has_hard_issue
+    """Compatibility name; the result is solely OpenWrite's delivery status."""
+    del threshold
+    decision = canonical_review_decision(review)
+    return decision.get("delivery_status") == "pass"
 
 
 def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -> dict:
@@ -365,7 +384,8 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
             print("    修订已应用，复评中…", flush=True)
 
         review = studio.review(chapter_id)
-        passed = review_gate(review, args.threshold)
+        decision = canonical_review_decision(review)
+        passed = decision.get("delivery_status") == "pass"
         try:
             dog_artifacts = write_review_artifacts(studio, chapter_id, review, args.threshold)
             dog_manifest = str(dog_artifacts["manifest"])
@@ -377,10 +397,23 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
             # pretending the DoG graph exists.
             print(f"    DoG 快照写入失败（不影响本轮评审）: {exc}", flush=True)
         refresh_delivery()
-        attempts.append({"score": review.get("score"), "passed": passed, "review": review})
-        print(f"    评分 {review.get('score')}（阈值 {args.threshold}）→ "
-              f"{'通过' if passed else '未达标'}", flush=True)
-        final = {"score": review.get("score"), "passed": passed}
+        attempts.append({
+            "quality_score": decision.get("quality_score"),
+            "coverage": decision.get("coverage"),
+            "gate_status": decision.get("gate_status"),
+            "delivery_status": decision.get("delivery_status"),
+            "production_gate_status": decision.get("production_gate_status"),
+            "execution_status": decision.get("execution_status"),
+            "passed": passed,
+            "review": review,
+        })
+        print(
+            f"    质量 {decision.get('quality_score')} / 覆盖率 {decision.get('coverage')} "
+            f"/ 硬门 {decision.get('gate_status')} / 交付 {decision.get('delivery_status')} "
+            f"→ {'通过' if passed else '未达标'}",
+            flush=True,
+        )
+        final = {**decision, "passed": passed, "score": decision.get("quality_score")}
         if passed:
             break
 
@@ -388,7 +421,14 @@ def run_chapter(studio: Studio, chapter: str | None, args, session_root: Path) -
         "chapter": chapter_id,
         "title": str(rec.get("title") or ""),
         "words": words,
-        "score": final.get("score"),
+        "quality_score": final.get("quality_score"),
+        "coverage": final.get("coverage"),
+        "gate_status": final.get("gate_status"),
+        "delivery_status": final.get("delivery_status"),
+        "production_gate_status": final.get("production_gate_status"),
+        "execution_status": final.get("execution_status"),
+        # v1 compatibility output; no v2 decision reads these aliases.
+        "score": final.get("quality_score"),
         "passed": final.get("passed"),
         "attempts": len(attempts),
         "seconds": round(time.monotonic() - started, 1),
