@@ -34,7 +34,7 @@ def _type_ok(value: Any, name: str) -> bool:
     if not isinstance(value, expected):
         return False
     # bool is a subclass of int; keep number/integer checks strict.
-    if name == "integer" and isinstance(value, bool):
+    if name in ("integer", "number") and isinstance(value, bool):
         return False
     return True
 

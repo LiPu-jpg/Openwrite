@@ -1479,7 +1479,7 @@ class StudioApplication:
         return self.workspace()
 
     def model_profiles(self) -> dict[str, Any]:
-        from tools.canonical_contracts import validate_model_profile_surface
+        from tools.contracts_generated import validate_model_profile_surface
 
         try:
             surface = self._model_profile_store.surface(self._project_model_routes())
@@ -2137,7 +2137,7 @@ class StudioApplication:
             return manifest
 
         def graph_payload(kind: str) -> dict[str, Any] | None:
-            from tools import canonical_contracts
+            from tools import contracts_generated
 
             if not selected:
                 return None
@@ -2151,14 +2151,14 @@ class StudioApplication:
                 manifest = versioned(
                     manifest,
                     schema_version="dsh-novel.review.manifest.v2",
-                    validator=canonical_contracts.validate_review_manifest_v2,
+                    validator=contracts_generated.validate_review_manifest_v2,
                     label="review manifest",
                 )
             else:
                 manifest = versioned(
                     manifest,
                     schema_version="dsh-novel.delivery.manifest.v2",
-                    validator=canonical_contracts.validate_delivery_v2,
+                    validator=contracts_generated.validate_delivery_v2,
                     label="delivery manifest",
                 )
             if graph is not None:
@@ -2941,7 +2941,7 @@ class StudioApplication:
                     f"不支持的评审 v2 版本: {review_v2.get('schema_version')!r}",
                     code="CONTRACT_INVALID",
                 )
-            from tools.canonical_contracts import validate_review_v2
+            from tools.contracts_generated import validate_review_v2
 
             try:
                 validate_review_v2(review_v2)
@@ -3119,7 +3119,7 @@ class StudioApplication:
                 f"不支持的 benchmark 产物版本: {result.get('schema_version')!r}",
                 code="CONTRACT_INVALID",
             )
-        from tools.canonical_contracts import validate_benchmark_v1
+        from tools.contracts_generated import validate_benchmark_v1
 
         try:
             validate_benchmark_v1(result)

@@ -131,7 +131,7 @@ def canonical_review_decision(
             "source_revision": str(review.get("source_revision") or ""),
             "current_source_revision": str(current_source_revision or ""),
         }
-    from tools.canonical_contracts import validate_review_v2
+    from tools.contracts_generated import validate_review_v2
 
     decision = validate_review_v2(review["review_v2"])
     source_revision = str(review.get("source_revision") or "")
