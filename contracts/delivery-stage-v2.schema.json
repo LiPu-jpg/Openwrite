@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openwrite.dev/schemas/delivery-stage-v2.schema.json",
+  "title": "dsh-novel delivery stage v2",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "recordType",
+    "chapterId",
+    "stage",
+    "verdict",
+    "status",
+    "evidence"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {"const": "dsh-novel.delivery.stage.v2"},
+    "recordType": {"const": "delivery-stage"},
+    "chapterId": {"type": "string", "pattern": "^ch_\\d+$"},
+    "stage": {"type": "string", "minLength": 1},
+    "verdict": {"enum": ["pass", "fail", "inconclusive"]},
+    "status": {"type": "string", "minLength": 1},
+    "evidence": {"type": "object"}
+  }
+}

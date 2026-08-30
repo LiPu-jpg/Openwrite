@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openwrite.dev/schemas/model-benchmark-v1.schema.json",
+  "title": "OpenWrite model benchmark v1 artifact",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "status",
+    "context_hash",
+    "config",
+    "candidates",
+    "evaluations"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {"const": "openwrite.model-benchmark.v1"},
+    "run_id": {"type": "string", "pattern": "^bench_[A-Za-z0-9_-]+$"},
+    "status": {"enum": ["completed", "partial", "failed"]},
+    "context_hash": {"type": "string", "minLength": 1},
+    "candidates": {"type": "array"},
+    "evaluations": {"type": "array"},
+    "config": {
+      "type": "object",
+      "required": ["writer_profile_ids", "reviewer_profile_ids"],
+      "additionalProperties": true,
+      "properties": {
+        "writer_profile_ids": {"type": "array", "items": {"type": "string"}},
+        "reviewer_profile_ids": {"type": "array", "items": {"type": "string"}},
+        "repeats": {"type": "integer", "minimum": 1, "maximum": 5},
+        "target_words": {"type": "integer", "minimum": 200, "maximum": 12000},
+        "concurrency": {"type": "integer", "minimum": 1, "maximum": 4},
+        "blind_review": {"type": "boolean"},
+        "run_scoped_profiles": {"type": "boolean"},
+        "execution_mode": {"enum": ["framework", "creative"]}
+      }
+    }
+  }
+}

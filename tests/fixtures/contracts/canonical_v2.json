@@ -1,0 +1,44 @@
+{
+  "review": {
+    "schema_version": "openwrite.review.v2",
+    "execution_status": "completed",
+    "quality_score": 82.5,
+    "coverage": 1.0,
+    "gate_status": "pass",
+    "delivery_status": "pass",
+    "production_gate_status": "disabled_uncalibrated"
+  },
+  "delivery": {
+    "schemaVersion": "dsh-novel.delivery.manifest.v2",
+    "recordType": "chapter-delivery",
+    "chapterId": "ch_001",
+    "stages": {
+      "writing": {
+        "schemaVersion": "dsh-novel.delivery.stage.v2",
+        "recordType": "delivery-stage",
+        "chapterId": "ch_001",
+        "stage": "writing",
+        "verdict": "pass",
+        "status": "committed",
+        "evidence": {}
+      }
+    }
+  },
+  "model_profile": {
+    "default_profile_id": "writer",
+    "schema_version": "openwrite.model-profile.v1",
+    "profiles": [
+      {"id": "writer", "label": "Writer", "provider": "openai", "model": "provider/model-id", "configured": false}
+    ],
+    "routes": {"chapter_write": "writer"}
+  },
+  "benchmark": {
+    "schema_version": "openwrite.model-benchmark.v1",
+    "run_id": "bench_fixture",
+    "status": "completed",
+    "context_hash": "sha256:fixture",
+    "config": {"writer_profile_ids": ["writer"], "reviewer_profile_ids": ["reviewer"]},
+    "candidates": [],
+    "evaluations": []
+  }
+}

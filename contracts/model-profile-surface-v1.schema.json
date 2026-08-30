@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openwrite.dev/schemas/model-profile-surface-v1.schema.json",
+  "title": "OpenWrite model profile surface v1 (credential-free)",
+  "type": "object",
+  "required": ["schema_version", "profiles", "routes", "default_profile_id"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {"const": "openwrite.model-profile.v1"},
+    "default_profile_id": {"type": "string", "minLength": 1},
+    "legacy_mapped": {"type": "boolean"},
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "provider", "model", "configured"],
+        "additionalProperties": true,
+        "disallowed": ["api_key", "embedding_api_key", "secret"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "label": {"type": "string", "minLength": 1},
+          "provider": {"type": "string", "minLength": 1},
+          "model": {"type": "string", "minLength": 1},
+          "configured": {"type": "boolean"},
+          "embedding_configured": {"type": "boolean"},
+          "credential_updated_at": {"type": "string"}
+        }
+      }
+    },
+    "routes": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    }
+  }
+}
