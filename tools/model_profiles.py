@@ -9,6 +9,7 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -50,13 +51,16 @@ PROFILE_FIELDS = (
     "max_output_tokens",
     "temperature",
     "timeout_seconds",
+    "thinking_modes",
     "credential_ref",
+    "credential_updated_at",
     "embedding_provider",
     "embedding_base_url",
     "embedding_model",
     "embedding_dimension",
     "embedding_max_tokens",
     "embedding_credential_ref",
+    "embedding_credential_updated_at",
     "search_mode",
 )
 
@@ -95,9 +99,7 @@ class ModelProfileStore:
                 "version": PROFILE_VERSION,
                 "default_profile_id": str(payload.get("default_profile_id") or "default"),
                 "profiles": [
-                    self._profile_metadata(item)
-                    for item in profiles
-                    if isinstance(item, dict)
+                    self._profile_metadata(item) for item in profiles if isinstance(item, dict)
                 ]
                 if isinstance(profiles, list)
                 else [],
@@ -119,19 +121,13 @@ class ModelProfileStore:
             "id": "default",
             "label": "默认模型",
             "provider": str(legacy.get("provider") or os.environ.get("LLM_PROVIDER") or "openai"),
-            "base_url": str(
-                legacy.get("base_url") or os.environ.get("LLM_BASE_URL") or ""
-            ),
-            "model": str(
-                legacy.get("model") or os.environ.get("LLM_MODEL") or "gpt-4o-mini"
-            ),
+            "base_url": str(legacy.get("base_url") or os.environ.get("LLM_BASE_URL") or ""),
+            "model": str(legacy.get("model") or os.environ.get("LLM_MODEL") or "gpt-4o-mini"),
             "api_format": str(
                 legacy.get("api_format") or os.environ.get("LLM_API_FORMAT") or "chat"
             ),
             "context_tokens": int(
-                legacy.get("context_tokens")
-                or os.environ.get("OPENWRITE_CONTEXT_TOKENS")
-                or 64000
+                legacy.get("context_tokens") or os.environ.get("OPENWRITE_CONTEXT_TOKENS") or 64000
             ),
             "max_output_tokens": int(
                 legacy.get("max_tokens") or os.environ.get("LLM_MAX_TOKENS") or 24000
@@ -201,6 +197,7 @@ class ModelProfileStore:
         for key in ROUTE_KEYS:
             routes.setdefault(key, default_id)
         return {
+            "schema_version": "openwrite.model-profile.v1",
             "profiles": profiles,
             "presets": model_preset_catalog(),
             "routes": routes,
@@ -219,21 +216,25 @@ class ModelProfileStore:
         payload = self.load()
         metadata = self._profile_metadata(profile)
         profile_id = metadata["id"]
+        existing = next(
+            (item for item in payload["profiles"] if item["id"] == profile_id),
+            {},
+        )
+        metadata.pop("credential_updated_at", None)
+        metadata.pop("embedding_credential_updated_at", None)
         credential_ref = str(metadata.get("credential_ref") or f"key_{profile_id}")
         metadata["credential_ref"] = credential_ref
         embedding_credential_ref = str(
             metadata.get("embedding_credential_ref") or f"embedding_key_{profile_id}"
         )
         metadata["embedding_credential_ref"] = embedding_credential_ref
-        profiles = [item for item in payload["profiles"] if item["id"] != profile_id]
-        profiles.append(metadata)
-        payload["profiles"] = sorted(profiles, key=lambda item: item["id"])
-        if str(payload.get("default_profile_id") or "") not in {
-            item["id"] for item in profiles
-        }:
-            payload["default_profile_id"] = profile_id
         secret = str(api_key or "").strip()
+        if existing.get("credential_ref") == credential_ref and existing.get(
+            "credential_updated_at"
+        ):
+            metadata["credential_updated_at"] = existing["credential_updated_at"]
         if secret:
+            metadata["credential_updated_at"] = self._utc_timestamp()
             self._session_credentials[credential_ref] = secret
             credentials = self._credentials()
             if remember_api_key:
@@ -246,8 +247,16 @@ class ModelProfileStore:
             credentials = self._credentials()
             credentials.pop(credential_ref, None)
             self._write_json(self.credentials_path, credentials)
+            metadata.pop("credential_updated_at", None)
         embedding_secret = str(embedding_api_key or "").strip()
+        if existing.get("embedding_credential_ref") == embedding_credential_ref and existing.get(
+            "embedding_credential_updated_at"
+        ):
+            metadata["embedding_credential_updated_at"] = existing[
+                "embedding_credential_updated_at"
+            ]
         if embedding_secret:
+            metadata["embedding_credential_updated_at"] = self._utc_timestamp()
             self._session_credentials[embedding_credential_ref] = embedding_secret
             credentials = self._credentials()
             if remember_api_key:
@@ -260,6 +269,12 @@ class ModelProfileStore:
             credentials = self._credentials()
             credentials.pop(embedding_credential_ref, None)
             self._write_json(self.credentials_path, credentials)
+            metadata.pop("embedding_credential_updated_at", None)
+        profiles = [item for item in payload["profiles"] if item["id"] != profile_id]
+        profiles.append(metadata)
+        payload["profiles"] = sorted(profiles, key=lambda item: item["id"])
+        if str(payload.get("default_profile_id") or "") not in {item["id"] for item in profiles}:
+            payload["default_profile_id"] = profile_id
         self._write_payload(payload)
         return metadata
 
@@ -285,11 +300,7 @@ class ModelProfileStore:
             str(api_key or "").strip()
             or self._session_credentials.get(credential_ref, "")
             or self._credentials().get(credential_ref, "")
-            or (
-                os.environ.get("LLM_API_KEY", "").strip()
-                if metadata["id"] == "default"
-                else ""
-            )
+            or (os.environ.get("LLM_API_KEY", "").strip() if metadata["id"] == "default" else "")
         )
         if not secret:
             raise ModelProfileError(
@@ -358,8 +369,7 @@ class ModelProfileStore:
                     code="MODEL_PROFILE_IN_USE",
                 )
             routes = {
-                key: fallback_id if value == profile_id else value
-                for key, value in routes.items()
+                key: fallback_id if value == profile_id else value for key, value in routes.items()
             }
         removed = next(item for item in payload["profiles"] if item["id"] == profile_id)
         payload["profiles"] = [item for item in payload["profiles"] if item["id"] != profile_id]
@@ -367,9 +377,7 @@ class ModelProfileStore:
             payload["default_profile_id"] = fallback_id or (
                 payload["profiles"][0]["id"] if payload["profiles"] else "default"
             )
-        payload["routes"] = {
-            key: value for key, value in routes.items() if key in ROUTE_KEYS
-        }
+        payload["routes"] = {key: value for key, value in routes.items() if key in ROUTE_KEYS}
         credential_ref = str(removed.get("credential_ref") or "")
         self._session_credentials.pop(credential_ref, None)
         embedding_credential_ref = str(removed.get("embedding_credential_ref") or "")
@@ -436,6 +444,34 @@ class ModelProfileStore:
             "embedding_api_key": embedding_api_key,
             "operation": operation,
         }
+
+    def resolve_profile(self, profile_id: str, *, operation: str) -> dict[str, Any]:
+        """Resolve one named profile for a run-scoped operation without changing routes."""
+        if operation not in ROUTE_KEYS:
+            raise ModelProfileError("模型任务路由无效", code="INVALID_MODEL_ROUTE")
+        clean_id = str(profile_id or "").strip()
+        surface = self.surface()
+        profile = next(
+            (item for item in surface["profiles"] if item["id"] == clean_id),
+            None,
+        )
+        if profile is None:
+            raise ModelProfileError(
+                f"模型档案不存在: {clean_id}",
+                code="MODEL_PROFILE_NOT_FOUND",
+            )
+        credential_ref = str(profile.get("credential_ref") or "")
+        api_key = (
+            self._session_credentials.get(credential_ref)
+            or self._credentials().get(credential_ref)
+            or (os.environ.get("LLM_API_KEY", "").strip() if profile["id"] == "default" else "")
+        )
+        if not api_key:
+            raise ModelProfileError(
+                f"模型档案 {profile['label']} 缺少 API Key",
+                code="MODEL_CREDENTIAL_MISSING",
+            )
+        return {**profile, "api_key": api_key, "operation": operation}
 
     @staticmethod
     def _profile_metadata(value: dict[str, Any]) -> dict[str, Any]:
@@ -544,7 +580,19 @@ class ModelProfileStore:
         search_mode = str(value.get("search_mode") or "vector").strip().lower()
         if search_mode not in {"vector", "graph"}:
             raise ModelProfileError("检索策略无效", code="INVALID_MODEL_PROFILE")
-        return {
+        raw_thinking_modes = value.get("thinking_modes")
+        if raw_thinking_modes is None:
+            thinking_modes: dict[str, str] = {}
+        elif isinstance(raw_thinking_modes, dict):
+            thinking_modes = {
+                str(operation): str(mode).strip().lower()
+                for operation, mode in raw_thinking_modes.items()
+                if str(operation) in {"chapter_write", "review", "revision"}
+                and str(mode).strip().lower() in {"enabled", "disabled", "omit"}
+            }
+        else:
+            raise ModelProfileError("thinking_modes 必须是对象", code="INVALID_MODEL_PROFILE")
+        metadata = {
             "id": profile_id,
             "label": str(value.get("label") or profile_id).strip()[:80],
             "provider": provider,
@@ -555,6 +603,7 @@ class ModelProfileStore:
             "max_output_tokens": max_output_tokens,
             "temperature": temperature,
             "timeout_seconds": timeout_seconds,
+            "thinking_modes": thinking_modes,
             "credential_ref": str(value.get("credential_ref") or f"key_{profile_id}"),
             "embedding_provider": embedding_provider,
             "embedding_base_url": embedding_base_url,
@@ -566,6 +615,28 @@ class ModelProfileStore:
             ),
             "search_mode": search_mode,
         }
+        for field in ("credential_updated_at", "embedding_credential_updated_at"):
+            timestamp = ModelProfileStore._normalized_timestamp(value.get(field))
+            if timestamp:
+                metadata[field] = timestamp
+        return metadata
+
+    @staticmethod
+    def _utc_timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    @staticmethod
+    def _normalized_timestamp(value: Any) -> str:
+        timestamp = str(value or "").strip()
+        if not timestamp or len(timestamp) > 40 or not timestamp.endswith("Z"):
+            return ""
+        try:
+            parsed = datetime.fromisoformat(timestamp[:-1] + "+00:00")
+        except ValueError:
+            return ""
+        if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+            return ""
+        return timestamp
 
     @staticmethod
     def _bounded_number(
@@ -592,9 +663,7 @@ class ModelProfileStore:
         if not isinstance(value, dict):
             return {}
         return {
-            key: str(value[key]).strip()
-            for key in ROUTE_KEYS
-            if str(value.get(key) or "").strip()
+            key: str(value[key]).strip() for key in ROUTE_KEYS if str(value.get(key) or "").strip()
         }
 
     def _write_payload(self, payload: dict[str, Any]) -> None:
@@ -610,11 +679,7 @@ class ModelProfileStore:
 
     def _credentials(self) -> dict[str, str]:
         payload = self._read_json(self.credentials_path)
-        return {
-            str(key): str(value)
-            for key, value in payload.items()
-            if str(key) and str(value)
-        }
+        return {str(key): str(value) for key, value in payload.items() if str(key) and str(value)}
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any]:
@@ -651,9 +716,7 @@ def activate_model_profile(
     search_profile: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     token = _ACTIVE_PROFILE.set(dict(profile))
-    search_token = _ACTIVE_SEARCH_PROFILE.set(
-        dict(search_profile) if search_profile else None
-    )
+    search_token = _ACTIVE_SEARCH_PROFILE.set(dict(search_profile) if search_profile else None)
     try:
         yield profile
     finally:

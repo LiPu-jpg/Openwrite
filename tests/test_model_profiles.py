@@ -81,6 +81,47 @@ def test_three_named_profiles_route_independently_and_keep_credentials_private(t
     assert "review-secret" not in surface_text
 
 
+def test_named_profile_override_does_not_mutate_routes(tmp_path: Path):
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("writer-a", "writer-a-model"), api_key="a-secret")
+    store.save_profile(profile("writer-b", "writer-b-model"), api_key="b-secret")
+    store.save_routes({"chapter_write": "writer-a"})
+
+    before = store.load()["routes"]
+    resolved = store.resolve_profile("writer-b", operation="chapter_write")
+
+    assert resolved["id"] == "writer-b"
+    assert resolved["api_key"] == "b-secret"
+    assert store.load()["routes"] == before
+
+
+def test_profile_persists_task_scoped_thinking_modes(tmp_path: Path):
+    store = ModelProfileStore(tmp_path)
+    candidate = {
+        **profile("critic", "deepseek-v4-flash"),
+        "thinking_modes": {
+            "review": "disabled",
+            "revision": "disabled",
+            "chapter_write": "omit",
+            "unknown": "enabled",
+        },
+    }
+
+    saved = store.save_profile(candidate, api_key="secret")
+    store.save_routes({"review": "critic"})
+
+    assert saved["thinking_modes"] == {
+        "review": "disabled",
+        "revision": "disabled",
+        "chapter_write": "omit",
+    }
+    resolved = store.resolve("review")
+    assert resolved["thinking_modes"]["review"] == "disabled"
+    with activate_model_profile(resolved):
+        config = LLMConfig.from_env()
+    assert config.extra["thinking_modes"]["review"] == "disabled"
+
+
 def test_search_profile_keeps_embedding_credentials_private(tmp_path: Path):
     store = ModelProfileStore(tmp_path)
     search_profile = {
@@ -177,6 +218,97 @@ def test_disabling_credential_persistence_clears_an_existing_key(
 
     assert store.surface()["profiles"][0]["configured"] is False
     assert store.credentials_path.read_text(encoding="utf-8").strip() == "{}"
+
+
+def test_credential_update_timestamps_are_server_managed_and_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store = ModelProfileStore(tmp_path)
+    first_timestamp = "2026-08-25T08:00:00Z"
+    second_timestamp = "2026-08-25T09:30:00Z"
+    monkeypatch.setattr(
+        ModelProfileStore,
+        "_utc_timestamp",
+        staticmethod(lambda: first_timestamp),
+    )
+
+    saved = store.save_profile(
+        {
+            **profile("prose", "writer"),
+            "credential_updated_at": "2099-01-01T00:00:00Z",
+            "embedding_credential_updated_at": "2099-01-01T00:00:00Z",
+        },
+        api_key="test-chat-credential-a",
+        embedding_api_key="test-embedding-credential-a",
+    )
+
+    assert saved["credential_updated_at"] == first_timestamp
+    assert saved["embedding_credential_updated_at"] == first_timestamp
+
+    metadata_only = store.save_profile({**profile("prose", "writer"), "label": "Updated label"})
+    assert metadata_only["credential_updated_at"] == first_timestamp
+    assert metadata_only["embedding_credential_updated_at"] == first_timestamp
+
+    monkeypatch.setattr(
+        ModelProfileStore,
+        "_utc_timestamp",
+        staticmethod(lambda: second_timestamp),
+    )
+    rotated = store.save_profile(profile("prose", "writer"), api_key="test-chat-credential-b")
+    assert rotated["credential_updated_at"] == second_timestamp
+    assert rotated["embedding_credential_updated_at"] == first_timestamp
+
+    surface_text = json.dumps(store.surface(), ensure_ascii=False)
+    profile_text = store.profiles_path.read_text(encoding="utf-8")
+    assert second_timestamp in surface_text
+    assert "test-chat-credential-a" not in surface_text
+    assert "test-chat-credential-b" not in surface_text
+    assert "test-embedding-credential-a" not in surface_text
+    assert "test-chat-credential-a" not in profile_text
+    assert "test-chat-credential-b" not in profile_text
+    assert "test-embedding-credential-a" not in profile_text
+
+
+def test_clearing_credentials_clears_update_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.setattr(
+        ModelProfileStore,
+        "_utc_timestamp",
+        staticmethod(lambda: "2026-08-25T08:00:00Z"),
+    )
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(
+        profile("prose", "writer"),
+        api_key="test-chat-credential",
+        embedding_api_key="test-embedding-credential",
+    )
+
+    cleared = store.save_profile(profile("prose", "writer"), remember_api_key=False)
+    surface_profile = next(item for item in store.surface()["profiles"] if item["id"] == "prose")
+
+    assert "credential_updated_at" not in cleared
+    assert "embedding_credential_updated_at" not in cleared
+    assert "credential_updated_at" not in surface_profile
+    assert "embedding_credential_updated_at" not in surface_profile
+    assert surface_profile["configured"] is False
+    assert surface_profile["embedding_key_configured"] is False
+
+
+def test_existing_credential_without_timestamp_does_not_invent_one(tmp_path: Path):
+    store = ModelProfileStore(tmp_path)
+    saved = store.save_profile(profile("prose", "writer"))
+    store._write_json(
+        store.credentials_path,
+        {saved["credential_ref"]: "pre-upgrade-test-credential"},
+    )
+
+    surface_profile = store.surface()["profiles"][0]
+
+    assert surface_profile["configured"] is True
+    assert "credential_updated_at" not in surface_profile
 
 
 def test_delete_profile_in_use_requires_and_applies_fallback(tmp_path: Path):

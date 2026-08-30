@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import os
 import time
 from collections.abc import Callable
@@ -40,7 +41,7 @@ def _value(value: Any, key: str, default: Any = None) -> Any:
     return getattr(value, key, default)
 
 
-def _plain_usage(usage: Any) -> dict[str, Any]:
+def _plain_usage(usage: Any, *, response: Any = None) -> dict[str, Any]:
     """Convert SDK usage models into YAML/JSON-safe, OpenAI-shaped data."""
 
     def convert(value: Any) -> Any:
@@ -59,8 +60,8 @@ def _plain_usage(usage: Any) -> dict[str, Any]:
         return str(value)
 
     if usage is None:
-        return {}
-    if isinstance(usage, dict):
+        raw = {}
+    elif isinstance(usage, dict):
         raw = usage
     else:
         model_dump = getattr(usage, "model_dump", None)
@@ -73,10 +74,17 @@ def _plain_usage(usage: Any) -> dict[str, Any]:
             try:
                 raw = dict(usage)
             except (TypeError, ValueError):
-                return {}
+                raw = {}
     converted = convert(raw)
     if not isinstance(converted, dict):
-        return {}
+        converted = {}
+
+    hidden = convert(_value(response, "_hidden_params", {}))
+    hidden = hidden if isinstance(hidden, dict) else {}
+    if "response_cost" not in converted and "response_cost" in hidden:
+        converted["response_cost"] = hidden["response_cost"]
+    if "response_cost_details" not in converted and "response_cost_details" in hidden:
+        converted["response_cost_details"] = hidden["response_cost_details"]
 
     prompt = converted.get("prompt_tokens", converted.get("input_tokens", 0))
     completion = converted.get(
@@ -88,6 +96,32 @@ def _plain_usage(usage: Any) -> dict[str, Any]:
         converted["completion_tokens"] = completion
     if "total_tokens" not in converted and (prompt or completion):
         converted["total_tokens"] = int(prompt or 0) + int(completion or 0)
+    if "completion_tokens_details" not in converted and isinstance(
+        converted.get("output_tokens_details"), dict
+    ):
+        converted["completion_tokens_details"] = converted["output_tokens_details"]
+
+    explicit_reported = converted.get("cost_reported")
+    cost: float | None = None
+    # Preserve provider truth first: OpenRouter usage.cost, LiteLLM
+    # response_cost, then our normalized compatibility alias.
+    for key in ("cost", "response_cost", "cost_usd"):
+        if key not in converted:
+            continue
+        try:
+            candidate = float(converted[key])
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(candidate) and candidate >= 0:
+            cost = candidate
+            break
+    if cost is not None:
+        converted["cost_usd"] = cost
+    converted["cost_reported"] = (
+        explicit_reported
+        if isinstance(explicit_reported, bool)
+        else cost is not None
+    )
     return converted
 
 
@@ -204,6 +238,7 @@ class LLMConfig:
                 api_format=_api_format(profile.get("api_format")),
                 timeout_seconds=float(profile.get("timeout_seconds") or 120),
                 max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
+                extra={"thinking_modes": dict(profile.get("thinking_modes") or {})},
             )
         return cls(
             provider=_provider_name(os.getenv("LLM_PROVIDER", "openai")),
@@ -289,13 +324,14 @@ class LLMClient:
         max_tokens: int | None = None,
         stream: bool = False,
         on_progress: OnStreamProgress = None,
+        operation: str = "",
     ) -> LLMResponse:
         """Send one provider-neutral chat request."""
         temp = temperature if temperature is not None else self.config.temperature
         maxt = max_tokens if max_tokens is not None else self.config.max_tokens
         if self.config.api_format == "responses":
-            return self._chat_responses(messages, temp, maxt, stream, on_progress)
-        return self._chat_completion(messages, temp, maxt, stream, on_progress)
+            return self._chat_responses(messages, temp, maxt, stream, on_progress, operation)
+        return self._chat_completion(messages, temp, maxt, stream, on_progress, operation)
 
     def chat_with_tools(
         self,
@@ -330,6 +366,7 @@ class LLMClient:
         max_tokens: int,
         stream: bool,
         on_progress: OnStreamProgress,
+        operation: str = "",
     ) -> LLMResponse:
         prepared = self._prepare_messages(messages, max_tokens=max_tokens)
         params = self._completion_params(
@@ -337,6 +374,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             stream=stream,
+            operation=operation,
         )
         response = self._call(self._completion, params)
         if stream:
@@ -346,7 +384,7 @@ class LLMClient:
         message = _value(choice, "message", {})
         return LLMResponse(
             content=_content_text(_value(message, "content", "")),
-            usage=_plain_usage(_value(response, "usage")),
+            usage=_plain_usage(_value(response, "usage"), response=response),
             model=str(_value(response, "model", self.config.model) or self.config.model),
             provider=self.config.provider,
             finish_reason=str(_value(choice, "finish_reason", "") or ""),
@@ -386,7 +424,7 @@ class LLMClient:
         return ToolCallResponse(
             content=content,
             tool_calls=tool_calls,
-            usage=_plain_usage(_value(response, "usage")),
+            usage=_plain_usage(_value(response, "usage"), response=response),
             model=str(_value(response, "model", self.config.model) or self.config.model),
             provider=self.config.provider,
             finish_reason=finish_reason,
@@ -399,10 +437,13 @@ class LLMClient:
         max_tokens: int,
         stream: bool,
         on_progress: OnStreamProgress,
+        operation: str = "",
     ) -> LLMResponse:
         responses = getattr(self._backend, "responses", None)
         if not callable(responses):
-            return self._chat_completion(messages, temperature, max_tokens, stream, on_progress)
+            return self._chat_completion(
+                messages, temperature, max_tokens, stream, on_progress, operation
+            )
 
         prepared = self._prepare_messages(messages, max_tokens=max_tokens)
         params = self._base_params()
@@ -414,7 +455,7 @@ class LLMClient:
                 "stream": stream,
             }
         )
-        params.update(self.config.extra)
+        params.update(self._request_extra(operation))
         response = self._call(responses, params)
         if stream:
             return self._stream_response(response, on_progress)
@@ -424,7 +465,7 @@ class LLMClient:
             output_text = self._responses_output_text(_value(response, "output", []) or [])
         return LLMResponse(
             content=output_text,
-            usage=_plain_usage(_value(response, "usage")),
+            usage=_plain_usage(_value(response, "usage"), response=response),
             model=str(_value(response, "model", self.config.model) or self.config.model),
             provider=self.config.provider,
             finish_reason=str(_value(response, "status", "") or ""),
@@ -450,6 +491,7 @@ class LLMClient:
         max_tokens: int,
         stream: bool,
         tools: list[dict[str, Any]] | None = None,
+        operation: str = "",
     ) -> dict[str, Any]:
         params = self._base_params()
         params.update(
@@ -462,22 +504,22 @@ class LLMClient:
         )
         if tools:
             params["tools"] = tools
-        # DeepSeek 推理模型的思维链会挤占 max_tokens 导致 content 截断/为空
-        # （finish=length 而 reasoning_content 巨大）。结构化输出场景（JSON 审计、
-        # 批量修订）默认关闭 thinking；调用方仍可通过 config.extra 显式覆盖。
-        extra = dict(self.config.extra.get("extra_body") or {}) if isinstance(
-            self.config.extra, dict
-        ) else {}
-        if "thinking" not in extra:
-            # DeepSeek 推理模型的思维链会挤占 max_tokens 导致 content 截断/为空
-            # （finish=length 而 reasoning_content 巨大）。结构化输出场景（JSON 审计、
-            # 批量修订）默认关闭 thinking；调用方仍可通过 config.extra 显式覆盖。
-            extra["thinking"] = {"type": "disabled"}
-        if extra:
-            existing_extra_body = dict(params.get("extra_body") or {})
-            existing_extra_body.update(extra)
-            params["extra_body"] = existing_extra_body
+        params.update(self._request_extra(operation))
         return params
+
+    def _request_extra(self, operation: str) -> dict[str, Any]:
+        """Return provider extras scoped to one operation without leaking config metadata."""
+        if not isinstance(self.config.extra, dict):
+            return {}
+        extra = copy.deepcopy(self.config.extra)
+        modes = extra.pop("thinking_modes", {})
+        extra_body = dict(extra.pop("extra_body", {}) or {})
+        mode = str(modes.get(operation) or "omit").lower() if isinstance(modes, dict) else "omit"
+        if "thinking" not in extra_body and mode in {"enabled", "disabled"}:
+            extra_body["thinking"] = {"type": mode}
+        if extra_body:
+            extra["extra_body"] = extra_body
+        return extra
 
     def _call(self, operation: Callable[..., Any], params: dict[str, Any]) -> Any:
         try:
@@ -845,8 +887,8 @@ class LLMClient:
                                 chinese_chars=chinese_chars,
                             )
                         )
-                event_usage = _plain_usage(_value(event, "usage"))
-                if event_usage:
+                event_usage = _plain_usage(_value(event, "usage"), response=event)
+                if any(key != "cost_reported" for key in event_usage):
                     usage = event_usage
                 response_model = str(
                     _value(event, "model", response_model) or response_model

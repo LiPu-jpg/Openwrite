@@ -67,17 +67,89 @@ def test_usage_models_are_converted_to_serializable_plain_data():
         "completion_tokens": 5,
         "total_tokens": 16,
         "prompt_tokens_details": {"cached_tokens": 7, "audio_tokens": None},
+        "cost_reported": False,
     }
 
 
 def test_responses_usage_is_normalized_to_shared_token_names():
-    assert _plain_usage({"input_tokens": 8, "output_tokens": 3}) == {
+    assert _plain_usage(
+        {
+            "input_tokens": 8,
+            "output_tokens": 3,
+            "output_tokens_details": {"reasoning_tokens": 2},
+        }
+    ) == {
         "input_tokens": 8,
         "output_tokens": 3,
+        "output_tokens_details": {"reasoning_tokens": 2},
         "prompt_tokens": 8,
         "completion_tokens": 3,
         "total_tokens": 11,
+        "completion_tokens_details": {"reasoning_tokens": 2},
+        "cost_reported": False,
     }
+
+
+@pytest.mark.parametrize("cost", [0, 0.00012345])
+def test_openrouter_usage_cost_is_canonicalized_without_losing_raw_cost(cost: float):
+    usage = _plain_usage(
+        {
+            "prompt_tokens": 8,
+            "completion_tokens": 3,
+            "total_tokens": 11,
+            "cost": cost,
+            "cost_details": {"upstream_inference_cost": cost},
+        }
+    )
+
+    assert usage["cost"] == cost
+    assert usage["cost_usd"] == cost
+    assert usage["cost_reported"] is True
+    assert usage["cost_details"] == {"upstream_inference_cost": cost}
+
+
+def test_litellm_hidden_response_cost_is_merged_into_chat_usage():
+    backend = FakeLiteLLM()
+
+    def completion(**kwargs):
+        backend.completion_calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="完成", reasoning_content=""),
+                    finish_reason="stop",
+                )
+            ],
+            usage={"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+            model="openrouter/model",
+            _hidden_params={
+                "response_cost": 0.0000042,
+                "response_cost_details": {"prompt_cost": 0.000003},
+                "api_key": "must-not-be-copied",
+            },
+        )
+
+    backend.completion = completion
+    response = LLMClient(LLMConfig(model="openrouter/model"), client=backend).chat(
+        [Message("user", "继续")]
+    )
+
+    assert response.usage["response_cost"] == 0.0000042
+    assert response.usage["cost_usd"] == 0.0000042
+    assert response.usage["cost_reported"] is True
+    assert response.usage["response_cost_details"] == {"prompt_cost": 0.000003}
+    assert "api_key" not in response.usage
+def test_provider_cost_wins_over_stale_normalized_alias():
+    usage = _plain_usage({
+        "prompt_tokens": 1,
+        "completion_tokens": 1,
+        "cost": 0,
+        "response_cost": 0.25,
+        "cost_usd": 9.99,
+    })
+
+    assert usage["cost_usd"] == 0
+    assert usage["cost_reported"] is True
 
 
 def test_llm_config_normalizes_full_chat_completions_endpoint():
@@ -303,6 +375,32 @@ def test_real_litellm_backend_accepts_openwrite_request_shape_without_network():
 
     assert response.content == "LiteLLM mock ok"
     assert response.provider == "openai"
+
+
+def test_thinking_is_scoped_to_the_configured_operation():
+    backend = FakeLiteLLM()
+    client = LLMClient(
+        LLMConfig(
+            model="deepseek-v4-flash",
+            extra={"thinking_modes": {"review": "disabled", "chapter_write": "omit"}},
+        ),
+        client=backend,
+    )
+
+    client.chat([Message("user", "正文")], operation="chapter_write")
+    client.chat([Message("user", "审稿")], operation="review")
+
+    assert "extra_body" not in backend.completion_calls[0]
+    assert backend.completion_calls[1]["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_unconfigured_thinking_is_not_sent_to_provider():
+    backend = FakeLiteLLM()
+    client = LLMClient(LLMConfig(model="gpt-4o-mini"), client=backend)
+
+    client.chat([Message("user", "普通请求")], operation="review")
+
+    assert "extra_body" not in backend.completion_calls[0]
 
 
 def test_request_context_is_trimmed_at_the_proportional_tier():
