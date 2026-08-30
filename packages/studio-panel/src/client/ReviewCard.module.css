@@ -52,8 +52,9 @@
 
 .verdictRow {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 16px;
+  gap: 8px 16px;
   margin-bottom: 8px;
 }
 
@@ -73,6 +74,11 @@
 .score {
   font-size: 14px;
   color: var(--dsw-alias-label-primary);
+}
+
+.metric {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .issueCount {
@@ -119,14 +125,29 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-.severity[data-severity='blocker'] {
+.severity[data-severity='critical'] {
   color: var(--dsw-alias-state-error-primary);
   border-color: var(--dsw-alias-state-error-secondary);
 }
 
-.severity[data-severity='high'] {
+.severity[data-severity='warning'] {
   color: var(--dsw-alias-state-warn-label);
   border-color: var(--dsw-alias-state-warn-tertiary);
+}
+
+.severity[data-severity='info'] {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.priority {
+  flex: none;
+  font-size: 10px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.priority[data-priority='blocker'],
+.priority[data-priority='high'] {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .dimension {

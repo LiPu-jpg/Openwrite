@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { Download, ExternalLink, FileUp, FlaskConical, ListTodo, RefreshCw } from 'lucide-react'
+import { Download, ExternalLink, FileUp, FlaskConical, Gauge, ListTodo, RefreshCw, Cpu } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { API_PROXY_BASE, type StudioApiInjected } from './api.ts'
 import { ResearchView } from './ResearchView.tsx'
+import { BenchmarkView } from './BenchmarkView.tsx'
+import { ModelView } from './ModelView.tsx'
 import { TasksView } from './TasksView.tsx'
 import { useWorkbench, workbenchStore } from './WorkbenchStore.ts'
 import css from './Workbench.module.css'
 
-type OperationsMode = 'tasks' | 'research' | 'transfer'
+type OperationsMode = 'tasks' | 'benchmark' | 'models' | 'research' | 'transfer'
 type ExportFormat = 'md' | 'txt' | 'epub'
 
 interface ImportPlan {
@@ -29,6 +31,8 @@ export function OperationsView(props: OperationsViewProps) {
   const workbench = useWorkbench()
   const items = [
     { id: 'tasks' as const, icon: ListTodo, label: props.t('view.tasks') },
+    { id: 'benchmark' as const, icon: Gauge, label: props.t('view.benchmark') },
+    { id: 'models' as const, icon: Cpu, label: props.t('view.models') },
     { id: 'research' as const, icon: FlaskConical, label: props.t('view.research') },
     { id: 'transfer' as const, icon: FileUp, label: props.t('operations.transfer') },
   ]
@@ -41,6 +45,8 @@ export function OperationsView(props: OperationsViewProps) {
     </nav>
     <section className={css.workspaceContent}>
       {mode === 'tasks' && <TasksView key={workbench.epochs.tasks} {...props} />}
+      {mode === 'benchmark' && <BenchmarkView key={workbench.epochs.benchmark} {...props} />}
+      {mode === 'models' && <ModelView key={workbench.epochs.models} {...props} />}
       {mode === 'research' && <ResearchView key={workbench.epochs.research} {...props} />}
       {mode === 'transfer' && <TransferPanel {...props} />}
     </section>
@@ -260,4 +266,3 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
     </a>
   </div>
 }
-

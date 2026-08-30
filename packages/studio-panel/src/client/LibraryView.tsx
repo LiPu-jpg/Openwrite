@@ -36,7 +36,7 @@ export function LibraryView(props: LibraryViewProps) {
       <section className={css.workspaceContent}>
         {mode === 'assets' && <AssetsView key={workbench.epochs.assets} {...props} />}
         {mode === 'outline' && <OutlineView key={workbench.epochs.outline} {...props} />}
-        {mode === 'graph' && <GraphView key={workbench.epochs.workspace} {...props} />}
+        {mode === 'graph' && <GraphView key={workbench.epochs.graph} {...props} />}
         {mode === 'research' && <ResearchView key={workbench.epochs.research} {...props} />}
         {mode === 'search' && <SearchView key={workbench.epochs.workspace} {...props} />}
       </section>

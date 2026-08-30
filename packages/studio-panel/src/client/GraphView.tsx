@@ -1,8 +1,7 @@
 /**
- * Graph view (图谱): OpenWrite continuity data as native SVG — the
+ * Graph view (图谱): OpenWrite continuity data as SVG and React Flow — the
  * foreshadowing board (layered by 主线/支线/彩蛋, ordered by target chapter)
- * and the character/world relationship graph (deterministic circular layout).
- * No graph library: both layouts are small deterministic computations.
+ * and the interactive character/world relationship graph (circular seed layout).
  * Read-only.
  *
  * Wire shape (verified against OpenWrite tools/novel_service.py continuity()
@@ -36,15 +35,31 @@
  * }
  *
  * Sections (toolbar chips): 伏笔 (board + DAG validation errors), 关系图
- * (kind-filtered circle), 事实账本 (the three truth documents), 工作流
+ * (kind-filtered interactive canvas), 事实账本 (the three truth documents), 工作流
  * (per-chapter pipeline stages). All read-only.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
+import { useWorkbench } from './WorkbenchStore.ts'
+import ELK from 'elkjs/lib/elk.bundled.js'
+import { ReviewDagView } from './DagCanvas.tsx'
+import {
+  Background,
+  BackgroundVariant,
+  Controls,
+  MarkerType,
+  ReactFlow,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type Node,
+  type ReactFlowInstance,
+} from '@xyflow/react'
+import 'dsh-react-flow-style'
 import css from './views.module.css'
 
 interface ForeshadowNode {
@@ -63,13 +78,14 @@ interface ForeshadowEdge {
   to: string
   type: string
 }
-
 interface RelationNode {
   id: string
   label: string
   kind: string
   type: string
   status: string
+  description: string
+  sourcePath: string
   unresolved: boolean
 }
 
@@ -78,6 +94,9 @@ interface RelationEdge {
   source: string
   target: string
   label: string
+  kind: string
+  origin: string
+  sourceLabel: string
   confirmed: boolean
 }
 
@@ -114,7 +133,7 @@ interface ContinuityPayload {
 }
 
 type LoadState = 'loading' | 'error' | 'ready'
-type Segment = 'foreshadowing' | 'relationships' | 'truth' | 'workflows'
+type Segment = 'foreshadowing' | 'relationships' | 'truth' | 'workflows' | 'review' | 'delivery'
 
 /** `ch_0010` → 10; anything else → null (sorted last). */
 function chapterNumber(value: string): number | null {
@@ -158,22 +177,17 @@ function parseContinuity(data: unknown): ContinuityPayload {
     .map((raw): RelationNode => {
       const node = record(raw)
       return {
-        id: text(node['id']),
-        label: text(node['label']) || text(node['id']),
-        kind: text(node['kind']),
-        type: text(node['type']),
-        status: text(node['status']),
-        unresolved: node['unresolved'] === true,
+        id: text(node['id']), label: text(node['label']) || text(node['id']), kind: text(node['kind']),
+        type: text(node['type']), status: text(node['status']), description: text(node['description']),
+        sourcePath: text(node['source_path']), unresolved: node['unresolved'] === true,
       }
     })
   const relationEdges: RelationEdge[] = (Array.isArray(graph['edges']) ? graph['edges'] : [])
     .map((raw): RelationEdge => {
       const edge = record(raw)
       return {
-        id: text(edge['id']),
-        source: text(edge['source']),
-        target: text(edge['target']),
-        label: text(edge['label']),
+        id: text(edge['id']), source: text(edge['source']), target: text(edge['target']), label: text(edge['label']),
+        kind: text(edge['kind']), origin: text(edge['origin']), sourceLabel: text(edge['source_label']),
         confirmed: edge['confirmed'] === true,
       }
     })
@@ -255,15 +269,10 @@ function layoutForeshadow(nodes: readonly ForeshadowNode[]): { placed: PlacedFor
   }
 }
 
-/* --- relationship layout: deterministic circle, chords for edges --- */
+/* --- relationship layout: deterministic force-directed seed for React Flow --- */
 
-const REL_RADIUS = 260
-const REL_NODE_R = 8
-/** Above this many visible nodes, edge labels hide (they stay on <title> hover). */
-const REL_EDGE_LABEL_LIMIT = 30
-/** Above this many visible nodes, node labels clip harder (6 chars). */
-const REL_DENSE_NODE_LIMIT = 40
-
+const REL_NODE_W = 156
+const REL_NODE_H = 52
 /** Node-kind chip order; kinds outside this list bucket into 'other'. */
 const REL_KIND_ORDER = ['character', 'faction', 'place', 'concept'] as const
 
@@ -280,20 +289,165 @@ interface PlacedRelation {
   y: number
 }
 
-function layoutRelations(nodes: readonly RelationNode[]): { placed: PlacedRelation[]; size: number } {
+async function layoutRelations(nodes: readonly RelationNode[], edges: readonly RelationEdge[] = []): Promise<{ placed: PlacedRelation[]; size: number }> {
   const ordered = [...nodes].sort((a, b) => a.id.localeCompare(b.id))
-  const radius = Math.max(140, Math.min(REL_RADIUS, ordered.length * 22))
-  const placed = ordered.map((node, index) => {
-    const angle = (2 * Math.PI * index) / Math.max(1, ordered.length) - Math.PI / 2
-    return {
-      node,
-      x: radius * Math.cos(angle),
-      y: radius * Math.sin(angle),
-    }
-  })
-  return { placed, size: radius * 2 + 140 }
+  const nodeById = new Map(ordered.map(node => [node.id, node]))
+  const graph = {
+    id: 'relations',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'RIGHT',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '64',
+      'elk.spacing.nodeNode': '28',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+    },
+    children: ordered.map(node => ({ id: node.id, width: REL_NODE_W, height: REL_NODE_H })),
+    edges: edges.filter(edge => nodeById.has(edge.source) && nodeById.has(edge.target)).map(edge => ({
+      id: edge.id, sources: [edge.source], targets: [edge.target],
+    })),
+  }
+  try {
+    const result = await new ELK().layout(graph)
+    const placed = (result.children ?? []).flatMap(child => {
+      const node = nodeById.get(child.id)
+      return node === undefined ? [] : [{ node, x: (child.x ?? 0) + 40, y: (child.y ?? 0) + 40 }]
+    })
+    const maxX = Math.max(1, ...placed.map(item => item.x + REL_NODE_W + 40))
+    const maxY = Math.max(1, ...placed.map(item => item.y + REL_NODE_H + 40))
+    return { placed, size: Math.max(maxX, maxY) }
+  } catch {
+    const placed = ordered.map((node, index) => ({ node, x: (index % 4) * 220 + 40, y: Math.floor(index / 4) * 110 + 40 }))
+    const maxX = Math.max(1, ...placed.map(item => item.x + REL_NODE_W + 40))
+    const maxY = Math.max(1, ...placed.map(item => item.y + REL_NODE_H + 40))
+    return { placed, size: Math.max(maxX, maxY) }
+  }
 }
 
+function relationNodeColor(kind: string): string {
+  if (kind === 'character') return 'business'
+  if (kind === 'faction') return 'warn'
+  if (kind === 'place') return 'success'
+  if (kind === 'concept') return 'info'
+  return 'neutral'
+}
+
+function relationNodeLabel(node: RelationNode): ReactNode {
+  return <div className={css.relationFlowNode} data-kind={relationNodeColor(node.kind)}>
+    <strong title={node.label}>{node.label}</strong>
+    <small>{node.type || node.kind || 'entity'}{node.unresolved ? ' · unresolved' : ''}</small>
+  </div>
+}
+
+interface RelationshipFlowProps {
+  nodes: RelationNode[]
+  edges: RelationEdge[]
+  t: PropsLocale<'studio-panel'>['t']
+}
+
+function RelationshipFlow({ nodes: relationNodes, edges: relationEdges, t }: RelationshipFlowProps) {
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null)
+  const [selectedId, setSelectedId] = useState('')
+  const [moving, setMoving] = useState(false)
+  const relationById = useMemo(() => new Map(relationNodes.map(node => [node.id, node])), [relationNodes])
+  const selected = selectedId !== '' ? relationById.get(selectedId) : undefined
+  const [selectedEdgeId, setSelectedEdgeId] = useState('')
+  const edgeById = useMemo(() => new Map(relationEdges.map(edge => [edge.id, edge])), [relationEdges])
+  const selectedEdge = selectedEdgeId !== '' ? edgeById.get(selectedEdgeId) : undefined
+  const neighbors = selected === undefined ? [] : relationEdges.flatMap(edge => {
+    if (edge.source === selected.id) return relationById.get(edge.target) ? [relationById.get(edge.target)!] : []
+    if (edge.target === selected.id) return relationById.get(edge.source) ? [relationById.get(edge.source)!] : []
+    return []
+  })
+
+  useEffect(() => {
+    let active = true
+    void layoutRelations(relationNodes, relationEdges).then(({ placed }) => {
+      if (!active) return
+      let saved: Record<string, { x: number; y: number }> = {}
+      try {
+        const raw = window.localStorage.getItem('dsh-novel.relationPositions')
+        const parsed = raw ? JSON.parse(raw) : {}
+        if (parsed !== null && typeof parsed === 'object') saved = parsed as Record<string, { x: number; y: number }>
+      } catch { /* unavailable or corrupt local storage */ }
+      const nextNodes: Node[] = placed.map(({ node, x, y }) => {
+        const position = saved[node.id]
+        return {
+          id: node.id, type: 'default', position: position && Number.isFinite(position.x) && Number.isFinite(position.y) ? position : { x, y },
+          data: { label: relationNodeLabel(node) }, className: css.relationFlowNodeShell ?? '',
+          style: { width: REL_NODE_W, minHeight: REL_NODE_H, padding: 0, border: 'none', background: 'transparent', boxShadow: 'none' },
+        }
+      })
+      const visibleIds = new Set(relationNodes.map(node => node.id))
+      const nextEdges: Edge[] = relationEdges
+        .filter(edge => visibleIds.has(edge.source) && visibleIds.has(edge.target))
+        .map(edge => ({
+          id: edge.id, source: edge.source, target: edge.target,
+          ...(edge.label === '' ? {} : { label: edge.label }), animated: false,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { strokeWidth: edge.confirmed ? 1.5 : 1, strokeDasharray: edge.confirmed ? undefined : '5 4' },
+        }))
+      setNodes(nextNodes)
+      setEdges(nextEdges)
+      const frame = requestAnimationFrame(() => {
+        if (flow !== null) void flow.fitView({ padding: 0.22, minZoom: 0.45, maxZoom: 1.2 })
+      })
+      window.setTimeout(() => cancelAnimationFrame(frame), 0)
+    })
+    return () => { active = false }
+  }, [flow, relationEdges, relationNodes, setEdges, setNodes])
+
+  useEffect(() => {
+    setEdges(current => current.map(edge => edge.animated === moving ? edge : { ...edge, animated: moving }))
+  }, [moving, setEdges])
+
+  useEffect(() => {
+    if (selectedId !== '' && !relationById.has(selectedId)) setSelectedId('')
+  }, [relationById, selectedId])
+
+  return <div className={css.relationshipWorkspace} data-detail={selected !== undefined}>
+    <div className={css.relationshipCanvas}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onInit={setFlow}
+        onNodeClick={(_event, node) => { setSelectedId(node.id); setSelectedEdgeId('') }}
+        onEdgeClick={(_event, edge) => { setSelectedEdgeId(edge.id); setSelectedId('') }}
+        onNodeDragStart={() => setMoving(true)}
+        onNodeDragStop={(_event, node) => { setMoving(false); try { const current = JSON.parse(window.localStorage.getItem('dsh-novel.relationPositions') || '{}') as Record<string, unknown>; current[node.id] = node.position; window.localStorage.setItem('dsh-novel.relationPositions', JSON.stringify(current)) } catch { /* unavailable storage */ } }}
+        nodesDraggable
+        nodesConnectable={false}
+        elementsSelectable
+        fitView
+        minZoom={0.25}
+        maxZoom={2}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Controls showInteractive={false} />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
+      </ReactFlow>
+    </div>
+    {(selected !== undefined || selectedEdge !== undefined) && <aside className={css.relationshipDetail}>
+      {selectedEdge !== undefined ? <>
+        <div className={css.detailHeading}>{selectedEdge.label || selectedEdge.id}</div>
+        <div className={css.dagDetailRow}><b>{t('graph.edgeType')}</b><span>{selectedEdge.kind || 'relation'}</span></div>
+        <div className={css.dagDetailRow}><b>{t('graph.origin')}</b><span>{selectedEdge.origin || '—'} · {selectedEdge.confirmed ? t('graph.confirmed') : t('graph.unresolved')}</span></div>
+        <div className={css.dagDetailRow}><b>{t('graph.source')}</b><span>{selectedEdge.sourceLabel || selectedEdge.source} → {selectedEdge.target}</span></div>
+      </> : selected !== undefined ? <>
+        <div className={css.detailHeading}>{selected.label}</div>
+        <div className={css.dagDetailRow}><b>{t('graph.entityType')}</b><span>{selected.type || selected.kind || '—'}</span></div>
+        <div className={css.dagDetailRow}><b>{t('graph.entityStatus')}</b><span>{selected.status || '—'}</span></div>
+        {selected.description !== '' && <p className={css.detailNotice}>{selected.description}</p>}
+        {selected.sourcePath !== '' && <a href={`/studio-panel/api/document?path=${encodeURIComponent(selected.sourcePath)}`} target="_blank" rel="noreferrer">{t('graph.source')}</a>}
+        {neighbors.length > 0 && <><div className={css.detailHeading}>{t('graph.neighbors')}</div><ul className={css.validationList}>{neighbors.map(neighbor => <li key={neighbor.id}><button type="button" className={css.linkButton} onClick={() => setSelectedId(neighbor.id)}>{neighbor.label}</button></li>)}</ul></>}
+        {selected.unresolved && <div className={css.taskError}>{t('graph.unresolved')}</div>}
+      </> : null}
+    </aside>}
+  </div>
+}
 /** Truncate a node label for display; the full text rides the <title> tooltip. */
 function clip(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value
@@ -303,13 +457,29 @@ function clip(value: string, max: number): string {
 export type GraphViewProps =
   ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
 
-export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
+export function GraphView({ fetchStudioApi, postStudioApi, t }: GraphViewProps) {
+  const workbench = useWorkbench()
+  // 评审/交付 DAG 由评审任务产出：任务失效即重载 DAG 视图。
+  const dagEpoch = workbench.epochs.tasks
   const [state, setState] = useState<LoadState>('loading')
   const [payload, setPayload] = useState<ContinuityPayload | null>(null)
   const [error, setError] = useState('')
   const [segment, setSegment] = useState<Segment>('foreshadowing')
   // Story-relevant backbone by default: characters + factions.
   const [kindFilter, setKindFilter] = useState<ReadonlySet<RelationKind>>(new Set(['character', 'faction']))
+  const [relationQuery, setRelationQuery] = useState(() => {
+    try { return window.localStorage.getItem('dsh-novel.relationQuery') ?? '' } catch { return '' }
+  })
+  const [connectedOnly, setConnectedOnly] = useState(() => {
+    try { return window.localStorage.getItem('dsh-novel.relationConnectedOnly') === 'true' } catch { return false }
+  })
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('dsh-novel.relationQuery', relationQuery)
+      window.localStorage.setItem('dsh-novel.relationConnectedOnly', String(connectedOnly))
+    } catch { /* unavailable storage */ }
+  }, [connectedOnly, relationQuery])
 
   const load = useCallback(() => {
     setState('loading')
@@ -331,15 +501,16 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
   useEffect(() => load(), [load])
 
   const foreshadow = payload !== null ? layoutForeshadow(payload.foreshadowNodes) : null
-  // Kind filtering: edges render only when both endpoints stay visible.
-  const visibleRelationNodes = payload === null ? [] : payload.relationNodes.filter(node => kindFilter.has(relationKind(node.kind)))
-  const relations = layoutRelations(visibleRelationNodes)
-  const relationPositions = new Map(relations.placed.map(item => [item.node.id, item]))
+  const query = relationQuery.trim().toLocaleLowerCase()
+  const connectedIds = new Set((payload?.relationEdges ?? []).flatMap(edge => [edge.source, edge.target]))
+  const visibleRelationNodes = payload === null ? [] : payload.relationNodes.filter(node => {
+    const matchesQuery = query === '' || `${node.label} ${node.description} ${node.id}`.toLocaleLowerCase().includes(query)
+    return kindFilter.has(relationKind(node.kind)) && matchesQuery && (!connectedOnly || connectedIds.has(node.id))
+  })
+  const visibleRelationIds = new Set(visibleRelationNodes.map(node => node.id))
   const visibleRelationEdges = payload === null ? [] : payload.relationEdges.filter(
-    edge => relationPositions.has(edge.source) && relationPositions.has(edge.target),
+    edge => visibleRelationIds.has(edge.source) && visibleRelationIds.has(edge.target),
   )
-  const showEdgeLabels = visibleRelationNodes.length <= REL_EDGE_LABEL_LIMIT
-  const nodeLabelClip = visibleRelationNodes.length > REL_DENSE_NODE_LIMIT ? 6 : 10
   // Chips for the kinds actually present in the data (in canonical order, 'other' last).
   const presentKinds = payload === null ? [] : [...REL_KIND_ORDER, 'other' as const]
     .filter(kind => payload.relationNodes.some(node => relationKind(node.kind) === kind))
@@ -390,6 +561,22 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
             onClick={() => { setSegment('workflows') }}
           >
             {t('graph.workflows')} {payload?.workflows.length ?? 0}
+          </button>
+          <button
+            type="button"
+            className={css.chip}
+            data-active={segment === 'review'}
+            onClick={() => { setSegment('review') }}
+          >
+            {t('graph.reviewDag')}
+          </button>
+          <button
+            type="button"
+            className={css.chip}
+            data-active={segment === 'delivery'}
+            onClick={() => { setSegment('delivery') }}
+          >
+            {t('graph.deliveryDag')}
           </button>
           {segment === 'relationships' && payload?.relationTruncated === true && (
             <span className={css.truncatedNote}>{t('graph.truncated')}</span>
@@ -483,6 +670,11 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
         )}
         {state === 'ready' && payload !== null && segment === 'relationships' && (
           <>
+            <div className={css.graphFilterRow}>
+              <input aria-label={t('graph.search')} placeholder={t('graph.search')} value={relationQuery} onChange={event => setRelationQuery(event.target.value)} />
+              <label><input type="checkbox" checked={connectedOnly} onChange={event => setConnectedOnly(event.target.checked)} /> {t('graph.connectedOnly')}</label>
+              <span>{visibleRelationNodes.length}/{payload.relationNodes.length} · {visibleRelationEdges.length}/{payload.relationEdges.length}</span>
+            </div>
             {presentKinds.length > 1 && (
               <div className={css.kindFilterRow}>
                 {presentKinds.map(kind => (
@@ -500,64 +692,7 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
             )}
             {visibleRelationNodes.length === 0
               ? <div className={css.notice}>{t('graph.empty.relationships')}</div>
-              : (
-                <svg
-                  className={css.graphCanvas}
-                  viewBox={`${-relations.size / 2} ${-relations.size / 2} ${relations.size} ${relations.size}`}
-                  role="img"
-                  aria-label={t('graph.relationships')}
-                >
-                  <defs>
-                    <marker id="studio-panel-rel-arrow" viewBox="0 0 8 8" refX="7" refY="4"
-                      markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                      <path d="M 0 0 L 8 4 L 0 8 z" className={css.edgeArrow} />
-                    </marker>
-                  </defs>
-                  {visibleRelationEdges.map(edge => {
-                    const source = relationPositions.get(edge.source)
-                    const target = relationPositions.get(edge.target)
-                    if (source === undefined || target === undefined) return null
-                    // Quadratic chord bending toward the center keeps direction readable.
-                    const mx = (source.x + target.x) / 2
-                    const my = (source.y + target.y) / 2
-                    const cx = mx * 0.3
-                    const cy = my * 0.3
-                    // Trim the line ends so arrows land on the node rim.
-                    const dx = target.x - source.x
-                    const dy = target.y - source.y
-                    const length = Math.hypot(dx, dy) || 1
-                    const trim = REL_NODE_R + 4
-                    return (
-                      <g key={edge.id}>
-                        <path
-                          d={`M ${source.x + (dx / length) * trim} ${source.y + (dy / length) * trim}`
-                            + ` Q ${cx} ${cy} ${target.x - (dx / length) * trim} ${target.y - (dy / length) * trim}`}
-                          className={css.edge}
-                          data-confirmed={edge.confirmed}
-                          markerEnd="url(#studio-panel-rel-arrow)"
-                        />
-                        {showEdgeLabels && edge.label !== '' && (
-                          <text x={mx * 0.65} y={my * 0.65} className={css.edgeLabel}>
-                            {clip(edge.label, 8)}
-                          </text>
-                        )}
-                        <title>{`${edge.source} → ${edge.label} → ${edge.target}`}</title>
-                      </g>
-                    )
-                  })}
-                  {relations.placed.map(({ node, x, y }) => (
-                    <g key={node.id}>
-                      <circle cx={x} cy={y} r={REL_NODE_R}
-                        className={css.relationNode} data-kind={node.kind} data-unresolved={node.unresolved} />
-                      <text x={x + REL_NODE_R + 5} y={y + 4} className={css.graphNodeTitle}>
-                        {clip(node.label, nodeLabelClip)}
-                      </text>
-                      <title>{`${node.label} · ${node.type}${node.unresolved ? ' · unresolved' : ''}`}</title>
-                    </g>
-                  ))}
-                </svg>
-              )
-            }
+              : <RelationshipFlow nodes={visibleRelationNodes} edges={visibleRelationEdges} t={t} />}
           </>
         )}
         {state === 'ready' && payload !== null && segment === 'truth' && (
@@ -606,6 +741,12 @@ export function GraphView({ fetchStudioApi, t }: GraphViewProps) {
                 </div>
               </div>
             ))
+        )}
+        {state === 'ready' && segment === 'review' && (
+          <ReviewDagView key={dagEpoch} fetchStudioApi={fetchStudioApi} postStudioApi={postStudioApi} kind="review" t={t} />
+        )}
+        {state === 'ready' && segment === 'delivery' && (
+          <ReviewDagView key={dagEpoch} fetchStudioApi={fetchStudioApi} postStudioApi={postStudioApi} kind="delivery" t={t} />
         )}
       </div>
     </div>

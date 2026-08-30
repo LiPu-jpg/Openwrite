@@ -41,21 +41,37 @@ type TaskPhase = (typeof PHASES)[number]
 /** One task record (the fields this view reads; the payload carries more). */
 /** Completed chapter_review result (subset the row/expand reads). */
 interface ReviewResult {
-  score: number | null
-  passed: boolean | null
+  qualityScore: number | null
+  coverage: number | null
+  gateStatus: string
+  deliveryStatus: string
   issues: number | null
   summary: string
-  issueDetails: { severity: string; dimension: string; summary: string }[]
+  issueDetails: {
+    reviewSeverity: 'critical' | 'warning' | 'info'
+    revisionPriority: 'blocker' | 'high' | 'medium' | 'low'
+    dimension: string
+    summary: string
+  }[]
 }
 
 /** Narrow one issue entry from a completed review result. */
-function parseIssue(raw: unknown): { severity: string; dimension: string; summary: string } | null {
+function parseIssue(raw: unknown): ReviewResult['issueDetails'][number] | null {
   if (raw === null || typeof raw !== 'object') return null
   const item = raw as Record<string, unknown>
   const summary = typeof item['summary'] === 'string' ? item.summary : ''
   if (summary === '') return null
+  const severity = String(item['review_severity'] ?? item['legacy_severity'] ?? item['severity'] ?? '').toLowerCase()
+  const priority = String(item['revision_priority'] ?? '').toLowerCase()
   return {
-    severity: String(item['severity'] ?? 'medium'),
+    reviewSeverity: severity === 'critical' || severity === 'blocker'
+      ? 'critical'
+      : severity === 'info' || severity === 'low' ? 'info' : 'warning',
+    revisionPriority: ['blocker', 'high', 'medium', 'low'].includes(priority)
+      ? priority as ReviewResult['issueDetails'][number]['revisionPriority']
+      : severity === 'critical' || severity === 'blocker'
+        ? 'blocker'
+        : severity === 'high' ? 'high' : severity === 'info' || severity === 'low' ? 'low' : 'medium',
     dimension: String(item['dimension'] ?? 'general'),
     summary,
   }
@@ -68,11 +84,19 @@ function parseReviewResult(raw: unknown): ReviewResult | null {
   const details = Array.isArray(r['issue_details'])
     ? r['issue_details'].map(parseIssue).filter((item): item is NonNullable<typeof item> => item !== null)
     : []
-  const score = typeof r['score'] === 'number' ? r.score : null
-  if (score === null && details.length === 0) return null
+  const v2 = (r['review_v2'] !== null && typeof r['review_v2'] === 'object' && !Array.isArray(r['review_v2'])
+    ? r['review_v2'] : {}) as Record<string, unknown>
+  const qualityScore = typeof v2['quality_score'] === 'number'
+    ? v2.quality_score
+    : typeof r['score'] === 'number' ? r.score : null
+  if (qualityScore === null && details.length === 0 && typeof r['passed'] !== 'boolean') return null
   return {
-    score,
-    passed: typeof r['passed'] === 'boolean' ? r.passed : null,
+    qualityScore,
+    coverage: typeof v2['coverage'] === 'number' ? v2.coverage : null,
+    gateStatus: typeof v2['gate_status'] === 'string' ? v2.gate_status : '',
+    deliveryStatus: typeof v2['delivery_status'] === 'string'
+      ? v2.delivery_status
+      : r['passed'] === true ? 'pass' : 'revise',
     issues: typeof r['issues'] === 'number' ? r.issues : null,
     summary: typeof r['summary'] === 'string' ? r.summary : '',
     issueDetails: details,
@@ -218,7 +242,19 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
       case 'reference_operation': return t('tasks.type.reference_operation')
       case 'manuscript_import': return t('tasks.type.manuscript_import')
       case 'research': return t('tasks.type.research')
+      case 'model_benchmark': return t('tasks.type.model_benchmark')
       default: return type
+    }
+  }
+
+  const reviewStatusLabel = (status: string): string => {
+    switch (status) {
+      case 'pass': return t('review.status.pass')
+      case 'blocked': return t('review.status.blocked')
+      case 'inconclusive': return t('review.status.inconclusive')
+      case 'revise': return t('review.status.revise')
+      case 'stale': return t('review.status.stale')
+      default: return status || t('review.status.unknown')
     }
   }
 
@@ -290,7 +326,7 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
               <button
                 type="button"
                 className={css.scoreChip}
-                data-band={task.result.score === null ? 'na' : task.result.score >= 70 ? 'good' : task.result.score >= 40 ? 'mid' : 'bad'}
+                data-band={task.result.gateStatus === 'blocked' ? 'bad' : task.result.qualityScore === null ? 'na' : task.result.qualityScore >= 70 ? 'good' : task.result.qualityScore >= 40 ? 'mid' : 'bad'}
                 title={t('tasks.result.toggle')}
                 onClick={() => {
                   setExpanded(previous => {
@@ -301,7 +337,10 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
                   })
                 }}
               >
-                {t('tasks.result.score')} {task.result.score ?? '—'} · {t('tasks.result.issues')} {task.result.issues ?? task.result.issueDetails.length}
+                {t('tasks.result.score')} {task.result.qualityScore ?? '—'}
+                {task.result.coverage !== null ? ` · ${t('review.coverage')} ${Math.round(task.result.coverage * 100)}%` : ''}
+                {' · '}{reviewStatusLabel(task.result.deliveryStatus)}
+                {' · '}{t('tasks.result.issues')} {task.result.issues ?? task.result.issueDetails.length}
               </button>
             )}
             <span className={css.taskActions}>
@@ -337,10 +376,16 @@ export function TasksView({ fetchStudioApi, postStudioApi, t }: TasksViewProps) 
           </div>
           {expanded.has(task.taskId) && task.result !== null && (
             <div className={css.taskIssues}>
+              <div className={css.taskReviewMeta}>
+                <span>{t('review.delivery')} {reviewStatusLabel(task.result.deliveryStatus)}</span>
+                {task.result.gateStatus !== '' && <span>{t('review.gate')} {reviewStatusLabel(task.result.gateStatus)}</span>}
+                {task.result.coverage !== null && <span>{t('review.coverage')} {Math.round(task.result.coverage * 100)}%</span>}
+              </div>
               {task.result.summary !== '' && <div className={css.taskIssuesSummary}>{task.result.summary}</div>}
               {task.result.issueDetails.slice(0, 10).map((issue, index) => (
                 <div key={index} className={css.taskIssueRow}>
-                  <span className={css.taskIssueSeverity} data-severity={issue.severity}>{issue.severity}</span>
+                  <span className={css.taskIssueSeverity} data-severity={issue.reviewSeverity}>{t(`review.severity.${issue.reviewSeverity}`)}</span>
+                  <span className={css.taskIssuePriority} data-priority={issue.revisionPriority}>{t('review.priority')} · {t(`review.priority.${issue.revisionPriority}`)}</span>
                   <span className={css.taskIssueDim}>{issue.dimension}</span>
                   <span className={css.taskIssueText}>{issue.summary}</span>
                 </div>

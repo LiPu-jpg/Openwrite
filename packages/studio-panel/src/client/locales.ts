@@ -12,6 +12,8 @@ export type StudioPanelKey =
   | 'view.outline'
   | 'view.assets'
   | 'view.tasks'
+  | 'view.benchmark'
+  | 'view.models'
   | 'view.graph'
   | 'view.research'
   | 'view.search'
@@ -248,6 +250,7 @@ export type StudioPanelKey =
   | 'tasks.type.reference_operation'
   | 'tasks.type.manuscript_import'
   | 'tasks.type.research'
+  | 'tasks.type.model_benchmark'
   | 'graph.foreshadowing'
   | 'graph.relationships'
   | 'graph.weight'
@@ -256,6 +259,25 @@ export type StudioPanelKey =
   | 'graph.validation.errors'
   | 'graph.empty.foreshadowing'
   | 'graph.empty.relationships'
+  | 'graph.entityType'
+  | 'graph.entityStatus'
+  | 'graph.search'
+  | 'graph.connectedOnly'
+  | 'graph.neighbors'
+  | 'graph.edgeType'
+  | 'graph.origin'
+  | 'graph.source'
+  | 'graph.confirmed'
+  | 'dag.quality'
+  | 'dag.coverage'
+  | 'dag.gate'
+  | 'dag.delivery'
+  | 'dag.current'
+  | 'dag.stale'
+  | 'dag.toRevision'
+  | 'dag.toRevisionDone'
+  | 'dag.toRevisionFailed'
+  | 'graph.unresolved'
   | 'graph.kind.character'
   | 'graph.kind.faction'
   | 'graph.kind.place'
@@ -270,6 +292,88 @@ export type StudioPanelKey =
   | 'graph.empty.truth'
   | 'graph.empty.truthDoc'
   | 'graph.empty.workflows'
+  | 'graph.reviewDag'
+  | 'graph.deliveryDag'
+  | 'graph.filter.all'
+  | 'graph.filter.anomaly'
+  | 'graph.filter.blocker'
+  | 'graph.expandChecks'
+  | 'graph.collapseChecks'
+  | 'graph.empty.dag'
+  | 'benchmark.title'
+  | 'benchmark.task'
+  | 'benchmark.mode'
+  | 'benchmark.mode.framework'
+  | 'benchmark.mode.creative'
+  | 'benchmark.reviewer'
+  | 'benchmark.chapter'
+  | 'benchmark.repeats'
+  | 'benchmark.words'
+  | 'benchmark.concurrency'
+  | 'benchmark.run'
+  | 'benchmark.empty'
+  | 'benchmark.select'
+  | 'benchmark.candidate'
+  | 'benchmark.candidates'
+  | 'benchmark.evaluations'
+  | 'benchmark.writer'
+  | 'benchmark.path'
+  | 'benchmark.status'
+  | 'benchmark.actualWords'
+  | 'benchmark.finishReason'
+  | 'benchmark.error'
+  | 'benchmark.coverage'
+  | 'benchmark.gate'
+  | 'benchmark.delivery'
+  | 'benchmark.productionGate'
+  | 'benchmark.productionGateMissing'
+  | 'benchmark.domains'
+  | 'benchmark.latency'
+  | 'benchmark.usage'
+  | 'benchmark.cost'
+  | 'benchmark.inputTokens'
+  | 'benchmark.outputTokens'
+  | 'benchmark.reasoningTokens'
+  | 'benchmark.totalTokens'
+  | 'benchmark.actualCost'
+  | 'benchmark.costCoverage'
+  | 'benchmark.effectiveRate'
+  | 'models.title'
+  | 'models.list'
+  | 'models.editor'
+  | 'models.new'
+  | 'models.empty'
+  | 'models.id'
+  | 'models.label'
+  | 'models.provider'
+  | 'models.modelId'
+  | 'models.baseUrl'
+  | 'models.apiFormat'
+  | 'models.context'
+  | 'models.output'
+  | 'models.credential'
+  | 'models.embeddingProvider'
+  | 'models.embeddingModel'
+  | 'models.embeddingCredential'
+  | 'models.credentialHint'
+  | 'models.remember'
+  | 'models.save'
+  | 'models.chatTest'
+  | 'models.embeddingTest'
+  | 'models.delete'
+  | 'models.dependencies'
+  | 'models.dependenciesHint'
+  | 'models.fallback'
+  | 'models.chooseFallback'
+  | 'models.routes'
+  | 'models.routesSave'
+  | 'models.saved'
+  | 'models.deleted'
+  | 'models.chatOk'
+  | 'models.embeddingOk'
+  | 'models.configured'
+  | 'models.missing'
+  | 'models.routesSaved'
   | 'research.reports'
   | 'research.unavailable'
   | 'research.empty'
@@ -310,10 +414,31 @@ export type StudioPanelKey =
   | 'review.suggestion'
   | 'review.quote'
   | 'review.dimension'
+  | 'review.coverage'
+  | 'review.gate'
+  | 'review.delivery'
+  | 'review.execution'
+  | 'review.priority'
+  | 'review.severity.critical'
+  | 'review.severity.warning'
+  | 'review.severity.info'
   | 'review.severity.blocker'
   | 'review.severity.high'
   | 'review.severity.medium'
   | 'review.severity.low'
+  | 'review.priority.blocker'
+  | 'review.priority.high'
+  | 'review.priority.medium'
+  | 'review.priority.low'
+  | 'review.status.pass'
+  | 'review.status.blocked'
+  | 'review.status.inconclusive'
+  | 'review.status.revise'
+  | 'review.status.completed'
+  | 'review.status.partial'
+  | 'review.status.failed'
+  | 'review.status.stale'
+  | 'review.status.unknown'
   | 'review.rawTitle'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -332,6 +457,8 @@ export const zh: Record<StudioPanelKey, string> = {
   'view.outline': '大纲',
   'view.assets': '资产',
   'view.tasks': '任务',
+  'view.benchmark': '模型测试',
+  'view.models': '模型',
   'view.graph': '图谱',
   'view.research': '研究',
   'view.search': '搜索',
@@ -543,10 +670,31 @@ export const zh: Record<StudioPanelKey, string> = {
   'review.suggestion': '修改建议',
   'review.quote': '原文引用',
   'review.dimension': '维度',
+  'review.coverage': '覆盖率',
+  'review.gate': '门禁',
+  'review.delivery': '交付',
+  'review.execution': '执行',
+  'review.priority': '修订优先级',
+  'review.severity.critical': '严重',
+  'review.severity.warning': '警告',
+  'review.severity.info': '提示',
   'review.severity.blocker': '阻塞',
   'review.severity.high': '高',
   'review.severity.medium': '中',
   'review.severity.low': '低',
+  'review.priority.blocker': '阻塞',
+  'review.priority.high': '高',
+  'review.priority.medium': '中',
+  'review.priority.low': '低',
+  'review.status.pass': '通过',
+  'review.status.blocked': '阻塞',
+  'review.status.inconclusive': '信息不足',
+  'review.status.revise': '需修订',
+  'review.status.completed': '完成',
+  'review.status.partial': '部分完成',
+  'review.status.failed': '失败',
+  'review.status.stale': '已过期',
+  'review.status.unknown': '未知',
   'review.rawTitle': '原始输出',
   'tasks.empty': '暂无任务。agent 启动写章/评审等后台任务后会出现在这里。',
   'tasks.filter.all': '全部',
@@ -573,6 +721,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'tasks.type.reference_operation': '参考库',
   'tasks.type.manuscript_import': '导入',
   'tasks.type.research': '研究',
+  'tasks.type.model_benchmark': '模型横评',
   'graph.foreshadowing': '伏笔',
   'graph.relationships': '关系图',
   'graph.weight': '权重',
@@ -581,6 +730,25 @@ export const zh: Record<StudioPanelKey, string> = {
   'graph.validation.errors': '伏笔 DAG 校验错误',
   'graph.empty.foreshadowing': '暂无待回收伏笔。让 agent 用 novel_foreshadowing_* 埋设后刷新。',
   'graph.empty.relationships': '暂无关系数据。建立资产关系后刷新（或调整上方类型过滤）。',
+  'graph.entityType': '实体类型',
+  'graph.entityStatus': '状态',
+  'graph.search': '搜索实体、描述或 ID',
+  'graph.connectedOnly': '只看有连接节点',
+  'graph.neighbors': '邻居节点',
+  'graph.edgeType': '边类型',
+  'graph.origin': '来源',
+  'graph.source': '来源文件',
+  'graph.confirmed': '已确认',
+  'dag.quality': '质量',
+  'dag.coverage': '覆盖率',
+  'dag.gate': '硬门',
+  'dag.delivery': '交付',
+  'dag.current': '评审当前',
+  'dag.stale': '评审已过期',
+  'dag.toRevision': '问题转修订',
+  'dag.toRevisionDone': '已创建修订任务。',
+  'dag.toRevisionFailed': '创建修订任务失败',
+  'graph.unresolved': '未解析实体',
   'graph.kind.character': '角色',
   'graph.kind.faction': '势力',
   'graph.kind.place': '地点',
@@ -595,6 +763,88 @@ export const zh: Record<StudioPanelKey, string> = {
   'graph.empty.truth': '暂无真相文件内容。章节推进后由 agent 更新 data/world/ 下的真相文件。',
   'graph.empty.truthDoc': '（空）',
   'graph.empty.workflows': '暂无活动章节工作流。',
+  'graph.reviewDag': '评审 DAG',
+  'graph.deliveryDag': '交付 DAG',
+  'graph.filter.all': '全部',
+  'graph.filter.anomaly': '异常',
+  'graph.filter.blocker': '阻断',
+  'graph.expandChecks': '展开 37 项',
+  'graph.collapseChecks': '折叠 37 项',
+  'graph.empty.dag': '当前章节暂无已物化的 DAG。',
+  'benchmark.title': '框架内模型测试台',
+  'benchmark.task': '后台任务',
+  'benchmark.mode': '执行模式',
+  'benchmark.mode.framework': '真实写作框架',
+  'benchmark.mode.creative': '裸写诊断',
+  'benchmark.reviewer': '评审模型',
+  'benchmark.chapter': '章节',
+  'benchmark.repeats': '重复',
+  'benchmark.words': '目标字数',
+  'benchmark.concurrency': '并发',
+  'benchmark.run': '开始测试',
+  'benchmark.empty': '暂无模型测试记录。',
+  'benchmark.select': '选择左侧测试查看交叉评审结果。',
+  'benchmark.candidate': '写作候选',
+  'benchmark.candidates': '候选可靠性',
+  'benchmark.evaluations': '独立盲评',
+  'benchmark.writer': '写作模型',
+  'benchmark.path': '执行路径',
+  'benchmark.status': '状态',
+  'models.title': '模型配置',
+  'models.list': '模型档案列表',
+  'models.editor': '模型档案编辑器',
+  'models.new': '新增档案',
+  'models.empty': '暂无模型档案。',
+  'models.id': '档案 ID',
+  'models.label': '档案名',
+  'models.provider': 'Provider',
+  'models.modelId': '真实 Model ID',
+  'models.baseUrl': 'Base URL',
+  'models.apiFormat': 'API 格式',
+  'models.context': '上下文 Token',
+  'models.output': '输出 Token',
+  'models.credential': 'Chat Credential',
+  'models.embeddingProvider': 'Embedding Provider',
+  'models.embeddingModel': 'Embedding Model ID',
+  'models.embeddingCredential': 'Embedding Credential',
+  'models.credentialHint': '留空保持已有凭据',
+  'models.remember': '写入本机凭据存储（仅写不可读）',
+  'models.save': '保存档案',
+  'models.chatTest': '聊天测试',
+  'models.embeddingTest': 'Embedding 测试',
+  'models.delete': '删除档案',
+  'models.dependencies': '依赖预览',
+  'models.dependenciesHint': '以下任务路由当前依赖此档案；删除时必须选择回退档案。',
+  'models.fallback': '删除后的回退档案',
+  'models.chooseFallback': '选择回退档案',
+  'models.routes': '操作路由',
+  'models.routesSave': '保存路由',
+  'models.saved': '模型档案已保存。',
+  'models.deleted': '模型档案已删除。',
+  'models.chatOk': '聊天连接测试成功。',
+  'models.embeddingOk': 'Embedding 连接测试成功。',
+  'models.configured': 'Chat 已配置',
+  'models.missing': 'Chat 未配置',
+  'models.routesSaved': '操作路由已保存。',
+  'benchmark.actualWords': '实际字数',
+  'benchmark.finishReason': '终止原因',
+  'benchmark.error': '错误',
+  'benchmark.coverage': '覆盖率',
+  'benchmark.gate': '质量门槛',
+  'benchmark.delivery': '交付建议',
+  'benchmark.productionGate': '生产门槛',
+  'benchmark.productionGateMissing': '未记录（非生产批准）',
+  'benchmark.domains': '未完成评审域',
+  'benchmark.latency': '耗时',
+  'benchmark.usage': '用量',
+  'benchmark.cost': '费用',
+  'benchmark.inputTokens': '输入',
+  'benchmark.outputTokens': '输出',
+  'benchmark.reasoningTokens': '推理',
+  'benchmark.totalTokens': '总计',
+  'benchmark.actualCost': '实际费用',
+  'benchmark.costCoverage': '费用已报告',
+  'benchmark.effectiveRate': '综合有效价 / 1M',
   'research.reports': '报告',
   'research.unavailable': '深度研究运行环境未就绪，请先在 Studio 中完成初始化。',
   'research.empty': '暂无研究报告。让 agent 发起一次深度研究后刷新。',
@@ -638,6 +888,8 @@ export const en: Record<StudioPanelKey, string> = {
   'view.outline': 'Outline',
   'view.assets': 'Assets',
   'view.tasks': 'Tasks',
+  'view.benchmark': 'Model test',
+  'view.models': 'Models',
   'view.graph': 'Graph',
   'view.research': 'Research',
   'view.search': 'Search',
@@ -849,10 +1101,31 @@ export const en: Record<StudioPanelKey, string> = {
   'review.suggestion': 'Suggestion',
   'review.quote': 'Quote',
   'review.dimension': 'Dimension',
+  'review.coverage': 'Coverage',
+  'review.gate': 'Gate',
+  'review.delivery': 'Delivery',
+  'review.execution': 'Execution',
+  'review.priority': 'Revision priority',
+  'review.severity.critical': 'Critical',
+  'review.severity.warning': 'Warning',
+  'review.severity.info': 'Info',
   'review.severity.blocker': 'Blocker',
   'review.severity.high': 'High',
   'review.severity.medium': 'Medium',
   'review.severity.low': 'Low',
+  'review.priority.blocker': 'Blocker',
+  'review.priority.high': 'High',
+  'review.priority.medium': 'Medium',
+  'review.priority.low': 'Low',
+  'review.status.pass': 'Pass',
+  'review.status.blocked': 'Blocked',
+  'review.status.inconclusive': 'Inconclusive',
+  'review.status.revise': 'Revise',
+  'review.status.completed': 'Completed',
+  'review.status.partial': 'Partial',
+  'review.status.failed': 'Failed',
+  'review.status.stale': 'Stale',
+  'review.status.unknown': 'Unknown',
   'review.rawTitle': 'Raw output',
   'tasks.empty': 'No tasks yet. Background jobs the agent starts (chapter writing, review, …) will show up here.',
   'tasks.filter.all': 'All',
@@ -879,6 +1152,7 @@ export const en: Record<StudioPanelKey, string> = {
   'tasks.type.reference_operation': 'Reference',
   'tasks.type.manuscript_import': 'Import',
   'tasks.type.research': 'Research',
+  'tasks.type.model_benchmark': 'Model benchmark',
   'graph.foreshadowing': 'Foreshadowing',
   'graph.relationships': 'Relationships',
   'graph.weight': 'Weight',
@@ -887,6 +1161,25 @@ export const en: Record<StudioPanelKey, string> = {
   'graph.validation.errors': 'Foreshadowing DAG validation errors',
   'graph.empty.foreshadowing': 'No pending foreshadowing. Ask the agent to plant some with novel_foreshadowing_*, then refresh.',
   'graph.empty.relationships': 'No relationship data. Create asset relations and refresh (or adjust the kind filters above).',
+  'graph.entityType': 'Entity type',
+  'graph.entityStatus': 'Status',
+  'graph.search': 'Search entities, descriptions or IDs',
+  'graph.connectedOnly': 'Connected nodes only',
+  'graph.neighbors': 'Neighbors',
+  'graph.edgeType': 'Edge type',
+  'graph.origin': 'Origin',
+  'graph.source': 'Source file',
+  'graph.confirmed': 'Confirmed',
+  'dag.quality': 'Quality',
+  'dag.coverage': 'Coverage',
+  'dag.gate': 'Gate',
+  'dag.delivery': 'Delivery',
+  'dag.current': 'Review current',
+  'dag.stale': 'Review stale',
+  'dag.toRevision': 'Issues to revision',
+  'dag.toRevisionDone': 'Revision task created.',
+  'dag.toRevisionFailed': 'Revision task failed',
+  'graph.unresolved': 'Unresolved entity',
   'graph.kind.character': 'Characters',
   'graph.kind.faction': 'Factions',
   'graph.kind.place': 'Places',
@@ -901,6 +1194,88 @@ export const en: Record<StudioPanelKey, string> = {
   'graph.empty.truth': 'No truth-file content yet. The agent updates the data/world/ truth files as chapters advance.',
   'graph.empty.truthDoc': '(empty)',
   'graph.empty.workflows': 'No active chapter workflows.',
+  'graph.reviewDag': 'Review DAG',
+  'graph.deliveryDag': 'Delivery DAG',
+  'graph.filter.all': 'All',
+  'graph.filter.anomaly': 'Anomalies',
+  'graph.filter.blocker': 'Blockers',
+  'graph.expandChecks': 'Expand 37 checks',
+  'graph.collapseChecks': 'Collapse 37 checks',
+  'graph.empty.dag': 'No materialized DAG for this chapter.',
+  'benchmark.title': 'In-framework model benchmark',
+  'benchmark.task': 'Background task',
+  'benchmark.mode': 'Execution mode',
+  'benchmark.mode.framework': 'Production framework',
+  'benchmark.mode.creative': 'Creative diagnostic',
+  'benchmark.reviewer': 'Review model',
+  'benchmark.chapter': 'Chapter',
+  'benchmark.repeats': 'Repeats',
+  'benchmark.words': 'Target words',
+  'benchmark.concurrency': 'Concurrency',
+  'benchmark.run': 'Run benchmark',
+  'benchmark.empty': 'No model benchmark runs yet.',
+  'benchmark.select': 'Select a run to inspect cross-review results.',
+  'benchmark.candidate': 'Writing candidate',
+  'benchmark.candidates': 'Candidate reliability',
+  'benchmark.evaluations': 'Independent blind review',
+  'benchmark.writer': 'Writer model',
+  'benchmark.path': 'Execution path',
+  'benchmark.status': 'Status',
+  'benchmark.actualWords': 'Actual words',
+  'benchmark.finishReason': 'Finish reason',
+  'benchmark.error': 'Error',
+  'benchmark.coverage': 'Coverage',
+  'benchmark.gate': 'Quality gate',
+  'benchmark.delivery': 'Delivery advice',
+  'benchmark.productionGate': 'Production gate',
+  'benchmark.productionGateMissing': 'Not recorded (not production approval)',
+  'benchmark.domains': 'Incomplete domains',
+  'benchmark.latency': 'Latency',
+  'benchmark.usage': 'Usage',
+  'benchmark.cost': 'Cost',
+  'benchmark.inputTokens': 'Input',
+  'benchmark.outputTokens': 'Output',
+  'benchmark.reasoningTokens': 'Reasoning',
+  'benchmark.totalTokens': 'Total',
+  'benchmark.actualCost': 'Actual cost',
+  'benchmark.costCoverage': 'Cost reported',
+  'benchmark.effectiveRate': 'Blended effective / 1M',
+  'models.title': 'Model profiles',
+  'models.list': 'Profile list',
+  'models.editor': 'Profile editor',
+  'models.new': 'New profile',
+  'models.empty': 'No model profiles configured.',
+  'models.id': 'Profile ID',
+  'models.label': 'Profile name',
+  'models.provider': 'Provider',
+  'models.modelId': 'Real model ID',
+  'models.baseUrl': 'Base URL',
+  'models.apiFormat': 'API format',
+  'models.context': 'Context tokens',
+  'models.output': 'Output tokens',
+  'models.credential': 'Chat credential',
+  'models.embeddingProvider': 'Embedding provider',
+  'models.embeddingModel': 'Embedding model ID',
+  'models.embeddingCredential': 'Embedding credential',
+  'models.credentialHint': 'Leave blank to keep the stored credential',
+  'models.remember': 'Store locally (write-only credential)',
+  'models.save': 'Save profile',
+  'models.chatTest': 'Chat test',
+  'models.embeddingTest': 'Embedding test',
+  'models.delete': 'Delete profile',
+  'models.dependencies': 'Dependency preview',
+  'models.dependenciesHint': 'These operation routes use this profile; choose a fallback before deletion.',
+  'models.fallback': 'Fallback after deletion',
+  'models.chooseFallback': 'Choose fallback',
+  'models.routes': 'Operation routes',
+  'models.routesSave': 'Save routes',
+  'models.saved': 'Model profile saved.',
+  'models.deleted': 'Model profile deleted.',
+  'models.chatOk': 'Chat connection succeeded.',
+  'models.embeddingOk': 'Embedding connection succeeded.',
+  'models.configured': 'Chat configured',
+  'models.missing': 'Chat not configured',
+  'models.routesSaved': 'Operation routes saved.',
   'research.reports': 'Reports',
   'research.unavailable': 'The deep-research runtime is not ready. Finish the setup in Studio first.',
   'research.empty': 'No research reports yet. Ask the agent to run a deep research, then refresh.',

@@ -6,12 +6,11 @@
  *
  * Wire shape (verified against OpenWrite tools/chapter_pipeline.py review
  * stage + tools/review_store.py normalize_review_issues): the tool value is
- * { result: { ok, chapter_id, passed, score (0-100, derived from severity
- * counts — NOT a per-dimension table), issues: <count int>, summary,
- * issue_details: [...], strict, dimensions, ... }, workspace: {...} }.
- * Each normalized issue carries { id, dimension: int|null, severity:
- * blocker|high|medium|low, summary (folded from description), category,
- * evidence: { quote, ... }, suggestion, auto_fixable }.
+ * { result: { ok, chapter_id, passed, score, review_v2, issues: <count int>,
+ * summary, issue_details: [...], strict, dimensions, ... }, workspace: {...} }.
+ * Review v2 is authoritative for quality score, coverage, gate, and delivery.
+ * Issue review severity (critical/warning/info) is independent from revision
+ * priority (blocker/high/medium/low).
  *
  * Anything unexpected (running call, non-JSON output, missing fields) falls
  * back to the raw pretty-JSON card — the review text is never swallowed.
@@ -30,7 +29,8 @@ type ReviewCardProps = ToolCallViewProps & PropsLocale<'studio-panel'>
 interface ReviewIssue {
   id: string
   dimension: number | null
-  severity: 'blocker' | 'high' | 'medium' | 'low'
+  reviewSeverity: 'critical' | 'warning' | 'info'
+  revisionPriority: 'blocker' | 'high' | 'medium' | 'low'
   summary: string
   category: string
   quote: string
@@ -40,13 +40,18 @@ interface ReviewIssue {
 interface ReviewReport {
   chapterId: string
   passed: boolean
-  score: number | null
+  qualityScore: number | null
+  coverage: number | null
+  executionStatus: string
+  gateStatus: string
+  deliveryStatus: string
   issueCount: number
   summary: string
   issues: ReviewIssue[]
 }
 
-const SEVERITIES = ['blocker', 'high', 'medium', 'low'] as const
+const REVIEW_SEVERITIES = ['critical', 'warning', 'info'] as const
+const REVISION_PRIORITIES = ['blocker', 'high', 'medium', 'low'] as const
 
 /** Flatten a settled result's content blocks to text (the tool-call-model resultText rule). */
 function resultText(node: ToolResultNode): string {
@@ -69,21 +74,35 @@ function parseReport(text: string): ReviewReport | null {
   if (data === null || typeof data !== 'object') return null
   const outer = data as Record<string, unknown>
   const result = (outer['result'] !== null && typeof outer['result'] === 'object' ? outer['result'] : outer) as Record<string, unknown>
-  if (typeof result['passed'] !== 'boolean' && typeof result['score'] !== 'number') return null
   const text2 = (value: unknown): string => (typeof value === 'string' ? value : '')
+  const v2 = (result['review_v2'] !== null && typeof result['review_v2'] === 'object' && !Array.isArray(result['review_v2'])
+    ? result['review_v2'] : {}) as Record<string, unknown>
+  const qualityScore = typeof v2['quality_score'] === 'number'
+    ? v2['quality_score']
+    : typeof result['score'] === 'number' ? result['score'] : null
+  const deliveryStatus = text2(v2['delivery_status'])
+  if (typeof result['passed'] !== 'boolean' && qualityScore === null && deliveryStatus === '') return null
   const issueList = Array.isArray(result['issue_details']) ? result['issue_details'] : []
   const issues: ReviewIssue[] = []
   for (const raw of issueList) {
     if (raw === null || typeof raw !== 'object') continue
     const item = raw as Record<string, unknown>
     const evidence = (item['evidence'] !== null && typeof item['evidence'] === 'object' ? item['evidence'] : {}) as Record<string, unknown>
-    const severity = text2(item['severity'])
+    const rawSeverity = text2(item['review_severity'] ?? item['legacy_severity'] ?? item['severity']).toLowerCase()
+    const reviewSeverity = rawSeverity === 'critical' || rawSeverity === 'blocker'
+      ? 'critical'
+      : rawSeverity === 'info' || rawSeverity === 'low' ? 'info' : 'warning'
+    const rawPriority = text2(item['revision_priority']).toLowerCase()
+    const revisionPriority = (REVISION_PRIORITIES as readonly string[]).includes(rawPriority)
+      ? rawPriority as ReviewIssue['revisionPriority']
+      : rawSeverity === 'critical' || rawSeverity === 'blocker'
+        ? 'blocker'
+        : rawSeverity === 'high' ? 'high' : rawSeverity === 'info' || rawSeverity === 'low' ? 'low' : 'medium'
     issues.push({
       id: text2(item['id']) || `issue_${String(issues.length)}`,
       dimension: typeof item['dimension'] === 'number' ? item['dimension'] : null,
-      severity: (SEVERITIES as readonly string[]).includes(severity)
-        ? severity as ReviewIssue['severity']
-        : 'medium',
+      reviewSeverity: (REVIEW_SEVERITIES as readonly string[]).includes(reviewSeverity) ? reviewSeverity : 'warning',
+      revisionPriority,
       // normalize_review_issues folds description into summary; keep both fallbacks.
       summary: text2(item['summary']) || text2(item['description']),
       category: text2(item['category']),
@@ -93,8 +112,12 @@ function parseReport(text: string): ReviewReport | null {
   }
   return {
     chapterId: text2(result['chapter_id']),
-    passed: result['passed'] === true,
-    score: typeof result['score'] === 'number' ? result['score'] : null,
+    passed: deliveryStatus !== '' ? deliveryStatus === 'pass' : result['passed'] === true,
+    qualityScore,
+    coverage: typeof v2['coverage'] === 'number' ? v2['coverage'] : null,
+    executionStatus: text2(v2['execution_status']),
+    gateStatus: text2(v2['gate_status']),
+    deliveryStatus: deliveryStatus || (result['passed'] === true ? 'pass' : 'revise'),
     // `issues` on the wire is a COUNT, not the array (that is issue_details).
     issueCount: typeof result['issues'] === 'number' ? result['issues'] : issues.length,
     summary: text2(result['summary']),
@@ -133,13 +156,28 @@ export function NovelReviewCard({ block, t }: ReviewCardProps) {
     toggle()
   }
 
+  const statusLabel = (status: string): string => {
+    switch (status) {
+      case 'pass': return t('review.status.pass')
+      case 'blocked': return t('review.status.blocked')
+      case 'inconclusive': return t('review.status.inconclusive')
+      case 'revise': return t('review.status.revise')
+      case 'completed': return t('review.status.completed')
+      case 'partial': return t('review.status.partial')
+      case 'failed': return t('review.status.failed')
+      case 'stale': return t('review.status.stale')
+      default: return status || t('review.status.unknown')
+    }
+  }
+
   const summaryLine = running
     ? t('review.running')
     : report !== null
       ? [
         report.chapterId,
-        report.score !== null ? `${t('review.score')} ${String(report.score)}` : '',
-        report.passed ? t('review.passed') : t('review.failed'),
+        report.qualityScore !== null ? `${t('review.score')} ${String(report.qualityScore)}` : '',
+        report.coverage !== null ? `${t('review.coverage')} ${Math.round(report.coverage * 100)}%` : '',
+        statusLabel(report.deliveryStatus),
       ].filter(part => part !== '').join(' · ')
       : ''
 
@@ -150,7 +188,7 @@ export function NovelReviewCard({ block, t }: ReviewCardProps) {
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
-        data-state={running ? 'running' : isError ? 'error' : report?.passed === true ? 'ok' : 'error'}
+        data-state={running ? 'running' : isError ? 'error' : report?.deliveryStatus === 'pass' ? 'ok' : 'error'}
         onClick={toggle}
         onKeyDown={toggleFromKeyboard}
       >
@@ -166,9 +204,12 @@ export function NovelReviewCard({ block, t }: ReviewCardProps) {
                 <span className={css.verdict} data-passed={report.passed}>
                   {report.passed ? t('review.passed') : t('review.failed')}
                 </span>
-                {report.score !== null && (
-                  <span className={css.score}>{t('review.score')} {report.score}</span>
+                {report.qualityScore !== null && (
+                  <span className={css.score}>{t('review.score')} {report.qualityScore}</span>
                 )}
+                {report.coverage !== null && <span className={css.metric}>{t('review.coverage')} {Math.round(report.coverage * 100)}%</span>}
+                {report.gateStatus !== '' && <span className={css.metric}>{t('review.gate')} {statusLabel(report.gateStatus)}</span>}
+                {report.executionStatus !== '' && <span className={css.metric}>{t('review.execution')} {statusLabel(report.executionStatus)}</span>}
                 <span className={css.issueCount}>{t('review.issues')} {report.issueCount}</span>
               </div>
               {report.summary !== '' && <div className={css.reportSummary}><MarkdownText text={report.summary} /></div>}
@@ -178,8 +219,11 @@ export function NovelReviewCard({ block, t }: ReviewCardProps) {
                   {group.items.map(issue => (
                     <div key={issue.id} className={css.issue}>
                       <div className={css.issueHead}>
-                        <span className={css.severity} data-severity={issue.severity}>
-                          {t(`review.severity.${issue.severity}`)}
+                        <span className={css.severity} data-severity={issue.reviewSeverity}>
+                          {t(`review.severity.${issue.reviewSeverity}`)}
+                        </span>
+                        <span className={css.priority} data-priority={issue.revisionPriority}>
+                          {t('review.priority')} · {t(`review.priority.${issue.revisionPriority}`)}
                         </span>
                         {issue.dimension !== null && (
                           <span className={css.dimension}>{t('review.dimension')} {issue.dimension}</span>

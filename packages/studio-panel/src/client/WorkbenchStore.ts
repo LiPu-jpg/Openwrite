@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from 'react'
 import { fetchStudioApi } from './api.ts'
+import { nextEpochs, triggersRefresh } from './workbench-epochs.ts'
 
 export type ConnectionState = 'connecting' | 'online' | 'offline'
 export type EditorStatus = 'idle' | 'loading' | 'saved' | 'dirty' | 'saving' | 'conflict' | 'offline'
-export type ResourceKey = 'workspace' | 'manuscript' | 'outline' | 'assets' | 'tasks' | 'research' | 'revisions'
+export type ResourceKey = 'workspace' | 'manuscript' | 'outline' | 'assets' | 'tasks' | 'benchmark' | 'models' | 'dag' | 'graph' | 'research' | 'revisions'
 
 export interface ReviewSummary {
   score: number | null
@@ -41,6 +42,10 @@ const EMPTY_EPOCHS: Readonly<Record<ResourceKey, number>> = {
   outline: 0,
   assets: 0,
   tasks: 0,
+  benchmark: 0,
+  models: 0,
+  dag: 0,
+  graph: 0,
   research: 0,
   revisions: 0,
 }
@@ -115,6 +120,7 @@ class NovelWorkbenchStore {
   private snapshot: WorkbenchSnapshot = INITIAL
   private readonly listeners = new Set<Listener>()
   private pollTimer: number | null = null
+  private eventSource: EventSource | null = null
   private refreshPromise: Promise<void> | null = null
   private taskSignature = ''
   private revision = 0
@@ -144,8 +150,9 @@ class NovelWorkbenchStore {
   }
 
   invalidate(resource: ResourceKey): void {
-    this.patch({ epochs: { ...this.snapshot.epochs, [resource]: this.snapshot.epochs[resource] + 1 } })
-    if (resource === 'workspace' || resource === 'manuscript' || resource === 'outline' || resource === 'tasks') {
+    // Derived invalidation lives in workbench-epochs.ts (pure + unit-tested).
+    this.patch({ epochs: nextEpochs(resource, this.snapshot.epochs) })
+    if (triggersRefresh(resource)) {
       void this.refresh()
     }
   }
@@ -159,32 +166,67 @@ class NovelWorkbenchStore {
   private start(): void {
     this.patch({ connection: 'connecting' })
     void this.refresh()
+    if (typeof EventSource === 'undefined') this.startFallbackPolling()
+    else {
+      const source = new EventSource('/studio-panel/events')
+      this.eventSource = source
+      source.addEventListener('open', () => {
+        if (this.pollTimer !== null) window.clearInterval(this.pollTimer)
+        this.pollTimer = null
+        this.patch({ connection: 'online' })
+      })
+      source.addEventListener('ready', event => {
+        this.consumeMutation((event as MessageEvent<string>).data)
+        this.patch({ connection: 'online' })
+      })
+      source.addEventListener('invalidate', event => {
+        this.consumeMutation((event as MessageEvent<string>).data)
+        this.patch({ connection: 'online' })
+      })
+      source.onerror = () => {
+        this.patch({ connection: 'offline' })
+        this.startFallbackPolling()
+      }
+    }
+  }
+
+  private startFallbackPolling(): void {
+    if (this.pollTimer !== null) return
     void this.pollInvalidation()
     this.pollTimer = window.setInterval(() => {
       if (!document.hidden) void this.pollInvalidation()
-    }, 1_500)
+    }, 5_000)
+  }
+
+  private consumeMutation(value: unknown): void {
+    let mutation = record(value)
+    if (typeof value === 'string') {
+      try { mutation = record(JSON.parse(value)) } catch { return }
+    }
+    const revision = typeof mutation['revision'] === 'number' ? mutation['revision'] : 0
+    const resource = mutation['resource']
+    const initial = !this.revisionInitialized
+    this.revisionInitialized = true
+    if (revision > this.revision) {
+      this.revision = revision
+      if (!initial) this.invalidate(typeof resource === 'string' && resource in EMPTY_EPOCHS ? resource as ResourceKey : 'workspace')
+    }
   }
 
   private stop(): void {
     if (this.pollTimer !== null) window.clearInterval(this.pollTimer)
     this.pollTimer = null
+    this.eventSource?.close()
+    this.eventSource = null
   }
 
   private async pollInvalidation(): Promise<void> {
     try {
       const response = await fetch('/studio-panel/invalidation.json', { headers: { accept: 'application/json' } })
       if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
-      const mutation = record(await response.json())
-      const revision = typeof mutation['revision'] === 'number' ? mutation['revision'] : 0
-      const resource = mutation['resource']
-      const initial = !this.revisionInitialized
-      this.revisionInitialized = true
-      if (revision > this.revision) {
-        this.revision = revision
-        if (!initial) this.invalidate(typeof resource === 'string' && resource in EMPTY_EPOCHS ? resource as ResourceKey : 'workspace')
-      }
+      this.consumeMutation(await response.json())
       this.pollTicks += 1
-      if (this.pollTicks % 10 === 0) void this.refresh()
+      if (this.pollTicks % 4 === 0) void this.refresh()
       this.patch({ connection: 'online' })
     } catch {
       this.patch({ connection: 'offline' })

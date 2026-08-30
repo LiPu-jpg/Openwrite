@@ -47,6 +47,9 @@ const VDITOR_RUNTIME_SPECIFIER = 'dsh-vditor-runtime'
 const VDITOR_RUNTIME_VIRTUAL_ID = '\0dsh-vditor-runtime.mjs'
 const VDITOR_RUNTIME_FILE = resolvePath('vendor/vditor/dist/index.min.js')
 const VDITOR_ICONS_FILE = resolvePath('vendor/vditor/dist/js/icons/ant.js')
+const REACT_FLOW_STYLE_SPECIFIER = 'dsh-react-flow-style'
+const REACT_FLOW_STYLE_VIRTUAL_ID = '\0dsh-react-flow-style.mjs'
+const REACT_FLOW_STYLE_FILE = resolvePath('node_modules/@xyflow/react/dist/style.css')
 
 /** Node half: the host-side cordis plugin (Config schema + config route). */
 const lib: UserConfig = {
@@ -69,6 +72,9 @@ const client: UserConfig = {
   outDir: 'lib',
   format: 'cjs',
   platform: 'browser',
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
   dts: false,
   sourcemap: true,
   clean: false,
@@ -78,6 +84,33 @@ const client: UserConfig = {
   // a guaranteed runtime throw.
   noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
   plugins: [{
+    name: 'dsh-react-flow-style-inline',
+    resolveId(source: string) {
+      return source === REACT_FLOW_STYLE_SPECIFIER ? REACT_FLOW_STYLE_VIRTUAL_ID : null
+    },
+    async load(id: string) {
+      if (id !== REACT_FLOW_STYLE_VIRTUAL_ID) return null
+      this.addWatchFile(REACT_FLOW_STYLE_FILE)
+      const source = await readFile(REACT_FLOW_STYLE_FILE)
+      const { code } = transform({
+        filename: REACT_FLOW_STYLE_FILE,
+        code: source,
+        minify: true,
+      })
+      const tagId = `${ID}/react-flow`
+      return [
+        `const css = ${JSON.stringify(code.toString())};`,
+        `const tagId = ${JSON.stringify(tagId)};`,
+        'if (typeof document !== \'undefined\' && document.querySelector(\'style[data-plugin-css=\' + JSON.stringify(tagId) + \']\') === null) {',
+        '  const tag = document.createElement(\'style\');',
+        `  tag.dataset.plugin = ${JSON.stringify(ID)};`,
+        '  tag.dataset.pluginCss = tagId;',
+        '  tag.textContent = css;',
+        '  document.head.appendChild(tag);',
+        '}',
+      ].join('\n')
+    },
+  }, {
     name: 'dsh-vditor-runtime-inline',
     resolveId(source: string) {
       return source === VDITOR_RUNTIME_SPECIFIER ? VDITOR_RUNTIME_VIRTUAL_ID : null
