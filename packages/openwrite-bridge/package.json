@@ -20,7 +20,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "test:contracts": "node scripts/contract-smoke.mjs && node scripts/dog-canonical.mjs"
   },
   "dsh": {
     "bundle": {

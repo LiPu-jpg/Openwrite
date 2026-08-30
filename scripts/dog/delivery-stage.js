@@ -12,14 +12,15 @@ if (!inputPath) {
 try {
   const value = JSON.parse(await readFile(inputPath, 'utf8'))
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('delivery stage must be an object')
-  if (value.recordType !== 'delivery-stage') throw new Error('record is not a delivery stage')
+  if (!['delivery-stage', 'chapter-delivery'].includes(value.recordType)) throw new Error('record is not a delivery artifact')
   if (!['pass', 'fail', 'inconclusive'].includes(value.verdict)) throw new Error('delivery stage has an invalid verdict')
   process.stdout.write(JSON.stringify({
     verdict: value.verdict,
     evidence: {
       chapterId: value.chapterId,
       stage: value.stage,
-      status: value.status,
+      status: value.status ?? (value.readyForDelivery ? 'ready' : 'not_ready'),
+      readyForDelivery: value.readyForDelivery,
       ...(value.evidence !== null && typeof value.evidence === 'object' ? value.evidence : {}),
     },
   }))

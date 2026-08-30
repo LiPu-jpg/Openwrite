@@ -14,6 +14,9 @@ try {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('dimension record must be an object')
   }
+  if (!['dimension', 'review-dimension'].includes(value.recordType)) {
+    throw new Error('record is not a review dimension')
+  }
   const verdict = value.verdict
   if (verdict !== 'pass' && verdict !== 'fail' && verdict !== 'inconclusive') {
     throw new Error('dimension record has an invalid verdict')
@@ -24,6 +27,8 @@ try {
       chapterId: value.chapterId,
       dimension: value.dimension,
       name: value.name,
+      status: value.status,
+      criterionId: value.criterionId,
       issueCount: value.issueCount,
       issues: Array.isArray(value.issues) ? value.issues : [],
     },

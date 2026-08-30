@@ -1,4 +1,11 @@
-"""Build a chapter delivery DoG graph from OpenWrite's canonical artifacts."""
+"""Build a chapter delivery DoG graph from OpenWrite's canonical artifacts.
+
+Role: a model-free materializer/presentation transformer. Freshness and the
+canonical delivery decision come from OpenWrite's review record; the isolated
+`legacy_delivery_status` adapter exists only for v1-only reviews
+(`decisionSource` records which path produced the manifest). This module never
+calls a model.
+"""
 
 from __future__ import annotations
 
@@ -30,14 +37,21 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             pass
         raise
 
-
 def _load_json(path: Path) -> dict[str, Any]:
+    """Read an artifact. Only a missing file yields {}; corrupt JSON,
+    non-object roots, and empty objects raise so a malformed artifact can
+    never masquerade as an absent one (mirrors the TypeScript readJson)."""
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         return {}
-    return value if isinstance(value, dict) else {}
-
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"DoG artifact corrupt or unreadable: {path.name}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"DoG artifact root must be a JSON object: {path.name}")
+    if not value:
+        raise ValueError(f"DoG artifact empty object: {path.name}")
+    return value
 
 def _revision(path: Path | None) -> str:
     if path is None or not path.is_file():
@@ -46,22 +60,47 @@ def _revision(path: Path | None) -> str:
     return f"sha256:{digest}"
 
 
-def _gate_passed(review: dict[str, Any], threshold: int) -> bool:
+def _review_severity(issue: dict[str, Any]) -> str:
+    return str(
+        issue.get("review_severity")
+        or issue.get("legacy_severity")
+        or issue.get("severity")
+        or "warning"
+    ).lower()
+
+
+def legacy_delivery_status(review: dict[str, Any], threshold: int) -> str:
+    """v1-only adapter: derive delivery from legacy score/passed/severity.
+
+    Never used when review_v2 is present; v2 records carry OpenWrite's
+    canonical delivery_status.
+    """
     try:
-        score = int(review.get("score") or 0)
+        score = float(review.get("score") or 0)
     except (TypeError, ValueError, OverflowError):
         score = 0
     hard = any(
         isinstance(item, dict)
-        and str(item.get("severity") or "").lower() in HARD_SEVERITIES
+        and _review_severity(item) in HARD_SEVERITIES
         for item in review.get("issue_details") or []
     )
-    return score >= threshold and not hard
+    if hard:
+        return "blocked"
+    if review.get("passed") is False:
+        return "revise"
+    return "pass" if score >= threshold else "revise"
+
+
+def _delivery_status(review: dict[str, Any], threshold: int) -> str:
+    review_v2 = review.get("review_v2") if isinstance(review.get("review_v2"), dict) else {}
+    if review_v2:
+        return str(review_v2.get("delivery_status") or "inconclusive").lower()
+    return legacy_delivery_status(review, threshold)
 
 
 def _stage(chapter_id: str, name: str, verdict: str, status: str, evidence: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schemaVersion": "dsh-novel.delivery.stage.v1",
+        "schemaVersion": "dsh-novel.delivery.stage.v2",
         "recordType": "delivery-stage",
         "chapterId": chapter_id,
         "stage": name,
@@ -104,13 +143,14 @@ def write_delivery_artifacts(
         review and current_revision and review_source_revision != current_revision
     )
     review_current = bool(review) and bool(current_revision) and not review_stale
-    review_passed = review_current and _gate_passed(review, effective_threshold)
+    delivery_status = _delivery_status(review, effective_threshold) if review else "inconclusive"
+    review_passed = review_current and delivery_status == "pass"
     issues = [item for item in review.get("issue_details") or [] if isinstance(item, dict)]
     issue_ids = [str(item.get("id") or "") for item in issues if item.get("id")]
     hard_issue_ids = [
         str(item.get("id") or "")
         for item in issues
-        if item.get("id") and str(item.get("severity") or "").lower() in HARD_SEVERITIES
+        if item.get("id") and _review_severity(item) in HARD_SEVERITIES
     ]
 
     revision_dir = novel_root / "data" / "revisions" / chapter_id
@@ -125,6 +165,14 @@ def write_delivery_artifacts(
         item for item in applied if str(item.get("applied_revision") or "") == current_revision
     ]
 
+    writing_stage = _stage(
+        chapter_id,
+        "writing",
+        "pass" if current_revision else "inconclusive",
+        "committed" if current_revision else "missing",
+        {"manuscriptTarget": manuscript_target, "currentRevision": current_revision},
+    )
+
     if not review:
         review_stage = _stage(chapter_id, "review", "inconclusive", "missing", {})
     elif not review_current:
@@ -134,8 +182,14 @@ def write_delivery_artifacts(
             "staleReason": review.get("stale_reason"),
         })
     else:
-        review_stage = _stage(chapter_id, "review", "pass", "current", {
+        review_stage = _stage(chapter_id, "review", "pass" if review_passed else (
+            "inconclusive" if delivery_status in {"inconclusive", "stale"} else "fail"
+        ), "current", {
             "score": review.get("score"),
+            "qualityScore": (review.get("review_v2") or {}).get("quality_score") if isinstance(review.get("review_v2"), dict) else review.get("score"),
+            "coverage": (review.get("review_v2") or {}).get("coverage") if isinstance(review.get("review_v2"), dict) else 1,
+            "gateStatus": (review.get("review_v2") or {}).get("gate_status") if isinstance(review.get("review_v2"), dict) else ("blocked" if hard_issue_ids else "pass"),
+            "deliveryStatus": delivery_status,
             "threshold": effective_threshold,
             "passedGate": review_passed,
             "issueIds": issue_ids,
@@ -166,6 +220,35 @@ def write_delivery_artifacts(
             "requiredIssueIds": issue_ids,
         })
 
+    if review_passed and not applied_to_current:
+        application_stage = _stage(chapter_id, "application", "pass", "not_required", {})
+    elif applied_to_current:
+        application_stage = _stage(chapter_id, "application", "pass", "applied", {
+            "proposalIds": [str(item.get("proposal_id") or "") for item in applied_to_current],
+            "appliedRevision": current_revision,
+        })
+    elif pending:
+        application_stage = _stage(chapter_id, "application", "inconclusive", "awaiting_application", {
+            "proposalIds": [str(item.get("proposal_id") or "") for item in pending],
+        })
+    else:
+        application_stage = _stage(chapter_id, "application", "inconclusive", "waiting_for_revision", {})
+
+    rereview_after_application = bool(applied_to_current and review_current and review_source_revision == current_revision)
+    if rereview_after_application:
+        rereview_stage = _stage(chapter_id, "rereview", "pass" if review_passed else "fail", "completed", {
+            "sourceRevision": review_source_revision,
+            "deliveryStatus": delivery_status,
+        })
+    elif applied_to_current:
+        rereview_stage = _stage(chapter_id, "rereview", "inconclusive", "required", {
+            "currentRevision": current_revision,
+        })
+    elif review_passed:
+        rereview_stage = _stage(chapter_id, "rereview", "pass", "not_required", {})
+    else:
+        rereview_stage = _stage(chapter_id, "rereview", "inconclusive", "waiting_for_application", {})
+
     if review_passed:
         closure_stage = _stage(chapter_id, "closure", "pass", "closed", {
             "score": review.get("score"),
@@ -191,12 +274,19 @@ def write_delivery_artifacts(
     else:
         closure_stage = _stage(chapter_id, "closure", "inconclusive", "review_required", {})
 
-    stages = {"review": review_stage, "revision": revision_stage, "closure": closure_stage}
+    stages = {
+        "writing": writing_stage,
+        "review": review_stage,
+        "revision": revision_stage,
+        "application": application_stage,
+        "rereview": rereview_stage,
+        "closure": closure_stage,
+    }
     for name, record in stages.items():
         _atomic_write_json(artifact_dir / f"{name}.json", record)
 
     manifest = {
-        "schemaVersion": "dsh-novel.delivery.manifest.v1",
+        "schemaVersion": "dsh-novel.delivery.manifest.v2",
         "recordType": "chapter-delivery",
         "chapterId": chapter_id,
         "novelId": novel_id,
@@ -204,7 +294,9 @@ def write_delivery_artifacts(
         "manuscriptTarget": manuscript_target,
         "currentRevision": current_revision,
         "readyForDelivery": bool(current_revision) and closure_stage["verdict"] == "pass",
+        "verdict": closure_stage["verdict"],
         "stages": stages,
+        "decisionSource": "v2" if isinstance(review.get("review_v2"), dict) else "v1-adapter",
         "revisionTrail": [
             {
                 "proposalId": str(item.get("proposal_id") or ""),
@@ -225,23 +317,16 @@ def write_delivery_artifacts(
             "constraint": "hard",
             "target": (relative_dir / "delivery.json").as_posix(),
             "completion": {"op": "all", "items": [
-                {"op": "ref", "id": name} for name in ("manuscript", "review", "revision", "closure")
+                {"op": "ref", "id": name} for name in stages
             ]},
-            "verifier": {
-                "mode": "agentic",
-                "instruction": (
-                    "只检查章节交付 manifest 的整体自洽性：正文、当前评审、修订应用与复评关闭"
-                    "是否形成完整链路。不要修改文件，也不要重新进行 37 维正文审查。"
-                ),
-            },
-        },
-        "manuscript": {
-            "kind": "leaf", "title": "正文已成形", "constraint": "hard",
-            "target": manuscript_target,
-            "verifier": {"mode": "programmatic", "script": "import-chapter"},
+            "verifier": {"mode": "programmatic", "script": "delivery-stage"},
         },
     }
-    for name, title in (("review", "当前正文已评审"), ("revision", "修订动作已结算"), ("closure", "问题经复评关闭")):
+    titles = {
+        "writing": "正文已成形", "review": "当前正文已评审", "revision": "修订提案已生成",
+        "application": "修订已应用", "rereview": "新正文已复评", "closure": "问题经复评关闭",
+    }
+    for name, title in titles.items():
         nodes[name] = {
             "kind": "leaf", "title": title, "constraint": "hard",
             "target": (relative_dir / f"{name}.json").as_posix(),
@@ -249,7 +334,7 @@ def write_delivery_artifacts(
         }
     contains = [
         {"parent": "root", "child": name, "required": True, "failure": "fatal"}
-        for name in ("manuscript", "review", "revision", "closure")
+        for name in stages
     ]
     graph = {
         "schemaVersion": "0.9",
@@ -258,9 +343,11 @@ def write_delivery_artifacts(
         "nodes": nodes,
         "contains": contains,
         "dependsOn": [
-            {"source": "review", "target": "manuscript", "data": ["manuscript"]},
+            {"source": "review", "target": "writing", "data": ["manuscript"]},
             {"source": "revision", "target": "review", "data": ["review"]},
-            {"source": "closure", "target": "revision", "data": ["revision"]},
+            {"source": "application", "target": "revision", "data": ["revision"]},
+            {"source": "rereview", "target": "application", "data": ["application"]},
+            {"source": "closure", "target": "rereview", "data": ["rereview"]},
         ],
     }
     graph_path = artifact_dir / "dog-graph.json"

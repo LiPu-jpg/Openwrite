@@ -19,12 +19,31 @@ function strings(value: unknown): string[] {
   return values(value).map(item => String(item)).filter(Boolean)
 }
 
-async function readJson(path: string): Promise<RecordValue> {
+/** Read an artifact. Only a missing file is tolerated (undefined); corrupt
+ * JSON, non-object roots, and empty objects are contract failures so a
+ * malformed artifact can never masquerade as an absent one. */
+async function readJson(path: string): Promise<RecordValue | undefined> {
+  let text: string
   try {
-    return record(JSON.parse(await readFile(path, 'utf8')))
-  } catch {
-    return {}
+    text = await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw new Error(`DoG artifact unreadable: ${basename(path)}`)
   }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error(`DoG artifact corrupt JSON: ${basename(path)}`)
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`DoG artifact root must be a JSON object: ${basename(path)}`)
+  }
+  const value = parsed as RecordValue
+  if (Object.keys(value).length === 0) {
+    throw new Error(`DoG artifact empty object: ${basename(path)}`)
+  }
+  return value
 }
 
 async function atomicWrite(path: string, value: unknown): Promise<void> {
@@ -58,16 +77,29 @@ async function findNamedFiles(root: string, filename: string): Promise<string[]>
   return found
 }
 
-function gatePassed(review: RecordValue, threshold: number): boolean {
-  const score = Number(review['score'] ?? 0)
-  const hard = values(review['issue_details']).some(item =>
-    HARD_SEVERITIES.has(String(record(item)['severity'] ?? '').toLowerCase()))
-  return Number.isFinite(score) && score >= threshold && !hard
+function reviewSeverity(issue: RecordValue): string {
+  return String(issue['review_severity'] ?? issue['legacy_severity'] ?? issue['severity'] ?? 'warning').toLowerCase()
+}
+
+/** v1-only adapter: derive delivery from legacy score/passed/severity. Never
+ * used when review_v2 is present; v2 records carry OpenWrite's canonical
+ * delivery_status. */
+function legacyDeliveryStatus(review: RecordValue, threshold: number): string {
+  const hard = values(review['issue_details']).some(item => HARD_SEVERITIES.has(reviewSeverity(record(item))))
+  if (hard) return 'blocked'
+  if (review['passed'] === false) return 'revise'
+  return Number(review['score'] ?? 0) >= threshold ? 'pass' : 'revise'
+}
+
+function deliveryStatus(review: RecordValue, threshold: number): string {
+  const v2 = record(review['review_v2'])
+  if (Object.keys(v2).length > 0) return String(v2['delivery_status'] ?? 'inconclusive').toLowerCase()
+  return legacyDeliveryStatus(review, threshold)
 }
 
 function stage(chapterId: string, name: string, verdict: string, status: string, evidence: RecordValue): RecordValue {
   return {
-    schemaVersion: 'dsh-novel.delivery.stage.v1', recordType: 'delivery-stage',
+    schemaVersion: 'dsh-novel.delivery.stage.v2', recordType: 'delivery-stage',
     chapterId, stage: name, verdict, status, evidence,
   }
 }
@@ -78,13 +110,13 @@ export async function materializeChapterDelivery(
   chapterId: string,
   threshold?: number,
 ): Promise<JsonValue> {
-  if (!/^ch_\d+$/.test(chapterId)) throw new Error(`invalid chapter id for delivery graph: ${chapterId}`)
   const workspace = record(workspaceValue)
   const project = record(workspace['project'])
   const snapshot = record(workspace['snapshot'])
   const root = String(project['root'] ?? '').trim()
   const novelId = String(snapshot['novel_id'] ?? '').trim()
   if (!root || !novelId) throw new Error('chapter delivery lacks workspace project root or novel_id')
+  if (!/^ch_\d+$/.test(chapterId)) throw new Error(`invalid chapter id for delivery graph: ${chapterId}`)
   try {
     if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
   } catch {
@@ -94,7 +126,7 @@ export async function materializeChapterDelivery(
   const novelRoot = join(root, 'data', 'novels', novelId)
   const relativeDir = join('data', 'novels', novelId, 'data', 'dog', 'deliveries', chapterId).replaceAll('\\', '/')
   const directory = join(root, relativeDir)
-  const previous = await readJson(join(directory, 'delivery.json'))
+  const previous = await readJson(join(directory, 'delivery.json')) ?? {}
   const effectiveThreshold = threshold ?? Number(previous['threshold'] ?? 70)
   if (!Number.isInteger(effectiveThreshold) || effectiveThreshold < 0 || effectiveThreshold > 100) {
     throw new Error('delivery threshold must be an integer between 0 and 100')
@@ -109,16 +141,34 @@ export async function materializeChapterDelivery(
     currentRevision = `sha256:${createHash('sha256').update(await readFile(manuscript)).digest('hex')}`
   }
 
-  const review = await readJson(join(novelRoot, 'data', 'reviews', `${chapterId}.json`))
+  const review = await readJson(join(novelRoot, 'data', 'reviews', `${chapterId}.json`)) ?? {}
+  // Existence/type/version policy, mirroring Python review_store: a present
+  // review_v2 key (even null) must be a non-empty JSON object declaring the
+  // supported schema version; only records without the key ride the legacy
+  // v1 adapter.
+  const rawV2 = review['review_v2']
+  if (rawV2 !== undefined) {
+    if (rawV2 === null || typeof rawV2 !== 'object' || Array.isArray(rawV2)) {
+      throw new Error(`review_v2 must be a JSON object when present, got ${rawV2 === null ? 'null' : typeof rawV2}`)
+    }
+    const versionProbe = rawV2 as RecordValue
+    if (Object.keys(versionProbe).length === 0) {
+      throw new Error('review_v2 empty object: unsupported or missing schema version')
+    }
+    if (versionProbe['schema_version'] !== 'openwrite.review.v2') {
+      throw new Error(`unsupported review_v2 schema version: ${String(versionProbe['schema_version'])}`)
+    }
+  }
   const reviewSourceRevision = String(review['source_revision'] ?? '')
   const reviewStale = Boolean(review['stale'])
     || (Object.keys(review).length > 0 && currentRevision !== '' && reviewSourceRevision !== currentRevision)
   const reviewCurrent = Object.keys(review).length > 0 && currentRevision !== '' && !reviewStale
-  const reviewPassed = reviewCurrent && gatePassed(review, effectiveThreshold)
+  const currentDeliveryStatus = Object.keys(review).length > 0 ? deliveryStatus(review, effectiveThreshold) : 'inconclusive'
+  const reviewPassed = reviewCurrent && currentDeliveryStatus === 'pass'
   const issues = values(review['issue_details']).map(record).filter(item => Object.keys(item).length > 0)
   const issueIds = issues.map(item => String(item['id'] ?? '')).filter(Boolean)
   const hardIssueIds = issues
-    .filter(item => HARD_SEVERITIES.has(String(item['severity'] ?? '').toLowerCase()))
+    .filter(item => HARD_SEVERITIES.has(reviewSeverity(item)))
     .map(item => String(item['id'] ?? '')).filter(Boolean)
 
   const revisionDir = join(novelRoot, 'data', 'revisions', chapterId)
@@ -128,12 +178,15 @@ export async function materializeChapterDelivery(
   } catch {
     proposalNames = []
   }
-  const proposals = (await Promise.all(proposalNames.map(name => readJson(join(revisionDir, name)))))
-    .filter(item => item['kind'] === 'review_fix')
+  const proposalRecords = await Promise.all(proposalNames.map(name => readJson(join(revisionDir, name))))
+  const proposals = proposalRecords.filter((item): item is RecordValue => item !== undefined && item['kind'] === 'review_fix')
   const applied = proposals.filter(item => item['status'] === 'applied')
   const pending = proposals.filter(item => item['status'] === 'proposed')
   const appliedToCurrent = applied.filter(item => String(item['applied_revision'] ?? '') === currentRevision)
 
+  const writingStage = stage(chapterId, 'writing', currentRevision !== '' ? 'pass' : 'inconclusive', currentRevision !== '' ? 'committed' : 'missing', {
+    manuscriptTarget, currentRevision,
+  })
   let reviewStage: RecordValue
   if (Object.keys(review).length === 0) {
     reviewStage = stage(chapterId, 'review', 'inconclusive', 'missing', {})
@@ -142,8 +195,12 @@ export async function materializeChapterDelivery(
       sourceRevision: reviewSourceRevision, currentRevision, staleReason: review['stale_reason'] ?? null,
     })
   } else {
-    reviewStage = stage(chapterId, 'review', 'pass', 'current', {
+    const v2 = record(review['review_v2'])
+    reviewStage = stage(chapterId, 'review', reviewPassed ? 'pass' : ['inconclusive', 'stale'].includes(currentDeliveryStatus) ? 'inconclusive' : 'fail', 'current', {
       score: review['score'] ?? null, threshold: effectiveThreshold, passedGate: reviewPassed,
+      qualityScore: v2['quality_score'] ?? review['score'] ?? null, coverage: v2['coverage'] ?? 1,
+      gateStatus: v2['gate_status'] ?? (hardIssueIds.length > 0 ? 'blocked' : 'pass'),
+      deliveryStatus: currentDeliveryStatus,
       issueIds, hardIssueIds, sourceRevision: reviewSourceRevision,
     })
   }
@@ -166,6 +223,35 @@ export async function materializeChapterDelivery(
     revisionStage = stage(chapterId, 'revision', 'inconclusive', 'revision_required', { requiredIssueIds: issueIds })
   }
 
+  let applicationStage: RecordValue
+  if (reviewPassed && appliedToCurrent.length === 0) {
+    applicationStage = stage(chapterId, 'application', 'pass', 'not_required', {})
+  } else if (appliedToCurrent.length > 0) {
+    applicationStage = stage(chapterId, 'application', 'pass', 'applied', {
+      proposalIds: appliedToCurrent.map(item => String(item['proposal_id'] ?? '')).filter(Boolean), appliedRevision: currentRevision,
+    })
+  } else if (pending.length > 0) {
+    applicationStage = stage(chapterId, 'application', 'inconclusive', 'awaiting_application', {
+      proposalIds: pending.map(item => String(item['proposal_id'] ?? '')).filter(Boolean),
+    })
+  } else {
+    applicationStage = stage(chapterId, 'application', 'inconclusive', 'waiting_for_revision', {})
+  }
+
+  let rereviewStage: RecordValue
+  const rereviewAfterApplication = appliedToCurrent.length > 0 && reviewCurrent && reviewSourceRevision === currentRevision
+  if (rereviewAfterApplication) {
+    rereviewStage = stage(chapterId, 'rereview', reviewPassed ? 'pass' : 'fail', 'completed', {
+      sourceRevision: reviewSourceRevision, deliveryStatus: currentDeliveryStatus,
+    })
+  } else if (appliedToCurrent.length > 0) {
+    rereviewStage = stage(chapterId, 'rereview', 'inconclusive', 'required', { currentRevision })
+  } else if (reviewPassed) {
+    rereviewStage = stage(chapterId, 'rereview', 'pass', 'not_required', {})
+  } else {
+    rereviewStage = stage(chapterId, 'rereview', 'inconclusive', 'waiting_for_application', {})
+  }
+
   let closureStage: RecordValue
   if (reviewPassed) {
     const delta = record(review['issue_delta'])
@@ -185,12 +271,16 @@ export async function materializeChapterDelivery(
     closureStage = stage(chapterId, 'closure', 'inconclusive', 'review_required', {})
   }
 
-  const stages = { review: reviewStage, revision: revisionStage, closure: closureStage }
+  const stages = {
+    writing: writingStage, review: reviewStage, revision: revisionStage,
+    application: applicationStage, rereview: rereviewStage, closure: closureStage,
+  }
   await Promise.all(Object.entries(stages).map(([name, value]) => atomicWrite(join(directory, `${name}.json`), value)))
   const manifest = {
-    schemaVersion: 'dsh-novel.delivery.manifest.v1', recordType: 'chapter-delivery',
+    schemaVersion: 'dsh-novel.delivery.manifest.v2', recordType: 'chapter-delivery',
     chapterId, novelId, threshold: effectiveThreshold, manuscriptTarget, currentRevision,
-    readyForDelivery: currentRevision !== '' && closureStage['verdict'] === 'pass', stages,
+    readyForDelivery: currentRevision !== '' && closureStage['verdict'] === 'pass', verdict: closureStage['verdict'], stages,
+    decisionSource: Object.keys(record(review['review_v2'])).length > 0 ? 'v2' : 'v1-adapter',
     revisionTrail: proposals.map(item => ({
       proposalId: String(item['proposal_id'] ?? ''), status: String(item['status'] ?? ''),
       issueIds: strings(item['review_issue_ids']), sourceRevision: String(item['source_revision'] ?? ''),
@@ -202,19 +292,13 @@ export async function materializeChapterDelivery(
   const nodes: RecordValue = {
     root: {
       kind: 'composite', title: `${chapterId} 章节交付`, constraint: 'hard', target: `${relativeDir}/delivery.json`,
-      completion: { op: 'all', items: ['manuscript', 'review', 'revision', 'closure'].map(id => ({ op: 'ref', id })) },
-      verifier: {
-        mode: 'agentic',
-        instruction: '只检查章节交付 manifest 的整体自洽性：正文、当前评审、修订应用与复评关闭是否形成完整链路。不要修改文件，也不要重新进行 37 维正文审查。',
-      },
-    },
-    manuscript: {
-      kind: 'leaf', title: '正文已成形', constraint: 'hard', target: manuscriptTarget,
-      verifier: { mode: 'programmatic', script: 'import-chapter' },
+      completion: { op: 'all', items: Object.keys(stages).map(id => ({ op: 'ref', id })) },
+      verifier: { mode: 'programmatic', script: 'delivery-stage' },
     },
   }
   const stageTitles: Array<[string, string]> = [
-    ['review', '当前正文已评审'], ['revision', '修订动作已结算'], ['closure', '问题经复评关闭'],
+    ['writing', '正文已成形'], ['review', '当前正文已评审'], ['revision', '修订提案已生成'],
+    ['application', '修订已应用'], ['rereview', '新正文已复评'], ['closure', '问题经复评关闭'],
   ]
   for (const [name, title] of stageTitles) {
     nodes[name] = {
@@ -224,11 +308,13 @@ export async function materializeChapterDelivery(
   }
   const graph = {
     schemaVersion: '0.9', id: `novel-delivery-${chapterId}`, root: 'root', nodes,
-    contains: ['manuscript', 'review', 'revision', 'closure'].map(child => ({ parent: 'root', child, required: true, failure: 'fatal' })),
+    contains: Object.keys(stages).map(child => ({ parent: 'root', child, required: true, failure: 'fatal' })),
     dependsOn: [
-      { source: 'review', target: 'manuscript', data: ['manuscript'] },
+      { source: 'review', target: 'writing', data: ['manuscript'] },
       { source: 'revision', target: 'review', data: ['review'] },
-      { source: 'closure', target: 'revision', data: ['revision'] },
+      { source: 'application', target: 'revision', data: ['revision'] },
+      { source: 'rereview', target: 'application', data: ['application'] },
+      { source: 'closure', target: 'rereview', data: ['rereview'] },
     ],
   }
   const graphPath = join(directory, 'dog-graph.json')

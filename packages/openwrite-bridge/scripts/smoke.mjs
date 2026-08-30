@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import * as mod from '../lib/index.js'
 import { materializeChapterDelivery } from '../lib/dog-delivery.js'
-import { materializeCompletedDogTaskReview } from '../lib/dog-review.js'
+import { buildDogReviewBundle, materializeCompletedDogTaskReview } from '../lib/dog-review.js'
 
 assert.equal(mod.name, '@dsh-novel/openwrite-bridge', 'name export')
 assert.deepEqual(mod.inject, ['tools'], 'inject export')
@@ -67,7 +67,7 @@ const expected = [
   // deep research
   'novel_research_status', 'novel_research_report', 'novel_research_settings_save',
   // model configuration
-  'novel_model_profiles', 'novel_model_configure', 'novel_model_test',
+  'novel_model_profiles', 'novel_model_benchmark', 'novel_model_configure', 'novel_model_test',
   'novel_model_embedding_test', 'novel_model_profile_save', 'novel_model_profile_delete',
   'novel_model_routes_save',
 ]
@@ -75,6 +75,46 @@ assert.deepEqual(registered.map((t) => t.name), expected, 'registered novel_* to
 for (const tool of registered) {
   assert.ok(tool.description && tool.parameters && tool.output?.schema, `${tool.name} is fully defined`)
 }
+
+const benchmarkTool = registered.find(tool => tool.name === 'novel_model_benchmark')
+assert.ok(benchmarkTool, 'benchmark tool is registered')
+const benchmarkRequests = []
+const benchmarkFetch = globalThis.fetch
+globalThis.fetch = async (input, init = {}) => {
+  benchmarkRequests.push({ url: String(input), init })
+  return new Response(JSON.stringify({ ok: true, data: { accepted: true } }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+try {
+  const exec = { signal: new AbortController().signal }
+  assert.deepEqual(await benchmarkTool.execute({ action: 'list', limit: 7 }, exec), { accepted: true })
+  assert.deepEqual(await benchmarkTool.execute({ action: 'get', run_id: 'bench_test_001' }, exec), { accepted: true })
+  assert.deepEqual(await benchmarkTool.execute({
+    action: 'run', chapter_id: 'ch_003', writer_profile_ids: ['writer-a', 'writer-b'],
+    reviewer_profile_ids: ['critic'], execution_mode: 'framework', repeats: 2,
+    target_words: 2400, concurrency: 2,
+  }, exec), { accepted: true })
+  await assert.rejects(() => benchmarkTool.execute({ action: 'get' }, exec), /run_id is required/)
+  await assert.rejects(() => benchmarkTool.execute({ action: 'run', reviewer_profile_ids: ['critic'] }, exec), /writer_profile_ids is required/)
+  await assert.rejects(() => benchmarkTool.execute({ action: 'run', writer_profile_ids: ['writer-a'] }, exec), /reviewer_profile_ids is required/)
+} finally {
+  globalThis.fetch = benchmarkFetch
+}
+assert.equal(new URL(benchmarkRequests[0].url).pathname, '/api/benchmarks')
+assert.equal(new URL(benchmarkRequests[0].url).searchParams.get('limit'), '7')
+assert.equal(benchmarkRequests[0].init.method, 'GET')
+assert.equal(new URL(benchmarkRequests[1].url).pathname, '/api/benchmarks/bench_test_001')
+assert.equal(benchmarkRequests[1].init.method, 'GET')
+assert.equal(new URL(benchmarkRequests[2].url).pathname, '/api/benchmarks')
+assert.equal(benchmarkRequests[2].init.method, 'POST')
+assert.equal(benchmarkRequests[2].init.headers['X-OpenWrite-Studio'], '1')
+assert.deepEqual(JSON.parse(benchmarkRequests[2].init.body), {
+  writer_profile_ids: ['writer-a', 'writer-b'], reviewer_profile_ids: ['critic'],
+  chapter_id: 'ch_003', execution_mode: 'framework', repeats: 2,
+  target_words: 2400, concurrency: 2,
+})
 
 assert.deepEqual(routes.map(route => [route.kind, route.path]), [
   ['exact', '/studio-panel/config.json'],
@@ -101,10 +141,14 @@ assert.equal(configResponse.status, 200)
 assert.deepEqual(JSON.parse(configResponse.body), { studioUrl: resolved.baseUrl })
 
 const invalidationRoute = routes.find(route => route.path === '/studio-panel/invalidation.json')
-const initialInvalidation = capture()
-await invalidationRoute.handler({ method: 'GET' }, initialInvalidation)
-assert.deepEqual(JSON.parse(initialInvalidation.body), { revision: 0, resource: 'workspace', path: '' })
-assert.equal(Number(initialInvalidation.headers['content-length']), Buffer.byteLength(initialInvalidation.body))
+const benchmarkInvalidation = capture()
+await invalidationRoute.handler({ method: 'GET' }, benchmarkInvalidation)
+assert.deepEqual(JSON.parse(benchmarkInvalidation.body), {
+  revision: 1,
+  resource: 'benchmark',
+  path: '/api/benchmarks',
+})
+assert.equal(Number(benchmarkInvalidation.headers['content-length']), Buffer.byteLength(benchmarkInvalidation.body))
 
 const eventsRoute = routes.find(route => route.path === '/studio-panel/events')
 const eventResponse = capture()
@@ -115,10 +159,51 @@ assert.match(eventResponse.chunks.join(''), /event: ready/)
 
 const proxyRoute = routes.find(route => route.path === '/studio-panel/api')
 const originalFetch = globalThis.fetch
-globalThis.fetch = async () => new Response(JSON.stringify({ ok: true }), {
-  status: 200,
-  headers: { 'content-type': 'application/json' },
-})
+const proxyRequests = []
+globalThis.fetch = async (input, init = {}) => {
+  proxyRequests.push({ url: String(input), init })
+  const path = new URL(String(input)).pathname
+  const payload = path === '/api/tasks'
+    ? {
+        ok: true,
+        data: {
+          tasks: [
+            {
+              task_id: 'tsk_benchmark', type: 'model_benchmark', status: 'completed', phase: 'done',
+              result: {
+                run_id: 'bench_smoke', status: 'completed', artifact_path: '/tmp/bench.json',
+                context_hash: 'sha256:test', summary: { average_quality_score: 86 },
+                candidates: [{ content: 'large candidate content must be removed' }],
+                evaluations: [{ quality_score: 86 }],
+              },
+            },
+            {
+              task_id: 'tsk_review', type: 'chapter_review', status: 'completed', phase: 'done',
+              result: {
+                score: 84, passed: false, issues: 1, summary: 'Needs one repair',
+                review_v2: {
+                  schema_version: 'openwrite.review.v2',
+                  execution_status: 'completed', quality_score: 84, coverage: 0.92,
+                  gate_status: 'blocked', delivery_status: 'blocked',
+                  production_gate_status: 'disabled_uncalibrated',
+                  freshness_status: 'current', source_revision: 'sha256:smoke',
+                  current_source_revision: 'sha256:smoke', domains: [{ id: 'large' }],
+                },
+                issue_details: [{
+                  severity: 'critical', review_severity: 'critical', revision_priority: 'blocker',
+                  dimension: 2, category: 'logic', description: 'Broken causal link', evidence: { quote: 'large' },
+                }],
+              },
+            },
+          ],
+        },
+      }
+    : { ok: true }
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
 try {
   const mutationResponse = capture()
   await proxyRoute.handler({
@@ -128,20 +213,77 @@ try {
   }, mutationResponse)
   assert.equal(mutationResponse.status, 200)
   assert.equal(Number(mutationResponse.headers['content-length']), Buffer.byteLength(mutationResponse.body))
+
+  const documentInvalidation = capture()
+  await invalidationRoute.handler({ method: 'GET' }, documentInvalidation)
+  assert.deepEqual(JSON.parse(documentInvalidation.body), {
+    revision: 2,
+    resource: 'manuscript',
+    path: '/api/document',
+  })
+
+  const benchmarkProxyResponse = capture()
+  await proxyRoute.handler({
+    method: 'POST',
+    url: '/studio-panel/api/benchmarks',
+    async *[Symbol.asyncIterator]() { yield Buffer.from('{"writer_profile_ids":["writer"]}') },
+  }, benchmarkProxyResponse)
+  assert.equal(benchmarkProxyResponse.status, 200)
+  assert.equal(proxyRequests[1].init.headers['x-openwrite-studio'], '1')
+  assert.equal(new URL(proxyRequests[1].url).pathname, '/api/benchmarks')
+
+  const modelProxyResponse = capture()
+  await proxyRoute.handler({
+    method: 'POST',
+    url: '/studio-panel/api/model/routes',
+    async *[Symbol.asyncIterator]() { yield Buffer.from('{"routes":{}}') },
+  }, modelProxyResponse)
+  assert.equal(modelProxyResponse.status, 200)
+  assert.equal(new URL(proxyRequests[2].url).pathname, '/api/model/routes')
+  const taskListResponse = capture()
+  await proxyRoute.handler({ method: 'GET', url: '/studio-panel/api/tasks' }, taskListResponse)
+  const compactTasks = JSON.parse(taskListResponse.body).data.tasks
+  const compactTask = compactTasks[0]
+  assert.deepEqual(compactTask.result, {
+    run_id: 'bench_smoke', status: 'completed', artifact_path: '/tmp/bench.json',
+    context_hash: 'sha256:test', summary: { average_quality_score: 86 },
+  })
+  assert.deepEqual(compactTasks[1].result.review_v2, {
+    schema_version: 'openwrite.review.v2',
+    execution_status: 'completed', quality_score: 84, coverage: 0.92,
+    gate_status: 'blocked', delivery_status: 'blocked',
+    production_gate_status: 'disabled_uncalibrated',
+    freshness_status: 'current', source_revision: 'sha256:smoke',
+    current_source_revision: 'sha256:smoke',
+  })
+  assert.deepEqual(compactTasks[1].result.issue_details, [{
+    severity: 'critical', review_severity: 'critical', revision_priority: 'blocker',
+    dimension: 2, category: 'logic', summary: 'Broken causal link',
+  }])
+  assert.equal(taskListResponse.body.includes('"domains"'), false)
+  assert.equal(taskListResponse.body.includes('"evidence"'), false)
+  assert.equal(taskListResponse.body.includes('large candidate content'), false)
 } finally {
   globalThis.fetch = originalFetch
 }
 const changedInvalidation = capture()
 await invalidationRoute.handler({ method: 'GET' }, changedInvalidation)
 assert.deepEqual(JSON.parse(changedInvalidation.body), {
-  revision: 1,
-  resource: 'manuscript',
-  path: '/api/document',
+  revision: 4,
+  resource: 'models',
+  path: '/api/model/routes',
 })
 assert.match(eventResponse.chunks.join(''), /event: invalidate/)
 
 const dogWorkspace = await mkdtemp(join(tmpdir(), 'dsh-novel-dog-smoke-'))
 try {
+  const legacyFailed = buildDogReviewBundle({
+    score: 90, passed: false,
+    issue_details: [{ dimension: 7, severity: 'warning', description: 'Slow opening' }],
+  }, 'ch_008', 70)
+  assert.equal(legacyFailed.manifest.gateStatus, 'pass')
+  assert.equal(legacyFailed.manifest.deliveryStatus, 'revise')
+
   const dogReview = await materializeCompletedDogTaskReview({
     task: {
       type: 'chapter_review', status: 'completed', chapter_id: 'ch_009',
@@ -158,7 +300,7 @@ try {
   })
   assert.equal(dogReview.status, 'ready')
   const graph = JSON.parse(await readFile(dogReview.graphPath, 'utf8'))
-  assert.equal(Object.keys(graph.nodes).length, 38)
+  assert.equal(Object.keys(graph.nodes).length, 47)
   assert.equal(JSON.parse(await readFile(join(dogWorkspace, 'data/novels/smoke-book/data/dog/reviews/ch_009/dim_01.json'), 'utf8')).verdict, 'fail')
   assert.equal(JSON.parse(await readFile(join(dogWorkspace, 'data/novels/smoke-book/data/dog/reviews/ch_009/dim_03.json'), 'utf8')).verdict, 'inconclusive')
   const manifest = JSON.parse(await readFile(join(dogWorkspace, 'data/novels/smoke-book/data/dog/reviews/ch_009/review.json'), 'utf8'))
@@ -172,6 +314,16 @@ try {
   const revision = `sha256:${createHash('sha256').update(await readFile(manuscript)).digest('hex')}`
   await mkdir(join(dogWorkspace, 'data/novels/smoke-book/data/reviews'), { recursive: true })
   await writeFile(join(dogWorkspace, 'data/novels/smoke-book/data/reviews/ch_009.json'), JSON.stringify({
+    score: 90, passed: false, source_revision: revision,
+    issue_details: [{ id: 'issue-warning', severity: 'warning', dimension: 7 }],
+  }), 'utf8')
+  const legacyFailedDelivery = await materializeChapterDelivery({
+    project: { root: dogWorkspace }, snapshot: { novel_id: 'smoke-book' },
+  }, 'ch_009', 70)
+  assert.equal(legacyFailedDelivery.readyForDelivery, false)
+  assert.equal(legacyFailedDelivery.stages.closure, 'review_failed')
+
+  await writeFile(join(dogWorkspace, 'data/novels/smoke-book/data/reviews/ch_009.json'), JSON.stringify({
     score: 90, passed: true, source_revision: revision, issue_details: [],
   }), 'utf8')
   const delivery = await materializeChapterDelivery({
@@ -180,7 +332,8 @@ try {
   assert.equal(delivery.readyForDelivery, true)
   const deliveryGraph = JSON.parse(await readFile(delivery.graphPath, 'utf8'))
   assert.deepEqual(deliveryGraph.dependsOn.map(edge => `${edge.source}->${edge.target}`), [
-    'review->manuscript', 'revision->review', 'closure->revision',
+    'review->writing', 'revision->review', 'application->revision',
+    'rereview->application', 'closure->rereview',
   ])
 } finally {
   await rm(dogWorkspace, { recursive: true, force: true })

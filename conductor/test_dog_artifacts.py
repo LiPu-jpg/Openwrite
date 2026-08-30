@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dog_import import write_import_artifacts
 from dog_delivery import write_delivery_artifacts
-from dog_review import write_review_artifacts
+from dog_review import build_review_manifest, write_review_artifacts
 from smart_import import detect_and_convert
 
 
@@ -103,6 +103,28 @@ if (!['completed', 'success', 'failure', 'needs_replan', 'partial_success'].incl
         raise AssertionError(f"dsh-dog execution failed:\n{result.stderr or result.stdout}")
 
 
+def _assert_acyclic(graph: dict) -> None:
+    adjacency: dict[str, list[str]] = {node_id: [] for node_id in graph["nodes"]}
+    for edge in graph.get("dependsOn", []):
+        adjacency[edge["target"]].append(edge["source"])
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node_id: str) -> None:
+        if node_id in visiting:
+            raise AssertionError(f"cycle found at {node_id}")
+        if node_id in visited:
+            return
+        visiting.add(node_id)
+        for child in adjacency[node_id]:
+            visit(child)
+        visiting.remove(node_id)
+        visited.add(node_id)
+
+    for node_id in adjacency:
+        visit(node_id)
+
+
 class DogArtifactTests(unittest.TestCase):
     def test_review_graph_preserves_partial_and_hard_verdicts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -127,14 +149,113 @@ class DogArtifactTests(unittest.TestCase):
             graph_path = Path(result["graph_path"])
             artifact_dir = graph_path.parent
 
-            self.assertEqual(len(result["graph"]["nodes"]), 38)
+            self.assertEqual(len(result["graph"]["nodes"]), 47)
+            self.assertFalse(any(
+                node.get("verifier", {}).get("mode") == "agentic"
+                for node in result["graph"]["nodes"].values()
+            ))
+            parents = {
+                edge["child"]: edge["parent"]
+                for edge in result["graph"]["contains"]
+            }
+            self.assertEqual(parents["domain-character"], "root")
+            self.assertEqual(parents["dim-01"], "domain-character")
+            self.assertEqual(parents["dim-27"], "gate")
             self.assertEqual(_run_verifier("review-dimension", artifact_dir / "dim_01.json")["verdict"], "fail")
             self.assertEqual(_run_verifier("review-dimension", artifact_dir / "dim_02.json")["verdict"], "pass")
             self.assertEqual(_run_verifier("review-dimension", artifact_dir / "dim_03.json")["verdict"], "inconclusive")
             manifest = json.loads((artifact_dir / "review.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["issueCount"], 2)
             self.assertEqual(manifest["unmappedIssueCount"], 1)
+            self.assertEqual(manifest["schemaVersion"], "dsh-novel.review.manifest.v2")
+            self.assertEqual(len(manifest["domains"]), 6)
+            self.assertEqual(_run_verifier("review-record", artifact_dir / "gate.json")["verdict"], "fail")
+            _assert_acyclic(result["graph"])
             _validate_with_dog(graph_path, root)
+
+    def test_python_and_typescript_review_contracts_match(self) -> None:
+        review = {
+            "score": 84,
+            "passed": False,
+            "source_revision": "sha256:test",
+            "issue_details": [{
+                "id": "issue-1", "dimension": 1, "severity": "critical",
+                "revision_priority": "blocker", "description": "人物失真", "evidence": "证据",
+            }],
+            "review_v2": {
+                "schema_version": "openwrite.review.v2",
+                "execution_status": "partial", "quality_score": 84, "coverage": 0.9,
+                "gate_status": "blocked", "delivery_status": "blocked",
+                "requested_dimensions": list(range(1, 38)),
+                "domains": [{
+                    "id": "character", "status": "evaluated", "earned": 12, "max": 15,
+                    "potential_max": 15, "coverage": 1,
+                    "criteria": [{
+                        "id": "character_fidelity", "status": "evaluated", "earned": 4,
+                        "max": 5, "evidence": ["证据"], "legacy_check_ids": [1, 34],
+                    }],
+                }],
+            },
+        }
+        python_manifest, python_dimensions = build_review_manifest(review, "ch_001", 70)
+        script = """
+import fs from 'node:fs'
+import { buildDogReviewBundle } from './packages/openwrite-bridge/lib/dog-review.js'
+const review = JSON.parse(fs.readFileSync(0, 'utf8'))
+process.stdout.write(JSON.stringify(buildDogReviewBundle(review, 'ch_001', 70)))
+"""
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=REPO_ROOT,
+            input=json.dumps(review),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        typescript = json.loads(result.stdout)
+        typescript_manifest = typescript["manifest"]
+        for key in (
+            "schemaVersion", "chapterId", "verdict", "executionStatus", "qualityScore",
+            "coverage", "gateStatus", "deliveryStatus", "requestedDimensions", "dimensionCount",
+            "issueCount", "unmappedIssueCount",
+        ):
+            self.assertEqual(typescript_manifest[key], python_manifest[key], key)
+        self.assertEqual(
+            [(item["id"], item["legacyCheckIds"], item["verdict"]) for item in typescript_manifest["domains"]],
+            [(item["id"], item["legacyCheckIds"], item["verdict"]) for item in python_manifest["domains"]],
+        )
+        self.assertEqual(
+            [(item["dimension"], item["status"], item["verdict"]) for item in typescript["dimensionRecords"]],
+            [(number, python_dimensions[number]["status"], python_dimensions[number]["verdict"]) for number in range(1, 38)],
+        )
+
+    def test_legacy_failed_review_remains_revise_in_python_and_typescript(self) -> None:
+        review = {
+            "score": 90,
+            "passed": False,
+            "issue_details": [{"dimension": 7, "severity": "warning", "description": "节奏偏慢"}],
+        }
+        python_manifest, _ = build_review_manifest(review, "ch_001", 70)
+        script = """
+import fs from 'node:fs'
+import { buildDogReviewBundle } from './packages/openwrite-bridge/lib/dog-review.js'
+const review = JSON.parse(fs.readFileSync(0, 'utf8'))
+process.stdout.write(JSON.stringify(buildDogReviewBundle(review, 'ch_001', 70).manifest))
+"""
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=REPO_ROOT,
+            input=json.dumps(review),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        typescript_manifest = json.loads(result.stdout)
+
+        self.assertEqual(python_manifest["gateStatus"], "pass")
+        self.assertEqual(python_manifest["deliveryStatus"], "revise")
+        self.assertEqual(typescript_manifest["deliveryStatus"], "revise")
+        self.assertEqual(typescript_manifest["verdict"], "fail")
 
     def test_import_graph_checks_manifest_and_chapter(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -181,6 +302,24 @@ class DogArtifactTests(unittest.TestCase):
             failed = write_delivery_artifacts(root, "book", "ch_001", 70)
             self.assertEqual(failed["stages"]["closure"], "review_failed")
 
+            review_path.write_text(json.dumps({
+                "score": 90,
+                "passed": False,
+                "source_revision": first_revision,
+                "issue_details": [{"id": "issue-warning", "severity": "warning", "dimension": 7}],
+            }), encoding="utf-8")
+            legacy_failed = write_delivery_artifacts(root, "book", "ch_001", 70)
+            self.assertEqual(legacy_failed["stages"]["review"], "current")
+            self.assertEqual(legacy_failed["stages"]["closure"], "review_failed")
+            self.assertFalse(legacy_failed["ready_for_delivery"])
+
+            review_path.write_text(json.dumps({
+                "score": 60,
+                "passed": False,
+                "source_revision": first_revision,
+                "issue_details": [{"id": "issue-1", "severity": "blocker", "dimension": 1}],
+            }), encoding="utf-8")
+
             revision_dir = novel / "revisions" / "ch_001"
             revision_dir.mkdir(parents=True)
             proposal_path = revision_dir / "rev_test.json"
@@ -202,6 +341,8 @@ class DogArtifactTests(unittest.TestCase):
             review_path.write_text(json.dumps(stale_review), encoding="utf-8")
             awaiting = write_delivery_artifacts(root, "book", "ch_001", 70)
             self.assertEqual(awaiting["stages"]["revision"], "applied_requires_rereview")
+            self.assertEqual(awaiting["stages"]["application"], "applied")
+            self.assertEqual(awaiting["stages"]["rereview"], "required")
             self.assertEqual(awaiting["stages"]["closure"], "rereview_required")
             self.assertFalse(awaiting["ready_for_delivery"])
 
@@ -215,6 +356,15 @@ class DogArtifactTests(unittest.TestCase):
             closed = write_delivery_artifacts(root, "book", "ch_001", 70)
             self.assertEqual(closed["stages"]["closure"], "closed")
             self.assertTrue(closed["ready_for_delivery"])
+            self.assertEqual(
+                [edge["source"] for edge in closed["graph"]["dependsOn"]],
+                ["review", "revision", "application", "rereview", "closure"],
+            )
+            self.assertFalse(any(
+                node.get("verifier", {}).get("mode") == "agentic"
+                for node in closed["graph"]["nodes"].values()
+            ))
+            _assert_acyclic(closed["graph"])
             delivery_dir = Path(closed["graph_path"]).parent
             self.assertEqual(_run_verifier("delivery-stage", delivery_dir / "closure.json")["verdict"], "pass")
             _validate_with_dog(Path(closed["graph_path"]), root)
