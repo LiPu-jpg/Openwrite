@@ -10,3 +10,6 @@ dist/
 .tmp-*/
 *.log
 .DS_Store
+packages/studio-panel/.pw-browsers/
+packages/studio-panel/test-results/
+packages/studio-panel/playwright-report/

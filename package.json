@@ -8,6 +8,8 @@
     "build": "npm --prefix packages/openwrite-bridge run build && npm --prefix packages/studio-panel run build",
     "test:dog": "npm --prefix packages/openwrite-bridge run build && .venv/bin/python conductor/test_dog_artifacts.py",
     "test:epochs": "npm --prefix packages/studio-panel run test:epochs",
+    "test:components": "npm --prefix packages/studio-panel run test:components",
+    "test:e2e": "npm --prefix packages/studio-panel run test:e2e",
     "test:contracts": "npm --prefix packages/openwrite-bridge run test:contracts",
     "install-dsh": "bash scripts/install.sh",
     "dev": "bash scripts/dev.sh"
