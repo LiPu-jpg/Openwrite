@@ -70,7 +70,7 @@ Markdown / TXT / EPUB
 | **面向长篇的上下文** | 最近正文、滚动大纲、相关人物、世界规则、伏笔、真相文件、精确人物时态和语义召回共同组成 canonical packet。 |
 | **可追踪的人物与世界状态** | 章节结算会更新客观事实；轻量内联批注可记录人物位置、伤势、认知等时态变化，并检查连续性冲突。 |
 | **可靠写章与版本保护** | 作品级锁覆盖写章过程；正文、真相文件和章节记忆作为一个提交单元，失败时恢复写前快照。正文支持 checkpoint、批注和 AI 修订 diff。 |
-| **37 维审稿闭环** | 审稿读取作者意图、正典、关系、风格和章节目标；问题可在 Studio 中定位、筛选并生成可审阅的修订提案。 |
+| **证据驱动审稿闭环** | 原 37 项归入六个计分域和一个硬门禁；正向质量证据累加得分，覆盖率与 blocker 独立表达，问题可定位并生成可审阅的修订提案。 |
 | **私有参考库与风格采纳** | 对小说、旧稿和 Canon 做证据化拆解；只有人工明确选中的风格、规则或设定候选才会进入当前项目。 |
 | **本地与云端检索** | 默认可使用本机 FastEmbed 完成向量检索，也支持 OpenAI-compatible embedding；需要关系遍历时再启用 LightRAG 图谱模式。 |
 | **标准 SKILL.md 扩展** | Goethe / Dante 可按轮次启用标准 Skill；Skill 只提供有界指令和静态参考资料，不能绕过原有权限与写入确认。 |
@@ -141,7 +141,7 @@ openwrite studio
 3. **整理可写资产**：在 **大纲** 中按卷、幕、节、章管理结构，筛选待写或已写节点，设置章节目标并从章纲创建正文；在 **资料库** 中维护作者意图、故事基础、人物档案和世界设定。
 4. **用罗盘锁定近期方向**：右侧创作助手可随时查看创作罗盘和本章上下文，把阶段目标、必须保留与必须避免的内容固定进后续写作 packet。
 5. **交给 Dante 推进正文**：从顶栏或大纲节点开始写下一章，填写本章指导和字数目标。Dante 会完成写前检查、上下文组装、初稿、事实提取与状态结算；正文落盘后仍可在 Markdown 编辑器中手改、批注或创建 checkpoint。
-6. **审稿、修订并导出**：审稿工作区汇总 37 个维度的问题，支持按严重度和维度筛选、定位原文、生成修订提案并审阅 diff。完成后在 **项目迁移** 中导出 Markdown、TXT 或 EPUB。
+6. **审稿、修订并导出**：审稿工作区汇总六个质量域和原 37 项查询标签，分别展示质量分、覆盖率、硬门禁和交付状态；支持定位原文、生成修订提案并审阅 diff。完成后在 **项目迁移** 中导出 Markdown、TXT 或 EPUB。
 
 已有 TXT 或 Markdown 正文也不需要重来：在 **工具与设置 → 项目迁移** 中先解析卷章预览，确认无冲突后导入，再让 Dante 从现有进度继续。
 
@@ -154,13 +154,61 @@ openwrite studio
 | **资料库** | 分类编辑作者意图、创作重点、故事基础、人物和世界设定；支持 Markdown 即时渲染、自动保存、导入导出与 revision 冲突检查。 |
 | **正文** | 章节目录、字数目标、即时渲染编辑器、阅读宽度、专注模式、选区操作、批注、checkpoint、历史版本和修订记录。 |
 | **创作助手** | 在当前页面直接与 Dante 对话，携带选区或正文上下文；快速执行选区分析、续写建议与节奏检查，并查看罗盘、上下文、审稿和修订状态。 |
-| **审稿** | 汇总已审章节、阻断问题和待处理项；按严重度/维度筛选；定位证据；比较复审变化；为可修订问题生成提案。 |
+| **审稿** | 汇总已审章节、六域质量分、覆盖率、硬门禁和待处理项；按严重度/维度筛选；定位证据；比较复审变化；为可修订问题生成提案。 |
 | **AI 协作** | 保存 Goethe / Dante 长期会话，展示真实模型调用、工具执行、确认请求、校验、失败原因和落盘阶段，而不是只显示一段聊天结果。 |
 | **项目搜索与连续性** | 跨正典、正文和参考资料进行精确与语义检索；检查人物位置、伤势、认知、时间线和伏笔，浏览可搜索、筛选、缩放与拖拽的实体关系拓扑。 |
 | **深度研究** | 围绕创作问题启动有证据约束的多轮研究，可选择搜索提供方、证据策略和研究轮次，并在 Studio 中浏览归档报告。 |
 | **参考库** | 导入参考作品、旧稿或同人 Canon，确认卷章覆盖，生成证据报告与多作品对照画像，再由用户逐条决定是否采纳。 |
 | **Skills** | 查看标准 `SKILL.md` 与 Runtime Skill 的来源、适用 Agent、任务范围和权限，并在本轮 Goethe / Dante 对话中按需启用。 |
 | **工具与设置** | 管理模型与作品、字数规划和任务中心；在高级工具中检查 canonical packet、同步诊断与章节运行；在项目迁移中完成正文导入和整书导出。 |
+
+### Review v2 与模型横评
+
+Review v2 将原 37 个编号完整保留为 `legacy_check_ids`，但顶层只包含连贯与逻辑、
+角色与关系、情节与承诺、节奏与场景、文风与表达、正典与资料六个计分域，以及不计分的
+硬门禁。37 个编号恰好映射一次，其中 27 仅属于硬门禁。正常全量评审并行运行六域和
+一次门禁，聚合、覆盖率与交付判定均由程序完成，通常约 7 次模型调用。
+
+每个 criterion 只有在 `evaluated` 且带可定位正文证据时才能累加 `earned`。
+`not_applicable` 不进入分母；`inconclusive` 不被当成质量零分，而是降低 `coverage`。
+issue 只负责诊断，`critical` 通过 `gate_status=blocked` 阻止交付，不从
+`quality_score` 扣分。兼容字段 `score/passed/issue_details` 仍可读，但新代码应使用：
+
+```text
+execution_status + quality_score + coverage + gate_status + delivery_status
+```
+
+当前 70 分与 80% 覆盖率只用于建议性判定，尚未经过 10–20 章人工标注校准。
+因此 `threshold_calibration.status=uncalibrated` 且生产门禁默认关闭，
+`production_gate_status=disabled_uncalibrated`；未明确标记为 `calibrated` 时，代码拒绝
+开启生产门禁。`delivery_status` 在此阶段是修订建议，不是可发布审批。
+
+Studio HTTP 还提供隔离的模型横评接口：
+
+```text
+POST /api/benchmarks
+GET  /api/benchmarks
+GET  /api/benchmarks/{run_id}
+```
+
+横评使用同一个 `novel_context_preview` packet 与 SHA-256，通过 OpenWrite model profile
+和 LiteLLM-compatible gateway 运行写作模型 × 独立评审模型矩阵。默认
+`execution_mode=framework`：每个 `候选 profile × 重复轮次` 复制一份完整小说状态到
+`data/novels/{novel_id}/data/benchmarks/{run_id}/workspaces/`，依次进入公开生产入口
+`execute_write_chapter` 和 `execute_review_chapter`，保留正文提交、记忆、工作流及 Chapter
+Run V2 证据。写作失败同样记录公开入口、Run V2 ID、阶段状态、失败阶段和安全错误码；只有
+`commit` 完成的候选才进入同一沙箱中的生产评审。`execution_mode=creative` 只保留为显式的
+裸写诊断模式。
+
+运行级 profile 不改变全局 routes，沙箱提交不写回正式正文，汇总 artifact 落在
+`data/novels/{novel_id}/data/benchmarks/`。provider 限流、无可用路由、截断和参数不兼容
+记录为 reliability failure，不伪装成低质量分，artifact 不包含 API Key。
+
+横评会统一读取 OpenRouter `usage.cost`、OpenAI-compatible usage 和 LiteLLM
+`response_cost`，汇总输入、输出、推理 token 与服务商实际报告的美元费用。
+`cost_reported` 用来区分明确免费的 `$0` 和未返回费用的未知状态；费用不完整时仍保留
+已报告小计和覆盖数。界面中的 `$ / 1M tokens` 是按本次实际总费用计算的综合有效价，
+不是服务商目录中的独立输入价或输出价。
 
 ### 看得见的安全边界
 
