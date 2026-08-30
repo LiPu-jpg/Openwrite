@@ -46,6 +46,10 @@ MANIFEST_VERSION = 7
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
+# LightRAG owns process-global asyncio locks even when its working directories differ.
+# Serialize its synchronous entrypoints while surrounding writer jobs remain parallel.
+_LIGHTRAG_RUNTIME_LOCK = threading.Lock()
+
 
 class SearchConfigurationError(RuntimeError):
     """Raised when LightRAG cannot be configured from the active model profile."""
@@ -323,10 +327,12 @@ class LightRAGSearchBackend:
         *,
         limit: int,
     ) -> BackendSearchResult:
-        return _run_async(lambda: self._search(documents, query, limit=limit))
+        with _LIGHTRAG_RUNTIME_LOCK:
+            return _run_async(lambda: self._search(documents, query, limit=limit))
 
     def refresh(self, documents: list[IndexedDocument]) -> BackendSearchResult:
-        return _run_async(lambda: self._refresh(documents))
+        with _LIGHTRAG_RUNTIME_LOCK:
+            return _run_async(lambda: self._refresh(documents))
 
     async def _search(
         self,

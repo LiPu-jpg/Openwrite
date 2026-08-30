@@ -147,6 +147,56 @@ def test_single_chapter_heading_keeps_front_matter_and_chapter_boundaries(tmp_pa
     assert units[-1]["end"] == prepared["record"]["total_chars"]
 
 
+def test_read_content_returns_snapshot_and_confirmed_units(tmp_path: Path):
+    project = tmp_path / "project"
+    library = tmp_path / "private-library"
+    init_project(project, "demo", "参考原文读取测试")
+    service = ReferenceLibraryService(library, project_root=project, novel_id="demo")
+    source = _text("读取")
+
+    prepared = service.prepare(
+        "reference_read",
+        source,
+        title="可读参考",
+        relative_name="read.txt",
+        input_budget_tokens=500,
+    )
+    service.confirm_structure("reference_read")
+
+    result = service.read_content("reference_read")
+
+    assert result["content"] == source
+    assert result["record"]["source_id"] == "reference_read"
+    assert result["structure"]["status"] == "confirmed"
+    assert len(result["units"]) == len(prepared["structure"]["units"])
+    assert result["units"][0]["title"] == prepared["structure"]["units"][0]["title"]
+    for unit, expected in zip(result["units"], prepared["structure"]["units"]):
+        assert unit["unit_id"] == expected["unit_id"]
+        assert unit["content"] == source[expected["start"] : expected["end"]]
+
+
+def test_studio_application_reads_reference_content(tmp_path: Path):
+    project = tmp_path / "project"
+    library = tmp_path / "private-library"
+    init_project(project, "demo", "Studio 参考原文入口测试")
+    service = ReferenceLibraryService(library, project_root=project, novel_id="demo")
+    source = _text("应用入口")
+    service.prepare(
+        "reference_studio",
+        source,
+        title="Studio 参考",
+        relative_name="studio.txt",
+        input_budget_tokens=500,
+    )
+    service.confirm_structure("reference_studio")
+
+    app = StudioApplication(project, reference_library_root=library)
+    result = app.read_reference_library_content("reference_studio")
+
+    assert result["content"] == source
+    assert result["units"][-1]["content"]
+
+
 def test_reference_analysis_materializes_story_assets_in_private_library(tmp_path: Path):
     project = tmp_path / "project"
     library = tmp_path / "private-library"

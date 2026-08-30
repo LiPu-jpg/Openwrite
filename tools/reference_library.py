@@ -291,6 +291,32 @@ class ReferenceLibraryService:
             "assets": self._asset_index(clean_id),
         }
 
+    def read_content(self, source_id: str) -> dict[str, Any]:
+        """Return a read-only reference snapshot and its confirmed units."""
+        clean_id = self._source_id(source_id)
+        record = self.require_record(clean_id)
+        structure = self.require_structure(clean_id)
+        if structure.source_sha256 != record.source_sha256:
+            raise SourceAnalysisError("来源结构已过时，请重新导入", code="SOURCE_CHANGED")
+        text = self._snapshot_text(record)
+        units: list[dict[str, Any]] = []
+        for unit in structure.units:
+            start = max(0, min(int(unit.start), len(text)))
+            end = max(start, min(int(unit.end), len(text)))
+            units.append(
+                {
+                    **unit.model_dump(mode="json"),
+                    "content": text[start:end],
+                }
+            )
+        return {
+            "record": record.model_dump(mode="json"),
+            "structure": structure.model_dump(mode="json"),
+            "content": text,
+            "units": units,
+            "revision": self._revision(text),
+        }
+
     def synthesize(self, source_ids: Iterable[str]) -> ReferenceProfileV1:
         clean_ids = list(dict.fromkeys(self._source_id(item) for item in source_ids))
         records = {source_id: self.require_record(source_id) for source_id in clean_ids}

@@ -1,7 +1,11 @@
 import asyncio
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
+import tools.project_search as project_search_module
 from tools.model_profiles import activate_model_profile
 from tools.project_search import (
     MANIFEST_VERSION,
@@ -92,6 +96,37 @@ def test_project_search_uses_explicit_literal_fallback_when_lightrag_is_unconfig
     assert payload["scope"] == "core"
     assert payload["warning_code"] == "LIGHTRAG_NOT_CONFIGURED"
     assert payload["results"][0]["line"] == 3
+
+
+def test_lightrag_runtime_is_serialized_across_distinct_workspaces(
+    tmp_path: Path,
+    monkeypatch,
+):
+    active = 0
+    maximum_active = 0
+    guard = threading.Lock()
+
+    def fake_run_async(factory):
+        nonlocal active, maximum_active
+        del factory
+        with guard:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.05)
+        with guard:
+            active -= 1
+        return BackendSearchResult(chunks=[])
+
+    monkeypatch.setattr(project_search_module, "_run_async", fake_run_async)
+    backends = [
+        LightRAGSearchBackend.__new__(LightRAGSearchBackend),
+        LightRAGSearchBackend.__new__(LightRAGSearchBackend),
+    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda backend: backend.search([], "query", limit=1), backends))
+
+    assert len(results) == 2
+    assert maximum_active == 1
 
 
 def test_literal_fallback_matches_taxonomy_and_uses_yaml_display_name(tmp_path: Path):
