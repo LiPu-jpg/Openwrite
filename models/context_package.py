@@ -10,19 +10,11 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-
-def estimate_text_tokens(text: str) -> int:
-    """Conservatively estimate tokens for mixed Chinese/Latin text.
-
-    Providers use different tokenizers, so OpenWrite deliberately avoids
-    pretending this is exact.  Chinese characters are budgeted more
-    conservatively than Latin text to reduce late provider-side overflow.
-    """
-    if not text:
-        return 0
-    chinese_chars = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
-    other_chars = len(text) - chinese_chars
-    return int(chinese_chars * 1.5 + other_chars * 0.25)
+from models.token_estimation import (
+    TOKEN_ESTIMATOR_ID,
+    estimate_text_tokens,
+    unknown_actual_usage,
+)
 
 
 class ForeshadowingState(BaseModel):
@@ -63,7 +55,7 @@ class WorldRules(BaseModel):
         parts: List[str] = []
         if self.constraints:
             parts.append("【设定约束】")
-            for c in self.constraints[:10]:
+            for c in self.constraints:
                 parts.append(f"  - {c}")
         if self.entities:
             parts.append(f"【相关实体 ({len(self.entities)})】")
@@ -97,6 +89,10 @@ class GenerationContext(BaseModel):
     dramatic_context: Dict[str, str] = Field(
         default_factory=dict,
         description="章节的戏剧位置与内容焦点，由 OutlineHierarchy.get_dramatic_context() 生成",
+    )
+    scene_context: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="与当前正文 revision 绑定的本章场景顺序、故事时间与引用",
     )
 
     # 大纲
@@ -174,18 +170,42 @@ class GenerationContext(BaseModel):
 
     def estimate_tokens(self) -> int:
         """估算完整写作上下文，包括独立传递的真相文件。"""
-        total = estimate_text_tokens(self.to_prompt_context())
-        # These fields are passed to writer/reviewer separately rather than
-        # duplicated in ``to_prompt_sections``.  They still consume provider
-        # context and therefore must count against the same budget.
-        for truth_text in (
-            self.current_state,
-            self.foreshadowing_summary,
-            self.ledger,
-            self.relationships,
-        ):
-            total += estimate_text_tokens(truth_text)
-        return total
+        return int(self.token_estimate_report()["total_estimated_tokens"])
+
+    def token_estimate_report(self) -> Dict[str, Any]:
+        """Explain the execution estimate and distinguish it from actual usage."""
+
+        sections = self.to_prompt_sections()
+        section_tokens = sum(
+            estimate_text_tokens(content) for content in sections.values()
+        )
+        rendered_prompt_tokens = estimate_text_tokens(self.to_prompt_context())
+        # The delta contains Markdown headings, separators and any conservative
+        # rounding needed to keep the decomposed total at least as large as the
+        # estimate of the complete rendered prompt.
+        wrapper_tokens = max(0, rendered_prompt_tokens - section_tokens)
+        truth_tokens = sum(
+            estimate_text_tokens(truth_text)
+            for truth_text in (
+                self.current_state,
+                self.foreshadowing_summary,
+                self.ledger,
+                self.relationships,
+            )
+        )
+        prompt_tokens = section_tokens + wrapper_tokens
+        return {
+            "kind": "estimate",
+            "estimator": TOKEN_ESTIMATOR_ID,
+            "text_scope": "rendered_prompt_and_separate_truth_values",
+            "includes_wrapper_overhead": True,
+            "section_content_estimated_tokens": section_tokens,
+            "wrapper_estimated_tokens": wrapper_tokens,
+            "rendered_prompt_estimated_tokens": prompt_tokens,
+            "separate_truth_estimated_tokens": truth_tokens,
+            "total_estimated_tokens": prompt_tokens + truth_tokens,
+            "actual_usage": unknown_actual_usage(),
+        }
 
     def to_prompt_sections(self) -> Dict[str, str]:
         """转为有序的 prompt 段落字典"""
@@ -227,7 +247,34 @@ class GenerationContext(BaseModel):
         if self.current_chapter:
             ch = self.current_chapter
             if hasattr(ch, "title"):
-                sections["当前章节"] = f"{ch.title}\n{getattr(ch, 'summary', '')}"
+                chapter_parts = [
+                    str(getattr(ch, "title", "") or ""),
+                    str(getattr(ch, "summary", "") or ""),
+                ]
+                for label, attribute in (
+                    ("戏剧位置", "dramatic_position"),
+                    ("内容焦点", "content_focus"),
+                    ("节拍", "beats"),
+                    ("悬念", "hooks"),
+                    ("情绪变化", "emotional_arc"),
+                ):
+                    value = getattr(ch, attribute, "")
+                    if isinstance(value, list):
+                        rendered = "；".join(str(item) for item in value if str(item).strip())
+                    else:
+                        rendered = str(value or "").strip()
+                    if rendered:
+                        chapter_parts.append(f"{label}：{rendered}")
+                sections["当前章节"] = "\n".join(
+                    part for part in chapter_parts if part.strip()
+                )
+
+        if self.scene_context.get("status") == "current":
+            from tools.scene_integration import render_scene_context
+
+            rendered_scenes = render_scene_context(self.scene_context)
+            if rendered_scenes:
+                sections["本章场景结构（当前正文）"] = rendered_scenes
 
         if self.active_characters:
             chars = []
@@ -250,7 +297,7 @@ class GenerationContext(BaseModel):
                 sections["风格指南"] = self.style_profile.to_summary(max_chars=500)
 
         if self.world_rules and (self.world_rules.constraints or self.world_rules.entities):
-            sections["设定"] = self.world_rules.to_context_text(max_chars=300)
+            sections["设定"] = self.world_rules.to_context_text()
 
         if self.chapter_goals:
             sections["本章目标"] = "\n".join(f"- {g}" for g in self.chapter_goals)

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openwrite.dev/schemas/model-connection-test-v1.schema.json",
+  "title": "OpenWrite model connection test v1 success payload (chat and embedding variants)",
+  "type": "object",
+  "required": ["ok", "status", "provider", "model", "latency_ms", "tested_at"],
+  "additionalProperties": true,
+  "disallowed": ["api_key", "embedding_api_key", "secret", "credential"],
+  "properties": {
+    "ok": {"const": true},
+    "status": {"const": "ok"},
+    "provider": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1},
+    "latency_ms": {"type": "integer", "minimum": 0},
+    "tested_at": {"type": "string", "minLength": 1},
+    "reply": {"type": "string"},
+    "provider_label": {"type": "string"},
+    "dimension": {"type": "integer", "minimum": 1},
+    "max_tokens": {"type": "integer", "minimum": 1},
+    "base_url": {"type": "string"},
+    "vectors": {"type": "integer", "minimum": 1}
+  }
+}

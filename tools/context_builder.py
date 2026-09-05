@@ -13,42 +13,47 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Callable
-import yaml
 import re
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+import yaml
 
-# Import from sibling models
-import sys
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from models.outline import OutlineNode, OutlineHierarchy
 from models.character import CharacterProfile, CharacterTier
-from models.style import StyleProfile, VoicePattern, LanguageStyle, RhythmStyle
 from models.context_package import (
-    GenerationContext,
     ForeshadowingState,
+    GenerationContext,
     WorldRules,
     estimate_text_tokens,
 )
-from .truth_manager import TruthFilesManager
-from .resources import resolve_craft_dir
+from models.outline import OutlineHierarchy, OutlineNode
+from models.style import LanguageStyle, RhythmStyle, StyleProfile, VoicePattern
+from models.token_estimation import estimate_measurement, unknown_actual_usage
+
 from .chapter_memory import ChapterMemoryStore
+from .character_state_index import CharacterStateIndex, strip_character_state_annotations
+from .context_protection import (
+    ContextBudgetError,
+    assert_protected_unchanged,
+    ensure_protected_fits,
+    generation_protected_items,
+    protected_snapshot,
+)
 from .frontmatter import parse_toml_front_matter
+from .llm.context import ContextBudgetPlan, ContextBudgetPolicy
+from .llm.model_catalog import MAX_CONTEXT_TOKENS
 from .outline_cache import deserialize_outline_hierarchy
+from .outline_parser import OutlineMdParser
+from .resources import resolve_craft_dir
 from .shared_documents import (
     render_indexed_document,
     resolve_shared_document_path,
     shared_document_lookup_keys,
 )
 from .source_sync import ensure_runtime_fresh
-from .outline_parser import OutlineMdParser
-from .llm.context import ContextBudgetPlan, ContextBudgetPolicy
-from .llm.model_catalog import MAX_CONTEXT_TOKENS
-from .character_state_index import CharacterStateIndex, strip_character_state_annotations
+from .truth_manager import TruthFilesManager
+
+logger = logging.getLogger(__name__)
 
 
 class ContextBuilder:
@@ -230,6 +235,8 @@ class ContextBuilder:
             )
 
         # 11. 构建 context
+        from tools.scene_integration import build_scene_context
+
         context = GenerationContext(
             novel_id=self.novel_id,
             chapter_id=chapter_id,
@@ -250,6 +257,9 @@ class ContextBuilder:
             target_words=target_words,
             emotion_arc=emotion_arc,
             dramatic_context=dramatic_context,
+            scene_context=build_scene_context(
+                self.project_root, self.novel_id, chapter_id
+            ),
             current_state=truth.current_state,
             foreshadowing_summary=pending_hooks_str,
             ledger=truth.ledger,
@@ -273,7 +283,13 @@ class ContextBuilder:
         """Recall distant prose and reference material without treating it as truth."""
         enabled = os.environ.get("OPENWRITE_SEMANTIC_CONTEXT", "1").strip().lower()
         if enabled in {"0", "false", "no", "off"}:
-            return "", {"status": "disabled", "results": 0}
+            return "", {
+                "status": "disabled",
+                "reason": "disabled_by_configuration",
+                "results": 0,
+                "index": {"status": "not_queried", "updates": {}, "warning_codes": []},
+                "sources": [],
+            }
 
         target_number = self._parse_chapter_index(chapter_id)
         query_parts: List[str] = []
@@ -299,7 +315,13 @@ class ContextBuilder:
             query_parts.append(character_states[:800])
         query = "\n".join(dict.fromkeys(query_parts)).strip()
         if not query:
-            return "", {"status": "no_query", "results": 0}
+            return "", {
+                "status": "no_query",
+                "reason": "target_chapter_has_no_retrieval_terms",
+                "results": 0,
+                "index": {"status": "not_queried", "updates": {}, "warning_codes": []},
+                "sources": [],
+            }
 
         if self._search_index_factory is None:
             from tools.project_search import ProjectSearchIndex
@@ -341,9 +363,11 @@ class ContextBuilder:
                     "scope": scope,
                     "engine": str(payload.get("engine") or "none"),
                     "warning_code": str(payload.get("warning_code") or ""),
+                    "warning": str(payload.get("warning") or ""),
                     "semantic_hits": int(
                         (payload.get("retrieval_stats") or {}).get("semantic") or 0
                     ),
+                    "index_updates": dict(payload.get("index_updates") or {}),
                 }
             )
             if payload.get("embedding") and not embedding:
@@ -385,16 +409,54 @@ class ContextBuilder:
             if any(item.get("warning_code") for item in diagnostics)
             else "no_match"
         )
+        update_totals = {
+            key: sum(
+                int((item.get("index_updates") or {}).get(key) or 0)
+                for item in diagnostics
+            )
+            for key in ("inserted", "updated", "deleted")
+        }
+        warning_codes = [
+            str(item.get("warning_code") or "")
+            for item in diagnostics
+            if item.get("warning_code")
+        ]
         return "\n\n".join(parts), {
             "status": status,
+            "reason": {
+                "ready": "relevant_index_matches_selected",
+                "unavailable": "index_service_warning",
+                "no_match": "no_relevant_index_match",
+            }.get(status, status),
             "results": len(parts),
             "queries": diagnostics,
             "embedding": embedding,
             "excluded_recent_chapters": 2,
+            "index": {
+                "status": (
+                    "unavailable"
+                    if warning_codes
+                    else "refreshed"
+                    if any(update_totals.values())
+                    else "current"
+                ),
+                "updates": update_totals,
+                "warning_codes": warning_codes,
+            },
+            "sources": [
+                {
+                    "path": str(item.get("path") or ""),
+                    "line": int(item.get("line") or 1),
+                    "title": str(item.get("title") or ""),
+                    "scope": str(item.get("scope") or ""),
+                    "selection_reason": "semantic_relevance_to_target_chapter",
+                }
+                for item in selected
+            ],
         }
 
     def _load_story_control(self, filename: str, *, max_chars: int) -> str:
-        """加载人类维护的书级控制面，不读取运行态草稿。"""
+        """加载完整的人类维护控制面；预算层不得预先截断硬约束。"""
         path = self.src_dir / "story" / filename
         if not path.exists():
             return ""
@@ -402,18 +464,18 @@ class ContextBuilder:
             text = path.read_text(encoding="utf-8").strip()
         except OSError:
             return ""
-        return text[:max_chars]
+        return text
 
     def _load_core_documents(self) -> Dict[str, str]:
         """Load canonical premise documents under their creator-facing scope."""
         documents: Dict[str, str] = {}
-        for key, max_chars in (("background", 2000), ("foundation", 2000)):
+        for key in ("background", "foundation"):
             path = self.src_dir / "story" / f"{key}.md"
             if not path.is_file():
                 continue
             text = self._load_text(path).strip()
             if text:
-                documents[key] = text[:max_chars]
+                documents[key] = text
         return documents
 
     def _load_outline_hierarchy(self) -> OutlineHierarchy:
@@ -1036,7 +1098,7 @@ class ContextBuilder:
         entities_dir = world_dir / "entities"
         if entities_dir.exists():
             try:
-                from tools.world_query import list_entities, get_relations_graph
+                from tools.world_query import get_relations_graph, list_entities
 
                 entity_list = list_entities(self.novel_id, project_root=self.project_root)
                 rules.entities = entity_list
@@ -1108,6 +1170,9 @@ class ContextBuilder:
         L4 是提供商请求前的确定性硬适配。作者意图、创作罗盘和当前章
         在前三层中不会被删除。
         """
+        protected_items = generation_protected_items(context)
+        protected_tokens = ensure_protected_fits(protected_items, self.MAX_TOKENS)
+        protected_before = protected_snapshot(protected_items)
         original_tokens = context.estimate_tokens()
         plan = self._budget_plan(original_tokens)
         if not plan.requires_compression:
@@ -1118,6 +1183,8 @@ class ContextBuilder:
                 final_tokens=original_tokens,
                 actions=[],
                 plan=plan,
+                protected_items=protected_items,
+                protected_tokens=protected_tokens,
             )
             return context
 
@@ -1139,7 +1206,7 @@ class ContextBuilder:
             actions.append("L1: 压缩较旧章节记忆")
         if plan.level <= 1 and self._fits(compressed):
             return self._finish_compression(
-                compressed, 1, original_tokens, actions, plan
+                compressed, 1, original_tokens, actions, plan, protected_before
             )
 
         # L2 - structural summaries. Tighten the window in proportion to pressure.
@@ -1153,23 +1220,20 @@ class ContextBuilder:
             )
         if plan.level <= 2 and self._fits(compressed):
             return self._finish_compression(
-                compressed, 2, original_tokens, actions, plan
+                compressed, 2, original_tokens, actions, plan, protected_before
             )
 
-        # L3 - live working set. Truth files are summarized, not silently
-        # dropped; the exact prose keeps its tail because continuity is local.
+        # L3 - live working set. Canonical truth files remain exact; derived
+        # character state and pending-hook summaries may be compressed.
         live_targets = {
             "character_states": self._token_share_as_chars(0.04, minimum=500),
-            "current_state": self._token_share_as_chars(0.07, minimum=800),
-            "relationships": self._token_share_as_chars(0.07, minimum=800),
-            "ledger": self._token_share_as_chars(0.04, minimum=500),
             "foreshadowing_summary": self._token_share_as_chars(0.04, minimum=500),
         }
         changed_live = False
         for field, target in live_targets.items():
             changed_live |= self._compress_text_field(compressed, field, target)
         if changed_live:
-            actions.append("L3: 压缩真相状态、关系、账本和伏笔摘要")
+            actions.append("L3: 压缩派生人物状态和伏笔摘要")
         recent_target = self._token_share_as_chars(plan.recent_ratio, minimum=600)
         if len(compressed.recent_text) > recent_target:
             compressed.recent_text = self._fit_text(
@@ -1183,7 +1247,7 @@ class ContextBuilder:
             actions.append("L3: 活跃人物缩为最高相关的 5 人")
         if plan.level <= 3 and self._fits(compressed):
             return self._finish_compression(
-                compressed, 3, original_tokens, actions, plan
+                compressed, 3, original_tokens, actions, plan, protected_before
             )
 
         # L4 - deterministic provider guard. This pass intentionally becomes
@@ -1201,21 +1265,13 @@ class ContextBuilder:
         for field, target in (
             ("character_states", 500),
             ("semantic_references", 700),
-            ("current_state", 700),
-            ("relationships", 700),
-            ("ledger", 400),
             ("foreshadowing_summary", 400),
         ):
             setattr(compressed, field, self._fit_text(getattr(compressed, field), target))
-        compressed.core_documents = {
-            key: self._fit_text(value, 700)
-            for key, value in compressed.core_documents.items()
-            if value
-        }
         actions.append("L4: 应用最小工作集硬适配")
         self._force_fit(compressed, actions)
         return self._finish_compression(
-            compressed, 4, original_tokens, actions, plan
+            compressed, 4, original_tokens, actions, plan, protected_before
         )
 
     def _compression_report(
@@ -1227,9 +1283,16 @@ class ContextBuilder:
         final_tokens: int,
         actions: List[str],
         plan: ContextBudgetPlan,
+        protected_items: Dict[str, Any] | None = None,
+        protected_tokens: int = 0,
     ) -> Dict[str, Any]:
         return {
             "strategy": self.COMPRESSION_STRATEGY,
+            "measurement": estimate_measurement(
+                text_scope="rendered_prompt_and_separate_truth_values",
+                includes_wrapper_overhead=True,
+            ),
+            "actual_usage": unknown_actual_usage(),
             "applied": applied,
             "level": level,
             "planned_level": plan.level,
@@ -1244,6 +1307,9 @@ class ContextBuilder:
             "final_estimated_tokens": final_tokens,
             "within_budget": final_tokens <= plan.input_budget_tokens,
             "actions": list(actions),
+            "protected_items": list(protected_items or {}),
+            "protected_estimated_tokens": protected_tokens,
+            "protected_unchanged": True,
         }
 
     def _finish_compression(
@@ -1253,8 +1319,17 @@ class ContextBuilder:
         original_tokens: int,
         actions: List[str],
         plan: ContextBudgetPlan,
+        protected_before: Dict[str, str],
     ) -> GenerationContext:
+        current_protected = generation_protected_items(context)
+        assert_protected_unchanged(protected_before, current_protected)
         final_tokens = context.estimate_tokens()
+        if final_tokens > plan.input_budget_tokens:
+            raise ContextBudgetError(
+                budget_tokens=plan.input_budget_tokens,
+                required_tokens=final_tokens,
+                protected_items=current_protected,
+            )
         context.compression = self._compression_report(
             applied=bool(actions),
             level=level,
@@ -1262,6 +1337,10 @@ class ContextBuilder:
             final_tokens=final_tokens,
             actions=actions,
             plan=plan,
+            protected_items=current_protected,
+            protected_tokens=ensure_protected_fits(
+                current_protected, plan.input_budget_tokens
+            ),
         )
         logger.info(
             "上下文分级压缩 L%s: %s -> %s tokens (budget=%s)",
@@ -1317,18 +1396,14 @@ class ContextBuilder:
         selected = self._centered_nodes(nodes, context.chapter_id, window)
         changed = len(selected) != len(nodes)
         for node in selected:
+            if getattr(node, "node_id", "") == context.chapter_id:
+                continue
             summary = str(getattr(node, "summary", "") or "")
             fitted = self._fit_text(summary, summary_chars)
             if fitted != summary:
                 node.summary = fitted
                 changed = True
         context.outline_window = selected
-        if context.current_chapter is not None:
-            summary = str(getattr(context.current_chapter, "summary", "") or "")
-            fitted = self._fit_text(summary, max(summary_chars, 320))
-            if fitted != summary:
-                context.current_chapter.summary = fitted
-                changed = True
         return changed
 
     @staticmethod
@@ -1426,12 +1501,8 @@ class ContextBuilder:
             "character_states",
             "semantic_references",
             "chapter_summaries",
-            "relationships",
-            "current_state",
-            "ledger",
             "foreshadowing_summary",
             "recent_text",
-            "emotion_arc",
         ]
         iterations = 0
         while not self._fits(context) and iterations < 80:
@@ -1466,67 +1537,23 @@ class ContextBuilder:
             if context.style_profile is not None:
                 context.style_profile = None
                 continue
-            if context.world_rules.constraints or context.world_rules.entities:
-                context.world_rules = WorldRules()
+            if context.world_rules.entities or context.world_rules.relations:
+                context.world_rules = WorldRules(
+                    constraints=list(context.world_rules.constraints)
+                )
                 continue
             if context.foreshadowing.pending or context.foreshadowing.planted:
                 context.foreshadowing = ForeshadowingState()
                 continue
 
-            if context.core_documents:
-                key = max(context.core_documents, key=lambda item: len(context.core_documents[item]))
-                value = context.core_documents[key]
-                target = max(0, int(len(value) * 0.65) - 1)
-                if target:
-                    context.core_documents[key] = self._fit_text(value, target)
-                else:
-                    context.core_documents.pop(key, None)
-                continue
-
-            # Core controls are shortened only when the configured budget is
-            # too small to hold even the minimum working set.
-            core_candidates = [
-                (estimate_text_tokens(str(getattr(context, field, "") or "")), field)
-                for field in ("author_intent", "creative_focus")
-                if getattr(context, field, "")
-            ]
-            if core_candidates:
-                _, field = max(core_candidates)
-                value = str(getattr(context, field))
-                setattr(context, field, self._fit_text(value, max(64, int(len(value) * 0.65))))
-                continue
-            if context.current_chapter is not None and getattr(
-                context.current_chapter, "summary", ""
-            ):
-                context.current_chapter.summary = ""
-                continue
-            if context.chapter_goals:
-                context.chapter_goals = context.chapter_goals[:1]
-                context.chapter_goals[0] = self._fit_text(context.chapter_goals[0], 80)
-                continue
-            if context.dramatic_context:
-                context.dramatic_context = {}
-                continue
             break
-        # This branch is normally unreachable because the public setting is
-        # clamped to at least 12K.  Keep it for tests/custom callers that set a
-        # smaller instance budget: the provider cap remains a hard invariant.
         if not self._fits(context):
-            context.chapter_summaries = ""
-            context.character_states = ""
-            context.semantic_references = ""
-            context.relationships = ""
-            context.current_state = ""
-            context.ledger = ""
-            context.foreshadowing_summary = ""
-            context.recent_text = ""
-            context.emotion_arc = ""
-            context.outline_window = []
-            context.active_characters = []
-            context.style_profile = None
-            context.world_rules = WorldRules()
-            context.foreshadowing = ForeshadowingState()
-            context.core_documents = {}
+            protected = generation_protected_items(context)
+            raise ContextBudgetError(
+                budget_tokens=self.MAX_TOKENS,
+                required_tokens=context.estimate_tokens(),
+                protected_items=protected,
+            )
             context.author_intent = ""
             context.creative_focus = ""
             context.chapter_goals = []

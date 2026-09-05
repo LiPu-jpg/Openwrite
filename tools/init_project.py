@@ -68,7 +68,11 @@ def init_project(
 
     snapshot = _initialization_snapshot(root, clean_id)
     try:
-        return _init_project_impl(root, clean_id, title, template=template)
+        result = _init_project_impl(root, clean_id, title, template=template)
+        from tools.project_registry import initialize_content_git
+
+        initialize_content_git(root)
+        return result
     except Exception:
         _rollback_initialization(root, clean_id, snapshot)
         raise

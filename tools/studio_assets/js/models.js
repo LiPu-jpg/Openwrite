@@ -425,7 +425,7 @@ async function saveProfile(event) {
       method: "POST",
       body: JSON.stringify(profilePayload()),
     });
-    state.workspace.model_profiles = result.model_profiles;
+    state.workspace.model_profiles = result.data.model_profiles;
     selectedProfileId = result.profile.id;
     renderModelProfilesUI();
     $("#model-progress").textContent = "档案已保存，任务路由立即生效。";
@@ -446,7 +446,7 @@ async function testConnection() {
       method: "POST",
       body: JSON.stringify(profilePayload()),
     });
-    $("#model-progress").textContent = `连接成功 · ${result.model} · ${formatNumber(result.latency_ms)} ms`;
+    $("#model-progress").textContent = `连接成功 · ${result.data.model} · ${formatNumber(result.data.latency_ms)} ms`;
   } catch (error) {
     $("#model-progress").textContent = error.message;
   } finally {
@@ -466,7 +466,7 @@ async function testEmbeddingConnection() {
       method: "POST",
       body: JSON.stringify(profilePayload()),
     });
-    $("#model-progress").textContent = `Embedding 可用 · ${result.model} · ${result.dimension} 维 · ${formatNumber(result.latency_ms)} ms`;
+    $("#model-progress").textContent = `Embedding 可用 · ${result.data.model} · ${result.data.dimension} 维 · ${formatNumber(result.data.latency_ms)} ms`;
   } catch (error) {
     $("#model-progress").textContent = error.message;
   } finally {
@@ -486,8 +486,8 @@ async function deleteProfile() {
         fallback_id: $("#model-delete-fallback").value,
       }),
     });
-    state.workspace.model_profiles = result.model_profiles;
-    selectedProfileId = result.model_profiles.default_profile_id;
+    state.workspace.model_profiles = result.data.model_profiles;
+    selectedProfileId = result.data.model_profiles.default_profile_id;
     renderModelProfilesUI();
     showToast("模型档案已删除");
   } catch (error) {
@@ -526,7 +526,7 @@ async function saveRoutes() {
       method: "POST",
       body: JSON.stringify({ routes }),
     });
-    state.workspace.model_profiles = result.model_profiles;
+    state.workspace.model_profiles = result.data.model_profiles;
     renderModelProfilesUI();
     $("#model-progress").textContent = "任务路由已保存，下一次操作立即生效。";
     showToast("任务路由已更新");

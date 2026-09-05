@@ -16,6 +16,8 @@ import webbrowser
 from collections import deque
 from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import asdict
+from datetime import datetime, timezone
 from functools import partial
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -38,12 +40,22 @@ from tools.library_catalog import (
 )
 from tools.llm.model_catalog import MAX_CONTEXT_TOKENS, MAX_OUTPUT_TOKENS
 from tools.llm.response import redact_sensitive_text
+from tools.llm.test_errors import connection_test_failure
+from tools.manuscript_acceptance import (
+    ManuscriptAcceptanceError,
+    ManuscriptAcceptanceService,
+)
+from tools.model_benchmark import ModelBenchmarkService
 from tools.model_profiles import (
     ModelProfileError,
     ModelProfileStore,
     activate_model_profile,
 )
-from tools.model_benchmark import ModelBenchmarkService
+from tools.mutation_summary import (
+    MISSING_VALUE,
+    build_mutation_summary,
+    document_entity_kind,
+)
 from tools.novel_service import NovelApplicationService, NovelServiceError
 from tools.novel_workspace import (
     count_writing_units,
@@ -51,11 +63,13 @@ from tools.novel_workspace import (
     novel_root,
     split_manuscript,
 )
+from tools.operation_trace import OperationTraceStore
 from tools.outline_tree import (
     OutlineEditError,
     build_outline_structure,
     mutate_outline_structure,
 )
+from tools.project_lock import ProjectBusyError, ProjectWriteLock
 from tools.project_registry import (
     ProjectRegistry,
     default_registry_path,
@@ -63,21 +77,28 @@ from tools.project_registry import (
     is_framework_root,
     write_content_project_metadata,
 )
-from tools.project_search import ProjectSearchIndex
+from tools.project_search import ProjectSearchIndex, stable_document_id
 from tools.reference_library import (
     ReferenceLibraryService,
     default_reference_library_root,
 )
 from tools.research_service import ResearchService, ResearchServiceError
 from tools.review_store import (
+    ReviewStore,
+    canonical_review_decision,
     issue_revision_priority,
     normalize_review_issues,
     review_delivery_status,
     review_gate_status,
     review_quality_score,
 )
+from tools.review_dag_framework import review_dag_framework
 from tools.revision_service import RevisionError, RevisionService
 from tools.structured_assets import StructuredAssetError, StructuredAssetService
+from tools.structured_change_plan import (
+    StructuredChangePlanError,
+    StructuredChangePlanStore,
+)
 from tools.studio_contracts import (
     MAX_DOCUMENT_BYTES,
     STATIC_ROOT,
@@ -115,8 +136,9 @@ from tools.studio_runtime import (
     truthy_env as _truthy_env,
 )
 from tools.task_runner import PersistentTaskRunner, TaskCancelled, TaskContext
-from tools.task_store import TaskStoreError
+from tools.task_store import TASK_PHASES, TaskStoreError, task_result_ref
 from tools.version import __version__
+from tools.workspace_manager import WorkspaceManager
 from tools.writing_targets import normalize_writing_targets
 
 logger = logging.getLogger("tools.studio")
@@ -132,8 +154,7 @@ class StudioApplication:
         review_executor: Callable[[Path, dict[str, Any]], dict[str, Any]] | None = None,
         chat_executor: Callable[[Path, str, str, str], dict[str, Any]] | None = None,
         source_executor: Callable[[Path, dict[str, Any]], dict[str, Any]] | None = None,
-        revision_executor: Callable[[Path, dict[str, Any]], dict[str, Any] | str]
-        | None = None,
+        revision_executor: Callable[[Path, dict[str, Any]], dict[str, Any] | str] | None = None,
         model_test_executor: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         project_registry: ProjectRegistry | None = None,
         model_settings_store: StudioModelSettingsStore | None = None,
@@ -179,6 +200,10 @@ class StudioApplication:
         self._agent_activity_lock = Lock()
         self._agent_activities: dict[str, dict[str, Any]] = {}
         self._task_runner: PersistentTaskRunner | None = None
+        # Optional task-store change listener; the WorkspaceManager wires it
+        # for context applications so task transitions bump the per-root
+        # context epoch. Legacy launch mode keeps it None.
+        self._task_change_listener: Callable[[dict[str, Any]], None] | None = None
         self._structured_asset_service: StructuredAssetService | None = None
         self._asset_package_service: AssetPackageService | None = None
         self._research_service: ResearchService | None = None
@@ -191,9 +216,7 @@ class StudioApplication:
             self._task_runner = None
         self.project_root = Path(project_root).resolve()
         self.config_path = self.project_root / "novel_config.yaml"
-        self.initialized = self.config_path.exists() and not is_framework_root(
-            self.project_root
-        )
+        self.initialized = self.config_path.exists() and not is_framework_root(self.project_root)
         self.config = self._load_config() if self.initialized else {}
         self.novel_id = str(self.config.get("novel_id") or "")
         if self.initialized and not self.novel_id:
@@ -207,14 +230,10 @@ class StudioApplication:
         self._revision_service = self._build_revision_service() if self.initialized else None
         self._task_runner = self._build_task_runner() if self.initialized else None
         self._structured_asset_service = (
-            StructuredAssetService(self.project_root, self.novel_id)
-            if self.initialized
-            else None
+            StructuredAssetService(self.project_root, self.novel_id) if self.initialized else None
         )
         self._asset_package_service = (
-            AssetPackageService(self.project_root, self.novel_id)
-            if self.initialized
-            else None
+            AssetPackageService(self.project_root, self.novel_id) if self.initialized else None
         )
         self._research_service = (
             ResearchService(
@@ -258,6 +277,7 @@ class StudioApplication:
         self._revision_service = None
         self._structured_asset_service = None
         self._asset_package_service = None
+        self._research_service = None
         self._benchmark_service = None
 
     def _configure_debug_mode(self) -> None:
@@ -274,6 +294,62 @@ class StudioApplication:
         if not self.debug_enabled:
             return
         logger.debug("studio.%s %s", event, _debug_json(payload))
+
+    def record_operation_trace(
+        self,
+        *,
+        route: str,
+        request_id: str,
+        payload: dict[str, Any],
+        response: dict[str, Any],
+        model_calls: list[dict[str, Any]] | None = None,
+        status: str = "completed",
+        error_code: str = "",
+    ) -> dict[str, Any]:
+        """Persist one privacy-bounded request trace and attach its reference."""
+
+        trace_context = response.pop("_operation_trace_context", {})
+        if not self.initialized:
+            return response
+        manager = getattr(self, "_workspace_manager", None)
+        current = manager.current_request_context() if manager is not None else None
+        request_context = {
+            "workspace_id": str(getattr(current, "workspace_id", "") or ""),
+            "session_id": str(getattr(current, "session_id", "") or ""),
+            "tool_call_id": str(getattr(current, "tool_call_id", "") or ""),
+            "root_call_id": str(getattr(current, "root_call_id", "") or ""),
+            "tool_name": str(getattr(current, "tool_name", "") or ""),
+        }
+        should_record = bool(
+            request_context["tool_call_id"]
+            or response.get("mutation_summary")
+            or model_calls
+            or status == "failed"
+        )
+        if not should_record:
+            return response
+        reference = OperationTraceStore(self.novel_root).record(
+            route=route,
+            request_id=request_id,
+            payload=payload,
+            response=response,
+            request_context=request_context,
+            context=trace_context if isinstance(trace_context, dict) else {},
+            model_calls=model_calls,
+            status=status,
+            error_code=error_code,
+        )
+        response["operation_trace"] = reference
+        return response
+
+    def operation_traces(self, limit: int = 50) -> dict[str, Any]:
+        clean_limit = max(1, min(int(limit), 100))
+        records = OperationTraceStore(self.novel_root).list(clean_limit)
+        return {
+            "schema_version": "openwrite.operation-trace-list.v1",
+            "records": records,
+            "count": len(records),
+        }
 
     def agent_activity(self, run_id: str) -> dict[str, Any]:
         clean_id = self._normalize_activity_run_id(run_id)
@@ -441,18 +517,10 @@ class StudioApplication:
                     "tool_count": int(event.get("tool_count") or 0),
                     "has_content": bool(event.get("has_content")),
                     "ok": event.get("ok"),
-                    "message": self._agent_activity_detail(
-                        event.get("message"), limit=900
-                    ),
-                    "arguments": self._agent_activity_detail(
-                        event.get("arguments"), limit=1800
-                    ),
-                    "result": self._agent_activity_detail(
-                        event.get("result"), limit=2400
-                    ),
-                    "reason": self._agent_activity_detail(
-                        event.get("reason"), limit=900
-                    ),
+                    "message": self._agent_activity_detail(event.get("message"), limit=900),
+                    "arguments": self._agent_activity_detail(event.get("arguments"), limit=1800),
+                    "result": self._agent_activity_detail(event.get("result"), limit=2400),
+                    "reason": self._agent_activity_detail(event.get("reason"), limit=900),
                     "repair_attempt": int(event.get("repair_attempt") or 0),
                     "repair_limit": int(event.get("repair_limit") or 0),
                     "timestamp": now,
@@ -602,13 +670,27 @@ class StudioApplication:
             }
         self.config = self._load_config()
         snapshot = self._service().workspace_snapshot()
-        chapters = list_chapters(self.project_root, self.novel_id)
+        reading_order = self.reading_order()
+        from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+        manuscript_acceptance = ManuscriptAcceptanceService(
+            self.project_root, self.novel_id
+        ).inspect()
         return {
             "version": __version__,
             "initialized": True,
             "project": self._project_payload(),
             "snapshot": snapshot,
-            "documents": self._document_groups(chapters),
+            "documents": self._document_groups(
+                [
+                    item
+                    for item in reading_order["documents"]
+                    if item.get("status") != "missing"
+                ],
+                manuscript_acceptance=manuscript_acceptance,
+            ),
+            "reading_order": reading_order,
+            "manuscript_acceptance": manuscript_acceptance,
             "model": self._model_payload(),
             "model_profiles": self.model_profiles(),
             "operations": self.operation_status(),
@@ -673,14 +755,20 @@ class StudioApplication:
         if self._project_registry is not None:
             return self._project_registry.list()
         import yaml as _yaml
+
         registry_path = Path.home() / ".config" / "openwrite" / "recent_projects.yaml"
         if not registry_path.is_file():
             return []
         try:
             cfg = _yaml.safe_load(registry_path.read_text(encoding="utf-8")) or {}
             return [
-                {"path": str(item.get("path") or ""), "title": str(item.get("title") or ""), "novel_id": str(item.get("novel_id") or "")}
-                for item in (cfg.get("projects") or []) if isinstance(item, dict)
+                {
+                    "path": str(item.get("path") or ""),
+                    "title": str(item.get("title") or ""),
+                    "novel_id": str(item.get("novel_id") or ""),
+                }
+                for item in (cfg.get("projects") or [])
+                if isinstance(item, dict)
             ]
         except Exception:
             return []
@@ -806,6 +894,10 @@ class StudioApplication:
             self._revision_service = self._build_revision_service()
         return self._revision_service
 
+    def _manuscript_acceptance(self) -> ManuscriptAcceptanceService:
+        self.require_project()
+        return ManuscriptAcceptanceService(self.project_root, self.novel_id)
+
     def _build_task_runner(self) -> PersistentTaskRunner:
         return PersistentTaskRunner(
             self.project_root,
@@ -821,7 +913,11 @@ class StudioApplication:
                 "continuous_write": self._task_continuous_write,
                 "research": self._task_research,
                 "model_benchmark": self._task_model_benchmark,
+                "settle_backfill": self._task_settle_backfill,
+                "manuscript_reconcile": self._task_manuscript_reconcile,
+                "project_restore": self._task_project_restore,
             },
+            on_change=self._task_change_listener,
         )
 
     def _tasks(self) -> PersistentTaskRunner:
@@ -892,8 +988,14 @@ class StudioApplication:
             "CONFIRMATION_REQUIRED": HTTPStatus.PRECONDITION_REQUIRED,
             "DOCUMENT_CONFLICT": HTTPStatus.CONFLICT,
             "PATH_OUT_OF_BOUNDS": HTTPStatus.BAD_REQUEST,
+            "CONTRACT_INVALID": HTTPStatus.BAD_REQUEST,
+            "PROTECTED_CONTEXT_OVER_BUDGET": HTTPStatus.UNPROCESSABLE_ENTITY,
+            "EXPORT_PREFLIGHT_FAILED": HTTPStatus.CONFLICT,
+            "EXPORT_PREFLIGHT_CHANGED": HTTPStatus.CONFLICT,
+            "EPUB_VALIDATION_FAILED": HTTPStatus.UNPROCESSABLE_ENTITY,
+            "EXPORT_OUTPUT_INVALID": HTTPStatus.UNPROCESSABLE_ENTITY,
         }.get(exc.code, HTTPStatus.BAD_GATEWAY)
-        return StudioError(str(exc), status)
+        return StudioError(str(exc), status, code=exc.code, details=getattr(exc, "details", {}))
 
     def operation_status(self) -> dict[str, Any]:
         sources_root = self.novel_root / "data" / "sources"
@@ -911,18 +1013,12 @@ class StudioApplication:
                             chunks = loaded.get("chunks") or []
                             analysis = {
                                 "status": str(loaded.get("status") or ""),
-                                "change_status": str(
-                                    loaded.get("change_status") or ""
-                                ),
+                                "change_status": str(loaded.get("change_status") or ""),
                                 "relative_name": str(loaded.get("relative_name") or ""),
                                 "total_chars": int(loaded.get("total_chars") or 0),
-                                "input_budget_tokens": int(
-                                    loaded.get("input_budget_tokens") or 0
-                                ),
+                                "input_budget_tokens": int(loaded.get("input_budget_tokens") or 0),
                                 "updated_at": str(loaded.get("updated_at") or ""),
-                                "source_sha256": str(
-                                    loaded.get("source_sha256") or ""
-                                ),
+                                "source_sha256": str(loaded.get("source_sha256") or ""),
                                 "total_chunks": len(chunks),
                                 "completed_chunks": sum(
                                     1
@@ -933,8 +1029,7 @@ class StudioApplication:
                                 "failed_chunks": sum(
                                     1
                                     for chunk in chunks
-                                    if isinstance(chunk, dict)
-                                    and chunk.get("status") == "failed"
+                                    if isinstance(chunk, dict) and chunk.get("status") == "failed"
                                 ),
                             }
                     except (OSError, json.JSONDecodeError):
@@ -990,14 +1085,10 @@ class StudioApplication:
             "git_checkpoint": GitCheckpointManager(self.project_root).status(),
             "runtime_skills": self.runtime_skill_action({"action": "list"}),
             "runtime_rules": self.rule_action({"action": "status"}),
-            "chapter_runs_v2": self.chapter_run_v2_action(
-                {"action": "list", "limit": 10}
-            ),
+            "chapter_runs_v2": self.chapter_run_v2_action({"action": "list", "limit": 10}),
             "runtime_diagnostics": self.runtime_diagnostics(),
             "rolling_plans": self.rolling_plan_action({"action": "list", "limit": 10}),
-            "narrative_forecasts": self.narrative_forecast_action(
-                {"action": "list", "limit": 10}
-            ),
+            "narrative_forecasts": self.narrative_forecast_action({"action": "list", "limit": 10}),
         }
 
     def chapter_run_v2_action(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1030,9 +1121,11 @@ class StudioApplication:
 
         self.require_project()
         options = payload if isinstance(payload, dict) else {}
-        return RuntimeDiagnosticsService(self.project_root, self.novel_id).run(
-            stuck_minutes=int(options.get("stuck_minutes") or 30)
-        ).model_dump(mode="json")
+        return (
+            RuntimeDiagnosticsService(self.project_root, self.novel_id)
+            .run(stuck_minutes=int(options.get("stuck_minutes") or 30))
+            .model_dump(mode="json")
+        )
 
     def rolling_plan_action(self, payload: dict[str, Any]) -> dict[str, Any]:
         from tools.rolling_planning import RollingPlanningError, rolling_plan_action
@@ -1042,9 +1135,7 @@ class StudioApplication:
             return rolling_plan_action(self.project_root, self.novel_id, payload)
         except RollingPlanningError as exc:
             status = (
-                HTTPStatus.NOT_FOUND
-                if exc.code == "CANDIDATE_NOT_FOUND"
-                else HTTPStatus.CONFLICT
+                HTTPStatus.NOT_FOUND if exc.code == "CANDIDATE_NOT_FOUND" else HTTPStatus.CONFLICT
             )
             raise StudioError(str(exc), status, code=exc.code) from exc
 
@@ -1068,12 +1159,29 @@ class StudioApplication:
     def manuscript_editing_action(self, payload: dict[str, Any]) -> dict[str, Any]:
         from tools.manuscript_editing import (
             ManuscriptEditingError,
+            ManuscriptVersionStore,
             manuscript_editing_action,
         )
 
         self.require_project()
+        action = str(payload.get("action") or "versions")
+        chapter_id = str(payload.get("chapter_id") or "")
+        restore_before = ""
+        restore_path: Path | None = None
+        if action == "restore":
+            try:
+                versions = ManuscriptVersionStore(self.project_root, self.novel_id)
+                restore_path = versions.chapter_path(chapter_id)
+                restore_before = restore_path.read_text(encoding="utf-8")
+            except ManuscriptEditingError as exc:
+                status = (
+                    HTTPStatus.NOT_FOUND
+                    if exc.code in {"CHAPTER_NOT_FOUND", "VERSION_NOT_FOUND"}
+                    else HTTPStatus.CONFLICT
+                )
+                raise StudioError(str(exc), status, code=exc.code) from exc
         try:
-            return manuscript_editing_action(
+            result = manuscript_editing_action(
                 self.project_root,
                 self.novel_id,
                 payload,
@@ -1090,6 +1198,512 @@ class StudioApplication:
             else:
                 status = HTTPStatus.CONFLICT
             raise StudioError(str(exc), status, code=exc.code) from exc
+        if action == "restore" and restore_path is not None:
+            restored_content = restore_path.read_text(encoding="utf-8")
+            relative = restore_path.relative_to(self.novel_root).as_posix()
+            result["document"] = {
+                "path": relative,
+                "revision": RevisionService.fingerprint(restored_content),
+                "version": str(restore_path.stat().st_mtime_ns),
+            }
+            result["mutation_summary"] = build_mutation_summary(
+                operation="manuscript.restore",
+                entity_kind="manuscript",
+                entity_id=chapter_id,
+                path=relative,
+                before=restore_before,
+                after=restored_content,
+                source_revision=RevisionService.fingerprint(restore_before),
+                result_revision=result["document"]["revision"],
+                field_prefix="content",
+                flatten=False,
+            )
+        return result
+
+    def document_change_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Preview or execute a server-owned, revision-gated document change."""
+        from tools.agent.tool_runtime import project_document_change_plan
+
+        self.require_project()
+        result = project_document_change_plan(
+            self.project_root,
+            self.novel_id,
+            payload,
+        )
+        if not result.get("ok"):
+            code = str(result.get("error") or "DOCUMENT_CHANGE_FAILED").upper()
+            recoverable = code in {
+                "DOCUMENT_REVISION_CONFLICT",
+                "OLD_TEXT_NOT_FOUND",
+                "AMBIGUOUS_OLD_TEXT",
+                "AMBIGUOUS_TEXT_RANGE",
+            }
+            status = HTTPStatus.CONFLICT if recoverable else HTTPStatus.BAD_REQUEST
+            raise StudioError(
+                str(result.get("message") or result.get("error") or "文档变更失败"),
+                status,
+                code=code,
+                recoverable=recoverable,
+                details=(
+                    dict(result.get("details") or {})
+                    if isinstance(result.get("details"), dict)
+                    else {}
+                ),
+            )
+        if result.get("applied"):
+            relative = str(result.get("path") or "")
+            if relative:
+                chapter_id = self._chapter_id_from_document(relative)
+                if not chapter_id:
+                    try:
+                        CharacterStateIndex(self.project_root, self.novel_id).refresh()
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to refresh character state index after document plan: %s",
+                            exc,
+                        )
+                checkpoint_path = (
+                    (self.novel_root / relative).resolve().relative_to(self.project_root).as_posix()
+                )
+                result["checkpoint"] = (
+                    GitCheckpointManager(self.project_root)
+                    .checkpoint(
+                        [checkpoint_path],
+                        f"confirmed change plan: {relative}",
+                    )
+                    .to_dict()
+                )
+        return {**result, "workspace": self.workspace()}
+
+    def structured_change_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Preview and commit one exact, revision-gated structured domain change."""
+        self.require_project()
+        action = str(payload.get("action") or "preview").strip().lower()
+        if action not in {"preview", "apply", "reject", "retry", "undo"}:
+            raise StudioError(
+                "结构化变更操作无效",
+                HTTPStatus.BAD_REQUEST,
+                code="INVALID_STRUCTURED_CHANGE_ACTION",
+            )
+        token = str(payload.get("preview_token") or "").strip()
+        store = StructuredChangePlanStore(self.project_root, self.novel_id)
+        try:
+            if action == "reject":
+                result = store.reject(token)
+                return {**result, "workspace": self.workspace()}
+            if action in {"apply", "undo"}:
+                record, undo_token = store.apply(token, action=action)
+                status = "undone" if action == "undo" else "applied"
+                result = store.response(
+                    record,
+                    status=status,
+                    applied=True,
+                    undo_token=undo_token,
+                )
+                try:
+                    result.update(self._after_structured_change(record, action=action))
+                    workspace = self.workspace()
+                except Exception as exc:
+                    logger.exception(
+                        "Structured change committed but derived refresh failed: %s",
+                        exc,
+                    )
+                    result.update(
+                        {
+                            "write_committed": True,
+                            "refresh_failed": True,
+                            "failures": [
+                                {
+                                    "phase": "derived_refresh",
+                                    "error": str(exc),
+                                    "recoverable": True,
+                                }
+                            ],
+                        }
+                    )
+                    try:
+                        workspace = self.workspace()
+                    except Exception:
+                        workspace = {}
+                return {**result, "workspace": workspace}
+            retried_from = ""
+            if action == "retry":
+                previous, _previous_path = store.load(token)
+                if previous.get("purpose") != "preview":
+                    raise StructuredChangePlanError(
+                        "撤销凭据不能自动重试；请检查当前内容后建立新的变更。",
+                        code="STRUCTURED_UNDO_CONFLICT",
+                        recoverable=True,
+                    )
+                change_kind = str(previous["change_kind"])
+                change = dict(previous["change"])
+                retried_from = token
+            else:
+                change_kind = str(payload.get("change_kind") or "").strip()
+                change = payload.get("change")
+                if not isinstance(change, dict):
+                    raise StructuredChangePlanError(
+                        "preview 需要 change 对象。",
+                        code="INVALID_STRUCTURED_CHANGE",
+                    )
+            prepared = self._prepare_structured_change(
+                change_kind,
+                change,
+                rebase=action == "retry",
+            )
+            preview_token, record = store.save_preview(prepared)
+            if record["source_revision"] == record["result_revision"]:
+                store.reject(preview_token)
+                result = store.response(
+                    record,
+                    status="no_change",
+                    applied=False,
+                )
+            else:
+                result = store.response(
+                    record,
+                    status="proposed",
+                    applied=False,
+                    token=preview_token,
+                )
+            if retried_from:
+                store.reject(retried_from)
+                result["retried_from"] = retried_from
+            return {**result, "workspace": self.workspace()}
+        except StructuredChangePlanError as exc:
+            status = (
+                HTTPStatus.CONFLICT
+                if exc.recoverable or exc.code == "PROJECT_BUSY"
+                else HTTPStatus.BAD_REQUEST
+            )
+            raise StudioError(
+                str(exc),
+                status,
+                code=exc.code,
+                recoverable=exc.recoverable,
+            ) from exc
+
+    def _prepare_structured_change(
+        self,
+        change_kind: str,
+        change: dict[str, Any],
+        *,
+        rebase: bool,
+    ) -> dict[str, Any]:
+        if change_kind == "outline":
+            return self._prepare_outline_change(change, rebase=rebase)
+        if change_kind == "asset":
+            return self._prepare_asset_change(change, rebase=rebase)
+        if change_kind == "focus":
+            return self._prepare_focus_change(change)
+        if change_kind == "foreshadowing":
+            return self._prepare_foreshadowing_change(change)
+        if change_kind == "writing_targets":
+            return self._prepare_writing_targets_change(change)
+        raise StructuredChangePlanError(
+            "不支持的结构化变更类型。",
+            code="INVALID_STRUCTURED_CHANGE_KIND",
+        )
+
+    def _prepare_outline_change(
+        self,
+        change: dict[str, Any],
+        *,
+        rebase: bool,
+    ) -> dict[str, Any]:
+        source_path = self.novel_root / "src" / "outline.md"
+        source = source_path.read_text(encoding="utf-8")
+        effective = dict(change)
+        if rebase:
+            effective["revision"] = self.outline_structure()["revision"]
+        try:
+            edit = mutate_outline_structure(
+                self.novel_root,
+                operation=str(effective.get("operation") or ""),
+                revision=str(effective.get("revision") or ""),
+                node_id=str(effective.get("node_id") or ""),
+                title=str(effective.get("title") or ""),
+                summary=str(effective.get("summary") or ""),
+                kind=str(effective.get("kind") or ""),
+            )
+        except OutlineEditError as exc:
+            code = (
+                "STRUCTURED_REVISION_CONFLICT"
+                if exc.code == "conflict"
+                else "INVALID_STRUCTURED_CHANGE"
+            )
+            raise StructuredChangePlanError(
+                str(exc),
+                code=code,
+                recoverable=exc.code == "conflict",
+            ) from exc
+        return {
+            "change_kind": "outline",
+            "change": effective,
+            "target_scope": "novel",
+            "target_path": "src/outline.md",
+            "source_content": source,
+            "result_content": str(edit["content"]),
+            "entity_kind": "outline",
+            "entity_id": str(effective.get("node_id") or "outline"),
+            "summary_before": source,
+            "summary_after": str(edit["content"]),
+            "field_prefix": "content",
+            "flatten": False,
+            "metadata": {
+                "message": str(edit.get("message") or ""),
+                "selection_hint": dict(edit.get("selection_hint") or {}),
+                "renumbered": list(edit.get("renumbered") or []),
+                "skipped_renumbering": list(edit.get("skipped_renumbering") or []),
+            },
+        }
+
+    def _prepare_asset_change(
+        self,
+        change: dict[str, Any],
+        *,
+        rebase: bool,
+    ) -> dict[str, Any]:
+        effective = dict(change)
+        kind = str(effective.get("kind") or "")
+        asset_id = str(effective.get("id") or "")
+        if rebase:
+            try:
+                effective["revision"] = self._assets().read(kind, asset_id)["revision"]
+            except StructuredAssetError as exc:
+                raise StructuredChangePlanError(
+                    str(exc), code=exc.code, recoverable=exc.recoverable
+                ) from exc
+        try:
+            preview = self._assets().preview_update(
+                kind,
+                asset_id,
+                effective,
+                expected_revision=str(effective.get("revision") or ""),
+            )
+        except StructuredAssetError as exc:
+            code = "STRUCTURED_REVISION_CONFLICT" if exc.code == "ASSET_CONFLICT" else exc.code
+            raise StructuredChangePlanError(
+                str(exc), code=code, recoverable=exc.recoverable
+            ) from exc
+        before_asset = dict(preview["before"])
+        after_asset = dict(preview["after"])
+        before_fields = {
+            "data": before_asset.get("data", {}),
+            "body_markdown": before_asset.get("body_markdown", ""),
+            "raw_text": before_asset.get("raw_text", ""),
+        }
+        after_fields = {
+            "data": after_asset.get("data", {}),
+            "body_markdown": after_asset.get("body_markdown", ""),
+            "raw_text": after_asset.get("raw_text", ""),
+        }
+        if "raw_text" not in effective:
+            before_fields.pop("raw_text")
+            after_fields.pop("raw_text")
+        return {
+            "change_kind": "asset",
+            "change": effective,
+            "target_scope": "novel",
+            "target_path": str(preview["path"]),
+            "source_content": str(preview["before_content"]),
+            "result_content": str(preview["after_content"]),
+            "entity_kind": str(preview["kind"]),
+            "entity_id": str(preview["id"]),
+            "summary_before": before_fields,
+            "summary_after": after_fields,
+        }
+
+    def _prepare_focus_change(self, change: dict[str, Any]) -> dict[str, Any]:
+        from tools.novel_workspace import normalize_creative_focus, render_creative_focus
+
+        goal = str(change.get("goal") or "").strip()
+        if not goal:
+            raise StructuredChangePlanError(
+                "当前阶段目标不能为空", code="INVALID_STRUCTURED_CHANGE"
+            )
+        focus = normalize_creative_focus(
+            goal=goal,
+            must_keep=self._string_list(change.get("must_keep")),
+            must_avoid=self._string_list(change.get("must_avoid")),
+            notes=self._string_list(change.get("notes")),
+        )
+        path = self.novel_root / "src" / "story" / "current_focus.md"
+        source = path.read_text(encoding="utf-8") if path.exists() else ""
+        return {
+            "change_kind": "focus",
+            "change": dict(change),
+            "target_scope": "novel",
+            "target_path": "src/story/current_focus.md",
+            "source_content": source,
+            "result_content": render_creative_focus(focus),
+            "entity_kind": "canon",
+            "entity_id": "current_focus",
+            "summary_before": self._service().focus_snapshot(),
+            "summary_after": asdict(focus),
+        }
+
+    def _prepare_foreshadowing_change(
+        self,
+        change: dict[str, Any],
+    ) -> dict[str, Any]:
+        from models.foreshadowing import ForeshadowingGraph, ForeshadowingNode
+
+        path = self.novel_root / "data" / "foreshadowing" / "dag.yaml"
+        source = path.read_text(encoding="utf-8") if path.exists() else ""
+        try:
+            raw = yaml.safe_load(source) or {}
+            if not isinstance(raw, dict):
+                raise ValueError("伏笔 DAG 顶层必须是对象")
+            graph = ForeshadowingGraph.model_validate(raw).model_copy(deep=True)
+            action = str(change.get("action") or "create").strip()
+            node_id = str(change.get("node_id") or "").strip()
+            if not node_id:
+                raise ValueError("伏笔 ID 不能为空")
+            before_node = graph.nodes.get(node_id)
+            before_node_value = None if before_node is None else before_node.model_dump(mode="json")
+            if action == "create":
+                if before_node is not None:
+                    raise StructuredChangePlanError(
+                        f"伏笔节点已存在: {node_id}",
+                        code="STRUCTURED_REVISION_CONFLICT",
+                        recoverable=True,
+                    )
+                try:
+                    parsed_weight = int(change.get("weight") or 5)
+                except (TypeError, ValueError):
+                    parsed_weight = 5
+                node = ForeshadowingNode(
+                    id=node_id,
+                    content=str(change.get("content") or "").strip(),
+                    weight=parsed_weight if parsed_weight > 0 else 5,
+                    layer=str(change.get("layer") or "支线"),
+                    status="埋伏",
+                    created_at=str(change.get("created_at") or ""),
+                    target_chapter=str(change.get("target_chapter") or "") or None,
+                    tags=self._string_list(change.get("tags")),
+                )
+                graph.nodes[node_id] = node
+                graph.status[node_id] = "埋伏"
+            elif action == "update":
+                if before_node is None:
+                    raise StructuredChangePlanError(f"伏笔节点不存在: {node_id}", code="NOT_FOUND")
+                status = str(change.get("status") or "").strip()
+                before_node.status = status
+                graph.status[node_id] = status
+            else:
+                raise ValueError("未知伏笔操作")
+            after_node = graph.nodes.get(node_id)
+            result = yaml.dump(
+                graph.model_dump(by_alias=True),
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+        except StructuredChangePlanError:
+            raise
+        except Exception as exc:
+            raise StructuredChangePlanError(
+                f"伏笔变更无效: {exc}", code="INVALID_STRUCTURED_CHANGE"
+            ) from exc
+        return {
+            "change_kind": "foreshadowing",
+            "change": dict(change),
+            "target_scope": "novel",
+            "target_path": "data/foreshadowing/dag.yaml",
+            "source_content": source,
+            "result_content": result,
+            "entity_kind": "foreshadowing",
+            "entity_id": node_id,
+            "summary_before": before_node_value,
+            "summary_after": (None if after_node is None else after_node.model_dump(mode="json")),
+            "summary_before_missing": before_node is None,
+            "summary_after_missing": after_node is None,
+            "field_prefix": "node",
+            "flatten": False,
+        }
+
+    def _prepare_writing_targets_change(
+        self,
+        change: dict[str, Any],
+    ) -> dict[str, Any]:
+        source = self.config_path.read_text(encoding="utf-8")
+        config = self._load_config()
+        current = normalize_writing_targets(config.get("writing_targets"))
+        try:
+            targets = normalize_writing_targets(change, base=current, strict=True)
+        except ValueError as exc:
+            raise StructuredChangePlanError(str(exc), code="INVALID_STRUCTURED_CHANGE") from exc
+        config["writing_targets"] = targets
+        result = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
+        return {
+            "change_kind": "writing_targets",
+            "change": dict(change),
+            "target_scope": "project",
+            "target_path": "novel_config.yaml",
+            "source_content": source,
+            "result_content": result,
+            "entity_kind": "project",
+            "entity_id": self.novel_id,
+            "summary_before": current,
+            "summary_after": targets,
+        }
+
+    def _after_structured_change(
+        self,
+        record: dict[str, Any],
+        *,
+        action: str,
+    ) -> dict[str, Any]:
+        kind = str(record.get("change_kind") or "")
+        supplement: dict[str, Any] = {}
+        if kind == "writing_targets":
+            self.config = self._load_config()
+            if self._novel_service is not None:
+                self._novel_service.refresh()
+        elif kind == "asset":
+            supplement["sync"] = self._service().sync()
+            change = dict(record.get("change") or {})
+            asset_kind = str(change.get("kind") or record.get("entity_kind") or "")
+            asset_id = str(change.get("id") or record.get("entity_id") or "")
+            supplement["asset"] = self._asset_with_relations(
+                self._assets().read(asset_kind, asset_id)
+            )
+        elif kind == "outline":
+            supplement["outline"] = self.outline_structure()
+            try:
+                CharacterStateIndex(self.project_root, self.novel_id).refresh()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to refresh character state after structured outline change: %s",
+                    exc,
+                )
+        elif kind == "focus":
+            self._service().refresh()
+        elif kind == "foreshadowing":
+            supplement["continuity"] = self._service().continuity()
+        target_base = (
+            self.novel_root if record.get("target_scope") == "novel" else self.project_root
+        )
+        target = (target_base / str(record.get("target_path") or "")).resolve()
+        checkpoint = GitCheckpointManager(self.project_root).checkpoint(
+            [target.relative_to(self.project_root).as_posix()],
+            f"structured {action}: {kind}",
+        )
+        supplement["checkpoint"] = checkpoint.to_dict()
+        return supplement
+
+    def list_manuscript_versions(self, chapter_id: str) -> dict[str, Any]:
+        return self.manuscript_editing_action({"action": "versions", "chapter_id": chapter_id})
+
+    def compare_manuscript_version(self, chapter_id: str, version_id: str) -> dict[str, Any]:
+        return self.manuscript_editing_action(
+            {
+                "action": "compare",
+                "chapter_id": chapter_id,
+                "version_id": version_id,
+            }
+        )
 
     def runtime_skill_action(self, payload: dict[str, Any]) -> dict[str, Any]:
         from tools.agent.tool_runtime import build_tool_executors
@@ -1127,9 +1741,7 @@ class StudioApplication:
             intent=str(payload.get("intent") or ""),
             document_type=str(payload.get("document_type") or ""),
             explicit_skills=(
-                [str(item) for item in explicit]
-                if isinstance(explicit, list)
-                else None
+                [str(item) for item in explicit] if isinstance(explicit, list) else None
             ),
             base_tools=baseline,
         )
@@ -1179,6 +1791,7 @@ class StudioApplication:
             "version": str(path.stat().st_mtime_ns),
             "revision": RevisionService.fingerprint(content),
         }
+        result.update(self._document_identity(result["path"]))
         descriptor = describe_document(result["path"], content)
         if descriptor.scope in LIBRARY_SCOPES:
             result.update(descriptor.to_dict())
@@ -1191,8 +1804,12 @@ class StudioApplication:
         version: str | int | None,
         *,
         force: bool = False,
+        save_origin: str = "autosave",
     ) -> dict[str, Any]:
         path = self._resolve_document(relative_path, write=True)
+        clean_save_origin = str(save_origin or "autosave").strip()
+        if clean_save_origin not in {"autosave", "manual"}:
+            raise StudioError("保存来源无效", HTTPStatus.BAD_REQUEST, code="INVALID_SAVE_ORIGIN")
         encoded = content.encode("utf-8")
         self._debug_event(
             "document_write_requested",
@@ -1200,38 +1817,137 @@ class StudioApplication:
             bytes=len(encoded),
             version=version,
             force=force,
+            save_origin=clean_save_origin,
         )
         if len(encoded) > MAX_DOCUMENT_BYTES:
             raise StudioError("文档超过 2 MB，已拒绝保存", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
         if "\x00" in content:
             raise StudioError("文档包含无效字符")
 
-        with self._write_lock:
-            if path.exists() and version is not None and not force:
-                current_version = str(path.stat().st_mtime_ns)
-                if current_version != str(version):
-                    raise StudioError("文档已在其他位置修改，请重新载入", HTTPStatus.CONFLICT)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=path.parent,
-                prefix=f".{path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as handle:
-                handle.write(content)
-                temp_path = Path(handle.name)
-            temp_path.replace(path)
+        author_version: dict[str, Any] | None = None
+        acceptance_operation: dict[str, Any] | None = None
+        try:
+            with (
+                self._write_lock,
+                ProjectWriteLock(
+                    self.project_root,
+                    self.novel_id,
+                    operation=f"document_write:{self._relative(path)}",
+                ),
+            ):
+                current_content = path.read_text(encoding="utf-8") if path.exists() else None
+                if current_content is not None and version is not None and not force:
+                    current_version = str(path.stat().st_mtime_ns)
+                    if current_version != str(version):
+                        raise StudioError(
+                            "文档已在其他位置修改，请重新载入",
+                            HTTPStatus.CONFLICT,
+                            code="DOCUMENT_CONFLICT",
+                            recoverable=True,
+                        )
+                manuscript_root = (self.novel_root / "data" / "manuscript").resolve()
+                if (
+                    current_content is not None
+                    and current_content != content
+                    and manuscript_root in path.resolve().parents
+                    and re.fullmatch(r"ch_\d+", path.stem)
+                ):
+                    from tools.manuscript_editing import ManuscriptVersionStore
+
+                    checkpoint, created = ManuscriptVersionStore(
+                        self.project_root, self.novel_id
+                    ).checkpoint_before_change(
+                        path.stem,
+                        reason=clean_save_origin,
+                        label=(
+                            "手动保存前" if clean_save_origin == "manual" else "自动保存批次开始"
+                        ),
+                        content=current_content,
+                    )
+                    author_version = {
+                        **checkpoint.model_dump(mode="json"),
+                        "created": created,
+                    }
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=path.parent,
+                    prefix=f".{path.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as handle:
+                    handle.write(content)
+                    temp_path = Path(handle.name)
+                written_version = str(temp_path.stat().st_mtime_ns)
+                temp_path.replace(path)
+                if (
+                    current_content != content
+                    and manuscript_root in path.resolve().parents
+                    and re.fullmatch(r"ch_\d+", path.stem)
+                ):
+                    from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+                    acceptance_operation = ManuscriptAcceptanceService(
+                        self.project_root, self.novel_id
+                    ).start_acceptance(
+                        path.stem,
+                        source=clean_save_origin,
+                        expected_previous_revision=(
+                            RevisionService.fingerprint(current_content)
+                            if current_content is not None
+                            else ""
+                        ),
+                    )
+        except ProjectBusyError as exc:
+            raise StudioError(
+                str(exc),
+                HTTPStatus.CONFLICT,
+                code="PROJECT_BUSY",
+                recoverable=True,
+            ) from exc
         relative = self._relative(path)
-        if relative == "src/outline.md" or relative.startswith(
-            ("src/", "data/manuscript/")
-        ):
+        saved = {
+            "path": relative,
+            "title": self._document_title(path),
+            "content": content,
+            "version": written_version,
+            "revision": RevisionService.fingerprint(content),
+        }
+        saved["mutation_summary"] = build_mutation_summary(
+            operation="document.create" if current_content is None else "document.update",
+            entity_kind=document_entity_kind(relative),
+            entity_id=path.stem,
+            path=relative,
+            before=MISSING_VALUE if current_content is None else current_content,
+            after=content,
+            source_revision=(
+                "" if current_content is None else RevisionService.fingerprint(current_content)
+            ),
+            result_revision=saved["revision"],
+            field_prefix="content",
+            flatten=False,
+        )
+        descriptor = describe_document(relative, content)
+        if descriptor.scope in LIBRARY_SCOPES:
+            saved.update(descriptor.to_dict())
+        if author_version is not None:
+            saved["author_version"] = author_version
+        if acceptance_operation is not None:
+            saved["acceptance"] = {
+                "operation_id": str(acceptance_operation.get("operation_id") or ""),
+                "status": str(acceptance_operation.get("status") or "pending"),
+                "accepted_revision": str(
+                    acceptance_operation.get("expected_previous_revision") or ""
+                ),
+                "current_revision": saved["revision"],
+                "message": "正文已保存，关联事实待更新",
+            }
+        if relative == "src/outline.md" or relative.startswith("src/"):
             try:
                 CharacterStateIndex(self.project_root, self.novel_id).refresh()
             except Exception as exc:
                 logger.warning("Failed to refresh character state index: %s", exc)
-        saved = self.read_document(self._relative(path))
         checkpoint_path = path.resolve().relative_to(self.project_root).as_posix()
         checkpoint = GitCheckpointManager(self.project_root).checkpoint(
             [checkpoint_path], self._checkpoint_message(path)
@@ -1333,9 +2049,7 @@ class StudioApplication:
             state.current_chapter = previous_chapter
             state.current_section = "" if not previous_chapter else state.current_section
             state.stage = (
-                BookStage.CHAPTER_PREFLIGHT
-                if previous_chapter
-                else BookStage.ROLLING_OUTLINE
+                BookStage.CHAPTER_PREFLIGHT if previous_chapter else BookStage.ROLLING_OUTLINE
             )
             state.pending_confirmation = ""
             state.blocking_reason = ""
@@ -1364,6 +2078,77 @@ class StudioApplication:
             "workspace": self.workspace(),
         }
 
+    def delete_chapters_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Delete the contiguous latest tail, retaining a confirmed chapter.
+
+        The single-chapter endpoint remains the primitive and keeps all of its
+        backup, projection and latest-only safeguards. This endpoint merely
+        performs the same operation server-side in one request, with one
+        explicit confirmation and a freshness check for the current latest
+        chapter. Each chapter is still deleted through the existing guarded
+        primitive, so a failure leaves an auditable prefix of the tail removed.
+        """
+        self._require_no_active_tasks()
+        keep_through = str(payload.get("keep_through") or "").strip()
+        if not re.fullmatch(r"ch_\d+", keep_through):
+            raise StudioError("保留章节必须是 ch_数字 格式", HTTPStatus.BAD_REQUEST)
+        expected_confirmation = f"DELETE_AFTER:{keep_through}"
+        if str(payload.get("confirm") or "").strip() != expected_confirmation:
+            raise StudioError(
+                f"批量删除确认不匹配（请输入 {expected_confirmation}）",
+                HTTPStatus.PRECONDITION_REQUIRED,
+            )
+
+        chapters = list_chapters(self.project_root, self.novel_id)
+        if not chapters:
+            raise StudioError("当前没有可删除的正文章节", HTTPStatus.NOT_FOUND)
+        chapter_numbers = {
+            item.chapter_id: int(item.chapter_id.split("_")[-1]) for item in chapters
+        }
+        if keep_through not in chapter_numbers:
+            raise StudioError("保留章节不存在", HTTPStatus.NOT_FOUND)
+        latest = chapters[-1]
+        expected_version = payload.get("version")
+        if expected_version is None or str(expected_version) != str(latest.path.stat().st_mtime_ns):
+            raise StudioError("正文已变化，请重新载入最新章节后再批量删除", HTTPStatus.CONFLICT)
+
+        keep_number = chapter_numbers[keep_through]
+        targets = [item for item in chapters if chapter_numbers[item.chapter_id] > keep_number]
+        if not targets:
+            return {
+                "ok": True,
+                "kept_through": keep_through,
+                "deleted_chapters": [],
+                "deleted_count": 0,
+                "workspace": self.workspace(),
+            }
+
+        deleted: list[dict[str, Any]] = []
+        for chapter in reversed(targets):
+            relative = chapter.path.resolve().relative_to(self.novel_root).as_posix()
+            result = self.delete_chapter(
+                {
+                    "path": relative,
+                    "confirm": chapter.chapter_id,
+                    "version": str(chapter.path.stat().st_mtime_ns),
+                }
+            )
+            deleted.append(
+                {
+                    "chapter_id": result["chapter_id"],
+                    "previous_chapter": result["previous_chapter"],
+                    "backup": result["backup"],
+                }
+            )
+
+        return {
+            "ok": True,
+            "kept_through": keep_through,
+            "deleted_chapters": deleted,
+            "deleted_count": len(deleted),
+            "workspace": self.workspace(),
+        }
+
     def _checkpoint_message(self, path: Path) -> str:
         relative = self._relative(path)
         if relative == "src/outline.md":
@@ -1381,6 +2166,9 @@ class StudioApplication:
         return f"{prefix}: save {path.stem} from Studio"
 
     def update_focus(self, payload: dict[str, Any]) -> dict[str, Any]:
+        before = self._service().focus_snapshot()
+        focus_path = self.novel_root / "src" / "story" / "current_focus.md"
+        before_text = focus_path.read_text(encoding="utf-8") if focus_path.exists() else ""
         try:
             self._service().update_focus(
                 goal=str(payload.get("goal") or ""),
@@ -1390,11 +2178,25 @@ class StudioApplication:
             )
         except NovelServiceError as exc:
             raise self._translate_service_error(exc) from exc
-        return self.workspace()
+        after = self._service().focus_snapshot()
+        after_text = focus_path.read_text(encoding="utf-8")
+        workspace = self.workspace()
+        workspace["mutation_summary"] = build_mutation_summary(
+            operation="focus.update",
+            entity_kind="canon",
+            entity_id="current_focus",
+            path="src/story/current_focus.md",
+            before=before,
+            after=after,
+            source_revision=RevisionService.fingerprint(before_text),
+            result_revision=RevisionService.fingerprint(after_text),
+        )
+        return workspace
 
     def update_writing_targets(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.require_project()
         current = normalize_writing_targets(self.config.get("writing_targets"))
+        before_config = self.config_path.read_text(encoding="utf-8")
         try:
             targets = normalize_writing_targets(
                 payload,
@@ -1427,7 +2229,18 @@ class StudioApplication:
                 self._novel_service.refresh()
 
         self._debug_event("writing_targets_updated", **targets)
-        return self.workspace()
+        workspace = self.workspace()
+        workspace["mutation_summary"] = build_mutation_summary(
+            operation="project.writing_targets.update",
+            entity_kind="project",
+            entity_id=self.novel_id,
+            path="novel_config.yaml",
+            before=current,
+            after=targets,
+            source_revision=RevisionService.fingerprint(before_config),
+            result_revision=RevisionService.fingerprint(content),
+        )
+        return workspace
 
     def configure_model(self, payload: dict[str, Any]) -> dict[str, Any]:
         settings = self._validated_model_settings(payload)
@@ -1491,12 +2304,19 @@ class StudioApplication:
             raise StudioError(f"模型档案契约校验失败: {exc}", code="CONTRACT_INVALID") from exc
         return surface
 
+    def model_embedding(self) -> dict[str, Any]:
+        surface = self._model_profile_store.surface()
+        return {
+            "schema_version": "openwrite.embedding-profile-surface.v1",
+            "profiles": surface.get("embedding_profiles", []),
+            "active_profile_id": surface.get("active_embedding_profile_id", ""),
+        }
+
     def save_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             profile = self._model_profile_store.save_profile(
                 payload,
                 api_key=str(payload.get("api_key") or ""),
-                embedding_api_key=str(payload.get("embedding_api_key") or ""),
                 remember_api_key=bool(payload.get("remember_api_key", True)),
             )
         except (ModelProfileError, OSError) as exc:
@@ -1505,17 +2325,60 @@ class StudioApplication:
             raise StudioError("模型档案保存失败，请检查配置目录权限") from exc
         return {"profile": profile, "model_profiles": self.model_profiles()}
 
+    def save_embedding_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            profile = self._model_profile_store.save_embedding_profile(
+                payload,
+                api_key=str(payload.get("api_key") or ""),
+                remember_api_key=bool(payload.get("remember_api_key", True)),
+            )
+        except (ModelProfileError, OSError) as exc:
+            if isinstance(exc, ModelProfileError):
+                raise self._translate_model_profile_error(exc) from exc
+            raise StudioError("Embedding 档案保存失败，请检查配置目录权限") from exc
+        return {"profile": profile, **self.model_embedding()}
+
+    def select_embedding_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = self._model_profile_store.select_embedding_profile(
+                str(payload.get("profile_id") or "")
+            )
+        except ModelProfileError as exc:
+            raise self._translate_model_profile_error(exc) from exc
+        return {**result, **self.model_embedding()}
+
+    def delete_embedding_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = self._model_profile_store.delete_embedding_profile(
+                str(payload.get("profile_id") or "")
+            )
+        except (ModelProfileError, OSError) as exc:
+            if isinstance(exc, ModelProfileError):
+                raise self._translate_model_profile_error(exc) from exc
+            raise StudioError("Embedding 档案删除失败，请检查配置目录权限") from exc
+        return {**result, **self.model_embedding()}
+
     def save_model_routes(self, payload: dict[str, Any]) -> dict[str, Any]:
         routes = payload.get("routes")
         if not isinstance(routes, dict):
             raise StudioError("routes 必须是 JSON 对象", code="INVALID_REQUEST_BODY")
         try:
-            self._model_profile_store.save_routes(routes)
+            saved = self._model_profile_store.save_routes(routes)
         except (ModelProfileError, OSError) as exc:
             if isinstance(exc, ModelProfileError):
                 raise self._translate_model_profile_error(exc) from exc
             raise StudioError("任务路由保存失败，请检查配置目录权限") from exc
-        return {"model_profiles": self.model_profiles()}
+        return {"model_profiles": self.model_profiles(), "impact": saved["impact"]}
+
+    def delete_model_profile_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self._model_profile_store.delete_profile_preview(
+                str(payload.get("profile_id") or ""),
+                fallback_id=str(payload.get("fallback_id") or ""),
+                project_routes=self._project_model_routes(),
+            )
+        except ModelProfileError as exc:
+            raise self._translate_model_profile_error(exc) from exc
 
     def delete_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -1532,20 +2395,30 @@ class StudioApplication:
 
     def test_model_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate a candidate connection without replacing active settings."""
-        if payload.get("id"):
-            try:
+        from tools.contracts_generated import validate_model_connection_test_v1
+
+        profile_id = str(payload.get("id") or payload.get("profile_id") or "").strip()
+        try:
+            if profile_id:
                 candidate = self._model_profile_store.test_candidate(
                     payload,
                     api_key=str(payload.get("api_key") or ""),
                 )
-            except ModelProfileError as exc:
-                raise self._translate_model_profile_error(exc) from exc
-            settings = {
-                **candidate,
-                "max_tokens": candidate["max_output_tokens"],
-            }
-        else:
-            settings = self._validated_model_settings(payload)
+                settings = {
+                    **candidate,
+                    "max_tokens": candidate["max_output_tokens"],
+                }
+            else:
+                settings = self._validated_model_settings(payload)
+        except ModelProfileError as exc:
+            failure = connection_test_failure(exc)
+            self._persist_connection_test_failure(payload, "last_test", failure, None)
+            raise StudioError(
+                failure.message,
+                failure.http_status,
+                code=failure.code,
+                recoverable=failure.recoverable,
+            ) from exc
         started = time.monotonic()
         try:
             if self._model_test_executor is not None:
@@ -1553,47 +2426,162 @@ class StudioApplication:
             else:
                 result = self._default_model_connection_test(settings)
         except Exception as exc:
-            raise StudioError(self._safe_model_connection_error(exc)) from exc
-        return {
+            failure = connection_test_failure(exc)
+            logger.warning(
+                "model connection test failed: %s",
+                redact_sensitive_text(exc),
+            )
+            self._persist_connection_test_failure(payload, "last_test", failure, started)
+            raise StudioError(
+                failure.message,
+                failure.http_status,
+                code=failure.code,
+                recoverable=failure.recoverable,
+            ) from exc
+        latency_ms = max(1, int((time.monotonic() - started) * 1000))
+        result_payload = {
             "ok": True,
+            "status": "ok",
             "provider": settings["provider"],
             "model": settings["model"],
-            "latency_ms": max(1, int((time.monotonic() - started) * 1000)),
+            "latency_ms": latency_ms,
             "reply": str(result.get("reply") or "OK")[:120] if isinstance(result, dict) else "OK",
+            "tested_at": self._utc_timestamp(),
         }
+        try:
+            validate_model_connection_test_v1(result_payload)
+        except ValueError as exc:
+            raise StudioError(f"连接测试契约校验失败: {exc}", code="CONTRACT_INVALID") from exc
+        if profile_id:
+            self._record_connection_test_success(
+                profile_id,
+                "last_test",
+                provider=str(settings["provider"]),
+                resolved_model=str(settings["model"]),
+                latency_ms=latency_ms,
+                tested_at=result_payload["tested_at"],
+            )
+        return result_payload
 
     def test_embedding_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Probe the candidate embedding route without saving or exposing credentials."""
+        from tools.contracts_generated import validate_model_connection_test_v1
         from tools.embedding_runtime import (
-            EmbeddingRuntimeError,
             EmbeddingSettings,
             run_embedding_probe,
         )
 
+        profile_id = str(payload.get("id") or "").strip()
+        started = time.monotonic()
         try:
             candidate = self._model_profile_store.test_embedding_candidate(
-                payload,
-                api_key=str(payload.get("api_key") or ""),
-                embedding_api_key=str(payload.get("embedding_api_key") or ""),
+                payload, api_key=str(payload.get("api_key") or "")
             )
             settings = EmbeddingSettings(
-                provider=str(candidate.get("embedding_provider") or "openai"),
-                model=str(candidate.get("embedding_model") or ""),
-                dimension=int(candidate.get("embedding_dimension") or 0),
-                max_tokens=int(candidate.get("embedding_max_tokens") or 0),
-                base_url=str(
-                    candidate.get("embedding_base_url")
-                    or candidate.get("base_url")
-                    or ""
-                ),
-                api_key=str(candidate.get("embedding_api_key") or ""),
+                provider=str(candidate.get("provider") or "openai"),
+                model=str(candidate.get("model") or ""),
+                dimension=int(candidate.get("dimension") or 0),
+                max_tokens=int(candidate.get("max_tokens") or 0),
+                base_url=str(candidate.get("base_url") or ""),
+                api_key=str(candidate.get("api_key") or ""),
                 timeout_seconds=max(1, int(candidate.get("timeout_seconds") or 120)),
             )
-            return run_embedding_probe(settings)
-        except ModelProfileError as exc:
-            raise self._translate_model_profile_error(exc) from exc
-        except EmbeddingRuntimeError as exc:
-            raise StudioError(str(exc), HTTPStatus.BAD_GATEWAY) from exc
+            probe = run_embedding_probe(settings)
+        except Exception as exc:
+            failure = connection_test_failure(exc)
+            logger.warning(
+                "embedding connection test failed: %s",
+                redact_sensitive_text(exc),
+            )
+            self._persist_connection_test_failure(payload, "embedding_last_test", failure, started)
+            raise StudioError(
+                failure.message,
+                failure.http_status,
+                code=failure.code,
+                recoverable=failure.recoverable,
+            ) from exc
+        result_payload = {
+            **probe,
+            "status": "ok",
+            "tested_at": self._utc_timestamp(),
+        }
+        try:
+            validate_model_connection_test_v1(result_payload)
+        except ValueError as exc:
+            raise StudioError(f"连接测试契约校验失败: {exc}", code="CONTRACT_INVALID") from exc
+        if profile_id:
+            self._record_connection_test_success(
+                profile_id,
+                "embedding_last_test",
+                provider=str(candidate.get("provider") or ""),
+                resolved_model=str(candidate.get("model") or ""),
+                latency_ms=int(result_payload.get("latency_ms") or 0),
+                tested_at=result_payload["tested_at"],
+            )
+        return result_payload
+
+    @staticmethod
+    def _utc_timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    def _record_connection_test_success(
+        self,
+        profile_id: str,
+        key: str,
+        *,
+        provider: str,
+        resolved_model: str,
+        latency_ms: int,
+        tested_at: str,
+    ) -> None:
+        try:
+            self._model_profile_store.record_test_result(
+                profile_id,
+                key,
+                {
+                    "status": "ok",
+                    "tested_at": tested_at,
+                    "latency_ms": latency_ms,
+                    "provider": provider,
+                    "resolved_model": resolved_model,
+                    "error_code": None,
+                    "failed_stage": None,
+                },
+            )
+        except ModelProfileError:
+            logger.warning("connection test result could not be persisted")
+
+    def _persist_connection_test_failure(
+        self,
+        payload: dict[str, Any],
+        key: str,
+        failure: Any,
+        started: float | None,
+    ) -> None:
+        """Best-effort bookkeeping: a failed test never blocks the error path."""
+        profile_id = str(payload.get("id") or "").strip()
+        if not profile_id:
+            return
+        resolved_model = str(payload.get("model") if key == "embedding_last_test" else "") or str(
+            payload.get("model") or ""
+        )
+        latency_ms = max(1, int((time.monotonic() - started) * 1000)) if started is not None else 0
+        try:
+            self._model_profile_store.record_test_result(
+                profile_id,
+                key,
+                {
+                    "status": "failed",
+                    "tested_at": self._utc_timestamp(),
+                    "latency_ms": latency_ms,
+                    "provider": str(payload.get("provider") or ""),
+                    "resolved_model": resolved_model,
+                    "error_code": failure.code,
+                    "failed_stage": None,
+                },
+            )
+        except ModelProfileError:
+            logger.warning("connection test failure could not be persisted")
 
     def _validated_model_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         provider = str(payload.get("provider") or "openai").strip().lower()
@@ -1715,35 +2703,27 @@ class StudioApplication:
             "MODEL_PROFILE_NOT_FOUND": HTTPStatus.NOT_FOUND,
             "MODEL_PROFILE_IN_USE": HTTPStatus.CONFLICT,
             "MODEL_PROFILE_LAST_PROFILE": HTTPStatus.CONFLICT,
+            "MODEL_PROFILE_FALLBACK_INVALID": HTTPStatus.CONFLICT,
+            "MODEL_PROFILE_FALLBACK_UNCONFIGURED": HTTPStatus.CONFLICT,
         }.get(exc.code, HTTPStatus.BAD_REQUEST)
         return StudioError(
             str(exc),
             status,
             code=exc.code,
-            recoverable=exc.code in {
+            recoverable=exc.code
+            in {
                 "MODEL_PROFILE_NOT_CONFIGURED",
                 "MODEL_CREDENTIAL_MISSING",
                 "MODEL_PROFILE_IN_USE",
+                "MODEL_PROFILE_FALLBACK_INVALID",
+                "MODEL_PROFILE_FALLBACK_UNCONFIGURED",
             },
         )
 
     @staticmethod
     def _safe_model_connection_error(exc: Exception) -> str:
         """Map provider errors to useful messages without echoing credentials."""
-        message = str(exc).lower()
-        if any(term in message for term in ("401", "unauthorized", "authentication", "api key")):
-            return "连接测试失败：认证失败，请检查 API Key。"
-        if any(term in message for term in ("404", "not found", "model_not_found")):
-            return "连接测试失败：模型或 API 地址不存在，请检查模型名称和 Base URL。"
-        if any(term in message for term in ("429", "rate limit", "too many requests")):
-            return "连接测试失败：服务商限流或额度不足，请稍后重试并检查账户额度。"
-        if any(term in message for term in ("timeout", "timed out")):
-            return "连接测试失败：请求超时，请检查网络和 Base URL。"
-        if any(term in message for term in ("connection", "dns", "name resolution")):
-            return "连接测试失败：无法连接到服务商，请检查网络和 Base URL。"
-        if "empty model reply" in message or "模型返回空内容" in message:
-            return "连接测试失败：模型返回空内容，请调大最大输出后重试。"
-        return f"连接测试失败：{type(exc).__name__}。请检查模型配置。"
+        return connection_test_failure(exc).message
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -1866,6 +2846,143 @@ class StudioApplication:
             "workspace": self.workspace(),
         }
 
+    def _manuscript_imports(self) -> Any:
+        from tools.manuscript_import import ManuscriptImportService
+
+        self.require_project()
+        return ManuscriptImportService(self.project_root, self.novel_id)
+
+    @staticmethod
+    def _translate_manuscript_import_error(exc: Exception) -> StudioError:
+        code = str(getattr(exc, "code", "MANUSCRIPT_IMPORT_FAILED"))
+        status = {
+            "IMPORT_OPERATION_NOT_FOUND": HTTPStatus.NOT_FOUND,
+            "CONFIRMATION_REQUIRED": HTTPStatus.PRECONDITION_REQUIRED,
+            "STALE_PREVIEW_REVISION": HTTPStatus.CONFLICT,
+            "DUPLICATE_CHAPTER_ID": HTTPStatus.CONFLICT,
+            "IMPORT_PUBLISH_CONFLICT": HTTPStatus.CONFLICT,
+            "PROJECT_BUSY": HTTPStatus.CONFLICT,
+            "IMPORT_DISCARD_FORBIDDEN": HTTPStatus.CONFLICT,
+        }.get(code, HTTPStatus.BAD_REQUEST)
+        return StudioError(
+            str(exc),
+            status,
+            code=code,
+            recoverable=bool(getattr(exc, "recoverable", True)),
+            details=dict(getattr(exc, "details", {}) or {}),
+        )
+
+    def manuscript_import_surface(
+        self,
+        import_id: str = "",
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        from tools.manuscript_import import ManuscriptImportError
+
+        service = self._manuscript_imports()
+        try:
+            if not import_id:
+                return cast(dict[str, Any], service.list_operations(limit))
+            operation = service.operation(import_id)
+            response: dict[str, Any] = {"operation": operation}
+            if operation["stages"]["split"]["status"] == "completed":
+                response["preview"] = service.preview(import_id)
+            return response
+        except ManuscriptImportError as exc:
+            raise self._translate_manuscript_import_error(exc) from exc
+
+    def prepare_manuscript_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.manuscript_import import ManuscriptImportError
+
+        filename = str(payload.get("filename") or "import.md").strip()
+        suffix = Path(filename).suffix.lower()
+        if suffix not in {".txt", ".md", ".markdown"}:
+            raise StudioError("当前仅支持 TXT 和 Markdown 旧稿", code="INVALID_INPUT")
+        content = str(payload.get("content") or "")
+        if not content.strip():
+            raise StudioError("旧稿内容不能为空", code="INVALID_INPUT")
+        arc_id = str(payload.get("arc_id") or self.config.get("current_arc") or "arc_001")
+        start_number = payload.get("start_number")
+        start: int | None
+        if start_number in {None, ""}:
+            start = None
+        else:
+            try:
+                start = int(start_number)
+            except (TypeError, ValueError) as exc:
+                raise StudioError("起始章节必须是整数", code="INVALID_INPUT") from exc
+        try:
+            with tempfile.TemporaryDirectory(prefix="openwrite-import-source-") as temp_dir:
+                source = Path(temp_dir) / f"source{suffix}"
+                source.write_text(content, encoding="utf-8")
+                operation = self._manuscript_imports().start(
+                    source,
+                    arc_id=arc_id,
+                    start_number=start,
+                )
+            return {
+                "operation": operation,
+                "preview": self._manuscript_imports().preview(operation["import_id"]),
+            }
+        except ManuscriptImportError as exc:
+            raise self._translate_manuscript_import_error(exc) from exc
+
+    def revise_manuscript_import_structure(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        from tools.manuscript_import import ManuscriptImportError
+
+        chapters = payload.get("chapters")
+        if not isinstance(chapters, list):
+            raise StudioError("chapters 必须是数组", code="INVALID_INPUT")
+        import_id = str(payload.get("import_id") or "")
+        try:
+            preview = self._manuscript_imports().revise_preview(
+                import_id,
+                expected_preview_revision=str(payload.get("expected_preview_revision") or ""),
+                chapters=chapters,
+            )
+            return {
+                "operation": self._manuscript_imports().operation(import_id),
+                "preview": preview,
+            }
+        except ManuscriptImportError as exc:
+            raise self._translate_manuscript_import_error(exc) from exc
+
+    def confirm_manuscript_import_structure(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        from tools.manuscript_import import ManuscriptImportError
+
+        try:
+            operation = self._manuscript_imports().confirm_structure(
+                str(payload.get("import_id") or ""),
+                expected_preview_revision=str(payload.get("expected_preview_revision") or ""),
+                confirm=bool(payload.get("confirm")),
+            )
+            return {"operation": operation}
+        except ManuscriptImportError as exc:
+            raise self._translate_manuscript_import_error(exc) from exc
+
+    def run_manuscript_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        import_id = str(payload.get("import_id") or "")
+        self.manuscript_import_surface(import_id)
+        return self.create_task({"type": "manuscript_import", "input": {"import_id": import_id}})
+
+    def discard_manuscript_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.manuscript_import import ManuscriptImportError
+
+        try:
+            operation = self._manuscript_imports().discard(
+                str(payload.get("import_id") or ""),
+                confirm=bool(payload.get("confirm")),
+            )
+            return {"operation": operation}
+        except ManuscriptImportError as exc:
+            raise self._translate_manuscript_import_error(exc) from exc
+
     def preview_import(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Parse an import without writing chapters or advancing project state."""
         self.require_project()
@@ -1928,7 +3045,12 @@ class StudioApplication:
             "chapters": chapters,
         }
 
-    def context_preview(self, chapter_id: str) -> dict[str, Any]:
+    def context_preview(
+        self,
+        chapter_id: str,
+        known_revision: str = "",
+        known_source_revision: str = "",
+    ) -> dict[str, Any]:
         profile = self._operation_profile(
             "chapter_write",
             injected_executor=self._service(),
@@ -1939,8 +3061,32 @@ class StudioApplication:
         except NovelServiceError as exc:
             raise self._translate_service_error(exc) from exc
         packet = result.pop("packet", None)
-        if isinstance(packet, dict):
+        if isinstance(packet, dict) and not isinstance(result.get("manifest"), dict):
             result["manifest"] = build_context_manifest(self.novel_root, packet)
+        manifest = result.get("manifest")
+        if isinstance(manifest, dict):
+            current_revision = str(
+                manifest.get("packet_revision") or manifest.get("revision") or ""
+            )
+            current_source_revision = str(manifest.get("source_revision") or "")
+            source_changed = bool(
+                known_source_revision and known_source_revision != current_source_revision
+            )
+            packet_changed = bool(known_revision and known_revision != current_revision)
+            manifest["previous_freshness"] = {
+                "status": "stale" if source_changed or packet_changed else "current",
+                "reason": (
+                    "source_revision_changed"
+                    if source_changed
+                    else "packet_revision_changed"
+                    if packet_changed
+                    else "same_or_no_previous_packet"
+                ),
+                "previous_revision": known_revision or None,
+                "current_revision": current_revision,
+                "previous_source_revision": known_source_revision or None,
+                "current_source_revision": current_source_revision,
+            }
         return result
 
     def outline_structure(self, chapter_id: str = "") -> dict[str, Any]:
@@ -1949,9 +3095,7 @@ class StudioApplication:
         return build_outline_structure(
             self.novel_root,
             chapter_id=chapter_id,
-            writing_targets=normalize_writing_targets(
-                self.config.get("writing_targets")
-            ),
+            writing_targets=normalize_writing_targets(self.config.get("writing_targets")),
         )
 
     def edit_outline_structure(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1997,6 +3141,18 @@ class StudioApplication:
             "renumbered": edit.get("renumbered", []),
             "skipped_renumbering": edit.get("skipped_renumbering", []),
             "checkpoint": saved.get("checkpoint", {}),
+            "mutation_summary": build_mutation_summary(
+                operation=f"outline.{str(payload.get('operation') or 'update')}",
+                entity_kind="outline",
+                entity_id=str(payload.get("node_id") or selected_node_id or "outline"),
+                path="src/outline.md",
+                before=document["content"],
+                after=str(edit["content"]),
+                source_revision=str(payload.get("revision") or ""),
+                result_revision=str(outline.get("revision") or ""),
+                field_prefix="content",
+                flatten=False,
+            ),
         }
         self._debug_event(
             "outline_edit_completed",
@@ -2046,6 +3202,270 @@ class StudioApplication:
         except (OSError, ValueError) as exc:
             raise StudioError(str(exc)) from exc
 
+    def reading_order(self) -> dict[str, Any]:
+        from tools.reading_order import ReadingOrderError, ReadingOrderService
+
+        self.require_project()
+        try:
+            return ReadingOrderService(self.project_root, self.novel_id).surface()
+        except ReadingOrderError as exc:
+            raise self._translate_reading_order_error(exc) from exc
+
+    def reading_packet(
+        self,
+        document_id: str,
+        before: int = 1,
+        after: int = 1,
+    ) -> dict[str, Any]:
+        from tools.reading_order import ReadingOrderError, ReadingOrderService
+
+        self.require_project()
+        try:
+            return ReadingOrderService(self.project_root, self.novel_id).packet(
+                str(document_id or "").strip(),
+                before=before,
+                after=after,
+            )
+        except ReadingOrderError as exc:
+            raise self._translate_reading_order_error(exc) from exc
+
+    def move_reading_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.reading_order import ReadingOrderError, ReadingOrderService
+
+        self.require_project()
+        target_index = payload.get("target_index")
+        if isinstance(target_index, bool) or not isinstance(target_index, int):
+            raise StudioError(
+                "目标位置必须是整数",
+                HTTPStatus.BAD_REQUEST,
+                code="READING_TARGET_INDEX_INVALID",
+            )
+        try:
+            return ReadingOrderService(self.project_root, self.novel_id).move(
+                document_id=str(payload.get("document_id") or "").strip(),
+                target_volume_id=str(payload.get("target_volume_id") or "").strip(),
+                target_index=target_index,
+                expected_revision=str(payload.get("expected_revision") or "").strip(),
+            )
+        except ReadingOrderError as exc:
+            raise self._translate_reading_order_error(exc) from exc
+
+    def chapter_work_brief(
+        self,
+        chapter_id: str,
+        document_id: str = "",
+        recent_limit: int = 20,
+    ) -> dict[str, Any]:
+        from tools.chapter_work_brief import (
+            ChapterWorkBriefError,
+            ChapterWorkBriefService,
+        )
+
+        self.require_project()
+        try:
+            return ChapterWorkBriefService(self.project_root, self.novel_id).get(
+                chapter_id,
+                document_id=str(document_id or "").strip() or None,
+                recent_limit=recent_limit,
+            )
+        except ChapterWorkBriefError as exc:
+            status = {
+                "CHAPTER_NOT_FOUND": HTTPStatus.NOT_FOUND,
+                "DUPLICATE_CHAPTER_ID": HTTPStatus.CONFLICT,
+                "CHAPTER_UNREADABLE": HTTPStatus.UNPROCESSABLE_ENTITY,
+            }.get(exc.code, HTTPStatus.BAD_REQUEST)
+            raise StudioError(
+                str(exc),
+                status,
+                code=exc.code,
+                recoverable=exc.code == "DUPLICATE_CHAPTER_ID",
+            ) from exc
+
+    def scene_structure(self) -> dict[str, Any]:
+        """Return the canonical, revision-labelled scene projection."""
+        from tools.scene_structure import SceneStructureError, SceneStructureService
+
+        self.require_project()
+        try:
+            return SceneStructureService(self.project_root, self.novel_id).surface()
+        except SceneStructureError as exc:
+            raise self._translate_scene_structure_error(exc) from exc
+
+    def chapter_scenes(self, chapter_id: str) -> dict[str, Any]:
+        from tools.scene_structure import SceneStructureError, SceneStructureService
+
+        self.require_project()
+        try:
+            return SceneStructureService(self.project_root, self.novel_id).for_chapter(
+                chapter_id
+            )
+        except SceneStructureError as exc:
+            raise self._translate_scene_structure_error(exc) from exc
+
+    def scene_migration_preview(self) -> dict[str, Any]:
+        from tools.scene_structure import SceneStructureError, SceneStructureService
+
+        self.require_project()
+        try:
+            return SceneStructureService(
+                self.project_root, self.novel_id
+            ).migration_preview()
+        except SceneStructureError as exc:
+            raise self._translate_scene_structure_error(exc) from exc
+
+    def apply_scene_migration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.scene_structure import SceneStructureError, SceneStructureService
+
+        self.require_project()
+        try:
+            return SceneStructureService(self.project_root, self.novel_id).apply_migration(
+                expected_preview_revision=str(
+                    payload.get("expected_preview_revision") or ""
+                ).strip(),
+                confirm=payload.get("confirm") is True,
+            )
+        except SceneStructureError as exc:
+            raise self._translate_scene_structure_error(exc) from exc
+
+    def rollback_scene_migration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.scene_structure import SceneStructureError, SceneStructureService
+
+        self.require_project()
+        try:
+            return SceneStructureService(
+                self.project_root, self.novel_id
+            ).rollback_migration(
+                str(payload.get("migration_id") or "").strip(),
+                expected_revision=str(payload.get("expected_revision") or "").strip(),
+            )
+        except SceneStructureError as exc:
+            raise self._translate_scene_structure_error(exc) from exc
+
+    def update_scene_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.scene_structure import SceneStructureError, SceneStructureService
+
+        self.require_project()
+
+        def optional_list(name: str) -> list[str] | None:
+            value = payload.get(name)
+            if value is None:
+                return None
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise StudioError(
+                    f"{name} 必须是字符串数组",
+                    HTTPStatus.BAD_REQUEST,
+                    code="SCENE_METADATA_INVALID",
+                )
+            return value
+
+        try:
+            return SceneStructureService(self.project_root, self.novel_id).update_metadata(
+                str(payload.get("scene_id") or "").strip(),
+                expected_revision=str(payload.get("expected_revision") or "").strip(),
+                title=(
+                    str(payload["title"])
+                    if payload.get("title") is not None
+                    else None
+                ),
+                story_time_sort_key=(
+                    str(payload["story_time_sort_key"])
+                    if payload.get("story_time_sort_key") is not None
+                    else None
+                ),
+                story_time_label=(
+                    str(payload["story_time_label"])
+                    if payload.get("story_time_label") is not None
+                    else None
+                ),
+                characters=optional_list("characters"),
+                locations=optional_list("locations"),
+                events=optional_list("events"),
+            )
+        except SceneStructureError as exc:
+            raise self._translate_scene_structure_error(exc) from exc
+
+    def move_scene(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.scene_structure import SceneStructureError, SceneStructureService
+
+        self.require_project()
+        target_index = payload.get("target_index")
+        if isinstance(target_index, bool) or not isinstance(target_index, int):
+            raise StudioError(
+                "目标场景位置必须是整数",
+                HTTPStatus.BAD_REQUEST,
+                code="SCENE_TARGET_INDEX_INVALID",
+            )
+        try:
+            return SceneStructureService(self.project_root, self.novel_id).move(
+                str(payload.get("scene_id") or "").strip(),
+                target_chapter_id=str(payload.get("target_chapter_id") or "").strip(),
+                target_index=target_index,
+                expected_revision=str(payload.get("expected_revision") or "").strip(),
+                expected_source_revision=str(
+                    payload.get("expected_source_revision") or ""
+                ).strip(),
+                expected_target_revision=str(
+                    payload.get("expected_target_revision") or ""
+                ).strip(),
+            )
+        except SceneStructureError as exc:
+            raise self._translate_scene_structure_error(exc) from exc
+
+    @staticmethod
+    def _translate_scene_structure_error(exc: Any) -> StudioError:
+        code = str(exc.code)
+        if code in {"SCENE_NOT_FOUND", "SCENE_MIGRATION_NOT_FOUND"}:
+            status = HTTPStatus.NOT_FOUND
+        elif code in {
+            "PROJECT_BUSY",
+            "SCENE_MIGRATION_CONFLICT",
+            "SCENE_MIGRATION_DIVERGED",
+            "SCENE_READING_ORDER_BLOCKED",
+            "SCENE_STRUCTURE_AMBIGUOUS",
+            "SCENE_STRUCTURE_CONFLICT",
+            "SCENE_STRUCTURE_STALE",
+            "SCENE_TARGET_CHAPTER_AMBIGUOUS",
+            "SOURCE_REVISION_CONFLICT",
+            "TARGET_REVISION_CONFLICT",
+        }:
+            status = HTTPStatus.CONFLICT
+        elif code in {
+            "SCENE_MIGRATION_EVIDENCE_INVALID",
+            "SCENE_SIDECAR_INVALID",
+        }:
+            status = HTTPStatus.UNPROCESSABLE_ENTITY
+        elif code == "SCENE_TRANSACTION_FAILED":
+            status = HTTPStatus.INTERNAL_SERVER_ERROR
+        else:
+            status = HTTPStatus.BAD_REQUEST
+        return StudioError(
+            str(exc),
+            status,
+            code=code,
+            recoverable=bool(getattr(exc, "recoverable", False)),
+            details=dict(getattr(exc, "details", {}) or {}),
+        )
+
+    @staticmethod
+    def _translate_reading_order_error(exc: Any) -> StudioError:
+        status = {
+            "READING_DOCUMENT_NOT_FOUND": HTTPStatus.NOT_FOUND,
+            "READING_VOLUME_NOT_FOUND": HTTPStatus.NOT_FOUND,
+            "READING_ORDER_CONFLICT": HTTPStatus.CONFLICT,
+            "READING_DOCUMENT_AMBIGUOUS": HTTPStatus.CONFLICT,
+            "AMBIGUOUS_READING_ORDER": HTTPStatus.CONFLICT,
+            "READING_DOCUMENT_NOT_MOVABLE": HTTPStatus.CONFLICT,
+            "READING_TARGET_EXISTS": HTTPStatus.CONFLICT,
+            "PROJECT_BUSY": HTTPStatus.CONFLICT,
+        }.get(str(exc.code), HTTPStatus.BAD_REQUEST)
+        return StudioError(
+            str(exc),
+            status,
+            code=str(exc.code),
+            recoverable=bool(getattr(exc, "recoverable", False)),
+            details=dict(getattr(exc, "details", {}) or {}),
+        )
+
     def continuity(self) -> dict[str, Any]:
         try:
             return self._service().continuity()
@@ -2091,22 +3511,16 @@ class StudioApplication:
                     code="CONTRACT_INVALID",
                 )
             if not value:
-                raise StudioError(
-                    f"DoG 产物为空对象: {path.name}", code="CONTRACT_INVALID"
-                )
+                raise StudioError(f"DoG 产物为空对象: {path.name}", code="CONTRACT_INVALID")
             return value
 
         def validate_graph(graph: dict[str, Any]) -> None:
             """A graph artifact must carry typed nodes/contains/dependsOn."""
             if not isinstance(graph.get("nodes"), dict):
-                raise StudioError(
-                    "DoG graph nodes 必须是对象", code="CONTRACT_INVALID"
-                )
+                raise StudioError("DoG graph nodes 必须是对象", code="CONTRACT_INVALID")
             for key in ("contains", "dependsOn"):
                 if not isinstance(graph.get(key), list):
-                    raise StudioError(
-                        f"DoG graph {key} 必须是数组", code="CONTRACT_INVALID"
-                    )
+                    raise StudioError(f"DoG graph {key} 必须是数组", code="CONTRACT_INVALID")
 
         def versioned(
             manifest: dict[str, Any] | None,
@@ -2123,8 +3537,7 @@ class StudioApplication:
                 return {}
             if manifest.get("schemaVersion") != schema_version:
                 raise StudioError(
-                    f"不支持的 DoG {label} 版本: "
-                    f"{manifest.get('schemaVersion')!r}",
+                    f"不支持的 DoG {label} 版本: {manifest.get('schemaVersion')!r}",
                     code="CONTRACT_INVALID",
                 )
             try:
@@ -2179,12 +3592,25 @@ class StudioApplication:
                     records[str(node_id)] = record
             return {"graph": graph or {}, "manifest": manifest, "records": records}
 
+        framework = self.review_framework()
         return {
             "chapter_id": selected,
             "chapters": chapters,
             "review": graph_payload("review"),
             "delivery": graph_payload("delivery"),
+            "review_framework": {
+                "schema_version": framework["schema_version"],
+                "id": framework["id"],
+                "version": framework["version"],
+                "revision": framework["revision"],
+                "topology_locked": framework["topology_locked"],
+                "invariants": framework["invariants"],
+            },
         }
+
+    def review_framework(self) -> dict[str, Any]:
+        """Return the versioned review DAG blueprint shared by every chapter."""
+        return review_dag_framework()
 
     def manage_foreshadowing(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -2555,9 +3981,7 @@ class StudioApplication:
                         self.project_root,
                         self.novel_id,
                         session_store=session_store,
-                        activity_callback=lambda event: self._record_agent_activity(
-                            run_id, event
-                        ),
+                        activity_callback=lambda event: self._record_agent_activity(run_id, event),
                     ).respond(message)
                     result = {"content": response}
                 else:
@@ -2572,9 +3996,7 @@ class StudioApplication:
                         session_store=session_store,
                         tool_executors=layers.get("direct_tool_executors", {}),
                         action_executors=layers.get("action_tool_executors", {}),
-                        activity_callback=lambda event: self._record_agent_activity(
-                            run_id, event
-                        ),
+                        activity_callback=lambda event: self._record_agent_activity(run_id, event),
                     )
                     result = {"content": agent.respond(message)}
         except Exception as exc:
@@ -2656,11 +4078,7 @@ class StudioApplication:
                 if not text.strip():
                     raise StudioError("来源文本不能为空")
                 raw_focus = payload.get("focus")
-                focus = (
-                    [str(item) for item in raw_focus]
-                    if isinstance(raw_focus, list)
-                    else None
-                )
+                focus = [str(item) for item in raw_focus] if isinstance(raw_focus, list) else None
                 prepared = self._service().prepare_source_analysis_v2(
                     source_id=source_id,
                     content=text,
@@ -2683,13 +4101,9 @@ class StudioApplication:
                 source_ids = payload.get("source_ids")
                 if not isinstance(source_ids, list):
                     raise StudioError("请选择至少一个来源")
-                result = self._service().synthesize_sources_v2(
-                    [str(item) for item in source_ids]
-                )
+                result = self._service().synthesize_sources_v2([str(item) for item in source_ids])
             elif action == "profile_v2":
-                result = self._service().source_profile_v2(
-                    str(payload.get("profile_id") or "")
-                )
+                result = self._service().source_profile_v2(str(payload.get("profile_id") or ""))
             elif action == "promotion_preview_v2":
                 result = self._service().preview_source_promotion_v2(
                     str(payload.get("profile_id") or ""),
@@ -2738,13 +4152,9 @@ class StudioApplication:
                     relative_name=str(payload.get("relative_name") or "source.txt"),
                     intent=str(payload.get("intent") or "reference"),
                     focus=(
-                        [str(item) for item in raw_focus]
-                        if isinstance(raw_focus, list)
-                        else None
+                        [str(item) for item in raw_focus] if isinstance(raw_focus, list) else None
                     ),
-                    input_budget_tokens=int(
-                        payload.get("input_budget_tokens") or 12000
-                    ),
+                    input_budget_tokens=int(payload.get("input_budget_tokens") or 12000),
                 )
             elif action == "confirm_structure":
                 units = payload.get("units")
@@ -2761,20 +4171,18 @@ class StudioApplication:
             elif action == "retry":
                 profile = self._operation_profile("source_extract")
                 with self._model_context(profile):
-                    result = service.retry(
-                        source_id, str(payload.get("chunk_id") or "")
-                    )
+                    result = service.retry(source_id, str(payload.get("chunk_id") or ""))
             elif action == "synthesize":
                 source_ids = payload.get("source_ids")
                 if not isinstance(source_ids, list):
                     raise StudioError("请选择至少一个参考作品")
-                result = service.synthesize(
-                    [str(item) for item in source_ids]
-                ).model_dump(mode="json")
+                result = service.synthesize([str(item) for item in source_ids]).model_dump(
+                    mode="json"
+                )
             elif action == "profile":
-                result = service.profile(
-                    str(payload.get("profile_id") or "")
-                ).model_dump(mode="json")
+                result = service.profile(str(payload.get("profile_id") or "")).model_dump(
+                    mode="json"
+                )
             elif action == "adoption_preview":
                 selections = payload.get("selections")
                 if not isinstance(selections, list):
@@ -2784,9 +4192,7 @@ class StudioApplication:
                     str(payload.get("profile_id") or ""),
                     [item for item in selections if isinstance(item, dict)],
                     rejected_item_ids=(
-                        [str(item) for item in rejected]
-                        if isinstance(rejected, list)
-                        else None
+                        [str(item) for item in rejected] if isinstance(rejected, list) else None
                     ),
                 ).model_dump(mode="json")
             elif action == "adopt":
@@ -2888,7 +4294,34 @@ class StudioApplication:
             draft_path=result.get("draft_path", ""),
             book_state=self._debug_book_state(),
         )
-        return {"result": result, "workspace": self.workspace()}
+        trace_context = result.pop("_operation_trace_context", {})
+        response = {
+            "result": result,
+            "workspace": self.workspace(),
+            "_operation_trace_context": trace_context,
+        }
+        draft_value = str(result.get("draft_path") or "")
+        if draft_value:
+            try:
+                draft_path = Path(draft_value).resolve()
+                draft_path.relative_to(self.novel_root.resolve())
+                written_content = draft_path.read_text(encoding="utf-8")
+                relative = draft_path.relative_to(self.novel_root).as_posix()
+                response["mutation_summary"] = build_mutation_summary(
+                    operation="manuscript.create",
+                    entity_kind="manuscript",
+                    entity_id=str(result.get("chapter_id") or chapter_id),
+                    path=relative,
+                    before=MISSING_VALUE,
+                    after=written_content,
+                    source_revision="",
+                    result_revision=RevisionService.fingerprint(written_content),
+                    field_prefix="content",
+                    flatten=False,
+                )
+            except (OSError, ValueError):
+                logger.warning("Unable to summarize written chapter path: %s", draft_value)
+        return response
 
     def review_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile = self._operation_profile(
@@ -2924,16 +4357,15 @@ class StudioApplication:
         result["issue_details"] = normalize_review_issues(
             path.stem, result.get("issue_details", [])
         )
-        review_v2 = result.get("review_v2")
-        if review_v2 is not None:
+        if "review_v2" in result:
+            review_v2 = result["review_v2"]
             # Type policy: a present review_v2 must be a non-empty JSON object
             # declaring the supported schema version; null/list/string/empty
             # values are rejected outright so a malformed decision can never
             # pass through as canonical.
             if not isinstance(review_v2, dict) or not review_v2:
                 raise StudioError(
-                    f"review_v2 必须是非空 JSON 对象，得到 "
-                    f"{type(review_v2).__name__}",
+                    f"review_v2 必须是非空 JSON 对象，得到 {type(review_v2).__name__}",
                     code="CONTRACT_INVALID",
                 )
             if review_v2.get("schema_version") != "openwrite.review.v2":
@@ -2946,9 +4378,7 @@ class StudioApplication:
             try:
                 validate_review_v2(review_v2)
             except ValueError as exc:
-                raise StudioError(
-                    f"评审 v2 契约校验失败: {exc}", code="CONTRACT_INVALID"
-                ) from exc
+                raise StudioError(f"评审 v2 契约校验失败: {exc}", code="CONTRACT_INVALID") from exc
         self._debug_event(
             "review_chapter_completed",
             chapter_id=path.stem,
@@ -2956,7 +4386,11 @@ class StudioApplication:
             score=result.get("score"),
             issues=result.get("issues"),
         )
-        return {"result": result, "workspace": self.workspace()}
+        return {
+            "result": result,
+            "workspace": self.workspace(),
+            "review_framework": self.review_framework(),
+        }
 
     def create_selection_revision(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile = self._require_revision_model()
@@ -2992,6 +4426,12 @@ class StudioApplication:
                     issue_ids=[str(item) for item in issue_ids],
                     instruction=str(payload.get("instruction") or ""),
                     target_units=int(payload.get("target_units") or 0),
+                    expected_review_revision=str(
+                        payload.get("expected_review_revision") or ""
+                    ),
+                    expected_document_revision=str(
+                        payload.get("expected_document_revision") or ""
+                    ),
                 )
         except (TypeError, ValueError) as exc:
             raise StudioError("目标字数必须是整数", code="INVALID_INPUT") from exc
@@ -3033,7 +4473,11 @@ class StudioApplication:
             source_revision=proposal.get("source_revision"),
             applied_revision=proposal.get("applied_revision"),
         )
-        return {"proposal": proposal, "workspace": self.workspace()}
+        return {
+            "proposal": proposal,
+            "workspace": self.workspace(),
+            "mutation_summary": proposal.get("mutation_summary", {}),
+        }
 
     def reject_revision(self, proposal_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
@@ -3042,9 +4486,7 @@ class StudioApplication:
         except RevisionError as exc:
             raise self._translate_revision_error(exc) from exc
 
-    def regenerate_revision(
-        self, proposal_id: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    def regenerate_revision(self, proposal_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
         profile = self._require_revision_model()
         try:
@@ -3063,6 +4505,8 @@ class StudioApplication:
     def _translate_revision_error(exc: RevisionError) -> StudioError:
         status = {
             "DOCUMENT_CONFLICT": HTTPStatus.CONFLICT,
+            "REVIEW_CONFLICT": HTTPStatus.CONFLICT,
+            "REVIEW_STALE": HTTPStatus.CONFLICT,
             "PROJECT_BUSY": HTTPStatus.CONFLICT,
             "REVISION_STATUS_CONFLICT": HTTPStatus.CONFLICT,
             "REVISION_NOT_PROPOSED": HTTPStatus.CONFLICT,
@@ -3098,7 +4542,32 @@ class StudioApplication:
                 "interrupted",
             )
         }
-        return {"tasks": tasks, "counts": counts}
+        surface = {
+            "schema_version": "openwrite.task-surface.v1",
+            "phase_order": list(TASK_PHASES),
+            "tasks": [self._task_dto(task) for task in tasks],
+            "counts": counts,
+        }
+        from tools.contracts_generated import validate_task_surface_v1
+
+        try:
+            validate_task_surface_v1(surface)
+        except ValueError as exc:
+            raise StudioError(f"任务列表契约校验失败: {exc}", code="CONTRACT_INVALID") from exc
+        return surface
+
+    @staticmethod
+    def _task_dto(task: dict[str, Any]) -> dict[str, Any]:
+        """Read-time DTO decoration: phase index and artifact reference.
+
+        The record itself arrives normalized by the store; these two fields
+        are derived per read and never persisted.
+        """
+        dto = dict(task)
+        phase = dto.get("phase")
+        dto["phase_index"] = TASK_PHASES.index(phase) if phase in TASK_PHASES else None
+        dto["result_ref"] = task_result_ref(dto)
+        return dto
 
     def benchmark_surface(self, limit: int = 20) -> dict[str, Any]:
         return self._benchmarks().surface(limit)
@@ -3124,25 +4593,161 @@ class StudioApplication:
         try:
             validate_benchmark_v1(result)
         except ValueError as exc:
-            raise StudioError(
-                f"benchmark 契约校验失败: {exc}", code="CONTRACT_INVALID"
-            ) from exc
+            raise StudioError(f"benchmark 契约校验失败: {exc}", code="CONTRACT_INVALID") from exc
         return result
 
     def create_benchmark(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.create_task({"type": "model_benchmark", "input": dict(payload)})
+
+    def manuscript_acceptance(self) -> dict[str, Any]:
+        """Return the disk-to-derived-facts acceptance surface without mutating it."""
+        try:
+            return self._manuscript_acceptance().inspect()
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
+
+    def start_manuscript_acceptance(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            service = self._manuscript_acceptance()
+            operation = service.start_acceptance(
+                str(payload.get("chapter_id") or ""),
+                source=str(payload.get("source") or ""),
+                expected_previous_revision=str(payload.get("expected_previous_revision") or ""),
+                source_run_id=str(payload.get("source_run_id") or ""),
+            )
+            return self._manuscript_acceptance_result(service, operation)
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
+
+    def establish_manuscript_baseline(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            service = self._manuscript_acceptance()
+            operation = service.establish_baseline(confirm=payload.get("confirm") is True)
+            return self._manuscript_acceptance_result(service, operation)
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
+
+    def accept_external_manuscript(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            service = self._manuscript_acceptance()
+            operation = service.accept_external(
+                str(payload.get("chapter_id") or ""),
+                confirm=payload.get("confirm") is True,
+            )
+            return self._manuscript_acceptance_result(service, operation)
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
+
+    def reconcile_manuscript_acceptance(self, payload: dict[str, Any]) -> dict[str, Any]:
+        operation_id = str(payload.get("operation_id") or "")
+        try:
+            operation = self._manuscript_acceptance().operation(operation_id)
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
+        analyzed = operation.get("analysis_results")
+        analyzed = analyzed if isinstance(analyzed, dict) else {}
+        if any(
+            str(item.get("chapter_id") or "") not in analyzed
+            for item in operation.get("frozen_chapters") or []
+            if isinstance(item, dict)
+        ):
+            self._operation_profile("chapter_write")
+        return self.create_task(
+            {
+                "type": "manuscript_reconcile",
+                "input": {
+                    "operation_id": operation_id,
+                    "chapter_id": str(operation.get("chapter_id") or ""),
+                },
+            }
+        )
+
+    def acknowledge_manuscript_acceptance(self, payload: dict[str, Any]) -> dict[str, Any]:
+        domains = payload.get("domains")
+        if not isinstance(domains, list) or not all(isinstance(item, str) for item in domains):
+            raise StudioError(
+                "domains 必须是字符串列表",
+                HTTPStatus.BAD_REQUEST,
+                code="INVALID_DOMAIN",
+            )
+        try:
+            service = self._manuscript_acceptance()
+            operation = service.acknowledge(
+                str(payload.get("operation_id") or ""),
+                domains=domains,
+                confirm=payload.get("confirm") is True,
+            )
+            return self._manuscript_acceptance_result(service, operation)
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
+
+    @staticmethod
+    def _manuscript_acceptance_result(
+        service: ManuscriptAcceptanceService,
+        operation: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {"operation": operation, "acceptance": service.inspect()}
+
+    @staticmethod
+    def _translate_manuscript_acceptance_error(
+        exc: ManuscriptAcceptanceError,
+    ) -> StudioError:
+        if exc.code in {"OPERATION_NOT_FOUND", "DOCUMENT_NOT_FOUND"}:
+            status = HTTPStatus.NOT_FOUND
+        elif exc.code == "CONFIRMATION_REQUIRED":
+            status = HTTPStatus.PRECONDITION_REQUIRED
+        elif exc.code in {
+            "INVALID_OPERATION_ID",
+            "INVALID_CHAPTER_ID",
+            "INVALID_SOURCE",
+            "INVALID_DOMAIN",
+            "INVALID_ANALYSIS_RESULT",
+        }:
+            status = HTTPStatus.BAD_REQUEST
+        else:
+            status = HTTPStatus.CONFLICT
+        return StudioError(
+            str(exc),
+            status,
+            code=exc.code,
+            recoverable=exc.recoverable,
+            details=exc.details,
+        )
 
     def get_task(self, task_id: str) -> dict[str, Any]:
         try:
             task = self._tasks().store.load(task_id)
             if task is None:
                 raise TaskStoreError("Task not found")
+            self._ensure_task_workspace(task)
             return {
-                "task": task,
+                "task": self._task_dto(task),
                 "events": self._tasks().store.events(task_id),
             }
         except TaskStoreError as exc:
             raise self._translate_task_error(exc) from exc
+
+    def _task_origin(self) -> dict[str, Any] | None:
+        """Capture the workspace routing context of the current request thread."""
+        manager = getattr(self, "_workspace_manager", None)
+        if manager is None:
+            return None
+        context = manager.current_request_context()
+        if context is None:
+            return None
+        return {
+            "workspace_id": context.workspace_id or None,
+            "session_id": context.session_id or None,
+            "context_epoch": context.context_epoch,
+        }
+
+    def _ensure_task_workspace(self, task: dict[str, Any]) -> None:
+        if self._tasks().store.record_root_mismatch(task):
+            raise StudioError(
+                "任务工作区与当前工作区不一致",
+                HTTPStatus.CONFLICT,
+                code="WORKSPACE_CONTEXT_MISMATCH",
+            )
 
     def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         task_type = str(payload.get("type") or "").strip()
@@ -3197,6 +4802,7 @@ class StudioApplication:
                 chapter_id=chapter_id,
                 input_summary=self._task_input_summary(task_type, task_input),
                 retryable=True,
+                origin=self._task_origin(),
             )
         except TaskStoreError as exc:
             raise self._translate_task_error(exc) from exc
@@ -3211,6 +4817,10 @@ class StudioApplication:
     def cancel_task(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
         try:
+            task = self._tasks().store.load(task_id)
+            if task is None:
+                raise TaskStoreError("Task not found")
+            self._ensure_task_workspace(task)
             return self._tasks().cancel(task_id)
         except TaskStoreError as exc:
             raise self._translate_task_error(exc) from exc
@@ -3218,6 +4828,10 @@ class StudioApplication:
     def retry_task(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
         try:
+            task = self._tasks().store.load(task_id)
+            if task is None:
+                raise TaskStoreError("Task not found")
+            self._ensure_task_workspace(task)
             return self._tasks().retry(task_id)
         except TaskStoreError as exc:
             raise self._translate_task_error(exc) from exc
@@ -3225,13 +4839,15 @@ class StudioApplication:
     def confirm_task(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
         try:
+            task = self._tasks().store.load(task_id)
+            if task is None:
+                raise TaskStoreError("Task not found")
+            self._ensure_task_workspace(task)
             return self._tasks().confirm(task_id)
         except TaskStoreError as exc:
             raise self._translate_task_error(exc) from exc
 
-    def _task_write_chapter(
-        self, payload: dict[str, Any], context: TaskContext
-    ) -> dict[str, Any]:
+    def _task_write_chapter(self, payload: dict[str, Any], context: TaskContext) -> dict[str, Any]:
         args = dict(payload)
         expected_revision = str(args.get("outline_revision") or "")
         if expected_revision:
@@ -3260,9 +4876,7 @@ class StudioApplication:
                 raise TaskCancelled(str(exc)) from exc
             raise
 
-    def _task_review_chapter(
-        self, payload: dict[str, Any], context: TaskContext
-    ) -> dict[str, Any]:
+    def _task_review_chapter(self, payload: dict[str, Any], context: TaskContext) -> dict[str, Any]:
         chapter_id = str(
             payload.get("chapter_id")
             or self._chapter_id_from_document(str(payload.get("path") or ""))
@@ -3293,9 +4907,105 @@ class StudioApplication:
             raise
         return {
             **result,
-            "issue_details": normalize_review_issues(
-                chapter_id, result.get("issue_details", [])
-            ),
+            "issue_details": normalize_review_issues(chapter_id, result.get("issue_details", [])),
+        }
+
+    def _task_settle_backfill(
+        self, payload: dict[str, Any], context: TaskContext
+    ) -> dict[str, Any]:
+        """结算回填：把既有/导入章节的正文结算为记忆/真相/角色状态。"""
+        from tools.settle_backfill import run as run_settle_backfill
+
+        chapter_ids = payload.get("chapter_ids")
+        if isinstance(chapter_ids, str):
+            chapter_ids = [chapter_ids]
+        if chapter_ids is not None:
+            if not isinstance(chapter_ids, list) or not all(
+                re.fullmatch(r"ch_\d+", str(cid)) for cid in chapter_ids
+            ):
+                raise StudioError(
+                    "chapter_ids 必须是 ch_<数字> 列表",
+                    HTTPStatus.BAD_REQUEST,
+                    code="INVALID_CHAPTER_IDS",
+                )
+            chapter_ids = [str(cid) for cid in chapter_ids]
+        only_missing = bool(payload.get("only_missing", True))
+        context.phase("preparing", "冻结章节清单")
+        context.checkpoint()
+        context.phase("model", "逐章结算既有正文")
+        profile = self._operation_profile("chapter_write")
+        with self._model_context(profile):
+            summary = run_settle_backfill(
+                self.project_root,
+                self.novel_id,
+                chapter_ids=chapter_ids,
+                only_missing=only_missing,
+                profile=profile,
+                progress=context.progress_callback,
+                cancelled=context.cancellation_requested,
+                report=context.report_progress,
+            )
+        return {"ok": True, "summary": summary}
+
+    def _task_manuscript_reconcile(
+        self, payload: dict[str, Any], context: TaskContext
+    ) -> dict[str, Any]:
+        """Resume one durable acceptance operation inside the persistent queue."""
+        from tools.settle_backfill import analyze_existing_chapter
+
+        operation_id = str(payload.get("operation_id") or "")
+        service = self._manuscript_acceptance()
+        try:
+            operation = service.operation(operation_id)
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
+
+        frozen = [item for item in operation.get("frozen_chapters") or [] if isinstance(item, dict)]
+        analyzed = operation.get("analysis_results")
+        analyzed = analyzed if isinstance(analyzed, dict) else {}
+        completed_units = sum(1 for item in frozen if str(item.get("chapter_id") or "") in analyzed)
+        total_units = len(frozen)
+
+        context.phase("preparing", "读取冻结正文与既有调和进度")
+        context.report_progress(completed_units, total_units, "chapters")
+        context.checkpoint()
+
+        profile: dict[str, Any] | None = None
+        if completed_units < total_units:
+            profile = self._operation_profile("chapter_write")
+            context.phase("model", "逐章提取正文事实")
+
+        def analyzer(
+            chapter_id: str,
+            title: str,
+            content: str,
+            prior_context: str,
+        ) -> dict[str, Any]:
+            nonlocal completed_units
+            context.checkpoint()
+            result = analyze_existing_chapter(
+                self.project_root,
+                self.novel_id,
+                chapter_id=chapter_id,
+                title=title,
+                content=content,
+                truth_context=prior_context,
+            )
+            completed_units += 1
+            context.report_progress(completed_units, total_units, "chapters")
+            return result
+
+        try:
+            with self._model_context(profile):
+                completed = service.resume(operation_id, analyzer=analyzer)
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
+        context.phase("validating", "校验接纳版本与事实来源")
+        context.phase("committing", "提交重建后的派生事实")
+        return {
+            "operation_id": operation_id,
+            "operation": completed,
+            "acceptance": service.inspect(),
         }
 
     def _task_model_benchmark(
@@ -3315,6 +5025,8 @@ class StudioApplication:
             snapshot,
             progress=context.progress_callback,
             cancelled=context.cancellation_requested,
+            report=context.report_progress,
+            task_id=context.task_id,
         )
 
     def _task_revision_selection(
@@ -3363,6 +5075,12 @@ class StudioApplication:
                 issue_ids=[str(item) for item in issue_ids],
                 instruction=str(payload.get("instruction") or ""),
                 target_units=int(payload.get("target_units") or 0),
+                expected_review_revision=str(
+                    payload.get("expected_review_revision") or ""
+                ),
+                expected_document_revision=str(
+                    payload.get("expected_document_revision") or ""
+                ),
             )
         context.phase("validating", "准备 diff 预览")
         if context.cancellation_requested():
@@ -3424,12 +5142,15 @@ class StudioApplication:
             )
         return {"result": result}
 
-    def _task_research(
-        self, payload: dict[str, Any], context: TaskContext
-    ) -> dict[str, Any]:
+    def _task_research(self, payload: dict[str, Any], context: TaskContext) -> dict[str, Any]:
         try:
             profile = self._operation_profile("research")
-            return self._research().run(payload, context, model_profile=profile)
+            return self._research().run(
+                payload,
+                context,
+                model_profile=profile,
+                task_id=context.task_id,
+            )
         except ResearchServiceError as exc:
             raise StudioError(str(exc), code=exc.code, recoverable=True) from exc
 
@@ -3438,16 +5159,10 @@ class StudioApplication:
             surface = self._research().status()
             models = self.model_profiles()
             profile_id = str(
-                models.get("routes", {}).get("research")
-                or models.get("default_profile_id")
-                or ""
+                models.get("routes", {}).get("research") or models.get("default_profile_id") or ""
             )
             profile = next(
-                (
-                    item
-                    for item in models.get("profiles", [])
-                    if item.get("id") == profile_id
-                ),
+                (item for item in models.get("profiles", []) if item.get("id") == profile_id),
                 None,
             )
             surface["model_route"] = (
@@ -3469,6 +5184,13 @@ class StudioApplication:
                     "compatible": False,
                 }
             )
+            surface["schema_version"] = "openwrite.research-surface.v1"
+            from tools.contracts_generated import validate_research_surface_v1
+
+            try:
+                validate_research_surface_v1(surface)
+            except ValueError as exc:
+                raise StudioError(f"深度研究契约校验失败: {exc}", code="CONTRACT_INVALID") from exc
             return surface
         except ResearchServiceError as exc:
             raise StudioError(str(exc), code=exc.code, recoverable=True) from exc
@@ -3487,15 +5209,72 @@ class StudioApplication:
             return self._research().read_report(report_id)
         except ResearchServiceError as exc:
             status = (
-                HTTPStatus.NOT_FOUND
-                if exc.code == "REPORT_NOT_FOUND"
-                else HTTPStatus.BAD_REQUEST
+                HTTPStatus.NOT_FOUND if exc.code == "REPORT_NOT_FOUND" else HTTPStatus.BAD_REQUEST
             )
             raise StudioError(str(exc), status, code=exc.code) from exc
 
     def _task_import_manuscript(
         self, payload: dict[str, Any], context: TaskContext
     ) -> dict[str, Any]:
+        import_id = str(payload.get("import_id") or "")
+        if import_id:
+            from tools.manuscript_import import ManuscriptImportError
+            from tools.novel_workspace import update_project_progress
+
+            service = self._manuscript_imports()
+            try:
+                operation = service.operation(import_id)
+                if operation["status"] in {"awaiting_confirmation", "discarded"}:
+                    raise ManuscriptImportError(
+                        "请先确认旧稿章节结构再开始发布",
+                        code="IMPORT_STRUCTURE_NOT_CONFIRMED",
+                    )
+                total = int(operation.get("chapter_count") or 0)
+                context.phase("reading", "读取冻结旧稿与导入进度")
+                context.report_progress(0, total, "chapters")
+                context.checkpoint()
+                context.phase("preparing", "恢复暂存发布事务")
+                operation = service.resume(import_id)
+                acceptance_id = str(operation.get("acceptance_operation_id") or "")
+                if operation.get("status") == "awaiting_reconciliation" and acceptance_id:
+                    self._task_manuscript_reconcile(
+                        {"operation_id": acceptance_id},
+                        context,
+                    )
+                    operation = service.resume(import_id)
+                if operation.get("status") != "completed":
+                    raise ManuscriptImportError(
+                        "旧稿导入尚未完成",
+                        code="IMPORT_INCOMPLETE",
+                        details={"status": operation.get("status")},
+                    )
+                context.phase("validating", "校验逐章事实与全书综合")
+                published = list(operation.get("published_chapters") or [])
+                context.report_progress(len(published), total, "chapters")
+                context.phase("committing", "完成旧稿导入工作区")
+                if published:
+                    last = max(
+                        published,
+                        key=lambda item: int(str(item["chapter_id"]).removeprefix("ch_")),
+                    )
+                    update_project_progress(
+                        self.project_root,
+                        current_chapter=(
+                            f"ch_{int(str(last['chapter_id']).removeprefix('ch_')) + 1:03d}"
+                        ),
+                        current_arc=str(operation.get("arc_id") or ""),
+                    )
+                    self.config = self._load_config()
+                    if self._novel_service is not None:
+                        self._novel_service.refresh()
+                return {
+                    "import_id": import_id,
+                    "operation": operation,
+                    "imported": published,
+                }
+            except ManuscriptImportError as exc:
+                raise self._translate_manuscript_import_error(exc) from exc
+
         context.phase("reading", "读取导入文本")
         context.checkpoint()
         context.phase("preparing", "切分章节")
@@ -3506,6 +5285,49 @@ class StudioApplication:
             key: response.get(key)
             for key in ("arc_id", "next_chapter", "writing_units", "imported")
         }
+
+    def _task_project_restore(
+        self,
+        payload: dict[str, Any],
+        context: TaskContext,
+    ) -> dict[str, Any]:
+        from tools.novel_archive import NovelArchiveError, NovelArchiveService
+
+        archive_id = str(payload.get("archive_id") or "")
+        archive_path = self._archive_path(archive_id)
+        try:
+            context.phase("reading", "读取作品档案与校验清单")
+            preview = NovelArchiveService.preview_restore(
+                archive_path,
+                self._restore_target(payload.get("target_root")),
+                target_novel_id=str(payload.get("target_novel_id") or "") or None,
+                reference_policy=str(payload.get("reference_policy") or "preserve_relative"),
+            )
+            total = int(preview.get("file_count") or 0)
+            context.report_progress(0, total, "files")
+            context.checkpoint()
+            context.phase("validating", "复核校验和、路径与引用重映射")
+            if not preview["can_restore"]:
+                raise NovelArchiveError(
+                    "目标目录或引用存在冲突",
+                    code="RESTORE_CONFLICT",
+                    recoverable=True,
+                    details={"preview": preview},
+                )
+            context.checkpoint()
+            context.phase("committing", "原子恢复作品到新工作区")
+            result = NovelArchiveService.restore_archive(
+                archive_path,
+                self._restore_target(payload.get("target_root")),
+                expected_archive_sha256=str(payload.get("archive_sha256") or ""),
+                confirm=True,
+                target_novel_id=str(payload.get("target_novel_id") or "") or None,
+                reference_policy=str(payload.get("reference_policy") or "preserve_relative"),
+            )
+            context.report_progress(total, total, "files")
+            return {"archive_id": archive_id, **result}
+        except NovelArchiveError as exc:
+            raise self._translate_archive_error(exc) from exc
 
     def _task_continuous_write(
         self, payload: dict[str, Any], context: TaskContext
@@ -3555,9 +5377,7 @@ class StudioApplication:
             context.checkpoint()
             from tools.chapter_run_v2 import ChapterRunV2Store
 
-            latest_runs = ChapterRunV2Store(
-                self.project_root, self.novel_id
-            ).list(limit=20)
+            latest_runs = ChapterRunV2Store(self.project_root, self.novel_id).list(limit=20)
             pending_intervention = next(
                 (
                     item
@@ -3588,18 +5408,14 @@ class StudioApplication:
                 "chapter_id": chapter_id,
                 "guidance": str(payload.get("guidance") or recommendation.get("guidance") or ""),
                 "target_words": int(
-                    payload.get("target_words")
-                    or recommendation.get("target_words")
-                    or 3000
+                    payload.get("target_words") or recommendation.get("target_words") or 3000
                 ),
                 "temperature": float(payload.get("temperature") or 0.7),
             }
             try:
                 write_result = self._task_write_chapter(write_payload, context)
                 context.checkpoint()
-                review_result = self._task_review_chapter(
-                    {"chapter_id": chapter_id}, context
-                )
+                review_result = self._task_review_chapter({"chapter_id": chapter_id}, context)
                 consecutive_failures = 0
             except Exception:
                 consecutive_failures += 1
@@ -3628,9 +5444,7 @@ class StudioApplication:
             write_usage = write_result.get("usage")
             write_usage = write_usage if isinstance(write_usage, dict) else {}
             total_tokens += int(
-                write_usage.get("total_tokens")
-                or write_usage.get("output_tokens")
-                or 0
+                write_usage.get("total_tokens") or write_usage.get("output_tokens") or 0
             )
             total_cost_usd += float(write_usage.get("cost_usd") or 0)
             usage = {
@@ -3715,6 +5529,9 @@ class StudioApplication:
             "continuous_write": "受控连续写作",
             "research": "深度研究",
             "model_benchmark": "模型横评",
+            "settle_backfill": "结算回填",
+            "manuscript_reconcile": "正文事实调和",
+            "project_restore": "恢复作品档案",
         }
         return " · ".join(item for item in (labels.get(task_type, task_type), chapter) if item)
 
@@ -3753,6 +5570,7 @@ class StudioApplication:
         asset_id = str(payload.get("id") or "")
         revision = str(payload.get("revision") or "")
         try:
+            before = self._assets().read(kind, asset_id)
             asset = self._assets().update(
                 kind,
                 asset_id,
@@ -3764,7 +5582,33 @@ class StudioApplication:
             raise self._translate_asset_error(exc) from exc
         except NovelServiceError as exc:
             raise self._translate_service_error(exc) from exc
-        return {"asset": self._asset_with_relations(asset), "sync": sync}
+        result = {"asset": self._asset_with_relations(asset), "sync": sync}
+        before_fields = {
+            "data": before.get("data", {}),
+            "body_markdown": before.get("body_markdown", ""),
+            "raw_text": before.get("raw_text", ""),
+        }
+        after_fields = {
+            "data": asset.get("data", {}),
+            "body_markdown": asset.get("body_markdown", ""),
+            "raw_text": asset.get("raw_text", ""),
+        }
+        # raw_text mirrors the structured fields for normal character/world
+        # edits. Report it only for an explicit raw replacement.
+        if "raw_text" not in payload:
+            before_fields.pop("raw_text")
+            after_fields.pop("raw_text")
+        result["mutation_summary"] = build_mutation_summary(
+            operation="asset.update",
+            entity_kind=kind,
+            entity_id=asset_id,
+            path=str(asset.get("path") or before.get("path") or ""),
+            before=before_fields,
+            after=after_fields,
+            source_revision=str(before.get("revision") or revision),
+            result_revision=str(asset.get("revision") or ""),
+        )
+        return result
 
     def _asset_with_relations(self, asset: dict[str, Any]) -> dict[str, Any]:
         if asset.get("kind") not in {"character", "world"}:
@@ -3849,11 +5693,7 @@ class StudioApplication:
         if not re.fullmatch(r"pkg_[a-f0-9]{32}", upload_id):
             raise StudioError("资产包暂存标识无效", code="INVALID_ASSET_PACKAGE")
         path = (
-            self.novel_root
-            / "data"
-            / "workflows"
-            / "asset_packages"
-            / f"{upload_id}.owasset.zip"
+            self.novel_root / "data" / "workflows" / "asset_packages" / f"{upload_id}.owasset.zip"
         )
         if not path.is_file():
             raise StudioError(
@@ -3895,7 +5735,207 @@ class StudioApplication:
             details=exc.details,
         )
 
-    def export_download(self, format_name: str) -> tuple[str, bytes, str]:
+    def export_preflight(
+        self,
+        format_name: str = "md",
+        purpose: str = "backup",
+    ) -> dict[str, Any]:
+        try:
+            return self._service().export_preflight(
+                format_name=format_name,
+                purpose=purpose,
+            )
+        except NovelServiceError as exc:
+            raise self._translate_service_error(exc) from exc
+
+    def _novel_archive(self) -> Any:
+        from tools.novel_archive import NovelArchiveService
+
+        self.require_project()
+        return NovelArchiveService(self.project_root, self.novel_id)
+
+    def _archive_path(self, archive_id: str) -> Path:
+        clean = str(archive_id or "")
+        if not re.fullmatch(r"owa_[0-9a-f]{24}", clean):
+            raise StudioError("作品档案 ID 无效", code="INVALID_ARCHIVE_ID")
+        return self.novel_root / "data" / "archives" / f"{clean}.owarchive.zip"
+
+    @staticmethod
+    def _translate_archive_error(exc: Exception) -> StudioError:
+        code = str(getattr(exc, "code", "NOVEL_ARCHIVE_FAILED"))
+        status = {
+            "ARCHIVE_NOT_FOUND": HTTPStatus.NOT_FOUND,
+            "CONFIRMATION_REQUIRED": HTTPStatus.PRECONDITION_REQUIRED,
+            "PREFLIGHT_CHANGED": HTTPStatus.CONFLICT,
+            "ARCHIVE_CHANGED": HTTPStatus.CONFLICT,
+            "TARGET_NOT_EMPTY": HTTPStatus.CONFLICT,
+            "REFERENCE_CONFLICT": HTTPStatus.CONFLICT,
+            "PROJECT_BUSY": HTTPStatus.CONFLICT,
+            "CHECKSUM_MISMATCH": HTTPStatus.UNPROCESSABLE_ENTITY,
+            "MANIFEST_INVALID": HTTPStatus.UNPROCESSABLE_ENTITY,
+            "INVALID_ARCHIVE": HTTPStatus.UNPROCESSABLE_ENTITY,
+            "UNSAFE_ARCHIVE_PATH": HTTPStatus.UNPROCESSABLE_ENTITY,
+        }.get(code, HTTPStatus.BAD_REQUEST)
+        return StudioError(
+            str(exc),
+            status,
+            code=code,
+            recoverable=bool(getattr(exc, "recoverable", False)),
+            details=dict(getattr(exc, "details", {}) or {}),
+        )
+
+    def project_archive_preflight(self) -> dict[str, Any]:
+        from tools.novel_archive import NovelArchiveError
+
+        try:
+            initial = self._novel_archive().preflight()
+            output = self._archive_path(str(initial["archive_id"]))
+            return cast(dict[str, Any], self._novel_archive().preflight(output))
+        except NovelArchiveError as exc:
+            raise self._translate_archive_error(exc) from exc
+
+    def project_archive_surface(self, archive_id: str = "") -> dict[str, Any]:
+        from tools.novel_archive import NovelArchiveError, NovelArchiveService
+
+        try:
+            if archive_id:
+                inspected = NovelArchiveService.inspect_archive(self._archive_path(archive_id))
+                return {"archive": inspected}
+            directory = self.novel_root / "data" / "archives"
+            archives: list[dict[str, Any]] = []
+            if directory.is_dir():
+                for path in sorted(
+                    directory.glob("owa_*.owarchive.zip"),
+                    key=lambda item: item.stat().st_mtime_ns,
+                    reverse=True,
+                ):
+                    inspected = NovelArchiveService.inspect_archive(path)
+                    manifest = inspected["manifest"]
+                    archives.append(
+                        {
+                            "archive_id": manifest["archive_id"],
+                            "archive_sha256": inspected["archive_sha256"],
+                            "created_at": manifest.get("created_at"),
+                            "file_count": inspected["file_count"],
+                            "total_size": inspected["total_size"],
+                            "missing": manifest.get("missing", {}),
+                        }
+                    )
+            return {
+                "schema_version": "openwrite.novel-archive.v1",
+                "novel_id": self.novel_id,
+                "archives": archives[:100],
+            }
+        except NovelArchiveError as exc:
+            raise self._translate_archive_error(exc) from exc
+
+    def create_project_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.novel_archive import NovelArchiveError
+
+        expected = str(payload.get("expected_preflight_revision") or "")
+        if not expected:
+            raise StudioError("请先完成作品档案预检", code="PREVIEW_REQUIRED")
+        preflight = self.project_archive_preflight()
+        if expected != preflight["preflight_revision"]:
+            raise StudioError(
+                "作品内容在预检后发生变化",
+                HTTPStatus.CONFLICT,
+                code="PREFLIGHT_CHANGED",
+                recoverable=True,
+                details={"preflight": preflight},
+            )
+        output = self._archive_path(str(preflight["archive_id"]))
+        try:
+            created = self._novel_archive().create_archive(
+                output,
+                expected_preflight_revision=expected,
+            )
+            return {"archive": created}
+        except NovelArchiveError as exc:
+            raise self._translate_archive_error(exc) from exc
+
+    def project_archive_download(self, archive_id: str) -> tuple[str, bytes, str]:
+        path = self._archive_path(archive_id)
+        if not path.is_file():
+            raise StudioError("作品档案不存在", HTTPStatus.NOT_FOUND, code="ARCHIVE_NOT_FOUND")
+        return path.name, path.read_bytes(), "application/zip"
+
+    def _restore_target(self, value: Any) -> Path:
+        raw = str(value or "").strip()
+        candidate = Path(raw).expanduser()
+        if not raw or not candidate.is_absolute() or ".." in candidate.parts:
+            raise StudioError(
+                "恢复目标必须是不含 .. 的绝对路径",
+                code="RESTORE_TARGET_INVALID",
+            )
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(self.project_root)
+        except ValueError:
+            return resolved
+        raise StudioError(
+            "恢复目标必须位于当前项目之外",
+            code="RESTORE_TARGET_INVALID",
+        )
+
+    def project_restore_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.novel_archive import NovelArchiveError, NovelArchiveService
+
+        try:
+            return NovelArchiveService.preview_restore(
+                self._archive_path(str(payload.get("archive_id") or "")),
+                self._restore_target(payload.get("target_root")),
+                target_novel_id=str(payload.get("target_novel_id") or "") or None,
+                reference_policy=str(payload.get("reference_policy") or "preserve_relative"),
+            )
+        except NovelArchiveError as exc:
+            raise self._translate_archive_error(exc) from exc
+
+    def restore_project_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not bool(payload.get("confirm")):
+            raise StudioError(
+                "恢复作品档案需要显式确认",
+                HTTPStatus.PRECONDITION_REQUIRED,
+                code="CONFIRMATION_REQUIRED",
+                recoverable=True,
+            )
+        preview = self.project_restore_preview(payload)
+        expected = str(payload.get("archive_sha256") or "")
+        if not expected or expected != preview["archive_sha256"]:
+            raise StudioError(
+                "作品档案在预览后发生变化",
+                HTTPStatus.CONFLICT,
+                code="ARCHIVE_CHANGED",
+                recoverable=True,
+                details={"preview": preview},
+            )
+        if not preview["can_restore"]:
+            raise StudioError(
+                "目标目录或引用存在冲突",
+                HTTPStatus.CONFLICT,
+                code="RESTORE_CONFLICT",
+                recoverable=True,
+                details={"preview": preview},
+            )
+        return self.create_task(
+            {
+                "type": "project_restore",
+                "input": {
+                    "archive_id": str(payload.get("archive_id") or ""),
+                    "archive_sha256": expected,
+                    "target_root": preview["target_root"],
+                    "target_novel_id": preview["target_novel_id"],
+                    "reference_policy": preview["reference_policy"],
+                },
+            }
+        )
+
+    def export_download(
+        self,
+        format_name: str,
+        purpose: str = "backup",
+        preflight_revision: str = "",
+    ) -> tuple[str, bytes, str]:
         if format_name not in {"md", "txt", "epub"}:
             raise StudioError("导出格式仅支持 md、txt 或 epub")
         title = str(self.config.get("title") or self.novel_id)
@@ -3905,7 +5945,11 @@ class StudioApplication:
                 self._service().export_book(
                     output,
                     format_name=format_name,
+                    purpose=purpose,
+                    preflight_revision=preflight_revision,
                     title=title,
+                    author=str(self.config.get("author") or ""),
+                    language=str(self.config.get("language") or "zh-CN"),
                 )
             except NovelServiceError as exc:
                 raise self._translate_service_error(exc) from exc
@@ -3924,14 +5968,36 @@ class StudioApplication:
             raise StudioError(f"项目配置无法读取: {exc}") from exc
         return data if isinstance(data, dict) else {}
 
-    def _document_groups(self, chapters: list[Any]) -> dict[str, list[dict[str, Any]]]:
+    def _document_groups(
+        self,
+        chapters: list[Any],
+        *,
+        manuscript_acceptance: dict[str, Any] | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
         src = self.novel_root / "src"
+        acceptance_by_chapter = {
+            str(item.get("chapter_id") or ""): item
+            for item in (manuscript_acceptance or {}).get("chapters", [])
+            if isinstance(item, dict)
+        }
         groups = {
             "outline": [],
             "core": [],
             "characters": [],
             "settings": [],
-            "chapters": [self._chapter_summary(item) for item in chapters],
+            "chapters": [
+                self._chapter_summary(
+                    item,
+                    acceptance=acceptance_by_chapter.get(
+                        str(
+                            item.get("chapter_id")
+                            if isinstance(item, dict)
+                            else item.chapter_id
+                        )
+                    ),
+                )
+                for item in chapters
+            ],
         }
         for path in iter_library_paths(self.novel_root):
             try:
@@ -3954,35 +6020,101 @@ class StudioApplication:
             groups["outline"].append(self._document_summary(outline))
         return groups
 
-    def _chapter_summary(self, item: Any) -> dict[str, Any]:
-        review = self._load_review_result(item.chapter_id)
-        subtitle = f"{item.chapter_id} · {item.writing_units:,} 字"
+    def _chapter_summary(
+        self, item: Any, *, acceptance: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if isinstance(item, dict):
+            chapter_id = str(item.get("chapter_id") or "")
+            writing_units = int(item.get("writing_units") or 0)
+            relative_path = str(item.get("path") or "")
+            title = str(item.get("title") or chapter_id)
+        else:
+            chapter_id = str(item.chapter_id)
+            writing_units = int(item.writing_units)
+            relative_path = self._relative(item.path)
+            title = str(item.title)
+        review = self._load_review_result(chapter_id)
+        subtitle = f"{chapter_id} · {writing_units:,} 字"
         if review:
             subtitle += (
                 " · 审稿待刷新"
                 if review.get("stale")
                 else f" · {float(review.get('score', 0)):.0f} 分"
             )
-        return {
-            "path": self._relative(item.path),
-            "title": item.title,
+        result = {
+            "path": relative_path,
+            "title": title,
             "subtitle": subtitle,
             "review": review,
         }
+        if isinstance(item, dict):
+            for key in (
+                "document_id",
+                "occurrence_id",
+                "chapter_id",
+                "status",
+                "reading_index",
+                "revision",
+                "writing_units",
+                "updated_at",
+                "previous_document_id",
+                "previous_occurrence_id",
+                "next_document_id",
+                "next_occurrence_id",
+                "outline",
+                "volume",
+            ):
+                result[key] = item.get(key)
+        if acceptance is not None:
+            result["acceptance"] = dict(acceptance)
+        return result
+
+    def _document_identity(self, relative_path: str) -> dict[str, Any]:
+        from tools.reading_order import ReadingOrderError, ReadingOrderService
+
+        try:
+            documents = ReadingOrderService(
+                self.project_root, self.novel_id
+            ).surface()["documents"]
+        except (ReadingOrderError, OSError, UnicodeError, ValueError):
+            documents = []
+        matches = [
+            item
+            for item in documents
+            if isinstance(item, dict) and str(item.get("path") or "") == relative_path
+        ]
+        if matches:
+            occurrence_ids = [str(item.get("occurrence_id") or "") for item in matches]
+            return {
+                "document_id": str(matches[0].get("document_id") or ""),
+                "occurrence_id": occurrence_ids[0] if len(occurrence_ids) == 1 else "",
+                "occurrence_ids": occurrence_ids,
+            }
+        return {
+            "document_id": stable_document_id(self.novel_id, relative_path),
+            "occurrence_id": "",
+            "occurrence_ids": [],
+        }
 
     def _load_review_result(self, chapter_id: str) -> dict[str, Any] | None:
-        from tools.review_store import (
-            ReviewStore,
-            review_v2_contract,
-        )
+        from tools.review_store import review_v2_contract
 
-        data = ReviewStore(self.project_root, self.novel_id).load(chapter_id)
+        store = ReviewStore(self.project_root, self.novel_id)
+        data = store.load(chapter_id)
         if data is None:
             return None
         v2 = review_v2_contract(data)
         stale = bool(data.get("stale"))
+        decision: dict[str, Any] = {}
         if v2:
-            freshness = str(v2.get("freshness_status") or "")
+            try:
+                decision = canonical_review_decision(
+                    data,
+                    current_source_revision=store._source_revision(chapter_id),
+                )
+            except ValueError:
+                decision = dict(v2)
+            freshness = str(decision.get("freshness_status") or "")
             stale = stale or freshness == "stale"
         result = {
             "score": float(data.get("score") or 0),
@@ -3990,28 +6122,25 @@ class StudioApplication:
             "issues": int(data.get("issues") or 0),
             "reviewed_at": str(data.get("reviewed_at") or ""),
             "stale": stale,
-            "issue_details": normalize_review_issues(
-                chapter_id, data.get("issue_details", [])
-            ),
+            "issue_details": normalize_review_issues(chapter_id, data.get("issue_details", [])),
             "issue_delta": (
-                data.get("issue_delta")
-                if isinstance(data.get("issue_delta"), dict)
-                else None
+                data.get("issue_delta") if isinstance(data.get("issue_delta"), dict) else None
             ),
         }
         if v2:
             # Canonical v2 surface: the legacy score/passed aliases above are
             # compatibility only; clients prefer these independent statuses.
             result["review_v2"] = {
-                "schema_version": v2.get("schema_version"),
-                "execution_status": v2.get("execution_status"),
-                "quality_score": v2.get("quality_score"),
-                "coverage": v2.get("coverage"),
-                "gate_status": v2.get("gate_status"),
-                "delivery_status": "stale" if stale else v2.get("delivery_status"),
-                "production_gate_status": v2.get("production_gate_status"),
-                "freshness_status": v2.get("freshness_status"),
-                "source_revision": v2.get("source_revision"),
+                "schema_version": decision.get("schema_version"),
+                "execution_status": decision.get("execution_status"),
+                "quality_score": decision.get("quality_score"),
+                "coverage": decision.get("coverage"),
+                "gate_status": decision.get("gate_status"),
+                "delivery_status": "stale" if stale else decision.get("delivery_status"),
+                "production_gate_status": decision.get("production_gate_status"),
+                "freshness_status": "stale" if stale else decision.get("freshness_status"),
+                "source_revision": decision.get("source_revision"),
+                "current_source_revision": decision.get("current_source_revision"),
             }
         return result
 
@@ -4121,8 +6250,13 @@ class LegacyStudioRequestHandler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/context":
                 self.app.require_project()
-                chapter_id = parse_qs(parsed.query).get("chapter", ["next"])[0]
-                self._json(self.app.context_preview(chapter_id))
+                params = parse_qs(parsed.query)
+                chapter_id = params.get("chapter", ["next"])[0]
+                known_revision = params.get("known_revision", [""])[0]
+                known_source_revision = params.get("known_source_revision", [""])[0]
+                self._json(
+                    self.app.context_preview(chapter_id, known_revision, known_source_revision)
+                )
                 return
             if parsed.path == "/api/outline":
                 chapter_id = parse_qs(parsed.query).get("chapter", [""])[0]
@@ -4242,6 +6376,12 @@ class LegacyStudioRequestHandler(SimpleHTTPRequestHandler):
                 return
             if route == "/api/document/create":
                 self._json(self.app.create_document(payload))
+                return
+            if route == "/api/document/change-plan":
+                self._json(self.app.document_change_plan(payload))
+                return
+            if route == "/api/structured/change-plan":
+                self._json(self.app.structured_change_plan(payload))
                 return
             if route == "/api/import":
                 self._json(self.app.import_text(payload))
@@ -4372,8 +6512,7 @@ def create_server(
     review_executor: Callable[[Path, dict[str, Any]], dict[str, Any]] | None = None,
     chat_executor: Callable[[Path, str, str, str], dict[str, Any]] | None = None,
     source_executor: Callable[[Path, dict[str, Any]], dict[str, Any]] | None = None,
-    revision_executor: Callable[[Path, dict[str, Any]], dict[str, Any] | str]
-    | None = None,
+    revision_executor: Callable[[Path, dict[str, Any]], dict[str, Any] | str] | None = None,
     project_registry: ProjectRegistry | None = None,
     model_settings_store: StudioModelSettingsStore | None = None,
     model_profile_store: ModelProfileStore | None = None,
@@ -4403,9 +6542,22 @@ def create_server(
         reference_library_root=reference_library_root,
         debug=debug,
     )
+    app_kwargs = {
+        "writer_executor": writer_executor,
+        "review_executor": review_executor,
+        "chat_executor": chat_executor,
+        "source_executor": source_executor,
+        "revision_executor": revision_executor,
+        "model_settings_store": model_settings_store,
+        "model_profile_store": model_profile_store,
+        "reference_library_root": reference_library_root,
+    }
+    manager = WorkspaceManager(project_root, app_kwargs)
+    manager.adopt_default_app(app)
     handler = partial(ModularStudioRequestHandler, directory=str(STATIC_ROOT))
     server = ModularOpenWriteStudioServer((host, port), handler)
     server.app = app
+    server.workspace_manager = manager
     return server
 
 
@@ -4434,5 +6586,8 @@ def run_studio(
     except KeyboardInterrupt:
         print("\nStudio 已停止")
     finally:
+        manager = getattr(server, "workspace_manager", None)
+        if manager is not None:
+            manager.shutdown(wait=True)
         server.server_close()
     return 0

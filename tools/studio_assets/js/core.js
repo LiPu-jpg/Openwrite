@@ -42,6 +42,7 @@ export const state = {
   productTour: { active: false, step: "" },
   revisionProposal: null,
   revisionHunkSelection: new Set(),
+  contextPreviewRevisions: {},
   reviewChapterPath: "",
   tasks: [],
   research: { status: null, selectedReportId: "", searchProviderInitialized: false },

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tools.context_manifest import build_context_manifest
+from tools.context_manifest import build_context_manifest, check_context_manifest_freshness
 from tools.git_checkpoint import GitCheckpointManager
 from tools.init_project import init_project
 from tools.project_registry import ProjectRegistry, is_framework_root
@@ -81,6 +81,21 @@ def test_project_initialization_rolls_back_new_files_on_failure(
         init_project(project, "failed_book")
 
     assert not project.exists()
+
+
+def test_project_initialization_creates_standalone_git_repository(tmp_path: Path):
+    project = tmp_path / "novel"
+    init_project(project, "demo")
+
+    git_root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=project,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    assert Path(git_root).resolve() == project.resolve()
+    assert (project / ".git").exists()
 
 
 def test_project_registry_keeps_only_existing_projects(tmp_path: Path):
@@ -174,7 +189,8 @@ def test_project_search_returns_line_provenance_and_refreshes(tmp_path: Path):
     assert result["heading"] == "未解目标"
 
     character.write_text("# 林岑\n\n她改为寻找钟楼。\n", encoding="utf-8")
-    assert index.search("旧信", scope="characters")["results"] == []
+    refreshed = index.search("旧信", scope="characters")["results"]
+    assert all("旧信" not in item["snippet"] for item in refreshed)
     assert index.search("钟楼", scope="characters")["results"][0]["line"] == 3
 
 
@@ -188,7 +204,8 @@ def test_project_search_exposes_outline_as_its_own_scope(tmp_path: Path):
 
     assert payload["results"][0]["path"] == "src/outline.md"
     assert payload["results"][0]["scope"] == "outline"
-    assert ProjectSearchIndex(novel_root).search("旧信", scope="story")["results"] == []
+    story_results = ProjectSearchIndex(novel_root).search("旧信", scope="story")["results"]
+    assert all(item["path"] != "src/outline.md" for item in story_results)
 
 
 def test_context_manifest_records_layers_sources_and_revision(tmp_path: Path):
@@ -209,6 +226,34 @@ def test_context_manifest_records_layers_sources_and_revision(tmp_path: Path):
     assert levels["current_arc_sections"] == 2
     focus = next(item for item in manifest["items"] if item["section"] == "creative_focus")
     assert focus["sources"][0]["path"] == "src/story/current_focus.md"
+    assert focus["protected"] is True
+    assert focus["selection_reason"]
+    assert focus["snippet"] == "本章必须保留雨夜意象"
+    assert manifest["request_budget"]["scope"] == "openwrite_writing_request"
+    assert manifest["session_budget"] == {
+        "scope": "dsh_session",
+        "available": False,
+        "reason": "not_reported_by_session_runtime",
+    }
+
+
+def test_context_manifest_marks_old_source_snapshot_stale(tmp_path: Path):
+    init_project(tmp_path, "demo")
+    novel_root = tmp_path / "data" / "novels" / "demo"
+    focus_path = novel_root / "src" / "story" / "current_focus.md"
+    focus_path.write_text("雨夜必须出现钟声。", encoding="utf-8")
+    manifest = build_context_manifest(
+        novel_root,
+        {"creative_focus": "雨夜必须出现钟声。"},
+    )
+
+    assert check_context_manifest_freshness(novel_root, manifest)["status"] == "current"
+    focus_path.write_text("雨夜必须出现钟声，并让旧信被烧毁。", encoding="utf-8")
+
+    freshness = check_context_manifest_freshness(novel_root, manifest)
+    assert freshness["status"] == "stale"
+    assert freshness["reason"] == "source_revision_changed"
+    assert freshness["changed_sources"] == ["src/story/current_focus.md"]
 
 
 def test_context_manifest_prefers_canonical_library_groups_without_double_counting(
@@ -273,7 +318,7 @@ def test_git_checkpoint_requires_private_standalone_content_repository(tmp_path:
     assert subject == "outline: add a new act"
 
 
-def test_git_checkpoint_rejects_nested_framework_repository(tmp_path: Path):
+def test_git_checkpoint_uses_nested_standalone_content_repository(tmp_path: Path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     project = tmp_path / "novel"
     project.mkdir()
@@ -281,5 +326,13 @@ def test_git_checkpoint_rejects_nested_framework_repository(tmp_path: Path):
 
     status = GitCheckpointManager(project).status()
 
-    assert status["eligible"] is False
-    assert "独立 Git 根目录" in status["reason"]
+    assert status["eligible"] is True
+    assert status["project_type"] == "novel-content"
+    git_root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=project,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    assert Path(git_root).resolve() == project.resolve()

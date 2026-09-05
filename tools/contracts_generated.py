@@ -4,8 +4,11 @@
 #   review-manifest-v2.schema.json sha256:c74873990a9d $id: https://openwrite.dev/schemas/review-manifest-v2.schema.json
 #   delivery-manifest-v2.schema.json sha256:cb149eae6952 $id: https://openwrite.dev/schemas/delivery-manifest-v2.schema.json
 #   delivery-stage-v2.schema.json sha256:04d2637e1e4d $id: https://openwrite.dev/schemas/delivery-stage-v2.schema.json
-#   model-benchmark-v1.schema.json sha256:256610806cff $id: https://openwrite.dev/schemas/model-benchmark-v1.schema.json
-#   model-profile-surface-v1.schema.json sha256:fab06df1a21c $id: https://openwrite.dev/schemas/model-profile-surface-v1.schema.json
+#   model-benchmark-v1.schema.json sha256:4d56ab63c3ea $id: https://openwrite.dev/schemas/model-benchmark-v1.schema.json
+#   model-profile-surface-v1.schema.json sha256:d44a07240d23 $id: https://openwrite.dev/schemas/model-profile-surface-v1.schema.json
+#   task-surface-v1.schema.json sha256:b25a2195014a $id: https://openwrite.dev/schemas/task-surface-v1.schema.json
+#   research-surface-v1.schema.json sha256:c66c3f1494a1 $id: https://openwrite.dev/schemas/research-surface-v1.schema.json
+#   model-connection-test-v1.schema.json sha256:60824b0b20f4 $id: https://openwrite.dev/schemas/model-connection-test-v1.schema.json
 
 """Schema-derived contract types and validators (see tools/schema_codegen.py).
 
@@ -164,6 +167,103 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
     "additionalProperties": true,
     "properties": {
       "candidates": {
+        "items": {
+          "additionalProperties": true,
+          "disallowed": [
+            "api_key",
+            "embedding_api_key",
+            "secret"
+          ],
+          "properties": {
+            "candidate_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "cost_reported": {
+              "type": "boolean"
+            },
+            "cost_usd": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "error": {
+              "additionalProperties": true,
+              "properties": {
+                "code": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "latency_ms": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "reliability_status": {
+              "enum": [
+                "completed",
+                "failed"
+              ]
+            },
+            "usage": {
+              "additionalProperties": true,
+              "properties": {
+                "completion_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "prompt_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "reasoning_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "total_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "writer_profile": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "candidate_id",
+            "writer_profile",
+            "reliability_status"
+          ],
+          "type": "object"
+        },
         "type": "array"
       },
       "config": {
@@ -220,6 +320,104 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
         "type": "string"
       },
       "evaluations": {
+        "items": {
+          "additionalProperties": true,
+          "disallowed": [
+            "api_key",
+            "embedding_api_key",
+            "secret"
+          ],
+          "properties": {
+            "candidate_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "cost_reported": {
+              "type": "boolean"
+            },
+            "cost_usd": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "error": {
+              "additionalProperties": true,
+              "properties": {
+                "code": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "execution_status": {
+              "enum": [
+                "completed",
+                "partial",
+                "failed"
+              ]
+            },
+            "latency_ms": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "reviewer_profile": {
+              "type": "object"
+            },
+            "usage": {
+              "additionalProperties": true,
+              "properties": {
+                "completion_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "prompt_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "reasoning_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "total_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "candidate_id",
+            "reviewer_profile",
+            "execution_status"
+          ],
+          "type": "object"
+        },
         "type": "array"
       },
       "run_id": {
@@ -229,12 +427,36 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
       "schema_version": {
         "const": "openwrite.model-benchmark.v1"
       },
+      "started_at": {
+        "minLength": 1,
+        "type": "string"
+      },
       "status": {
         "enum": [
           "completed",
           "partial",
           "failed"
         ]
+      },
+      "summary": {
+        "additionalProperties": true,
+        "properties": {
+          "failed_candidates": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "latency_ms_total": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "task_id": {
+        "minLength": 1,
+        "type": "string"
       }
     },
     "required": [
@@ -249,61 +471,273 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
     "title": "OpenWrite model benchmark v1 artifact",
     "type": "object"
   },
+  "model_connection_test_v1": {
+    "$id": "https://openwrite.dev/schemas/model-connection-test-v1.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": true,
+    "disallowed": [
+      "api_key",
+      "embedding_api_key",
+      "secret",
+      "credential"
+    ],
+    "properties": {
+      "base_url": {
+        "type": "string"
+      },
+      "dimension": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "latency_ms": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "max_tokens": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "model": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "ok": {
+        "const": true
+      },
+      "provider": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "provider_label": {
+        "type": "string"
+      },
+      "reply": {
+        "type": "string"
+      },
+      "status": {
+        "const": "ok"
+      },
+      "tested_at": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "vectors": {
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "ok",
+      "status",
+      "provider",
+      "model",
+      "latency_ms",
+      "tested_at"
+    ],
+    "title": "OpenWrite model connection test v1 success payload (chat and embedding variants)",
+    "type": "object"
+  },
   "model_profile_surface_v1": {
+    "$defs": {
+      "chat_profile": {
+        "additionalProperties": true,
+        "disallowed": [
+          "api_key",
+          "embedding_api_key",
+          "secret"
+        ],
+        "properties": {
+          "capabilities": {
+            "properties": {
+              "chat": {
+                "const": true
+              }
+            },
+            "required": [
+              "chat"
+            ],
+            "type": "object"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_test": {
+            "$ref": "#/$defs/test"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "openwrite.model-profile.v1"
+          },
+          "used_by_routes": {
+            "items": {
+              "enum": [
+                "goethe",
+                "dante",
+                "chapter_write",
+                "review",
+                "source_extract",
+                "revision",
+                "search",
+                "research"
+              ]
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "provider",
+          "model",
+          "configured",
+          "schema_version",
+          "capabilities",
+          "used_by_routes",
+          "last_test"
+        ],
+        "type": "object"
+      },
+      "embedding_profile": {
+        "additionalProperties": true,
+        "disallowed": [
+          "api_key",
+          "embedding_api_key",
+          "secret"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "dimension": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_test": {
+            "$ref": "#/$defs/test"
+          },
+          "max_tokens": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "openwrite.embedding-profile.v1"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "provider",
+          "model",
+          "dimension",
+          "max_tokens",
+          "configured",
+          "active",
+          "schema_version",
+          "last_test"
+        ],
+        "type": "object"
+      },
+      "test": {
+        "additionalProperties": true,
+        "disallowed": [
+          "api_key",
+          "secret",
+          "credential"
+        ],
+        "properties": {
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failed_stage": {
+            "type": "null"
+          },
+          "latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "resolved_model": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "failed"
+            ]
+          },
+          "tested_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "tested_at",
+          "latency_ms",
+          "provider",
+          "resolved_model",
+          "error_code",
+          "failed_stage"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      }
+    },
     "$id": "https://openwrite.dev/schemas/model-profile-surface-v1.schema.json",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": true,
     "properties": {
+      "active_embedding_profile_id": {
+        "type": "string"
+      },
       "default_profile_id": {
         "minLength": 1,
         "type": "string"
       },
-      "legacy_mapped": {
-        "type": "boolean"
+      "embedding_profiles": {
+        "items": {
+          "$ref": "#/$defs/embedding_profile"
+        },
+        "type": "array"
       },
       "profiles": {
         "items": {
-          "additionalProperties": true,
-          "disallowed": [
-            "api_key",
-            "embedding_api_key",
-            "secret"
-          ],
-          "properties": {
-            "configured": {
-              "type": "boolean"
-            },
-            "credential_updated_at": {
-              "type": "string"
-            },
-            "embedding_configured": {
-              "type": "boolean"
-            },
-            "id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "label": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "model": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "provider": {
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "label",
-            "provider",
-            "model",
-            "configured"
-          ],
-          "type": "object"
+          "$ref": "#/$defs/chat_profile"
         },
         "type": "array"
       },
@@ -321,9 +755,418 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
       "schema_version",
       "profiles",
       "routes",
-      "default_profile_id"
+      "default_profile_id",
+      "embedding_profiles",
+      "active_embedding_profile_id"
     ],
-    "title": "OpenWrite model profile surface v1 (credential-free)",
+    "title": "OpenWrite independent chat and embedding model surface v1",
+    "type": "object"
+  },
+  "research_surface_v1": {
+    "$id": "https://openwrite.dev/schemas/research-surface-v1.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": true,
+    "disallowed": [
+      "api_key",
+      "credential",
+      "secret"
+    ],
+    "properties": {
+      "available": {
+        "type": "boolean"
+      },
+      "dependencies_ready": {
+        "type": "boolean"
+      },
+      "model_route": {
+        "additionalProperties": true,
+        "disallowed": [
+          "api_key",
+          "credential",
+          "secret"
+        ],
+        "properties": {
+          "compatible": {
+            "type": "boolean"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "label",
+          "model",
+          "provider",
+          "configured",
+          "compatible"
+        ],
+        "type": "object"
+      },
+      "node_ready": {
+        "type": "boolean"
+      },
+      "package_ready": {
+        "type": "boolean"
+      },
+      "pnpm_ready": {
+        "type": "boolean"
+      },
+      "reports": {
+        "items": {
+          "additionalProperties": true,
+          "disallowed": [
+            "api_key",
+            "credential",
+            "secret"
+          ],
+          "properties": {
+            "bytes": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "completed_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cost_usd": {
+              "additionalProperties": true,
+              "properties": {
+                "reported": {
+                  "type": "boolean"
+                },
+                "value": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "reported"
+              ],
+              "type": "object"
+            },
+            "created_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "episode_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "failure": {
+              "additionalProperties": true,
+              "disallowed": [
+                "api_key",
+                "credential",
+                "secret"
+              ],
+              "properties": {
+                "code": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "latency_ms": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "metrics": {
+              "type": "object"
+            },
+            "model_profile": {
+              "additionalProperties": true,
+              "disallowed": [
+                "api_key",
+                "credential",
+                "secret"
+              ],
+              "properties": {
+                "id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "provider": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "model",
+                "provider"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "search_provider": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_count": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sources": {
+              "items": {
+                "additionalProperties": true,
+                "properties": {
+                  "cited": {
+                    "type": "boolean"
+                  },
+                  "source_type": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "url",
+                  "source_type",
+                  "cited"
+                ],
+                "type": "object"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "sources_status": {
+              "enum": [
+                "ok",
+                "unavailable"
+              ]
+            },
+            "status": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "needs_human_review",
+                "unknown"
+              ]
+            },
+            "task_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "usage": {
+              "additionalProperties": true,
+              "properties": {
+                "reported": {
+                  "type": "boolean"
+                },
+                "total_tokens": {
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "total_tokens",
+                "reported"
+              ],
+              "type": "object"
+            },
+            "word_count": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "status",
+            "episode_id",
+            "task_id",
+            "created_at",
+            "completed_at",
+            "model_profile",
+            "search_provider",
+            "sources",
+            "sources_status",
+            "source_count",
+            "word_count",
+            "latency_ms",
+            "usage",
+            "cost_usd",
+            "failure",
+            "metrics",
+            "path",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "schema_version": {
+        "const": "openwrite.research-surface.v1"
+      },
+      "settings": {
+        "additionalProperties": true,
+        "disallowed": [
+          "api_key",
+          "credential",
+          "secret"
+        ],
+        "properties": {
+          "search_provider": {
+            "enum": [
+              "bocha",
+              "bing",
+              "jina",
+              "none"
+            ]
+          },
+          "search_providers": {
+            "items": {
+              "additionalProperties": true,
+              "disallowed": [
+                "api_key",
+                "credential",
+                "secret"
+              ],
+              "properties": {
+                "configured": {
+                  "type": "boolean"
+                },
+                "credential_configured": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "enum": [
+                    "bocha",
+                    "bing",
+                    "jina",
+                    "none"
+                  ]
+                },
+                "label": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "requires_api_key": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "requires_api_key",
+                "configured",
+                "credential_configured"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "search_provider",
+          "search_providers"
+        ],
+        "type": "object"
+      },
+      "setup_hint": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "schema_version",
+      "available",
+      "node_ready",
+      "pnpm_ready",
+      "package_ready",
+      "dependencies_ready",
+      "setup_hint",
+      "settings",
+      "reports",
+      "model_route"
+    ],
+    "title": "OpenWrite research surface v1 (credential-free)",
     "type": "object"
   },
   "review_manifest_v2": {
@@ -449,6 +1292,255 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
     ],
     "title": "OpenWrite review v2 decision",
     "type": "object"
+  },
+  "task_surface_v1": {
+    "$id": "https://openwrite.dev/schemas/task-surface-v1.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": true,
+    "properties": {
+      "counts": {
+        "type": "object"
+      },
+      "phase_order": {
+        "items": {
+          "enum": [
+            "queued",
+            "reading",
+            "preparing",
+            "model",
+            "validating",
+            "committing",
+            "complete"
+          ]
+        },
+        "type": "array"
+      },
+      "schema_version": {
+        "const": "openwrite.task-surface.v1"
+      },
+      "tasks": {
+        "items": {
+          "additionalProperties": true,
+          "disallowed": [
+            "api_key",
+            "credential",
+            "secret"
+          ],
+          "properties": {
+            "attempt": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "chapter_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "completed_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "error": {
+              "additionalProperties": true,
+              "properties": {
+                "code": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "failed_stage": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "recoverable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "recoverable"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "input_summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "phase": {
+              "enum": [
+                "queued",
+                "reading",
+                "preparing",
+                "model",
+                "validating",
+                "committing",
+                "complete",
+                null
+              ]
+            },
+            "phase_index": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "progress": {
+              "additionalProperties": true,
+              "properties": {
+                "completed_units": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "ratio": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "total_units": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "unit_kind": {
+                  "enum": [
+                    "candidates",
+                    "evaluations",
+                    "chapters",
+                    "files"
+                  ]
+                }
+              },
+              "required": [
+                "completed_units",
+                "total_units",
+                "ratio",
+                "unit_kind"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "result_ref": {
+              "additionalProperties": true,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "chapter",
+                    "review",
+                    "revision",
+                    "research_report",
+                    "benchmark_run",
+                    "import",
+                    "archive"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "id"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "schema_version": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "started_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "running",
+                "awaiting_confirmation",
+                "completed",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ]
+            },
+            "task_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "updated_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "task_id",
+            "type",
+            "status",
+            "phase",
+            "phase_index",
+            "progress",
+            "attempt",
+            "retryable",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "error",
+            "result_ref",
+            "input_summary",
+            "chapter_id",
+            "schema_version"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "schema_version",
+      "phase_order",
+      "tasks",
+      "counts"
+    ],
+    "title": "OpenWrite task surface v1 (credential-free)",
+    "type": "object"
   }
 }
 """)
@@ -546,6 +1638,82 @@ class DeliveryStageV2(_DeliveryStageV2Required, total=False):
     """dsh-novel delivery stage v2."""
 
 
+class ModelBenchmarkV1CandidateUsage(TypedDict, total=False):
+    """ModelBenchmarkV1CandidateUsage."""
+
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    reasoning_tokens: int | None
+    total_tokens: int | None
+
+
+class _ModelBenchmarkV1CandidateErrorRequired(TypedDict):
+    """Required keys of ModelBenchmarkV1CandidateError."""
+
+    code: str
+    message: str
+
+
+class ModelBenchmarkV1CandidateError(_ModelBenchmarkV1CandidateErrorRequired, total=False):
+    """ModelBenchmarkV1CandidateError."""
+
+
+class _ModelBenchmarkV1CandidateRequired(TypedDict):
+    """Required keys of ModelBenchmarkV1Candidate."""
+
+    candidate_id: str
+    writer_profile: dict[str, Any]
+    reliability_status: Literal["completed", "failed"]
+
+
+class ModelBenchmarkV1Candidate(_ModelBenchmarkV1CandidateRequired, total=False):
+    """ModelBenchmarkV1Candidate."""
+
+    usage: ModelBenchmarkV1CandidateUsage | None
+    cost_usd: float | None
+    cost_reported: bool
+    latency_ms: int | None
+    error: ModelBenchmarkV1CandidateError | None
+
+
+class ModelBenchmarkV1EvaluationUsage(TypedDict, total=False):
+    """ModelBenchmarkV1EvaluationUsage."""
+
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    reasoning_tokens: int | None
+    total_tokens: int | None
+
+
+class _ModelBenchmarkV1EvaluationErrorRequired(TypedDict):
+    """Required keys of ModelBenchmarkV1EvaluationError."""
+
+    code: str
+    message: str
+
+
+class ModelBenchmarkV1EvaluationError(_ModelBenchmarkV1EvaluationErrorRequired, total=False):
+    """ModelBenchmarkV1EvaluationError."""
+
+
+class _ModelBenchmarkV1EvaluationRequired(TypedDict):
+    """Required keys of ModelBenchmarkV1Evaluation."""
+
+    candidate_id: str
+    reviewer_profile: dict[str, Any]
+    execution_status: Literal["completed", "partial", "failed"]
+
+
+class ModelBenchmarkV1Evaluation(_ModelBenchmarkV1EvaluationRequired, total=False):
+    """ModelBenchmarkV1Evaluation."""
+
+    usage: ModelBenchmarkV1EvaluationUsage | None
+    cost_usd: float | None
+    cost_reported: bool
+    latency_ms: int | None
+    error: ModelBenchmarkV1EvaluationError | None
+
+
 class _ModelBenchmarkV1ConfigRequired(TypedDict):
     """Required keys of ModelBenchmarkV1Config."""
 
@@ -564,6 +1732,13 @@ class ModelBenchmarkV1Config(_ModelBenchmarkV1ConfigRequired, total=False):
     execution_mode: Literal["framework", "creative"]
 
 
+class ModelBenchmarkV1Summary(TypedDict, total=False):
+    """ModelBenchmarkV1Summary."""
+
+    latency_ms_total: int | None
+    failed_candidates: int
+
+
 class _ModelBenchmarkV1Required(TypedDict):
     """Required keys of ModelBenchmarkV1."""
 
@@ -571,30 +1746,17 @@ class _ModelBenchmarkV1Required(TypedDict):
     run_id: str
     status: Literal["completed", "partial", "failed"]
     context_hash: str
-    candidates: list[Any]
-    evaluations: list[Any]
+    candidates: list[ModelBenchmarkV1Candidate]
+    evaluations: list[ModelBenchmarkV1Evaluation]
     config: ModelBenchmarkV1Config
 
 
 class ModelBenchmarkV1(_ModelBenchmarkV1Required, total=False):
     """OpenWrite model benchmark v1 artifact."""
 
-
-class _ModelProfileSurfaceV1ProfileRequired(TypedDict):
-    """Required keys of ModelProfileSurfaceV1Profile."""
-
-    id: str
-    label: str
-    provider: str
-    model: str
-    configured: bool
-
-
-class ModelProfileSurfaceV1Profile(_ModelProfileSurfaceV1ProfileRequired, total=False):
-    """ModelProfileSurfaceV1Profile."""
-
-    embedding_configured: bool
-    credential_updated_at: str
+    task_id: str
+    started_at: str
+    summary: ModelBenchmarkV1Summary
 
 
 class _ModelProfileSurfaceV1Required(TypedDict):
@@ -602,14 +1764,285 @@ class _ModelProfileSurfaceV1Required(TypedDict):
 
     schema_version: Literal["openwrite.model-profile.v1"]
     default_profile_id: str
-    profiles: list[ModelProfileSurfaceV1Profile]
+    active_embedding_profile_id: str
+    profiles: list[Any]
+    embedding_profiles: list[Any]
     routes: dict[str, str]
 
 
 class ModelProfileSurfaceV1(_ModelProfileSurfaceV1Required, total=False):
-    """OpenWrite model profile surface v1 (credential-free)."""
+    """OpenWrite independent chat and embedding model surface v1."""
 
-    legacy_mapped: bool
+
+class _TaskSurfaceV1TaskProgressRequired(TypedDict):
+    """Required keys of TaskSurfaceV1TaskProgress."""
+
+    completed_units: int
+    total_units: int
+    ratio: float | None
+    unit_kind: Literal["candidates", "evaluations", "chapters", "files"]
+
+
+class TaskSurfaceV1TaskProgress(_TaskSurfaceV1TaskProgressRequired, total=False):
+    """TaskSurfaceV1TaskProgress."""
+
+
+class _TaskSurfaceV1TaskErrorRequired(TypedDict):
+    """Required keys of TaskSurfaceV1TaskError."""
+
+    code: str
+    message: str
+    recoverable: bool
+
+
+class TaskSurfaceV1TaskError(_TaskSurfaceV1TaskErrorRequired, total=False):
+    """TaskSurfaceV1TaskError."""
+
+    failed_stage: str | None
+
+
+class _TaskSurfaceV1TaskResultRefRequired(TypedDict):
+    """Required keys of TaskSurfaceV1TaskResultRef."""
+
+    type: Literal[
+        "chapter",
+        "review",
+        "revision",
+        "research_report",
+        "benchmark_run",
+        "import",
+        "archive",
+    ]
+    id: str
+
+
+class TaskSurfaceV1TaskResultRef(_TaskSurfaceV1TaskResultRefRequired, total=False):
+    """TaskSurfaceV1TaskResultRef."""
+
+
+class _TaskSurfaceV1TaskRequired(TypedDict):
+    """Required keys of TaskSurfaceV1Task."""
+
+    task_id: str
+    type: str
+    status: Literal[
+        "pending",
+        "running",
+        "awaiting_confirmation",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted",
+    ]
+    phase: Literal[
+        "queued",
+        "reading",
+        "preparing",
+        "model",
+        "validating",
+        "committing",
+        "complete",
+        None,
+    ]
+    phase_index: int | None
+    progress: TaskSurfaceV1TaskProgress | None
+    attempt: int
+    retryable: bool
+    created_at: str | None
+    updated_at: str | None
+    started_at: str | None
+    completed_at: str | None
+    error: TaskSurfaceV1TaskError | None
+    result_ref: TaskSurfaceV1TaskResultRef | None
+    input_summary: str | None
+    chapter_id: str | None
+    schema_version: str
+
+
+class TaskSurfaceV1Task(_TaskSurfaceV1TaskRequired, total=False):
+    """TaskSurfaceV1Task."""
+
+
+class _TaskSurfaceV1Required(TypedDict):
+    """Required keys of TaskSurfaceV1."""
+
+    schema_version: Literal["openwrite.task-surface.v1"]
+    phase_order: list[Literal["queued", "reading", "preparing", "model", "validating", "committing", "complete"]]
+    tasks: list[TaskSurfaceV1Task]
+    counts: dict[str, Any]
+
+
+class TaskSurfaceV1(_TaskSurfaceV1Required, total=False):
+    """OpenWrite task surface v1 (credential-free)."""
+
+
+class _ResearchSurfaceV1SettingsSearchProviderRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1SettingsSearchProvider."""
+
+    id: Literal["bocha", "bing", "jina", "none"]
+    label: str
+    requires_api_key: bool
+    configured: bool
+    credential_configured: bool
+
+
+class ResearchSurfaceV1SettingsSearchProvider(_ResearchSurfaceV1SettingsSearchProviderRequired, total=False):
+    """ResearchSurfaceV1SettingsSearchProvider."""
+
+
+class _ResearchSurfaceV1SettingsRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1Settings."""
+
+    search_provider: Literal["bocha", "bing", "jina", "none"]
+    search_providers: list[ResearchSurfaceV1SettingsSearchProvider]
+
+
+class ResearchSurfaceV1Settings(_ResearchSurfaceV1SettingsRequired, total=False):
+    """ResearchSurfaceV1Settings."""
+
+
+class _ResearchSurfaceV1ReportModelProfileRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1ReportModelProfile."""
+
+    id: str | None
+    label: str | None
+    model: str | None
+    provider: str | None
+
+
+class ResearchSurfaceV1ReportModelProfile(_ResearchSurfaceV1ReportModelProfileRequired, total=False):
+    """ResearchSurfaceV1ReportModelProfile."""
+
+
+class _ResearchSurfaceV1ReportSourceRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1ReportSource."""
+
+    title: str
+    url: str
+    source_type: str
+    cited: bool
+
+
+class ResearchSurfaceV1ReportSource(_ResearchSurfaceV1ReportSourceRequired, total=False):
+    """ResearchSurfaceV1ReportSource."""
+
+
+class _ResearchSurfaceV1ReportUsageRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1ReportUsage."""
+
+    total_tokens: int | None
+    reported: bool
+
+
+class ResearchSurfaceV1ReportUsage(_ResearchSurfaceV1ReportUsageRequired, total=False):
+    """ResearchSurfaceV1ReportUsage."""
+
+
+class _ResearchSurfaceV1ReportCostUsdRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1ReportCostUsd."""
+
+    value: float | None
+    reported: bool
+
+
+class ResearchSurfaceV1ReportCostUsd(_ResearchSurfaceV1ReportCostUsdRequired, total=False):
+    """ResearchSurfaceV1ReportCostUsd."""
+
+
+class _ResearchSurfaceV1ReportFailureRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1ReportFailure."""
+
+    code: str
+    message: str
+
+
+class ResearchSurfaceV1ReportFailure(_ResearchSurfaceV1ReportFailureRequired, total=False):
+    """ResearchSurfaceV1ReportFailure."""
+
+
+class _ResearchSurfaceV1ReportRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1Report."""
+
+    id: str
+    title: str
+    status: Literal["succeeded", "failed", "needs_human_review", "unknown"]
+    episode_id: str | None
+    task_id: str | None
+    created_at: str | None
+    completed_at: str | None
+    model_profile: ResearchSurfaceV1ReportModelProfile | None
+    search_provider: str | None
+    sources: list[ResearchSurfaceV1ReportSource] | None
+    sources_status: Literal["ok", "unavailable"]
+    source_count: int | None
+    word_count: int | None
+    latency_ms: int | None
+    usage: ResearchSurfaceV1ReportUsage
+    cost_usd: ResearchSurfaceV1ReportCostUsd
+    failure: ResearchSurfaceV1ReportFailure | None
+    metrics: dict[str, Any]
+    path: str
+    bytes: int
+
+
+class ResearchSurfaceV1Report(_ResearchSurfaceV1ReportRequired, total=False):
+    """ResearchSurfaceV1Report."""
+
+
+class _ResearchSurfaceV1ModelRouteRequired(TypedDict):
+    """Required keys of ResearchSurfaceV1ModelRoute."""
+
+    profile_id: str
+    label: str
+    model: str
+    provider: str
+    configured: bool
+    compatible: bool
+
+
+class ResearchSurfaceV1ModelRoute(_ResearchSurfaceV1ModelRouteRequired, total=False):
+    """ResearchSurfaceV1ModelRoute."""
+
+
+class _ResearchSurfaceV1Required(TypedDict):
+    """Required keys of ResearchSurfaceV1."""
+
+    schema_version: Literal["openwrite.research-surface.v1"]
+    available: bool
+    node_ready: bool
+    pnpm_ready: bool
+    package_ready: bool
+    dependencies_ready: bool
+    setup_hint: str
+    settings: ResearchSurfaceV1Settings
+    reports: list[ResearchSurfaceV1Report]
+    model_route: ResearchSurfaceV1ModelRoute
+
+
+class ResearchSurfaceV1(_ResearchSurfaceV1Required, total=False):
+    """OpenWrite research surface v1 (credential-free)."""
+
+
+class _ModelConnectionTestV1Required(TypedDict):
+    """Required keys of ModelConnectionTestV1."""
+
+    ok: Literal[true]
+    status: Literal["ok"]
+    provider: str
+    model: str
+    latency_ms: int
+    tested_at: str
+
+
+class ModelConnectionTestV1(_ModelConnectionTestV1Required, total=False):
+    """OpenWrite model connection test v1 success payload (chat and embedding variants)."""
+
+    reply: str
+    provider_label: str
+    dimension: int
+    max_tokens: int
+    base_url: str
+    vectors: int
 
 
 def _validate(value: Any, key: str, label: str) -> dict[str, Any]:
@@ -653,3 +2086,21 @@ def validate_model_profile_surface(value: Any) -> ModelProfileSurfaceV1:
     """Validate against model-profile-surface-v1.schema.json (schema-derived)."""
     result = _validate(value, "model_profile_surface_v1", "model profile surface")
     return cast(ModelProfileSurfaceV1, result)
+
+
+def validate_task_surface_v1(value: Any) -> TaskSurfaceV1:
+    """Validate against task-surface-v1.schema.json (schema-derived)."""
+    result = _validate(value, "task_surface_v1", "task surface")
+    return cast(TaskSurfaceV1, result)
+
+
+def validate_research_surface_v1(value: Any) -> ResearchSurfaceV1:
+    """Validate against research-surface-v1.schema.json (schema-derived)."""
+    result = _validate(value, "research_surface_v1", "research surface")
+    return cast(ResearchSurfaceV1, result)
+
+
+def validate_model_connection_test_v1(value: Any) -> ModelConnectionTestV1:
+    """Validate against model-connection-test-v1.schema.json (schema-derived)."""
+    result = _validate(value, "model_connection_test_v1", "model connection test")
+    return cast(ModelConnectionTestV1, result)

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openwrite.dev/schemas/task-surface-v1.schema.json",
+  "title": "OpenWrite task surface v1 (credential-free)",
+  "type": "object",
+  "required": ["schema_version", "phase_order", "tasks", "counts"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {"const": "openwrite.task-surface.v1"},
+    "phase_order": {
+      "type": "array",
+      "items": {
+        "enum": ["queued", "reading", "preparing", "model", "validating", "committing", "complete"]
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "task_id", "type", "status", "phase", "phase_index", "progress",
+          "attempt", "retryable", "created_at", "updated_at", "started_at",
+          "completed_at", "error", "result_ref", "input_summary", "chapter_id",
+          "schema_version"
+        ],
+        "additionalProperties": true,
+        "disallowed": ["api_key", "credential", "secret"],
+        "properties": {
+          "task_id": {"type": "string", "minLength": 1},
+          "type": {"type": "string", "minLength": 1},
+          "status": {
+            "enum": ["pending", "running", "awaiting_confirmation", "completed", "failed", "cancelled", "interrupted"]
+          },
+          "phase": {
+            "enum": ["queued", "reading", "preparing", "model", "validating", "committing", "complete", null]
+          },
+          "phase_index": {"type": ["integer", "null"]},
+          "progress": {
+            "type": ["object", "null"],
+            "required": ["completed_units", "total_units", "ratio", "unit_kind"],
+            "additionalProperties": true,
+            "properties": {
+              "completed_units": {"type": "integer", "minimum": 0},
+              "total_units": {"type": "integer", "minimum": 0},
+              "ratio": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+              "unit_kind": {"enum": ["candidates", "evaluations", "chapters", "files"]}
+            }
+          },
+          "attempt": {"type": "integer", "minimum": 1},
+          "retryable": {"type": "boolean"},
+          "created_at": {"type": ["string", "null"]},
+          "updated_at": {"type": ["string", "null"]},
+          "started_at": {"type": ["string", "null"]},
+          "completed_at": {"type": ["string", "null"]},
+          "error": {
+            "type": ["object", "null"],
+            "required": ["code", "message", "recoverable"],
+            "additionalProperties": true,
+            "properties": {
+              "code": {"type": "string", "minLength": 1},
+              "message": {"type": "string"},
+              "recoverable": {"type": "boolean"},
+              "failed_stage": {"type": ["string", "null"]}
+            }
+          },
+          "result_ref": {
+            "type": ["object", "null"],
+            "required": ["type", "id"],
+            "additionalProperties": true,
+            "properties": {
+              "type": {
+                "enum": ["chapter", "review", "revision", "research_report", "benchmark_run", "import", "archive"]
+              },
+              "id": {"type": "string", "minLength": 1}
+            }
+          },
+          "input_summary": {"type": ["string", "null"]},
+          "chapter_id": {"type": ["string", "null"]},
+          "schema_version": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "counts": {"type": "object"}
+  }
+}

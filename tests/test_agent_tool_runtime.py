@@ -21,6 +21,40 @@ def test_build_tool_executors_contains_existing_openwrite_tools(tmp_path: Path):
     assert WRITING_TOOLKIT.issubset(executors.keys())
 
 
+def test_agent_manuscript_change_enters_acceptance_protocol(tmp_path: Path):
+    from tools.init_project import init_project
+    from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+    init_project(tmp_path, "demo")
+    chapter = (
+        tmp_path
+        / "data"
+        / "novels"
+        / "demo"
+        / "data"
+        / "manuscript"
+        / "arc_001"
+        / "ch_001.md"
+    )
+    chapter.write_text("# 第一章\n\n旧句。\n", encoding="utf-8")
+    executor = build_tool_executors(tmp_path)["edit_project_document"]
+
+    preview = executor(
+        {
+            "path": "data/manuscript/arc_001/ch_001.md",
+            "edits": [{"old_text": "旧句。", "new_text": "新句。"}],
+        }
+    )
+    applied = executor({"preview_token": preview["preview_token"], "confirm": True})
+
+    assert applied["ok"] is True
+    assert applied["acceptance"]["status"] == "pending"
+    assert applied["acceptance"]["current_revision"].startswith("sha256:")
+    surface = ManuscriptAcceptanceService(tmp_path, "demo").inspect()
+    assert surface["status"] == "pending"
+    assert surface["latest_operation_id"] == applied["acceptance"]["operation_id"]
+
+
 def test_build_tool_executors_owns_registry_outside_cli(monkeypatch, tmp_path: Path):
     from tools.init_project import init_project
     from tools.novel_service import NovelApplicationService
@@ -668,6 +702,8 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
     assert preview["ok"] is True
     assert preview["applied"] is False
     assert preview["preview_token"]
+    assert preview["mutation_summary"]["execution_status"] == "proposed"
+    assert preview["mutation_summary"]["items"][0]["before"]["value"] is not None
     assert "+新动机：查清幽都转轮府与回响异动的关联。" in preview["diff"]
     assert "旧动机：只想远离归墟。" in hero.read_text(encoding="utf-8")
 
@@ -676,6 +712,10 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
     )
     assert applied["ok"] is True
     assert applied["applied"] is True
+    assert applied["mutation_summary"]["execution_status"] == "committed"
+    assert applied["mutation_summary"]["source_revision"].startswith("sha256:")
+    assert applied["mutation_summary"]["result_revision"].startswith("sha256:")
+    assert applied["undo_preview_token"]
     assert "新动机：查清幽都转轮府与回响异动的关联。" in hero.read_text(
         encoding="utf-8"
     )
@@ -683,6 +723,14 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
         {"preview_token": preview["preview_token"], "confirm": True}
     )
     assert reused["error"] == "document_preview_invalid"
+
+    undone = executors["edit_project_document"](
+        {"action": "undo", "preview_token": applied["undo_preview_token"]}
+    )
+    assert undone["ok"] is True
+    assert undone["applied"] is True
+    assert undone["mutation_summary"]["operation"] == "document.change_undo"
+    assert "旧动机：只想远离归墟。" in hero.read_text(encoding="utf-8")
 
     stale_preview = executors["edit_project_document"](
         {
@@ -701,6 +749,22 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
     )
     assert stale["error"] == "document_revision_conflict"
     assert 'role = "主角"' in hero.read_text(encoding="utf-8")
+
+    retried = executors["edit_project_document"](
+        {"action": "retry", "preview_token": stale_preview["preview_token"]}
+    )
+    assert retried["ok"] is True
+    assert retried["applied"] is False
+    assert retried["preview_token"] != stale_preview["preview_token"]
+    assert retried["retried_from"] == stale_preview["preview_token"]
+    rejected = executors["edit_project_document"](
+        {"action": "reject", "preview_token": retried["preview_token"]}
+    )
+    assert rejected["status"] == "rejected"
+    rejected_apply = executors["edit_project_document"](
+        {"action": "apply", "preview_token": retried["preview_token"]}
+    )
+    assert rejected_apply["error"] == "document_preview_invalid"
 
     quote_document = novel_root / "src" / "world" / "quote_rules.md"
     quote_document.write_text(

@@ -28,17 +28,272 @@
     "default_profile_id": "writer",
     "schema_version": "openwrite.model-profile.v1",
     "profiles": [
-      {"id": "writer", "label": "Writer", "provider": "openai", "model": "provider/model-id", "configured": false}
+      {
+        "id": "writer",
+        "label": "Writer",
+        "provider": "openai",
+        "model": "provider/model-id",
+        "configured": false,
+        "schema_version": "openwrite.model-profile.v1",
+        "capabilities": {"chat": true},
+        "used_by_routes": ["chapter_write"],
+        "last_test": {
+          "status": "failed",
+          "tested_at": "2026-08-30T10:00:00Z",
+          "latency_ms": 42,
+          "provider": "openai",
+          "resolved_model": "provider/model-id",
+          "error_code": "MODEL_TEST_TIMEOUT",
+          "failed_stage": null
+        }
+      }
     ],
-    "routes": {"chapter_write": "writer"}
+    "routes": {"chapter_write": "writer"},
+    "embedding_profiles": [{"id": "local", "label": "Local", "provider": "local", "model": "BAAI/bge-small-zh-v1.5", "base_url": "", "dimension": 512, "max_tokens": 512, "configured": true, "active": true, "schema_version": "openwrite.embedding-profile.v1", "last_test": null}],
+    "active_embedding_profile_id": "local"
   },
   "benchmark": {
     "schema_version": "openwrite.model-benchmark.v1",
     "run_id": "bench_fixture",
     "status": "completed",
     "context_hash": "sha256:fixture",
+    "task_id": "tsk_20260101000000_abcdef1234",
+    "started_at": "2026-01-01T00:00:01+00:00",
     "config": {"writer_profile_ids": ["writer"], "reviewer_profile_ids": ["reviewer"]},
-    "candidates": [],
-    "evaluations": []
+    "candidates": [
+      {
+        "candidate_id": "bench_fixture_writer_1",
+        "writer_profile": {"id": "writer", "model": "provider/model-id"},
+        "reliability_status": "completed",
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "reasoning_tokens": null, "total_tokens": 30},
+        "cost_usd": 0.0,
+        "cost_reported": true,
+        "latency_ms": 1200,
+        "error": null
+      }
+    ],
+    "evaluations": [
+      {
+        "candidate_id": "bench_fixture_writer_1",
+        "reviewer_profile": {"id": "reviewer", "model": "provider/reviewer-id"},
+        "execution_status": "completed",
+        "usage": {"prompt_tokens": null, "completion_tokens": null, "reasoning_tokens": null, "total_tokens": 12},
+        "cost_usd": null,
+        "cost_reported": false,
+        "latency_ms": 800,
+        "error": null
+      }
+    ],
+    "summary": {
+      "requested_candidates": 1,
+      "completed_candidates": 1,
+      "failed_candidates": 0,
+      "latency_ms_total": 2000
+    }
+  },
+  "task_surface": {
+    "schema_version": "openwrite.task-surface.v1",
+    "phase_order": ["queued", "reading", "preparing", "model", "validating", "committing", "complete"],
+    "tasks": [
+      {
+        "task_id": "tsk_20260101000000_abcdef1234",
+        "novel_id": "demo",
+        "type": "chapter_review",
+        "status": "completed",
+        "phase": "complete",
+        "phase_index": 6,
+        "progress": null,
+        "attempt": 1,
+        "retryable": true,
+        "cancel_requested": false,
+        "chapter_id": "ch_001",
+        "input_summary": "审校 ch_001",
+        "input": {"chapter_id": "ch_001"},
+        "result": {"score": 92},
+        "error": null,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:05:00+00:00",
+        "started_at": "2026-01-01T00:00:01+00:00",
+        "completed_at": "2026-01-01T00:05:00+00:00",
+        "schema_version": "openwrite.task.v1",
+        "result_ref": {"type": "review", "id": "ch_001"}
+      },
+      {
+        "task_id": "tsk_20260102000000_abcdef5678",
+        "novel_id": "demo",
+        "type": "research",
+        "status": "failed",
+        "phase": "model",
+        "phase_index": 3,
+        "progress": null,
+        "attempt": 2,
+        "retryable": true,
+        "cancel_requested": false,
+        "chapter_id": "",
+        "input_summary": "深度研究",
+        "input": {"query": "示例"},
+        "result": {},
+        "error": {"code": "TASK_FAILED", "message": "模型超时", "recoverable": true, "failed_stage": "model"},
+        "created_at": "2026-01-02T00:00:00+00:00",
+        "updated_at": "2026-01-02T00:03:00+00:00",
+        "started_at": "2026-01-02T00:00:01+00:00",
+        "completed_at": "2026-01-02T00:03:00+00:00",
+        "schema_version": "openwrite.task.v1",
+        "result_ref": null
+      },
+      {
+        "task_id": "tsk_20260103000000_abcdef9999",
+        "novel_id": "demo",
+        "type": "source_operation",
+        "status": "pending",
+        "phase": null,
+        "phase_index": null,
+        "progress": null,
+        "attempt": 1,
+        "retryable": false,
+        "cancel_requested": false,
+        "chapter_id": null,
+        "input_summary": null,
+        "input": {},
+        "result": {},
+        "error": null,
+        "created_at": "2026-01-03T00:00:00+00:00",
+        "updated_at": "2026-01-03T00:00:00+00:00",
+        "started_at": null,
+        "completed_at": null,
+        "schema_version": "openwrite.task.v0",
+        "result_ref": null
+      },
+      {
+        "task_id": "tsk_20260104000000_abcdef0000",
+        "novel_id": "demo",
+        "type": "model_benchmark",
+        "status": "running",
+        "phase": "validating",
+        "phase_index": 4,
+        "progress": {
+          "completed_units": 1,
+          "total_units": 2,
+          "ratio": 0.5,
+          "unit_kind": "evaluations"
+        },
+        "attempt": 1,
+        "retryable": true,
+        "cancel_requested": false,
+        "chapter_id": "ch_001",
+        "input_summary": "模型对比测试",
+        "input": {"chapter_id": "ch_001"},
+        "result": {},
+        "error": null,
+        "created_at": "2026-01-04T00:00:00+00:00",
+        "updated_at": "2026-01-04T00:01:00+00:00",
+        "started_at": "2026-01-04T00:00:01+00:00",
+        "completed_at": null,
+        "schema_version": "openwrite.task.v1",
+        "result_ref": null
+      }
+    ],
+    "counts": {
+      "pending": 1,
+      "running": 0,
+      "awaiting_confirmation": 0,
+      "completed": 1,
+      "failed": 1,
+      "cancelled": 0,
+      "interrupted": 0
+    }
+  },
+  "research_surface": {
+    "schema_version": "openwrite.research-surface.v1",
+    "available": true,
+    "node_ready": true,
+    "pnpm_ready": true,
+    "package_ready": true,
+    "dependencies_ready": true,
+    "setup_hint": "",
+    "settings": {
+      "search_provider": "bocha",
+      "search_providers": []
+    },
+    "reports": [
+      {
+        "id": "EP_20260803_053922_002_b9a1d3b3",
+        "title": "叙事视角研究",
+        "status": "succeeded",
+        "episode_id": "EP_20260803_053922_002_b9a1d3b3",
+        "task_id": "tsk_20260101000000_abcdef1234",
+        "created_at": "2026-08-03T05:40:00Z",
+        "completed_at": null,
+        "model_profile": {
+          "id": "default",
+          "label": "默认档案",
+          "model": "glm-4.7-flash",
+          "provider": "openai"
+        },
+        "search_provider": "bocha",
+        "sources": [
+          {
+            "title": "HTTP source 1",
+            "url": "https://example.test/node-http/1",
+            "source_type": "secondary",
+            "cited": true
+          },
+          {
+            "title": "HTTP source 2",
+            "url": "https://example.test/node-http/2",
+            "source_type": "secondary",
+            "cited": false
+          }
+        ],
+        "sources_status": "ok",
+        "source_count": 2,
+        "word_count": 1204,
+        "latency_ms": 53210,
+        "usage": {"total_tokens": 48211, "reported": true},
+        "cost_usd": {"value": 0.031, "reported": true},
+        "failure": null,
+        "metrics": {
+          "citationCount": 3,
+          "providerRequestCount": 12,
+          "totalTokenCount": 48211,
+          "estimatedCostUsd": 0.031
+        },
+        "path": "data/research/reports/EP_20260803_053922_002_b9a1d3b3.md",
+        "bytes": 1204
+      },
+      {
+        "id": "EP_failed_demo",
+        "title": "预算门未通过的研究",
+        "status": "failed",
+        "episode_id": "EP_failed_demo",
+        "task_id": null,
+        "created_at": "2026-08-04T00:00:00Z",
+        "completed_at": null,
+        "model_profile": null,
+        "search_provider": null,
+        "sources": null,
+        "sources_status": "unavailable",
+        "source_count": null,
+        "word_count": null,
+        "latency_ms": null,
+        "usage": {"total_tokens": null, "reported": false},
+        "cost_usd": {"value": null, "reported": false},
+        "failure": {
+          "code": "RESEARCH_EPISODE_FAILED",
+          "message": "DeepResearch 未通过内部质量或预算门，失败产物已保留供诊断"
+        },
+        "metrics": {"publishGatePassed": false},
+        "path": "data/research/reports/EP_failed_demo.md",
+        "bytes": 87
+      }
+    ],
+    "model_route": {
+      "profile_id": "default",
+      "label": "默认档案",
+      "model": "glm-4.7-flash",
+      "provider": "openai",
+      "configured": true,
+      "compatible": true
+    }
   }
 }

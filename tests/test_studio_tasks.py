@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import time
+import urllib.error
 from pathlib import Path
 from threading import Thread
 from urllib.request import ProxyHandler, Request, build_opener
 
+from tools.chapter_pipeline import _save_chapter as _save_chapter_file
 from tools.cli import _save_chapter
 from tools.init_project import init_project
+from tools.manuscript_acceptance import ManuscriptAcceptanceService
 from tools.model_profiles import ModelProfileStore, active_model_profile
 from tools.studio import StudioApplication, create_server
 
@@ -20,6 +23,57 @@ def _wait(app: StudioApplication, task_id: str, statuses: set[str], timeout: flo
             return task
         time.sleep(0.01)
     raise AssertionError(f"task {task_id} did not reach {statuses}")
+
+
+def _post_task(opener, base: str, path: str, payload: dict) -> tuple[int, dict]:
+    request = Request(
+        f"{base}{path}",
+        method="POST",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "X-OpenWrite-Studio": "1"},
+    )
+    try:
+        with opener.open(request) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def _get_task_http(opener, base: str, task_id: str) -> tuple[int, dict]:
+    try:
+        with opener.open(f"{base}/api/tasks/{task_id}") as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def _wait_http_task(
+    opener, base: str, task_id: str, statuses: set[str], timeout: float = 5
+) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status, payload = _get_task_http(opener, base, task_id)
+        if status == 200 and payload["data"]["task"]["status"] in statuses:
+            return payload["data"]["task"]
+        time.sleep(0.02)
+    raise AssertionError(f"task {task_id} did not reach {statuses}")
+
+
+def _save_accepted_chapter(
+    root: Path,
+    chapter_id: str,
+    title: str,
+    content: str,
+) -> tuple[Path, dict]:
+    """Simulate a writer extension that commits prose and its derived facts."""
+    path = _save_chapter_file(root, "demo", chapter_id, title, content)
+    acceptance = ManuscriptAcceptanceService(root, "demo").record_precomputed(
+        chapter_id,
+        source="chapter_write",
+        expected_previous_revision="",
+        fact={},
+    )
+    return path, acceptance
 
 
 def test_studio_runs_write_and_review_through_persistent_tasks(tmp_path: Path):
@@ -156,9 +210,8 @@ def test_controlled_continuous_write_waits_for_confirmation_and_resumes(tmp_path
 
     def writer(root: Path, args: dict) -> dict:
         number = int(args["chapter_id"].split("_")[1])
-        path = _save_chapter(
+        path, acceptance = _save_accepted_chapter(
             root,
-            "demo",
             args["chapter_id"],
             f"第{number}章",
             f"第{number}章正文。",
@@ -169,6 +222,7 @@ def test_controlled_continuous_write_waits_for_confirmation_and_resumes(tmp_path
             "title": f"第{number}章",
             "word_count": 6,
             "draft_path": str(path),
+            "acceptance": acceptance,
         }
 
     def reviewer(root: Path, args: dict) -> dict:
@@ -272,6 +326,184 @@ def test_studio_task_http_api_persists_across_refresh(tmp_path: Path):
         with opener.open(f"{base}/api/tasks/{task_id}") as response:
             detail = json.loads(response.read())
         assert detail["data"]["events"][-1]["event"] == "task_completed"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+        if server.app._task_runner is not None:
+            server.app._task_runner.shutdown(wait=True)
+
+
+def test_studio_task_confirm_via_http_resumes_and_rejects_non_awaiting(tmp_path: Path):
+    init_project(tmp_path, "demo")
+
+    def writer(root: Path, args: dict) -> dict:
+        number = int(args["chapter_id"].split("_")[1])
+        path, acceptance = _save_accepted_chapter(
+            root,
+            args["chapter_id"],
+            f"第{number}章",
+            f"第{number}章正文。",
+        )
+        return {
+            "ok": True,
+            "chapter_id": args["chapter_id"],
+            "title": f"第{number}章",
+            "word_count": 6,
+            "draft_path": str(path),
+            "acceptance": acceptance,
+        }
+
+    def reviewer(root: Path, args: dict) -> dict:
+        del root
+        return {
+            "ok": True,
+            "chapter_id": args["chapter_id"],
+            "passed": True,
+            "score": 90,
+            "issues": 0,
+            "issue_details": [],
+        }
+
+    server = create_server(tmp_path, port=0, writer_executor=writer, review_executor=reviewer)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    opener = build_opener(ProxyHandler({}))
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        outline = server.app.read_document("src/outline.md")
+        server.app.write_document(
+            outline["path"],
+            """# 第一卷
+
+## 第一幕
+
+### 第一节
+
+#### 第一章
+
+开场。
+
+#### 第二章
+
+推进。
+""",
+            outline["version"],
+        )
+
+        status, created = _post_task(
+            opener,
+            base,
+            "/api/tasks",
+            {
+                "type": "continuous_write",
+                "input": {
+                    "max_chapters": 2,
+                    "minimum_review_score": 82,
+                    "require_confirmation_after_each_chapter": True,
+                },
+            },
+        )
+        assert status == 200, created
+        task_id = created["data"]["task_id"]
+        waiting = _wait_http_task(opener, base, task_id, {"awaiting_confirmation"})
+        # A non-benchmark task DTO never fabricates progress.
+        assert waiting["progress"] is None
+
+        # A task that is not awaiting confirmation cannot be confirmed.
+        status, conflict = _post_task(opener, base, f"/api/tasks/{task_id}/retry", {})
+        assert status == 409, conflict
+        assert conflict["code"] == "TASK_CONFLICT"
+
+        # Confirm resumes the run as a NEW task record over HTTP.
+        status, resumed = _post_task(opener, base, f"/api/tasks/{task_id}/confirm", {})
+        assert status == 200, resumed
+        assert resumed["ok"] is True
+        resumed_id = resumed["data"]["task_id"]
+        assert resumed_id != task_id
+        completed = _wait_http_task(opener, base, resumed_id, {"completed"})
+        assert [item["chapter_id"] for item in completed["result"]["completed_chapters"]] == [
+            "ch_001",
+            "ch_002",
+        ]
+        assert completed["progress"] is None
+
+        # The resumed (now completed) task is no longer confirmable.
+        status, conflict = _post_task(opener, base, f"/api/tasks/{resumed_id}/confirm", {})
+        assert status == 409, conflict
+        assert conflict["code"] == "TASK_CONFLICT"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+        if server.app._task_runner is not None:
+            server.app._task_runner.shutdown(wait=True)
+
+
+def test_studio_task_routes_fail_closed_on_unknown_ids(tmp_path: Path):
+    init_project(tmp_path, "demo")
+    server = create_server(tmp_path, port=0)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    opener = build_opener(ProxyHandler({}))
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        # Well-formed but nonexistent ids: 404 TASK_NOT_FOUND on every verb.
+        status, payload = _get_task_http(opener, base, "tsk_missing_12345678")
+        assert status == 404
+        assert payload["code"] == "TASK_NOT_FOUND"
+        for verb in ("cancel", "retry", "confirm"):
+            status, payload = _post_task(
+                opener, base, f"/api/tasks/tsk_missing_12345678/{verb}", {}
+            )
+            assert status == 404, (verb, payload)
+            assert payload["code"] == "TASK_NOT_FOUND", (verb, payload)
+
+        # Malformed ids never reach a task handler at all: the route simply
+        # does not exist (404 fail closed, no task data crosses).
+        status, payload = _get_task_http(opener, base, "not-a-task")
+        assert status == 404
+        assert payload["code"] == "STATIC_ASSET_NOT_FOUND"
+        for verb in ("cancel", "retry", "confirm"):
+            status, payload = _post_task(opener, base, f"/api/tasks/not-a-task/{verb}", {})
+            assert status == 404, (verb, payload)
+            assert payload["code"] == "ROUTE_NOT_FOUND", (verb, payload)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+        if server.app._task_runner is not None:
+            server.app._task_runner.shutdown(wait=True)
+
+
+def test_studio_task_error_dto_carries_code_and_recoverable_without_extras(tmp_path: Path):
+    init_project(tmp_path, "demo")
+
+    def writer(root: Path, args: dict) -> dict:
+        del root, args
+        raise RuntimeError("模型超时")
+
+    server = create_server(tmp_path, port=0, writer_executor=writer)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    opener = build_opener(ProxyHandler({}))
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        status, created = _post_task(
+            opener,
+            base,
+            "/api/tasks",
+            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 10}},
+        )
+        assert status == 200, created
+        failed = _wait_http_task(opener, base, created["data"]["task_id"], {"failed"})
+        error = failed["error"]
+        assert error["code"] == "TASK_FAILED"
+        assert error["message"] == "模型超时"
+        assert error["recoverable"] is True
+        # The wire error carries only the documented fields: no stack traces,
+        # environment dumps, or other secret-bearing material.
+        assert set(error) <= {"code", "message", "recoverable", "failed_stage"}
     finally:
         server.shutdown()
         server.server_close()

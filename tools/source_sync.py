@@ -43,6 +43,22 @@ def collect_sync_status(project_root: Path, novel_id: str) -> Dict[str, Any]:
         if profile_paths[stem].stat().st_mtime > card_paths[stem].stat().st_mtime
     )
 
+    # 章节记忆/真相属于“写章管线结算产物”，不是 src 派生缓存：既有/导入章节
+    # 若从未结算会一直缺记忆。这里只做信息性统计（不进入 needs_sync，避免
+    # ensure_runtime_fresh 因无法自动修复而硬失败）；真正的回填见
+    # tools/settle_backfill.py（任务类型 settle_backfill）。
+    manuscript_dir = data_root / "manuscript"
+    drafted_stems = (
+        sorted({p.stem for p in manuscript_dir.rglob("ch_*.md")})
+        if manuscript_dir.is_dir()
+        else []
+    )
+    memory_dir = data_root / "memory" / "chapters"
+    memory_stems = (
+        {p.stem for p in memory_dir.glob("ch_*.yaml")} if memory_dir.is_dir() else set()
+    )
+    memory_missing = sorted(set(drafted_stems) - memory_stems)
+
     return {
         "novel_id": novel_id,
         "outline_pending": outline_pending,
@@ -51,6 +67,10 @@ def collect_sync_status(project_root: Path, novel_id: str) -> Dict[str, Any]:
         "missing_cards": missing_cards,
         "extra_cards": extra_cards,
         "stale_cards": stale_cards,
+        "drafted_chapters": len(drafted_stems),
+        "memory_count": len(memory_stems),
+        "memory_missing": memory_missing,
+        "memory_missing_count": len(memory_missing),
         "needs_sync": outline_pending or bool(missing_cards) or bool(stale_cards),
     }
 

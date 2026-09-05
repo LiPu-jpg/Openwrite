@@ -579,9 +579,25 @@ def test_cmd_multi_write_updates_runtime_state(
             self.novel_id = novel_id
             self.style_id = style_id
 
-        async def run(self, chapter_id: str, temperature: float = 0.7, run_review: bool = True):
+        async def run(
+            self,
+            chapter_id: str,
+            temperature: float = 0.7,
+            run_review: bool = True,
+            settle_state: bool = True,
+            **kwargs,
+        ):
+            assert settle_state is False
             return SimpleNamespace(
-                draft=SimpleNamespace(title="第二章", content="正文"),
+                draft=SimpleNamespace(
+                    title="第二章",
+                    content="正文",
+                    chapter_summary="章节摘要",
+                    observations="",
+                    state_delta={},
+                    state_updates={"current_state": "已更新"},
+                    token_usage={},
+                ),
                 review=SimpleNamespace(passed=True, score=93, issues=[]),
                 applied_state_updates={"current_state": "已更新"},
                 new_concepts=[],

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -77,6 +78,28 @@ def write_content_project_metadata(project_root: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def initialize_content_git(project_root: Path) -> bool:
+    """Initialize an independent Git repository for a newly created work.
+
+    A nested ``.git`` is intentional when the target sits under another
+    repository: content must remain independently checkpointable and must
+    never fall back to the OpenWrite framework repository.
+    """
+    root = Path(project_root).resolve()
+    git_path = root / ".git"
+    if git_path.is_dir() or git_path.is_file():
+        return False
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "init", "--quiet"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return True
 
 
 @dataclass(frozen=True)

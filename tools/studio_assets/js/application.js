@@ -198,14 +198,14 @@ async function saveResearchSettings(event) {
   button.disabled = true;
   $("#research-settings-status").textContent = "正在保存…";
   try {
-    state.research.status = await api("/api/research/settings", {
+    state.research.status = (await api("/api/research/settings", {
       method: "POST",
       body: JSON.stringify({
         search_provider: $("#research-settings-search").value,
         search_api_key: $("#research-search-api-key").value.trim(),
         remember_api_key: $("#research-search-remember-key").checked,
       }),
-    });
+    })).data;
     state.research.searchProviderInitialized = false;
     renderResearch();
     $("#research-settings-status").textContent = "API 设置已保存。";
@@ -224,13 +224,13 @@ async function clearResearchSearchKey() {
   if (!provider?.credential_configured) return;
   if (!window.confirm(`清除本机保存的 ${provider.label} API Key？`)) return;
   try {
-    state.research.status = await api("/api/research/settings", {
+    state.research.status = (await api("/api/research/settings", {
       method: "POST",
       body: JSON.stringify({
         search_provider: providerId,
         clear_api_key: true,
       }),
-    });
+    })).data;
     renderResearch();
     $("#research-settings-status").textContent = `${provider.label} API Key 已清除。`;
   } catch (error) {
@@ -1616,6 +1616,7 @@ async function saveDocument(options = {}) {
         path: state.document.path,
         content: contentAtStart,
         version: state.document.version,
+        save_origin: silent ? "autosave" : "manual",
       }),
     });
     state.document = saved;
@@ -3924,22 +3925,44 @@ async function runSync() {
 async function inspectContext(event) {
   event.preventDefault();
   const chapter = $("#context-chapter").value.trim() || "next";
+  const known = state.contextPreviewRevisions?.[chapter] || {};
+  const knownQuery = known.revision
+    ? `&known_revision=${encodeURIComponent(known.revision)}&known_source_revision=${encodeURIComponent(known.sourceRevision || "")}`
+    : "";
   $("#context-meta").textContent = "正在组装上下文…";
   try {
-    const payload = await api(`/api/context?chapter=${encodeURIComponent(chapter)}`);
+    const payload = await api(`/api/context?chapter=${encodeURIComponent(chapter)}${knownQuery}`);
     const manifest = payload.manifest || {};
+    state.contextPreviewRevisions[chapter] = {
+      revision: manifest.packet_revision || manifest.revision || "",
+      sourceRevision: manifest.source_revision || "",
+    };
     const semanticRetrieval = payload.semantic_retrieval || {};
     const semanticResultCount = Number(semanticRetrieval.results || 0);
     const semanticMeta = semanticRetrieval.status === "ready"
       ? ` · 语义召回 ${formatNumber(semanticResultCount)} 条`
       : "";
-    $("#context-meta").textContent = `${payload.chapter_id} · 目标 ${formatNumber(payload.target_words)} 字 · ${payload.characters.length} 位相关人物 · 上下文 ${formatNumber(manifest.estimated_tokens)} tokens${semanticMeta} · revision ${manifest.revision || "-"}`;
+    const requestBudget = manifest.request_budget || {};
+    $("#context-meta").textContent = `${payload.chapter_id} · 目标 ${formatNumber(payload.target_words)} 字 · ${payload.characters.length} 位相关人物 · 上下文 ${formatNumber(manifest.estimated_tokens)} / ${formatNumber(requestBudget.input_budget_tokens || 0)} tokens${semanticMeta} · revision ${manifest.packet_revision || manifest.revision || "-"}`;
     const provenance = (manifest.items || []).map((item) => {
-      const sources = (item.sources || []).map((source) => source.path).join(", ");
-      return `L${item.level} ${item.section} · ${item.estimated_tokens} tokens · ${sources}`;
+      const sources = (item.sources || []).map((source) => `${source.path}@${source.revision}`).join(", ");
+      const protection = item.protected ? ` · 受保护(${item.protection_reason})` : "";
+      const compression = item.compression_reason ? ` · ${item.status}:${item.compression_reason}` : ` · ${item.status || "selected"}`;
+      return `L${item.level} ${item.section} · ${item.estimated_tokens} tokens${protection}${compression}\n原因：${item.selection_reason || "assembled"}\n片段：${item.snippet || "（无）"}\n来源：${sources || "（无）"}`;
     }).join("\n");
     const sections = [];
+    const previousFreshness = manifest.previous_freshness || {};
+    if (previousFreshness.status === "stale") {
+      sections.push(`【旧上下文已过期】\n${previousFreshness.reason} · ${previousFreshness.previous_revision || "-"} → ${previousFreshness.current_revision || "-"}`);
+    }
+    sections.push(`【预算边界】\nOpenWrite 写章请求：${requestBudget.available ? `${manifest.estimated_tokens || 0} / ${requestBudget.input_budget_tokens || 0} tokens` : "不可用"}\n输出预留：${requestBudget.reserved_output_tokens ?? "不可用"}\n真实 provider 用量：${requestBudget.actual_usage?.reported ? requestBudget.actual_usage.total_tokens : "不可用"}\ndsh 会话预算：不可用（由会话运行时独立计量，不与本请求相加）`);
     if (provenance) sections.push(`【上下文来源】\n${provenance}`);
+    const missing = (manifest.missing_items || []).map((item) => `${item.section} · ${item.reason}`).join("\n");
+    if (missing) sections.push(`【缺失项】\n${missing}`);
+    const excluded = (manifest.excluded_items || []).map((item) => `${item.label || item.section} · ${item.reason}`).join("\n");
+    if (excluded) sections.push(`【预算排除项】\n${excluded}`);
+    const index = semanticRetrieval.index || {};
+    sections.push(`【语义检索】\n${semanticRetrieval.status || "unavailable"} · ${semanticRetrieval.reason || "未报告原因"} · index=${index.status || "unavailable"}`);
     if (String(payload.character_states || "").trim()) {
       sections.push(`【精确人物状态】\n${payload.character_states.trim()}`);
     }

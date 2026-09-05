@@ -1,0 +1,31 @@
+{
+  "jsonrpc": "2.0",
+  "id": 13,
+  "method": "tools/call",
+  "params": {
+    "name": "publish_content",
+    "arguments": {
+      "title": "分享一个长篇小说写作工具",
+      "content": "分享一个面向长篇小说的开源写作工具：OpenWrite。\n\n它把滚动大纲、上下文写作和审稿放在一起：写之前明确章节目标，写的时候带上相关设定，写完再检查节奏、动机和前后冲突。\n\n比较适合经常遇到人物状态散、伏笔容易忘、大纲跟不上正文等问题的创作者。\n\nGitHub 搜索：LiPu-jpg/Openwrite\n\n你写长篇时，最容易在哪一步卡住？",
+      "images": [
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output-v2/01.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output-v2/02.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output-v2/03.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output-v2/04.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output-v2/05.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output-v2/06.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output-v2/07.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output-v2/08.png"
+      ],
+      "tags": [
+        "AI写作",
+        "小说创作",
+        "写作工具",
+        "开源工具",
+        "开源项目"
+      ],
+      "visibility": "公开可见",
+      "is_original": false
+    }
+  }
+}

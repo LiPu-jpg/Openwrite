@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from models.token_estimation import estimate_measurement, estimate_text_tokens
 from tools.llm import LLMResponse, Message
 
 
@@ -476,7 +477,11 @@ class AgentContextInspector:
                 "role": message.role,
                 "content": message.content,
                 "characters": len(message.content),
-                "estimated_tokens": max(1, int(len(message.content) / 1.5)),
+                "estimated_tokens": estimate_text_tokens(message.content),
+                "measurement": estimate_measurement(
+                    text_scope="complete_message_content",
+                    includes_wrapper_overhead=True,
+                ),
                 "revision": hashlib.sha256(message.content.encode("utf-8")).hexdigest()[
                     :16
                 ],

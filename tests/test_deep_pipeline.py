@@ -22,6 +22,24 @@ from tools.truth_manager import TruthFiles, TruthFilesManager
 
 def test_chapter_memory_is_bounded_and_enters_next_chapter_context(tmp_path: Path):
     init_project(tmp_path, "demo")
+    from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+    manuscript = (
+        tmp_path / "data" / "novels" / "demo" / "data" / "manuscript" / "arc_001"
+    )
+    (manuscript / "ch_001.md").write_text("# 雨夜\n\n正文一。\n", encoding="utf-8")
+    (manuscript / "ch_002.md").write_text("# 地下室\n\n正文二。\n", encoding="utf-8")
+    acceptance = ManuscriptAcceptanceService(tmp_path, "demo")
+    baseline = acceptance.establish_baseline(confirm=True)
+    acceptance.resume(
+        baseline["operation_id"],
+        analyzer=lambda *args: {
+            "chapter_summary": "",
+            "observations": "",
+            "legacy_updates": {},
+            "state_delta": {},
+        },
+    )
     store = ChapterMemoryStore(tmp_path, "demo")
     store.save(
         chapter_id="ch_001",

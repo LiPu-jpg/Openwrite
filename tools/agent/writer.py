@@ -333,6 +333,13 @@ class WriterAgent(BaseAgent):
         if context.get("emotion_arc"):
             parts.append(f"## 章内情感弧线\n{context['emotion_arc']}\n")
 
+        if context.get("scene_context"):
+            from tools.scene_integration import render_scene_context
+
+            rendered_scenes = render_scene_context(context["scene_context"])
+            if rendered_scenes:
+                parts.append(f"## 本章场景结构（按顺序落实）\n{rendered_scenes}\n")
+
         # 戏剧位置
         if context.get("dramatic_context"):
             parts.append(f"## 戏剧位置\n{context['dramatic_context']}\n")

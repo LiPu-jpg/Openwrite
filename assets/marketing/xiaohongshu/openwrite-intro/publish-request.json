@@ -1,0 +1,34 @@
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "publish_content",
+    "arguments": {
+      "title": "写到第30章，AI还记得第1章吗？",
+      "content": "我一直觉得，AI 写小说真正困难的地方，不是“能不能写出一段文字”，而是“写了几十章以后，还记不记得这是一本什么样的书”。\n\n人物的位置、伤势和认知会变化，设定不能互相冲突，大纲也会随着创作不断调整。普通聊天窗口很难长期维护这些东西。\n\n所以我做了 OpenWrite：一个面向长篇小说的 AI Agent 创作工作台。\n\n它把作者意图、人物与世界设定、滚动大纲、正文、章节记忆、审稿和修订放进同一套流程。AI 可以参与，但人物、世界和大纲等正式资产仍然需要作者确认后才能写入。\n\n我不想让它代替作者，更希望它解决那些会打断创作的整理、回忆和检查工作。\n\n项目还在持续开发。你用 AI 写长篇时，最容易在哪一步卡住？",
+      "images": [
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output/01.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output/02.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output/03.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output/04.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output/05.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output/06.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output/07.png",
+        "/Users/jiaoziang/Openwrite/assets/marketing/xiaohongshu/openwrite-intro/output/08.png"
+      ],
+      "tags": [
+        "AI写作",
+        "小说写作",
+        "网文作者",
+        "写作工具",
+        "独立开发",
+        "开源项目",
+        "长篇小说",
+        "创作工具"
+      ],
+      "visibility": "公开可见",
+      "is_original": false
+    }
+  }
+}

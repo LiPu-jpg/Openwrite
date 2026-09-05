@@ -18,11 +18,11 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tools.context_builder import ContextBuilder
-from tools.outline_parser import OutlineMdParser
-from models.outline import OutlineNode, OutlineNodeType, OutlineHierarchy
 from models.context_package import GenerationContext
-
+from models.outline import OutlineHierarchy, OutlineNode, OutlineNodeType
+from tools.context_builder import ContextBuilder
+from tools.context_protection import ContextBudgetError
+from tools.outline_parser import OutlineMdParser
 
 # ── Fixtures ──────────────────────────────────────────────────
 
@@ -587,9 +587,10 @@ class TestDynamicCompression:
         assert "ch_006" in kept_ids
         assert kept_ids[0] < "ch_006" < kept_ids[-1]
         assert result.estimate_tokens() <= builder.MAX_TOKENS
-        assert len(nodes[5].summary) > len(result.current_chapter.summary)
+        assert result.current_chapter.summary == nodes[5].summary
+        assert result.compression["protected_unchanged"] is True
 
-    def test_hard_fit_is_a_real_invariant(self, builder):
+    def test_protected_controls_over_budget_fail_instead_of_being_truncated(self, builder):
         builder.MAX_TOKENS = 1200
         context = GenerationContext(
             novel_id="test",
@@ -602,12 +603,46 @@ class TestDynamicCompression:
             chapter_summaries="历史事件。" * 2000,
         )
 
+        with pytest.raises(ContextBudgetError) as raised:
+            builder._compress_if_needed(context)
+
+        assert raised.value.code == "PROTECTED_CONTEXT_OVER_BUDGET"
+        assert raised.value.details["budget_tokens"] == 1200
+        assert "author_intent" in raised.value.details["protected_items"]
+        assert "creative_focus" in raised.value.details["protected_items"]
+        assert raised.value.details["adjustments"]
+
+    def test_optional_pressure_preserves_protected_content_and_records_compression(self, builder):
+        builder.MAX_TOKENS = 4000
+        context = GenerationContext(
+            novel_id="test",
+            chapter_id="ch_001",
+            author_intent="人物不能违背已经做出的选择。",
+            creative_focus="雨夜中完成关系反转。",
+            core_documents={"foundation": "时间倒流必须付出记忆代价。"},
+            current_state="钟楼仍然封闭。",
+            relationships="林岑仍然信任周远。",
+            recent_text="可压缩的最近正文。" * 2500,
+            chapter_summaries="可重建的旧章节记忆。" * 2500,
+        )
+        protected_before = {
+            "author_intent": context.author_intent,
+            "creative_focus": context.creative_focus,
+            "core_documents": dict(context.core_documents),
+            "current_state": context.current_state,
+            "relationships": context.relationships,
+        }
+
         result = builder._compress_if_needed(context)
 
-        assert result.compression["level"] == 4
-        assert result.compression["final_estimated_tokens"] <= 1200
-        assert result.estimate_tokens() <= 1200
-        assert context.author_intent != result.author_intent
+        assert result.author_intent == protected_before["author_intent"]
+        assert result.creative_focus == protected_before["creative_focus"]
+        assert result.core_documents == protected_before["core_documents"]
+        assert result.current_state == protected_before["current_state"]
+        assert result.relationships == protected_before["relationships"]
+        assert result.compression["protected_unchanged"] is True
+        assert result.compression["within_budget"] is True
+        assert result.compression["actions"]
 
     def test_no_compression_records_budget_decision(self, builder):
         context = GenerationContext(recent_text="短文本")

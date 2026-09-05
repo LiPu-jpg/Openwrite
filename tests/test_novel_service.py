@@ -6,6 +6,7 @@ import pytest
 from tools.agent.book_state import BookStage, BookStateStore
 from tools.cli import _save_chapter
 from tools.context_builder import ContextBuilder
+from tools.context_protection import ContextBudgetError
 from tools.init_project import init_project
 from tools.novel_service import NovelApplicationService, NovelServiceError
 from tools.workflow_scheduler import WorkflowScheduler
@@ -74,6 +75,36 @@ def test_context_preview_exposes_dynamic_state_and_semantic_diagnostics(
     assert preview["semantic_retrieval"]["status"] == "ready"
     assert "他藏起了旧信" in preview["semantic_references"]
     assert "旧钟楼" in preview["character_states"]
+
+
+def test_write_never_calls_generator_after_protected_context_budget_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tools.chapter_assembler import ChapterAssemblerV2
+
+    init_project(tmp_path, "demo", "保护预算")
+    calls: list[dict] = []
+
+    def fail_assembly(self, chapter_id):
+        raise ContextBudgetError(
+            budget_tokens=1000,
+            required_tokens=1400,
+            protected_items={"author_intent": "必须保留"},
+        )
+
+    monkeypatch.setattr(ChapterAssemblerV2, "assemble", fail_assembly)
+    service = NovelApplicationService(
+        tmp_path,
+        writer_executor=lambda _root, args: calls.append(args) or {"ok": True},
+    )
+
+    with pytest.raises(NovelServiceError) as raised:
+        service.write_chapter({"chapter_id": "ch_001"})
+
+    assert raised.value.code == "PROTECTED_CONTEXT_OVER_BUDGET"
+    assert raised.value.details["source_paths"] == ["src/story/author_intent.md"]
+    assert calls == []
 
 
 def test_service_unifies_review_persistence_and_lifecycle(tmp_path: Path):
@@ -213,6 +244,13 @@ def test_service_unifies_focus_import_workspace_and_export(tmp_path: Path):
         "ch_002",
     ]
     assert imported["next_chapter"] == "ch_003"
+    acceptance = imported["acceptance"]
+    assert acceptance["source"] == "import"
+    assert acceptance["chapter_id"] == "ch_001"
+    assert acceptance["affected_chapters"] == ["ch_001", "ch_002"]
+    assert acceptance["accepted_revision"] == ""
+    assert acceptance["target_revision"].startswith("sha256:")
+    assert acceptance["status"] == "pending"
     assert snapshot["chapters"] == 2
     assert "第一章 雨夜" in output.read_text(encoding="utf-8")
     service.clear_focus()

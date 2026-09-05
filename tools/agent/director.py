@@ -57,6 +57,7 @@ class MultiAgentDirector:
         chapter_id: str,
         temperature: float = 0.7,
         run_review: bool = True,
+        settle_state: bool = True,
         *,
         guidance: str = "",
         target_words: int | None = None,
@@ -115,11 +116,15 @@ class MultiAgentDirector:
             for item in writing_context.get("active_characters", [])
             if isinstance(item, dict) and str(item.get("name") or "").strip()
         ]
-        applied_updates = self._apply_state_settlement(
-            draft.state_delta,
-            draft.state_updates,
-            chapter_id=chapter_id,
-            known_entities=known_entities,
+        applied_updates = (
+            self._apply_state_settlement(
+                draft.state_delta,
+                draft.state_updates,
+                chapter_id=chapter_id,
+                known_entities=known_entities,
+            )
+            if settle_state
+            else {}
         )
         new_concepts = self._collect_proposed_concepts(draft.state_delta)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -34,6 +35,8 @@ class ChapterMemoryStore:
         word_count: int,
         observations: str = "",
         token_usage: dict[str, Any] | None = None,
+        source_revision: str = "",
+        acceptance_operation_id: str = "",
     ) -> Path:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         path = self.path_for(chapter_id)
@@ -44,6 +47,8 @@ class ChapterMemoryStore:
             "word_count": max(0, int(word_count)),
             "observations": observations.strip(),
             "token_usage": dict(token_usage or {}),
+            "source_revision": str(source_revision or self._manuscript_revision(chapter_id)),
+            "acceptance_operation_id": str(acceptance_operation_id or ""),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         content = yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
@@ -58,7 +63,46 @@ class ChapterMemoryStore:
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError):
             return None
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
+        source_revision = str(data.get("source_revision") or "")
+        current_revision = self._manuscript_revision(chapter_id)
+        if source_revision and current_revision and source_revision == current_revision:
+            freshness = "current"
+        elif source_revision and current_revision:
+            freshness = "stale"
+        else:
+            freshness = "unknown"
+        # A matching file SHA is necessary but not sufficient while an earlier
+        # chapter acceptance is replaying downstream facts. The acceptance
+        # head is the causal gate for summaries used in later prompts.
+        try:
+            from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+            acceptance = ManuscriptAcceptanceService(
+                self.project_root, self.novel_id
+            ).inspect()
+            head = next(
+                (
+                    item
+                    for item in acceptance.get("chapters", [])
+                    if item.get("chapter_id") == chapter_id
+                ),
+                None,
+            )
+            if isinstance(head, dict) and (
+                head.get("status") != "current"
+                or head.get("facts_revision") != current_revision
+            ):
+                freshness = "stale"
+        except Exception:
+            pass
+        return {
+            **data,
+            "source_revision": source_revision,
+            "current_source_revision": current_revision,
+            "freshness_status": freshness,
+        }
 
     def list_before(self, chapter_id: str) -> list[dict[str, Any]]:
         target = self._chapter_number(chapter_id)
@@ -70,7 +114,7 @@ class ChapterMemoryStore:
             if target and number >= target:
                 continue
             record = self.load(path.stem)
-            if record:
+            if record and record.get("freshness_status") == "current":
                 records.append(record)
         return sorted(
             records,
@@ -125,6 +169,24 @@ class ChapterMemoryStore:
 
     def delete(self, chapter_id: str) -> None:
         self.path_for(chapter_id).unlink(missing_ok=True)
+
+    def _manuscript_revision(self, chapter_id: str) -> str:
+        manuscript = (
+            self.project_root
+            / "data"
+            / "novels"
+            / self.novel_id
+            / "data"
+            / "manuscript"
+        )
+        matches = list(manuscript.rglob(f"{chapter_id}.md")) if manuscript.is_dir() else []
+        if len(matches) != 1 or not matches[0].is_file():
+            return ""
+        try:
+            content = matches[0].read_text(encoding="utf-8")
+        except OSError:
+            return ""
+        return "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _chapter_number(chapter_id: str) -> int:

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit, urlunsplit
 
+from tools.operation_trace import active_operation_trace
+
 from .context import ContextBudgetPolicy
 
 logger = logging.getLogger(__name__)
@@ -329,9 +331,30 @@ class LLMClient:
         """Send one provider-neutral chat request."""
         temp = temperature if temperature is not None else self.config.temperature
         maxt = max_tokens if max_tokens is not None else self.config.max_tokens
-        if self.config.api_format == "responses":
-            return self._chat_responses(messages, temp, maxt, stream, on_progress, operation)
-        return self._chat_completion(messages, temp, maxt, stream, on_progress, operation)
+        collector = active_operation_trace()
+        try:
+            if self.config.api_format == "responses":
+                response = self._chat_responses(messages, temp, maxt, stream, on_progress, operation)
+            else:
+                response = self._chat_completion(messages, temp, maxt, stream, on_progress, operation)
+        except Exception as exc:
+            if collector is not None:
+                collector.record_model_exchange(
+                    messages=messages,
+                    response=None,
+                    operation=operation,
+                    context_plan=self.last_context_plan,
+                    error=exc,
+                )
+            raise
+        if collector is not None:
+            collector.record_model_exchange(
+                messages=messages,
+                response=response,
+                operation=operation,
+                context_plan=self.last_context_plan,
+            )
+        return response
 
     def chat_with_tools(
         self,
@@ -343,21 +366,46 @@ class LLMClient:
         """Send a normalized function-calling request through LiteLLM."""
         temp = temperature if temperature is not None else self.config.temperature
         maxt = max_tokens if max_tokens is not None else self.config.max_tokens
+        collector = active_operation_trace()
         try:
-            return self._chat_completion_with_tools(messages, tools, temp, maxt)
+            response = self._chat_completion_with_tools(messages, tools, temp, maxt)
         except Exception as exc:
             error_msg = str(exc).lower()
             if "invalid tool type" in error_msg or "tool_calls" in error_msg:
                 logger.warning("Tool calling failed, falling back to regular chat: %s", exc)
                 response = self.chat(messages, temperature=temp, max_tokens=maxt, stream=False)
-                return ToolCallResponse(
+                result = ToolCallResponse(
                     content=response.content,
                     usage=response.usage,
                     model=response.model,
                     provider=response.provider,
                     finish_reason=response.finish_reason,
                 )
+                if collector is not None:
+                    collector.record_model_exchange(
+                        messages=messages,
+                        response=result,
+                        context_plan=self.last_context_plan,
+                        tools=tools,
+                    )
+                return result
+            if collector is not None:
+                collector.record_model_exchange(
+                    messages=messages,
+                    response=None,
+                    context_plan=self.last_context_plan,
+                    error=exc,
+                    tools=tools,
+                )
             raise
+        if collector is not None:
+            collector.record_model_exchange(
+                messages=messages,
+                response=response,
+                context_plan=self.last_context_plan,
+                tools=tools,
+            )
+        return response
 
     def _chat_completion(
         self,

@@ -24,8 +24,18 @@ import yaml
 
 from models.context_package import estimate_text_tokens
 from models.outline import OutlineHierarchy
+from models.token_estimation import estimate_measurement, unknown_actual_usage
 from tools.agent_policy import get_default_agent_specs, get_redundant_agent_specs
 from tools.character_state_index import strip_character_state_annotations
+from tools.context_protection import (
+    ContextBudgetError,
+    assert_protected_unchanged,
+    chapter_requirements,
+    ensure_protected_fits,
+    packet_protected_items,
+    protected_snapshot,
+    render_context_value,
+)
 from tools.frontmatter import parse_toml_front_matter
 from tools.llm.context import ContextBudgetPlan, ContextBudgetPolicy
 from tools.outline_cache import deserialize_outline_hierarchy
@@ -93,6 +103,7 @@ class ChapterAssemblyPacket:
     story_background: str = ""
     historical_arc_summaries: List[ArcSummary] = field(default_factory=list)
     current_arc_sections: List[SectionSummary] = field(default_factory=list)
+    chapter_requirements: Dict[str, Any] = field(default_factory=dict)
     previous_chapter_content: str = ""
     protagonist_state: str = ""
     current_state: str = ""
@@ -132,6 +143,12 @@ class ChapterAssemblyPacket:
         if self.historical_arc_summaries:
             for arc in self.historical_arc_summaries:
                 parts.append(f"### {arc.title} ({arc.arc_id})\n{arc.summary}")
+        else:
+            parts.append("（暂无）")
+
+        parts.append("## 本章必需条件")
+        if self.chapter_requirements:
+            parts.append(render_context_value(self.chapter_requirements))
         else:
             parts.append("（暂无）")
 
@@ -306,6 +323,7 @@ class ChapterAssemblerV2:
             )
             packet.previous_chapter_content = self._load_previous_chapter_content(chapter_id)
             packet.protagonist_state = self._load_protagonist_state(hierarchy, chapter_id)
+            packet.chapter_requirements = chapter_requirements(chapter)
 
             chars = self._collect_relevant_characters(hierarchy, chapter_id)
             concepts = self._collect_relevant_concepts(hierarchy, chapter_id)
@@ -328,6 +346,11 @@ class ChapterAssemblerV2:
         original_characters = self._packet_character_count(packet)
         original_tokens = self._packet_token_count(packet)
         plan = self._context_policy.plan(original_tokens)
+        protected_items = packet_protected_items(packet)
+        protected_tokens = ensure_protected_fits(
+            protected_items, plan.input_budget_tokens
+        )
+        protected_before = protected_snapshot(protected_items)
         truncated_documents: List[str] = []
         dropped_documents: List[str] = []
 
@@ -342,60 +365,29 @@ class ChapterAssemblerV2:
                 truncated_documents=[],
                 dropped_documents=[],
                 budgets={},
+                protected_items=protected_items,
+                protected_tokens=protected_tokens,
             )
             return
 
-        target_characters = min(
+        optional_target_characters = min(
             original_characters,
-            max(256, int(plan.target_tokens / 1.5)),
+            max(0, int(max(0, plan.target_tokens - protected_tokens) / 1.5)),
         )
         shares = {
-            "controls": 0.11,
-            "core": 0.09,
             "historical_outline": 0.08,
             "current_outline": 0.08,
             "previous_chapter": 0.18,
             "protagonist_state": 0.04,
-            "continuity": 0.14,
             "characters": 0.13,
             "settings": 0.08,
             "style": 0.07,
         }
+        total_share = sum(shares.values())
         budgets = {
-            name: max(1, int(target_characters * share))
+            name: max(0, int(optional_target_characters * share / total_share))
             for name, share in shares.items()
         }
-
-        controls, truncated, dropped = self._limit_document_map(
-            {
-                "author_intent": packet.author_intent,
-                "creative_focus": packet.creative_focus,
-            },
-            total_chars=budgets["controls"],
-            per_document=budgets["controls"],
-            preferred_prefixes=("author_intent", "creative_focus"),
-        )
-        packet.author_intent = controls.get("author_intent", "")
-        packet.creative_focus = controls.get("creative_focus", "")
-        truncated_documents.extend(f"control:{name}" for name in truncated)
-        dropped_documents.extend(f"control:{name}" for name in dropped)
-
-        if packet.core_documents:
-            packet.core_documents, truncated, dropped = self._limit_document_map(
-                packet.core_documents,
-                total_chars=budgets["core"],
-                per_document=budgets["core"],
-                preferred_prefixes=("background", "foundation"),
-            )
-            truncated_documents.extend(f"core:{name}" for name in truncated)
-            dropped_documents.extend(f"core:{name}" for name in dropped)
-        else:
-            packet.story_background = self._limit_scalar(
-                packet.story_background,
-                budgets["core"],
-                "core:story_background",
-                truncated_documents,
-            )
 
         self._limit_summary_items(
             packet.historical_arc_summaries,
@@ -422,24 +414,6 @@ class ChapterAssemblerV2:
             "continuity:protagonist_state",
             truncated_documents,
         )
-
-        continuity, truncated, dropped = self._limit_document_map(
-            packet.continuity_documents
-            or {
-                "current_state": packet.current_state,
-                "ledger": packet.ledger,
-                "relationships": packet.relationships,
-            },
-            total_chars=budgets["continuity"],
-            per_document=budgets["continuity"],
-            preferred_prefixes=("current_state", "relationships", "ledger"),
-        )
-        packet.continuity_documents = continuity
-        packet.current_state = continuity.get("current_state", "")
-        packet.ledger = continuity.get("ledger", "")
-        packet.relationships = continuity.get("relationships", "")
-        truncated_documents.extend(f"continuity:{name}" for name in truncated)
-        dropped_documents.extend(f"continuity:{name}" for name in dropped)
 
         for attribute, label, preferred in (
             ("character_documents", "character", ()),
@@ -478,6 +452,14 @@ class ChapterAssemblerV2:
 
         final_tokens = self._packet_token_count(packet)
         final_characters = self._packet_character_count(packet)
+        current_protected = packet_protected_items(packet)
+        assert_protected_unchanged(protected_before, current_protected)
+        if final_tokens > plan.input_budget_tokens:
+            raise ContextBudgetError(
+                budget_tokens=plan.input_budget_tokens,
+                required_tokens=final_tokens,
+                protected_items=current_protected,
+            )
         packet.compression = self._compression_report(
             plan,
             applied=True,
@@ -488,6 +470,8 @@ class ChapterAssemblerV2:
             truncated_documents=truncated_documents,
             dropped_documents=dropped_documents,
             budgets=budgets,
+            protected_items=current_protected,
+            protected_tokens=protected_tokens,
         )
 
     def _compression_report(
@@ -502,9 +486,16 @@ class ChapterAssemblerV2:
         truncated_documents: List[str],
         dropped_documents: List[str],
         budgets: Dict[str, int],
+        protected_items: Dict[str, Any] | None = None,
+        protected_tokens: int = 0,
     ) -> Dict[str, Any]:
         return {
             "strategy": self.COMPRESSION_STRATEGY,
+            "measurement": estimate_measurement(
+                text_scope="packet_text_values",
+                includes_wrapper_overhead=False,
+            ),
+            "actual_usage": unknown_actual_usage(),
             "applied": applied,
             "level": plan.level,
             "planned_level": plan.level,
@@ -523,6 +514,9 @@ class ChapterAssemblerV2:
             "truncated_documents": truncated_documents,
             "dropped_documents": dropped_documents,
             "budgets": budgets,
+            "protected_items": list(protected_items or {}),
+            "protected_estimated_tokens": protected_tokens,
+            "protected_unchanged": True,
         }
 
     @staticmethod
@@ -642,8 +636,10 @@ class ChapterAssemblerV2:
             else [packet.current_state, packet.ledger, packet.relationships]
         )
         values: List[str] = [
+            *packet.system_prompts.values(),
             packet.author_intent,
             packet.creative_focus,
+            render_context_value(packet.chapter_requirements),
             *core_values,
             packet.previous_chapter_content,
             packet.protagonist_state,

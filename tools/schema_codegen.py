@@ -1,6 +1,6 @@
 """Generate schema-derived contract types and validators from ``contracts/*.schema.json``.
 
-The six JSON Schemas under ``contracts/`` are the machine-readable source of
+The nine JSON Schemas under ``contracts/`` are the machine-readable source of
 truth for the OpenWrite boundary contracts. This generator renders:
 
 - ``tools/contracts_generated.py`` — TypedDict types plus ``validate_*``
@@ -83,6 +83,27 @@ CONTRACTS: tuple[tuple[str, str, str, str, str], ...] = (
         "validateModelProfileSurfaceV1",
         "model profile surface",
     ),
+    (
+        "task_surface_v1",
+        "task-surface-v1.schema.json",
+        "validate_task_surface_v1",
+        "validateTaskSurfaceV1",
+        "task surface",
+    ),
+    (
+        "research_surface_v1",
+        "research-surface-v1.schema.json",
+        "validate_research_surface_v1",
+        "validateResearchSurfaceV1",
+        "research surface",
+    ),
+    (
+        "model_connection_test_v1",
+        "model-connection-test-v1.schema.json",
+        "validate_model_connection_test_v1",
+        "validateModelConnectionTestV1",
+        "model connection test",
+    ),
 )
 
 
@@ -112,7 +133,8 @@ def _collection_item_hint(hint: str) -> str:
 
 
 def _py_literal(values: list[Any]) -> str:
-    return "Literal[" + ", ".join(json.dumps(v, ensure_ascii=False) for v in values) + "]"
+    parts = ["None" if value is None else json.dumps(value, ensure_ascii=False) for value in values]
+    return "Literal[" + ", ".join(parts) + "]"
 
 
 class _PyTypeRenderer:
@@ -306,9 +328,16 @@ function typeOk(value: unknown, name: string): boolean {
 
 /** Minimal JSON Schema subset validator mirroring OpenWrite
  * `tools/schema_lint.py` and `scripts/schema-lint.mjs`. */
-export function validateSchema(value: unknown, schema: SchemaMap, path = '$'): string[] {
+export function validateSchema(value: unknown, schema: SchemaMap, path = '$', root: SchemaMap = schema): string[] {
   const errors: string[] = []
   const fail = (message: string) => errors.push(`${path}: ${message}`)
+
+  const ref = schema['$ref']
+  if (typeof ref === 'string' && ref.startsWith('#/')) {
+    let resolved: unknown = root
+    for (const part of ref.slice(2).split('/')) resolved = (resolved as SchemaMap)?.[part]
+    if (resolved && typeof resolved === 'object') return validateSchema(value, resolved as SchemaMap, path, root)
+  }
 
   const rawType = schema['type']
   if (rawType !== undefined) {
@@ -341,11 +370,11 @@ export function validateSchema(value: unknown, schema: SchemaMap, path = '$'): s
     const additional = schema['additionalProperties']
     for (const [key, sub] of Object.entries(record)) {
       if (key in properties) {
-        errors.push(...validateSchema(sub, properties[key] as SchemaMap, `${path}.${key}`))
+        errors.push(...validateSchema(sub, properties[key] as SchemaMap, `${path}.${key}`, root))
       } else if (additional === false) {
         fail(`unexpected property '${key}'`)
       } else if (additional !== undefined && typeof additional === 'object') {
-        errors.push(...validateSchema(sub, additional as SchemaMap, `${path}.${key}`))
+        errors.push(...validateSchema(sub, additional as SchemaMap, `${path}.${key}`, root))
       }
     }
     const minProperties = schema['minProperties']
@@ -357,7 +386,7 @@ export function validateSchema(value: unknown, schema: SchemaMap, path = '$'): s
   const items = schema['items']
   if (Array.isArray(value) && items !== undefined && typeof items === 'object') {
     value.forEach((item, index) => {
-      errors.push(...validateSchema(item, items as SchemaMap, `${path}[${index}]`))
+      errors.push(...validateSchema(item, items as SchemaMap, `${path}[${index}]`, root))
     })
   }
 

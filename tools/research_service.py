@@ -21,6 +21,137 @@ from tools.task_runner import TaskCancelled, TaskContext
 MAX_PROCESS_OUTPUT_BYTES = 2_000_000
 MAX_ERROR_DETAIL_CHARS = 1200
 
+RESEARCH_EPISODE_FAILED_MESSAGE = (
+    "DeepResearch 未通过内部质量或预算门，失败产物已保留供诊断"
+)
+
+
+def _nullable_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _metric_number(metrics: dict[str, Any], key: str) -> tuple[float | None, bool]:
+    """Read a numeric metric, distinguishing absent from an explicit 0."""
+    value = metrics.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None, False
+    return value, True
+
+
+def _normalize_model_profile(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "id": _nullable_text(value.get("id")),
+        "label": _nullable_text(value.get("label")),
+        "model": _nullable_text(value.get("model")),
+        "provider": _nullable_text(value.get("provider")),
+    }
+
+
+def _normalize_usage(raw_block: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+    block = raw_block if isinstance(raw_block, dict) else {}
+    if block:
+        value = block.get("total_tokens")
+        reported = bool(block.get("reported"))
+    else:
+        value, reported = _metric_number(metrics, "totalTokenCount")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return {"total_tokens": None, "reported": False}
+    return {
+        "total_tokens": int(value) if reported else None,
+        "reported": reported,
+    }
+
+
+def _normalize_cost(raw_block: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+    block = raw_block if isinstance(raw_block, dict) else {}
+    if block:
+        value = block.get("value")
+        reported = bool(block.get("reported"))
+    else:
+        value, reported = _metric_number(metrics, "estimatedCostUsd")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return {"value": None, "reported": False}
+    return {
+        "value": float(value) if reported else None,
+        "reported": reported,
+    }
+
+
+def normalize_report_metadata(
+    raw: Any, *, report_id: str = "", content: str | None = None
+) -> dict[str, Any]:
+    """Map any stored report metadata (old or new) onto the stable report DTO.
+
+    Every field is always present; data an old archive never recorded comes
+    back as an explicit null instead of being fabricated.
+    """
+    metadata = raw if isinstance(raw, dict) else {}
+    metrics = metadata.get("metrics")
+    metrics = dict(metrics) if isinstance(metrics, dict) else {}
+    sources = metadata.get("sources")
+    normalized_sources: list[dict[str, Any]] | None = None
+    if isinstance(sources, list):
+        normalized_sources = [
+            {
+                "title": str(entry.get("title") or ""),
+                "url": str(entry.get("url") or ""),
+                "source_type": str(entry.get("source_type") or ""),
+                "cited": bool(entry.get("cited")),
+            }
+            for entry in sources
+            if isinstance(entry, dict)
+        ]
+    sources_status = metadata.get("sources_status")
+    if sources_status not in {"ok", "unavailable"}:
+        sources_status = "ok" if normalized_sources is not None else "unavailable"
+    word_count = metadata.get("word_count")
+    if isinstance(word_count, bool) or not isinstance(word_count, int):
+        word_count = len(content) if content is not None else None
+    latency_ms = metadata.get("latency_ms")
+    if isinstance(latency_ms, bool) or not isinstance(latency_ms, int):
+        latency_ms = None
+    failure = metadata.get("failure")
+    if isinstance(failure, dict):
+        failure = {
+            "code": str(failure.get("code") or ""),
+            "message": str(failure.get("message") or ""),
+        }
+    else:
+        failure = None
+    status = str(metadata.get("status") or "unknown")
+    if status in {"completed", "complete"}:
+        status = "succeeded"
+    if status not in {"succeeded", "failed", "needs_human_review", "unknown"}:
+        status = "unknown"
+    return {
+        "id": report_id or str(metadata.get("id") or ""),
+        "title": str(metadata.get("title") or report_id or ""),
+        "prompt": str(metadata.get("prompt") or ""),
+        "status": status,
+        "episode_id": _nullable_text(metadata.get("episode_id")),
+        "task_id": _nullable_text(metadata.get("task_id")),
+        "created_at": _nullable_text(metadata.get("created_at")),
+        "completed_at": _nullable_text(metadata.get("completed_at")),
+        "model_profile": _normalize_model_profile(metadata.get("model_profile")),
+        "search_provider": _nullable_text(metadata.get("search_provider")),
+        "sources": normalized_sources,
+        "sources_status": sources_status,
+        "source_count": (
+            len(normalized_sources) if normalized_sources is not None else None
+        ),
+        "word_count": word_count,
+        "latency_ms": latency_ms,
+        "usage": _normalize_usage(metadata.get("usage"), metrics),
+        "cost_usd": _normalize_cost(metadata.get("cost_usd"), metrics),
+        "failure": failure,
+        "metrics": metrics,
+    }
+
 
 class ResearchServiceError(RuntimeError):
     """Expected failure while preparing or running a research episode."""
@@ -48,7 +179,12 @@ class ResearchService:
         self.research_root = self.novel_root / "data" / "research"
         self.report_root = self.research_root / "reports"
         self.artifact_root = self.research_root / "artifacts"
-        self.settings_store = settings_store or StudioResearchSettingsStore()
+        base_store = settings_store or StudioResearchSettingsStore()
+        # Non-secret settings live next to the research artifacts of THIS
+        # workspace; credentials stay machine-global inside the store.
+        self.settings_store = base_store.for_workspace(
+            self.research_root / "settings.json"
+        )
 
     def status(self) -> dict[str, Any]:
         node = shutil.which("node")
@@ -90,18 +226,10 @@ class ResearchService:
             report_path = metadata_path.with_suffix(".md")
             if not report_path.is_file():
                 continue
-            reports.append(
-                {
-                    "id": metadata_path.stem,
-                    "title": str(metadata.get("title") or metadata_path.stem),
-                    "status": str(metadata.get("status") or "unknown"),
-                    "episode_id": str(metadata.get("episode_id") or ""),
-                    "created_at": str(metadata.get("created_at") or ""),
-                    "path": str(report_path.relative_to(self.novel_root)),
-                    "bytes": report_path.stat().st_size,
-                    "metrics": metadata.get("metrics") or {},
-                }
-            )
+            entry = normalize_report_metadata(metadata, report_id=metadata_path.stem)
+            entry["path"] = str(report_path.relative_to(self.novel_root))
+            entry["bytes"] = report_path.stat().st_size
+            reports.append(entry)
         return reports
 
     def read_report(self, report_id: str) -> dict[str, Any]:
@@ -118,7 +246,13 @@ class ResearchService:
             raise ResearchServiceError(
                 "研究报告读取失败", code="REPORT_READ_FAILED"
             ) from exc
-        return {"id": report_id, "metadata": metadata, "content": content}
+        return {
+            "id": report_id,
+            "metadata": normalize_report_metadata(
+                metadata, report_id=report_id, content=content
+            ),
+            "content": content,
+        }
 
     def run(
         self,
@@ -126,6 +260,7 @@ class ResearchService:
         context: TaskContext,
         *,
         model_profile: dict[str, Any] | None = None,
+        task_id: str | None = None,
     ) -> dict[str, Any]:
         prompt = str(payload.get("prompt") or "").strip()
         if not prompt:
@@ -189,6 +324,8 @@ class ResearchService:
         )
         context.phase("preparing", "准备 DeepResearch 运行环境")
         context.checkpoint()
+        run_started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        started_monotonic = time.monotonic()
         process = subprocess.Popen(
             command,
             cwd=self.framework_root,
@@ -231,6 +368,7 @@ class ResearchService:
             selector.close()
             if process.stdout is not None:
                 process.stdout.close()
+        latency_ms = int((time.monotonic() - started_monotonic) * 1000)
         if process.returncode != 0:
             detail = redact_sensitive_text(
                 output.decode("utf-8", errors="replace").strip()[
@@ -259,21 +397,54 @@ class ResearchService:
         target_metadata = self.report_root / f"{report_id}.json"
         context.phase("committing", "归档研究报告到当前作品")
         shutil.copyfile(source_report, target_report)
+        report_text = target_report.read_text(encoding="utf-8")
+        sources, sources_status = self._episode_sources(
+            summary, source_report, report_text
+        )
+        metrics = summary.get("metrics") or {}
+        if not isinstance(metrics, dict):
+            metrics = {}
+        total_tokens, tokens_reported = _metric_number(metrics, "totalTokenCount")
+        cost_value, cost_reported = _metric_number(metrics, "estimatedCostUsd")
+        episode_status = summary.get("status", "unknown")
+        failure = None
+        if episode_status == "failed":
+            failure = {
+                "code": "RESEARCH_EPISODE_FAILED",
+                "message": RESEARCH_EPISODE_FAILED_MESSAGE,
+            }
         metadata = {
             "title": prompt[:120],
             "prompt": prompt,
-            "status": summary.get("status", "unknown"),
+            "status": episode_status,
             "episode_id": episode_id,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "created_at": run_started_at,
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "artifact_ref": str(source_report.parent.relative_to(self.novel_root)),
-            "metrics": summary.get("metrics") or {},
+            "metrics": metrics,
+            "task_id": task_id,
+            "model_profile": _normalize_model_profile(model_profile),
+            "search_provider": search,
+            "latency_ms": latency_ms,
+            "word_count": len(report_text),
+            "sources": sources,
+            "sources_status": sources_status,
+            "usage": {
+                "total_tokens": int(total_tokens) if tokens_reported else None,
+                "reported": tokens_reported,
+            },
+            "cost_usd": {
+                "value": float(cost_value) if cost_reported else None,
+                "reported": cost_reported,
+            },
+            "failure": failure,
         }
         target_metadata.write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         if metadata["status"] == "failed":
             raise ResearchServiceError(
-                "DeepResearch 未通过内部质量或预算门，失败产物已保留供诊断",
+                RESEARCH_EPISODE_FAILED_MESSAGE,
                 code="RESEARCH_EPISODE_FAILED",
             )
         return {
@@ -396,6 +567,56 @@ class ResearchService:
         raise ResearchServiceError(
             "无法解析 DeepResearch 运行结果", code="INVALID_RESEARCH_RESULT"
         )
+
+    def _episode_sources(
+        self, summary: dict[str, Any], source_report: Path, report_text: str
+    ) -> tuple[list[dict[str, Any]] | None, str]:
+        """Extract real per-source rows from the episode evidence index.
+
+        The framework writes ``evidence-index.json`` next to the episode
+        report (``globalEvidenceIndex`` of the report bundle, see
+        ``packages/contracts/src/report.ts``); each row carries the citation
+        title, URL and source tier. ``cited`` is derived from the citation
+        marker actually appearing in the archived report body. When no
+        parseable index exists the episode honestly reports ``unavailable``.
+        """
+        candidates = []
+        reported = str(summary.get("evidenceIndex") or "").strip()
+        if reported:
+            candidates.append(Path(reported))
+        candidates.append(source_report.parent / "evidence-index.json")
+        artifact_root = self.artifact_root.resolve()
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if not resolved.is_relative_to(artifact_root) or not resolved.is_file():
+                continue
+            try:
+                entries = json.loads(resolved.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(entries, list):
+                continue
+            sources = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                citation_id = str(entry.get("citationId") or "")
+                sources.append(
+                    {
+                        "title": str(entry.get("title") or ""),
+                        "url": str(
+                            entry.get("url") or entry.get("canonicalUrl") or ""
+                        ),
+                        "source_type": str(entry.get("sourceTier") or ""),
+                        "cited": bool(citation_id)
+                        and f"[{citation_id}]" in report_text,
+                    }
+                )
+            return sources, "ok"
+        return None, "unavailable"
 
     @staticmethod
     def _find_report(episode_dir: Path, artifact_root: Path) -> Path | None:

@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
 
@@ -54,13 +55,6 @@ PROFILE_FIELDS = (
     "thinking_modes",
     "credential_ref",
     "credential_updated_at",
-    "embedding_provider",
-    "embedding_base_url",
-    "embedding_model",
-    "embedding_dimension",
-    "embedding_max_tokens",
-    "embedding_credential_ref",
-    "embedding_credential_updated_at",
     "search_mode",
 )
 
@@ -89,6 +83,7 @@ class ModelProfileStore:
         self.credentials_path = self.directory / ".model-credentials.json"
         self.legacy = StudioModelSettingsStore(self.directory)
         self._session_credentials: dict[str, str] = {}
+        self._mutation_lock = Lock()
 
     def load(self) -> dict[str, Any]:
         payload = self._read_json(self.profiles_path)
@@ -104,6 +99,14 @@ class ModelProfileStore:
                 if isinstance(profiles, list)
                 else [],
                 "routes": self._routes(routes),
+                "embedding_profiles": [
+                    self._embedding_metadata(item)
+                    for item in payload.get("embedding_profiles", [])
+                    if isinstance(item, dict)
+                ],
+                "active_embedding_profile_id": str(
+                    payload.get("active_embedding_profile_id") or ""
+                ),
             }
         legacy = self.legacy.load_settings()
         if (
@@ -116,6 +119,8 @@ class ModelProfileStore:
                 "default_profile_id": "default",
                 "profiles": [],
                 "routes": {},
+                "embedding_profiles": [],
+                "active_embedding_profile_id": "",
             }
         profile = {
             "id": "default",
@@ -135,18 +140,6 @@ class ModelProfileStore:
             "temperature": float(os.environ.get("LLM_TEMPERATURE", "0.7")),
             "timeout_seconds": float(os.environ.get("LLM_TIMEOUT_SECONDS", "120")),
             "credential_ref": "key_default",
-            "embedding_provider": os.environ.get(
-                "OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER", "openai"
-            ).strip(),
-            "embedding_base_url": os.environ.get(
-                "OPENWRITE_LIGHTRAG_EMBEDDING_BASE_URL", ""
-            ).strip(),
-            "embedding_model": os.environ.get(
-                "OPENWRITE_LIGHTRAG_EMBEDDING_MODEL", DEFAULT_CLOUD_MODEL
-            ).strip(),
-            "embedding_dimension": 1536,
-            "embedding_max_tokens": 8192,
-            "embedding_credential_ref": "embedding_key_default",
             "search_mode": "vector",
         }
         credential = self.legacy.load_credential()
@@ -157,60 +150,98 @@ class ModelProfileStore:
             "default_profile_id": "default",
             "profiles": [profile],
             "routes": {key: "default" for key in ROUTE_KEYS},
+            "embedding_profiles": [
+                self._embedding_metadata(
+                    {
+                        "id": "default-embedding",
+                        "label": "默认 Embedding",
+                        "provider": os.environ.get(
+                            "OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER", "openai"
+                        ),
+                        "base_url": os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_BASE_URL", ""),
+                        "model": os.environ.get(
+                            "OPENWRITE_LIGHTRAG_EMBEDDING_MODEL", DEFAULT_CLOUD_MODEL
+                        ),
+                        "dimension": 1536,
+                        "max_tokens": 8192,
+                        "credential_ref": "embedding_key_default",
+                    }
+                )
+            ],
+            "active_embedding_profile_id": "default-embedding",
         }
 
     def surface(self, project_routes: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = self.load()
         persisted_credentials = self._credentials()
-        profiles = []
-        for profile in payload["profiles"]:
-            credential_ref = str(profile.get("credential_ref") or "")
-            configured = bool(
-                self._session_credentials.get(credential_ref)
-                or persisted_credentials.get(credential_ref)
-                or (profile["id"] == "default" and os.environ.get("LLM_API_KEY", "").strip())
-            )
-            embedding_credential_ref = str(profile.get("embedding_credential_ref") or "")
-            separate_embedding_key = bool(
-                self._session_credentials.get(embedding_credential_ref)
-                or persisted_credentials.get(embedding_credential_ref)
-                or (
-                    profile["id"] == "default"
-                    and os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_API_KEY", "").strip()
-                )
-            )
-            profiles.append(
-                {
-                    **profile,
-                    "configured": configured,
-                    "embedding_configured": (
-                        profile.get("embedding_provider") == "local"
-                        or separate_embedding_key
-                        or configured
-                    ),
-                    "embedding_key_configured": separate_embedding_key,
-                }
-            )
         routes = dict(payload["routes"])
         routes.update(self._routes(project_routes))
         default_id = str(payload.get("default_profile_id") or "default")
         for key in ROUTE_KEYS:
             routes.setdefault(key, default_id)
+        profiles = []
+        for profile in payload["profiles"]:
+            configured = self._profile_configured(profile, persisted_credentials)
+            profiles.append(
+                {
+                    **profile,
+                    "schema_version": "openwrite.model-profile.v1",
+                    "configured": configured,
+                    "capabilities": {"chat": True},
+                    "used_by_routes": [
+                        key for key in ROUTE_KEYS if routes.get(key) == profile["id"]
+                    ],
+                    "last_test": profile.get("last_test") or None,
+                }
+            )
+        embedding_profiles = []
+        for item in payload.get("embedding_profiles", []):
+            configured = item.get("provider") == "local" or self._credential_configured(
+                str(item.get("credential_ref") or ""), persisted_credentials
+            )
+            embedding_profiles.append(
+                {
+                    **item,
+                    "schema_version": "openwrite.embedding-profile.v1",
+                    "configured": configured,
+                    "active": item.get("id") == payload.get("active_embedding_profile_id"),
+                    "last_test": item.get("last_test") or None,
+                }
+            )
         return {
             "schema_version": "openwrite.model-profile.v1",
             "profiles": profiles,
             "presets": model_preset_catalog(),
             "routes": routes,
             "default_profile_id": default_id,
+            "embedding_profiles": embedding_profiles,
+            "active_embedding_profile_id": str(payload.get("active_embedding_profile_id") or ""),
             "legacy_mapped": not self.profiles_path.is_file() and bool(profiles),
         }
+
+    def _profile_configured(
+        self, profile: dict[str, Any], persisted_credentials: dict[str, str]
+    ) -> bool:
+        credential_ref = str(profile.get("credential_ref") or "")
+        return bool(
+            self._session_credentials.get(credential_ref)
+            or persisted_credentials.get(credential_ref)
+            or (profile["id"] == "default" and os.environ.get("LLM_API_KEY", "").strip())
+        )
+
+    def _credential_configured(
+        self, credential_ref: str, persisted_credentials: dict[str, str]
+    ) -> bool:
+        return bool(
+            self._session_credentials.get(credential_ref)
+            or persisted_credentials.get(credential_ref)
+        )
 
     def save_profile(
         self,
         profile: dict[str, Any],
         *,
         api_key: str = "",
-        embedding_api_key: str = "",
         remember_api_key: bool = True,
     ) -> dict[str, Any]:
         payload = self.load()
@@ -221,13 +252,14 @@ class ModelProfileStore:
             {},
         )
         metadata.pop("credential_updated_at", None)
-        metadata.pop("embedding_credential_updated_at", None)
+        # Connection-test outcomes are server-managed: clients cannot forge
+        # them through save_profile, and a metadata-only save preserves them.
+        metadata.pop("last_test", None)
+        for test_field in ("last_test",):
+            if existing.get(test_field) is not None:
+                metadata[test_field] = existing[test_field]
         credential_ref = str(metadata.get("credential_ref") or f"key_{profile_id}")
         metadata["credential_ref"] = credential_ref
-        embedding_credential_ref = str(
-            metadata.get("embedding_credential_ref") or f"embedding_key_{profile_id}"
-        )
-        metadata["embedding_credential_ref"] = embedding_credential_ref
         secret = str(api_key or "").strip()
         if existing.get("credential_ref") == credential_ref and existing.get(
             "credential_updated_at"
@@ -248,28 +280,6 @@ class ModelProfileStore:
             credentials.pop(credential_ref, None)
             self._write_json(self.credentials_path, credentials)
             metadata.pop("credential_updated_at", None)
-        embedding_secret = str(embedding_api_key or "").strip()
-        if existing.get("embedding_credential_ref") == embedding_credential_ref and existing.get(
-            "embedding_credential_updated_at"
-        ):
-            metadata["embedding_credential_updated_at"] = existing[
-                "embedding_credential_updated_at"
-            ]
-        if embedding_secret:
-            metadata["embedding_credential_updated_at"] = self._utc_timestamp()
-            self._session_credentials[embedding_credential_ref] = embedding_secret
-            credentials = self._credentials()
-            if remember_api_key:
-                credentials[embedding_credential_ref] = embedding_secret
-            else:
-                credentials.pop(embedding_credential_ref, None)
-            self._write_json(self.credentials_path, credentials)
-        elif not remember_api_key:
-            self._session_credentials.pop(embedding_credential_ref, None)
-            credentials = self._credentials()
-            credentials.pop(embedding_credential_ref, None)
-            self._write_json(self.credentials_path, credentials)
-            metadata.pop("embedding_credential_updated_at", None)
         profiles = [item for item in payload["profiles"] if item["id"] != profile_id]
         profiles.append(metadata)
         payload["profiles"] = sorted(profiles, key=lambda item: item["id"])
@@ -278,22 +288,202 @@ class ModelProfileStore:
         self._write_payload(payload)
         return metadata
 
-    def save_routes(self, routes: dict[str, Any]) -> dict[str, str]:
+    def embedding_surface(self) -> dict[str, Any]:
+        surface = self.surface()
+        return {
+            "profiles": surface.get("embedding_profiles", []),
+            "active_profile_id": surface.get("active_embedding_profile_id", ""),
+        }
+
+    def save_embedding_profile(
+        self, profile: dict[str, Any], *, api_key: str = "", remember_api_key: bool = True
+    ) -> dict[str, Any]:
         payload = self.load()
-        profile_ids = {item["id"] for item in payload["profiles"]}
-        normalized = self._routes(routes)
-        missing = sorted(set(normalized.values()) - profile_ids)
-        if missing:
-            raise ModelProfileError(
-                f"模型档案不存在: {', '.join(missing)}",
-                code="MODEL_PROFILE_NOT_FOUND",
-            )
-        payload["routes"] = {**payload["routes"], **normalized}
+        metadata = self._embedding_metadata(profile)
+        existing = next(
+            (
+                item
+                for item in payload.get("embedding_profiles", [])
+                if item["id"] == metadata["id"]
+            ),
+            {},
+        )
+        # Credential timestamps and probe outcomes are server-owned. A form
+        # save may omit them but must neither erase nor forge existing state.
+        metadata.pop("credential_updated_at", None)
+        metadata.pop("last_test", None)
+        ref = metadata["credential_ref"]
+        if existing.get("credential_ref") == ref and existing.get("credential_updated_at"):
+            metadata["credential_updated_at"] = existing["credential_updated_at"]
+        if existing.get("last_test") is not None:
+            metadata["last_test"] = existing["last_test"]
+        secret = str(api_key or "").strip()
+        if secret:
+            self._session_credentials[ref] = secret
+            credentials = self._credentials()
+            if remember_api_key:
+                credentials[ref] = secret
+            else:
+                credentials.pop(ref, None)
+            self._write_json(self.credentials_path, credentials)
+            metadata["credential_updated_at"] = self._utc_timestamp()
+        elif not remember_api_key:
+            self._session_credentials.pop(ref, None)
+            credentials = self._credentials()
+            credentials.pop(ref, None)
+            self._write_json(self.credentials_path, credentials)
+            metadata.pop("credential_updated_at", None)
+        items = [
+            item for item in payload.get("embedding_profiles", []) if item["id"] != metadata["id"]
+        ]
+        items.append(metadata)
+        payload["embedding_profiles"] = sorted(items, key=lambda item: item["id"])
+        if not payload.get("active_embedding_profile_id"):
+            payload["active_embedding_profile_id"] = metadata["id"]
         self._write_payload(payload)
-        return payload["routes"]
+        return metadata
+
+    def select_embedding_profile(self, profile_id: str) -> dict[str, Any]:
+        payload = self.load()
+        if profile_id not in {item["id"] for item in payload.get("embedding_profiles", [])}:
+            raise ModelProfileError("Embedding 档案不存在", code="MODEL_PROFILE_NOT_FOUND")
+        payload["active_embedding_profile_id"] = profile_id
+        self._write_payload(payload)
+        return {"active_embedding_profile_id": profile_id}
+
+    def delete_embedding_profile(self, profile_id: str) -> dict[str, Any]:
+        payload = self.load()
+        items = payload.get("embedding_profiles", [])
+        if profile_id not in {item["id"] for item in items}:
+            raise ModelProfileError("Embedding 档案不存在", code="MODEL_PROFILE_NOT_FOUND")
+        if len(items) <= 1:
+            raise ModelProfileError(
+                "至少保留一个 Embedding 档案", code="MODEL_PROFILE_LAST_PROFILE"
+            )
+        removed = next(item for item in items if item["id"] == profile_id)
+        payload["embedding_profiles"] = [item for item in items if item["id"] != profile_id]
+        if payload.get("active_embedding_profile_id") == profile_id:
+            payload["active_embedding_profile_id"] = payload["embedding_profiles"][0]["id"]
+        ref = str(removed.get("credential_ref") or "")
+        self._session_credentials.pop(ref, None)
+        credentials = self._credentials()
+        credentials.pop(ref, None)
+        self._write_json(self.credentials_path, credentials)
+        self._write_payload(payload)
+        return {
+            "deleted": profile_id,
+            "active_embedding_profile_id": payload["active_embedding_profile_id"],
+        }
+
+    def resolve_embedding(self) -> dict[str, Any]:
+        payload = self.load()
+        active_id = str(payload.get("active_embedding_profile_id") or "")
+        item = next(
+            (x for x in payload.get("embedding_profiles", []) if x["id"] == active_id), None
+        )
+        if item is None:
+            raise ModelProfileError("尚未配置 Embedding 档案", code="MODEL_PROFILE_NOT_CONFIGURED")
+        ref = str(item.get("credential_ref") or "")
+        key = self._session_credentials.get(ref) or self._credentials().get(ref)
+        if item.get("provider") != "local" and not key:
+            raise ModelProfileError("Embedding 档案缺少 API Key", code="MODEL_CREDENTIAL_MISSING")
+        return {**item, "api_key": key or ""}
+
+    def save_routes(self, routes: dict[str, Any]) -> dict[str, Any]:
+        """Validate the entire map, then swap it under a lock (never partial)."""
+        if not isinstance(routes, dict):
+            raise ModelProfileError("模型任务路由必须是对象", code="INVALID_MODEL_ROUTE")
+        unknown_keys = sorted(set(routes) - set(ROUTE_KEYS))
+        if unknown_keys:
+            raise ModelProfileError(
+                f"模型任务路由无效: {', '.join(unknown_keys)}",
+                code="INVALID_MODEL_ROUTE",
+            )
+        normalized = self._routes(routes)
+        with self._mutation_lock:
+            payload = self.load()
+            profile_ids = {item["id"] for item in payload["profiles"]}
+            missing = sorted(set(normalized.values()) - profile_ids)
+            if missing:
+                raise ModelProfileError(
+                    f"模型档案不存在: {', '.join(missing)}",
+                    code="MODEL_PROFILE_NOT_FOUND",
+                )
+            previous = dict(payload["routes"])
+            swapped = {**previous, **normalized}
+            payload["routes"] = swapped
+            self._write_payload(payload)
+        changed = [
+            {"route": key, "from": previous.get(key), "to": value}
+            for key, value in normalized.items()
+            if previous.get(key) != value
+        ]
+        return {
+            "routes": swapped,
+            "impact": {
+                "changed_routes": changed,
+                "profiles_affected": sorted(
+                    {str(item["from"]) for item in changed if item["from"]}
+                    | {str(item["to"]) for item in changed}
+                ),
+            },
+        }
+
+    def record_test_result(
+        self,
+        profile_id: str,
+        key: str,
+        record: dict[str, Any],
+    ) -> None:
+        """Persist a connection-test outcome without touching config or routes."""
+        if key not in {"last_test", "embedding_last_test"}:
+            raise ModelProfileError("测试记录字段无效", code="INVALID_MODEL_PROFILE")
+        normalized = self._normalized_test_record(record)
+        if normalized is None:
+            raise ModelProfileError("测试记录格式无效", code="INVALID_MODEL_PROFILE")
+        with self._mutation_lock:
+            payload = self.load()
+            collection = (
+                payload["profiles"] if key == "last_test" else payload.get("embedding_profiles", [])
+            )
+            target = next((item for item in collection if item["id"] == profile_id), None)
+            if target is None:
+                raise ModelProfileError("模型档案不存在", code="MODEL_PROFILE_NOT_FOUND")
+            target["last_test"] = normalized
+            self._write_payload(payload)
+
+    def _resolve_probe_profile(
+        self, collection_key: str, profile: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Hydrate a stored profile when a probe request references only its id.
+
+        Connection-test endpoints accept a bare ``{"id": ...}`` (the common
+        "test the stored profile" case). Validation and metadata derivation then
+        run over the stored record instead of an empty candidate, so a local
+        embedding profile keeps its local provider and a saved chat profile keeps
+        its base_url/model. Explicit candidate fields in ``profile`` always win.
+        """
+        profile_id = str(profile.get("id") or "").strip()
+        if not profile_id:
+            return profile
+        has_candidate_fields = any(
+            profile.get(key) not in (None, "")
+            for key in ("provider", "model", "base_url", "api_format")
+        )
+        payload = self.load()
+        stored = next(
+            (item for item in payload.get(collection_key, []) if item.get("id") == profile_id),
+            None,
+        )
+        if stored is None:
+            if has_candidate_fields:
+                return profile
+            raise ModelProfileError("模型档案不存在", code="MODEL_PROFILE_NOT_FOUND")
+        return {**stored, **profile}
 
     def test_candidate(self, profile: dict[str, Any], *, api_key: str = "") -> dict[str, Any]:
         """Resolve a connection-test candidate without exposing stored credentials."""
+        profile = self._resolve_probe_profile("profiles", profile)
         metadata = self._profile_metadata(profile)
         credential_ref = str(metadata.get("credential_ref") or "")
         secret = (
@@ -310,39 +500,24 @@ class ModelProfileStore:
         return {**metadata, "api_key": secret}
 
     def test_embedding_candidate(
-        self,
-        profile: dict[str, Any],
-        *,
-        api_key: str = "",
-        embedding_api_key: str = "",
+        self, profile: dict[str, Any], *, api_key: str = ""
     ) -> dict[str, Any]:
-        """Resolve an embedding probe without requiring a chat-model request."""
-        metadata = self._profile_metadata(profile)
-        if metadata["embedding_provider"] == "local":
-            return {**metadata, "embedding_api_key": ""}
-
-        credential_ref = str(metadata.get("credential_ref") or "")
-        embedding_credential_ref = str(metadata.get("embedding_credential_ref") or "")
+        """Resolve an independent embedding profile for a connection probe."""
+        profile = self._resolve_probe_profile("embedding_profiles", profile)
+        metadata = self._embedding_metadata(profile)
+        if metadata["provider"] == "local":
+            return {**metadata, "api_key": ""}
+        ref = str(metadata.get("credential_ref") or "")
         secret = (
-            str(embedding_api_key or "").strip()
-            or str(api_key or "").strip()
-            or self._session_credentials.get(embedding_credential_ref, "")
-            or self._credentials().get(embedding_credential_ref, "")
-            or self._session_credentials.get(credential_ref, "")
-            or self._credentials().get(credential_ref, "")
-            or (
-                os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_API_KEY", "").strip()
-                or os.environ.get("LLM_API_KEY", "").strip()
-                if metadata["id"] == "default"
-                else ""
-            )
+            str(api_key or "").strip()
+            or self._session_credentials.get(ref, "")
+            or self._credentials().get(ref, "")
         )
         if not secret:
             raise ModelProfileError(
-                f"模型档案 {metadata['label']} 缺少 Embedding API Key",
-                code="MODEL_CREDENTIAL_MISSING",
+                f"Embedding 档案 {metadata['label']} 缺少 API Key", code="MODEL_CREDENTIAL_MISSING"
             )
-        return {**metadata, "embedding_api_key": secret}
+        return {**metadata, "api_key": secret}
 
     def delete_profile(
         self,
@@ -351,43 +526,115 @@ class ModelProfileStore:
         fallback_id: str = "",
         project_routes: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        with self._mutation_lock:
+            payload = self.load()
+            profile_ids = {item["id"] for item in payload["profiles"]}
+            if profile_id not in profile_ids:
+                raise ModelProfileError("模型档案不存在", code="MODEL_PROFILE_NOT_FOUND")
+            if len(profile_ids) == 1:
+                raise ModelProfileError(
+                    "至少保留一个模型档案",
+                    code="MODEL_PROFILE_LAST_PROFILE",
+                )
+            routes = {**payload["routes"], **self._routes(project_routes)}
+            referenced = sorted(key for key, value in routes.items() if value == profile_id)
+            if referenced:
+                if not fallback_id:
+                    raise ModelProfileError(
+                        "档案正在被任务路由引用，请选择回退档案",
+                        code="MODEL_PROFILE_IN_USE",
+                    )
+                if fallback_id == profile_id or fallback_id not in profile_ids:
+                    raise ModelProfileError(
+                        "回退档案无效，请选择一个不同的现有档案",
+                        code="MODEL_PROFILE_FALLBACK_INVALID",
+                    )
+                fallback = next(item for item in payload["profiles"] if item["id"] == fallback_id)
+                if not self._profile_configured(fallback, self._credentials()):
+                    raise ModelProfileError(
+                        "回退档案缺少 API Key，无法接管聊天路由",
+                        code="MODEL_PROFILE_FALLBACK_UNCONFIGURED",
+                    )
+                routes = {
+                    key: fallback_id if value == profile_id else value
+                    for key, value in routes.items()
+                }
+            removed = next(item for item in payload["profiles"] if item["id"] == profile_id)
+            payload["profiles"] = [item for item in payload["profiles"] if item["id"] != profile_id]
+            if payload.get("default_profile_id") == profile_id:
+                payload["default_profile_id"] = fallback_id or (
+                    payload["profiles"][0]["id"] if payload["profiles"] else "default"
+                )
+            payload["routes"] = {key: value for key, value in routes.items() if key in ROUTE_KEYS}
+            credential_ref = str(removed.get("credential_ref") or "")
+            self._session_credentials.pop(credential_ref, None)
+            credentials = self._credentials()
+            credentials.pop(credential_ref, None)
+            self._write_json(self.credentials_path, credentials)
+            self._write_payload(payload)
+            return {"deleted": profile_id, "routes": payload["routes"]}
+
+    def delete_profile_preview(
+        self,
+        profile_id: str,
+        *,
+        fallback_id: str = "",
+        project_routes: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Read-only deletion impact preview; never mutates the store."""
         payload = self.load()
+        persisted_credentials = self._credentials()
         profile_ids = {item["id"] for item in payload["profiles"]}
         if profile_id not in profile_ids:
             raise ModelProfileError("模型档案不存在", code="MODEL_PROFILE_NOT_FOUND")
-        if len(profile_ids) == 1:
-            raise ModelProfileError(
-                "至少保留一个模型档案",
-                code="MODEL_PROFILE_LAST_PROFILE",
-            )
-        routes = {**payload["routes"], **self._routes(project_routes)}
-        referenced = sorted(key for key, value in routes.items() if value == profile_id)
-        if referenced:
-            if not fallback_id or fallback_id == profile_id or fallback_id not in profile_ids:
-                raise ModelProfileError(
-                    "档案正在被任务路由引用，请选择回退档案",
-                    code="MODEL_PROFILE_IN_USE",
-                )
-            routes = {
-                key: fallback_id if value == profile_id else value for key, value in routes.items()
+        # The preview must predict delete_profile exactly, so it judges the
+        # same route map delete enforces: stored routes + project overrides,
+        # without the read-time default-profile fallback.
+        effective = {
+            key: value
+            for key, value in {
+                **payload["routes"],
+                **self._routes(project_routes),
+            }.items()
+            if key in ROUTE_KEYS
+        }
+        used_by_routes = [key for key in ROUTE_KEYS if effective.get(key) == profile_id]
+        others = [item for item in payload["profiles"] if item["id"] != profile_id]
+        fallback_candidates = [
+            {
+                "id": item["id"],
+                "label": item["label"],
+                "configured": self._profile_configured(item, persisted_credentials),
             }
-        removed = next(item for item in payload["profiles"] if item["id"] == profile_id)
-        payload["profiles"] = [item for item in payload["profiles"] if item["id"] != profile_id]
-        if payload.get("default_profile_id") == profile_id:
-            payload["default_profile_id"] = fallback_id or (
-                payload["profiles"][0]["id"] if payload["profiles"] else "default"
-            )
-        payload["routes"] = {key: value for key, value in routes.items() if key in ROUTE_KEYS}
-        credential_ref = str(removed.get("credential_ref") or "")
-        self._session_credentials.pop(credential_ref, None)
-        embedding_credential_ref = str(removed.get("embedding_credential_ref") or "")
-        self._session_credentials.pop(embedding_credential_ref, None)
-        credentials = self._credentials()
-        credentials.pop(credential_ref, None)
-        credentials.pop(embedding_credential_ref, None)
-        self._write_json(self.credentials_path, credentials)
-        self._write_payload(payload)
-        return {"deleted": profile_id, "routes": payload["routes"]}
+            for item in sorted(others, key=lambda item: item["id"])
+        ]
+        blocking: list[str] = []
+        if not others:
+            blocking.append("MODEL_PROFILE_LAST_PROFILE")
+        elif used_by_routes:
+            if not fallback_id:
+                blocking.append("MODEL_PROFILE_IN_USE")
+            elif fallback_id == profile_id or fallback_id not in profile_ids:
+                blocking.append("MODEL_PROFILE_FALLBACK_INVALID")
+            else:
+                fallback = next(item for item in others if item["id"] == fallback_id)
+                if not self._profile_configured(fallback, persisted_credentials):
+                    blocking.append("MODEL_PROFILE_FALLBACK_UNCONFIGURED")
+        resulting: dict[str, str] | None = None
+        if not blocking:
+            resulting = {
+                key: (fallback_id if value == profile_id else value)
+                for key, value in effective.items()
+            }
+        return {
+            "profile_id": profile_id,
+            "used_by_routes": used_by_routes,
+            "routes_that_would_fail": used_by_routes if blocking else [],
+            "fallback_candidates": fallback_candidates,
+            "resulting_routes": resulting,
+            "deletable": not blocking,
+            "blocking_reasons": blocking,
+        }
 
     def resolve(
         self,
@@ -428,20 +675,9 @@ class ModelProfileStore:
                 f"模型档案 {profile['label']} 缺少 API Key",
                 code="MODEL_CREDENTIAL_MISSING",
             )
-        embedding_credential_ref = str(profile.get("embedding_credential_ref") or "")
-        embedding_api_key = (
-            self._session_credentials.get(embedding_credential_ref)
-            or self._credentials().get(embedding_credential_ref)
-            or (
-                os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_API_KEY", "").strip()
-                if profile["id"] == "default"
-                else ""
-            )
-        )
         return {
             **profile,
             "api_key": api_key,
-            "embedding_api_key": embedding_api_key,
             "operation": operation,
         }
 
@@ -535,48 +771,6 @@ class ModelProfileStore:
         timeout_seconds = ModelProfileStore._bounded_number(
             value.get("timeout_seconds"), 120, 1, 1800, float, "超时"
         )
-        try:
-            embedding_provider = normalize_embedding_provider(
-                value.get("embedding_provider") or "openai"
-            )
-        except EmbeddingRuntimeError as exc:
-            raise ModelProfileError(str(exc), code="INVALID_MODEL_PROFILE") from exc
-        embedding_base_url = str(value.get("embedding_base_url") or "").strip().rstrip("/")
-        if embedding_provider == "openai" and embedding_base_url:
-            parsed_embedding_url = urlparse(embedding_base_url)
-            if (
-                parsed_embedding_url.scheme not in {"http", "https"}
-                or not parsed_embedding_url.netloc
-            ):
-                raise ModelProfileError(
-                    "Embedding Base URL 必须是有效的 HTTP(S) 地址",
-                    code="INVALID_MODEL_PROFILE",
-                )
-        embedding_model = str(
-            value.get("embedding_model")
-            or (DEFAULT_LOCAL_MODEL if embedding_provider == "local" else DEFAULT_CLOUD_MODEL)
-        ).strip()
-        if not embedding_model or len(embedding_model) > 120:
-            raise ModelProfileError(
-                "Embedding 模型名称不能为空且不能超过 120 字",
-                code="INVALID_MODEL_PROFILE",
-            )
-        embedding_dimension = ModelProfileStore._bounded_number(
-            value.get("embedding_dimension"),
-            DEFAULT_LOCAL_DIMENSION if embedding_provider == "local" else 1536,
-            1,
-            65536,
-            int,
-            "Embedding 维度",
-        )
-        embedding_max_tokens = ModelProfileStore._bounded_number(
-            value.get("embedding_max_tokens"),
-            DEFAULT_LOCAL_MAX_TOKENS if embedding_provider == "local" else 8192,
-            256,
-            131072,
-            int,
-            "Embedding Token 上限",
-        )
         search_mode = str(value.get("search_mode") or "vector").strip().lower()
         if search_mode not in {"vector", "graph"}:
             raise ModelProfileError("检索策略无效", code="INVALID_MODEL_PROFILE")
@@ -605,21 +799,110 @@ class ModelProfileStore:
             "timeout_seconds": timeout_seconds,
             "thinking_modes": thinking_modes,
             "credential_ref": str(value.get("credential_ref") or f"key_{profile_id}"),
-            "embedding_provider": embedding_provider,
-            "embedding_base_url": embedding_base_url,
-            "embedding_model": embedding_model,
-            "embedding_dimension": embedding_dimension,
-            "embedding_max_tokens": embedding_max_tokens,
-            "embedding_credential_ref": str(
-                value.get("embedding_credential_ref") or f"embedding_key_{profile_id}"
-            ),
             "search_mode": search_mode,
         }
-        for field in ("credential_updated_at", "embedding_credential_updated_at"):
+        for field in ("credential_updated_at",):
             timestamp = ModelProfileStore._normalized_timestamp(value.get(field))
             if timestamp:
                 metadata[field] = timestamp
+        for field in ("last_test",):
+            test_record = ModelProfileStore._normalized_test_record(value.get(field))
+            if test_record is not None:
+                metadata[field] = test_record
         return metadata
+
+    @staticmethod
+    def _embedding_metadata(value: dict[str, Any]) -> dict[str, Any]:
+        profile_id = str(value.get("id") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,47}", profile_id):
+            raise ModelProfileError("Embedding 档案 ID 格式无效", code="INVALID_MODEL_PROFILE")
+        try:
+            provider = normalize_embedding_provider(value.get("provider") or "openai")
+        except EmbeddingRuntimeError as exc:
+            raise ModelProfileError(str(exc), code="INVALID_MODEL_PROFILE") from exc
+        model = str(
+            value.get("model")
+            or (DEFAULT_LOCAL_MODEL if provider == "local" else DEFAULT_CLOUD_MODEL)
+        ).strip()
+        if not model or len(model) > 120:
+            raise ModelProfileError(
+                "Embedding 模型名称不能为空且不能超过 120 字", code="INVALID_MODEL_PROFILE"
+            )
+        base_url = str(value.get("base_url") or "").strip().rstrip("/")
+        if provider == "openai":
+            if not base_url:
+                base_url = "https://api.openai.com/v1"
+            parsed = urlparse(base_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ModelProfileError(
+                    "Embedding Base URL 必须是有效的 HTTP(S) 地址", code="INVALID_MODEL_PROFILE"
+                )
+        dimension = ModelProfileStore._bounded_number(
+            value.get("dimension"),
+            DEFAULT_LOCAL_DIMENSION if provider == "local" else 1536,
+            1,
+            65536,
+            int,
+            "Embedding 维度",
+        )
+        max_tokens = ModelProfileStore._bounded_number(
+            value.get("max_tokens"),
+            DEFAULT_LOCAL_MAX_TOKENS if provider == "local" else 8192,
+            1,
+            131072,
+            int,
+            "Embedding Token 上限",
+        )
+        metadata = {
+            "id": profile_id,
+            "label": str(value.get("label") or profile_id).strip()[:80],
+            "provider": provider,
+            "model": model,
+            "base_url": base_url,
+            "dimension": dimension,
+            "max_tokens": max_tokens,
+            "credential_ref": str(value.get("credential_ref") or f"embedding_key_{profile_id}"),
+        }
+        stamp = ModelProfileStore._normalized_timestamp(value.get("credential_updated_at"))
+        if stamp:
+            metadata["credential_updated_at"] = stamp
+        record = ModelProfileStore._normalized_test_record(value.get("last_test"))
+        if record is not None:
+            metadata["last_test"] = record
+        return metadata
+
+    @staticmethod
+    def _normalized_test_record(value: Any) -> dict[str, Any] | None:
+        """Sanitize a persisted connection-test record (credential-free)."""
+        if not isinstance(value, dict):
+            return None
+        status = str(value.get("status") or "")
+        if status not in {"ok", "failed"}:
+            return None
+        tested_at = ModelProfileStore._normalized_timestamp(value.get("tested_at"))
+        if not tested_at:
+            return None
+        raw_latency = value.get("latency_ms")
+        if isinstance(raw_latency, bool):
+            return None
+        try:
+            latency_ms = int(raw_latency)
+        except (TypeError, ValueError):
+            return None
+        if latency_ms < 0:
+            return None
+        error_code = str(value.get("error_code") or "").strip() or None
+        if status == "ok":
+            error_code = None
+        return {
+            "status": status,
+            "tested_at": tested_at,
+            "latency_ms": latency_ms,
+            "provider": str(value.get("provider") or "")[:80],
+            "resolved_model": str(value.get("resolved_model") or "")[:120],
+            "error_code": error_code,
+            "failed_stage": None,
+        }
 
     @staticmethod
     def _utc_timestamp() -> str:
@@ -674,6 +957,8 @@ class ModelProfileStore:
                 "default_profile_id": payload.get("default_profile_id") or "default",
                 "profiles": payload.get("profiles") or [],
                 "routes": payload.get("routes") or {},
+                "embedding_profiles": payload.get("embedding_profiles") or [],
+                "active_embedding_profile_id": payload.get("active_embedding_profile_id") or "",
             },
         )
 

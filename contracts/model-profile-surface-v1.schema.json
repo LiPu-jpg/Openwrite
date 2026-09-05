@@ -1,35 +1,21 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openwrite.dev/schemas/model-profile-surface-v1.schema.json",
-  "title": "OpenWrite model profile surface v1 (credential-free)",
+  "title": "OpenWrite independent chat and embedding model surface v1",
   "type": "object",
-  "required": ["schema_version", "profiles", "routes", "default_profile_id"],
+  "required": ["schema_version", "profiles", "routes", "default_profile_id", "embedding_profiles", "active_embedding_profile_id"],
   "additionalProperties": true,
   "properties": {
     "schema_version": {"const": "openwrite.model-profile.v1"},
     "default_profile_id": {"type": "string", "minLength": 1},
-    "legacy_mapped": {"type": "boolean"},
-    "profiles": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["id", "label", "provider", "model", "configured"],
-        "additionalProperties": true,
-        "disallowed": ["api_key", "embedding_api_key", "secret"],
-        "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "label": {"type": "string", "minLength": 1},
-          "provider": {"type": "string", "minLength": 1},
-          "model": {"type": "string", "minLength": 1},
-          "configured": {"type": "boolean"},
-          "embedding_configured": {"type": "boolean"},
-          "credential_updated_at": {"type": "string"}
-        }
-      }
-    },
-    "routes": {
-      "type": "object",
-      "additionalProperties": {"type": "string"}
-    }
+    "active_embedding_profile_id": {"type": "string"},
+    "profiles": {"type": "array", "items": {"$ref": "#/$defs/chat_profile"}},
+    "embedding_profiles": {"type": "array", "items": {"$ref": "#/$defs/embedding_profile"}},
+    "routes": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "$defs": {
+    "test": {"type": ["object", "null"], "required": ["status", "tested_at", "latency_ms", "provider", "resolved_model", "error_code", "failed_stage"], "additionalProperties": true, "disallowed": ["api_key", "secret", "credential"], "properties": {"status": {"enum": ["ok", "failed"]}, "tested_at": {"type": "string"}, "latency_ms": {"type": "integer", "minimum": 0}, "provider": {"type": "string"}, "resolved_model": {"type": "string"}, "error_code": {"type": ["string", "null"]}, "failed_stage": {"type": "null"}}},
+    "chat_profile": {"type": "object", "additionalProperties": true, "required": ["id", "label", "provider", "model", "configured", "schema_version", "capabilities", "used_by_routes", "last_test"], "disallowed": ["api_key", "embedding_api_key", "secret"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "provider": {"type": "string"}, "model": {"type": "string"}, "configured": {"type": "boolean"}, "schema_version": {"const": "openwrite.model-profile.v1"}, "capabilities": {"type": "object", "required": ["chat"], "properties": {"chat": {"const": true}}}, "used_by_routes": {"type": "array", "items": {"enum": ["goethe", "dante", "chapter_write", "review", "source_extract", "revision", "search", "research"]}}, "last_test": {"$ref": "#/$defs/test"}}},
+    "embedding_profile": {"type": "object", "additionalProperties": true, "required": ["id", "label", "provider", "model", "dimension", "max_tokens", "configured", "active", "schema_version", "last_test"], "disallowed": ["api_key", "embedding_api_key", "secret"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "provider": {"type": "string"}, "model": {"type": "string"}, "base_url": {"type": "string"}, "dimension": {"type": "integer", "minimum": 1}, "max_tokens": {"type": "integer", "minimum": 1}, "configured": {"type": "boolean"}, "active": {"type": "boolean"}, "schema_version": {"const": "openwrite.embedding-profile.v1"}, "last_test": {"$ref": "#/$defs/test"}}}
   }
 }

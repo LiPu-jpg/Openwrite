@@ -16,6 +16,7 @@ from markdown_it import MarkdownIt
 
 from tools.character_state_index import strip_character_state_annotations
 from tools.novel_workspace import list_chapters
+from tools.scene_integration import scene_export_chapters
 
 
 class EpubExportError(ValueError):
@@ -52,6 +53,8 @@ def export_epub(
     chapters = list_chapters(project_root, novel_id)
     if not chapters:
         raise EpubExportError("还没有可导出的章节")
+    scene_chapters = scene_export_chapters(project_root, novel_id)
+    export_chapters = scene_chapters if scene_chapters is not None else chapters
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     book_title = str(title or novel_id).strip()
@@ -60,9 +63,14 @@ def export_epub(
     digest = hashlib.sha256()
     chapter_entries: list[tuple[str, str, str]] = []
     renderer = MarkdownIt("commonmark", {"html": False})
-    for index, chapter in enumerate(chapters, start=1):
+    for index, chapter in enumerate(export_chapters, start=1):
+        source_text = (
+            chapter.markdown
+            if scene_chapters is not None
+            else chapter.path.read_text(encoding="utf-8")
+        )
         markdown = strip_character_state_annotations(
-            chapter.path.read_text(encoding="utf-8")
+            source_text
         )
         digest.update(chapter.chapter_id.encode("utf-8"))
         digest.update(markdown.encode("utf-8"))

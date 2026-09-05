@@ -468,10 +468,24 @@ class CharacterStateIndex:
         return "ch_001", "default"
 
     def _source_paths(self) -> list[Path]:
-        candidates = [
-            *(self.novel_root / "src").rglob("*.md"),
-            *(self.novel_root / "data" / "manuscript").rglob("*.md"),
-        ]
+        manuscript_paths = list((self.novel_root / "data" / "manuscript").rglob("*.md"))
+        accepted: list[Path] = []
+        try:
+            from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+            acceptance = ManuscriptAcceptanceService(
+                self.project_root, self.novel_id
+            )
+            for path in manuscript_paths:
+                fact = acceptance._read_json(acceptance.fact_path(path.stem))  # noqa: SLF001
+                if not isinstance(fact, dict):
+                    continue
+                content = path.read_text(encoding="utf-8")
+                if fact.get("source_revision") == acceptance.fingerprint(content):
+                    accepted.append(path)
+        except Exception:
+            accepted = []
+        candidates = [*(self.novel_root / "src").rglob("*.md"), *accepted]
         return sorted({path.resolve() for path in candidates if path.is_file()})
 
     def _latest_manuscript_chapter(self) -> str:

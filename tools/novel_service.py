@@ -8,7 +8,10 @@ input normalization, canonical packet assembly and result semantics live here.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 import re
+import tempfile
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -19,9 +22,16 @@ import yaml
 
 
 class NovelServiceError(RuntimeError):
-    def __init__(self, message: str, *, code: str = "OPERATION_FAILED"):
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "OPERATION_FAILED",
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.code = code
+        self.details = details or {}
 
 
 class NovelApplicationService:
@@ -103,9 +113,7 @@ class NovelApplicationService:
     def render_focus(self) -> str:
         from tools.novel_workspace import load_creative_focus, render_creative_focus
 
-        rendered: str = render_creative_focus(
-            load_creative_focus(self.project_root, self.novel_id)
-        )
+        rendered: str = render_creative_focus(load_creative_focus(self.project_root, self.novel_id))
         return rendered
 
     def update_focus(
@@ -151,11 +159,18 @@ class NovelApplicationService:
         start_number: int | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
+        from tools.manuscript_acceptance import ManuscriptAcceptanceService
         from tools.novel_workspace import import_manuscript, update_project_progress
 
         target_arc = str(arc_id or self.config.get("current_arc") or "arc_001")
         if not re.fullmatch(r"arc_\d+", target_arc):
             raise NovelServiceError("篇 ID 必须形如 arc_001", code="INVALID_INPUT")
+        acceptance_service = ManuscriptAcceptanceService(self.project_root, self.novel_id)
+        accepted_before = {
+            str(item.get("chapter_id") or ""): str(item.get("accepted_revision") or "")
+            for item in acceptance_service.inspect().get("chapters", [])
+            if isinstance(item, dict)
+        }
         try:
             imported = import_manuscript(
                 self.project_root,
@@ -177,10 +192,17 @@ class NovelApplicationService:
             current_arc=target_arc,
         )
         self.refresh()
+        earliest = min(imported, key=lambda item: self._chapter_number(item.chapter_id))
+        acceptance = acceptance_service.start_acceptance(
+            earliest.chapter_id,
+            source="import",
+            expected_previous_revision=accepted_before.get(earliest.chapter_id, ""),
+        )
         return {
             "arc_id": target_arc,
             "next_chapter": next_chapter,
             "writing_units": sum(item.writing_units for item in imported),
+            "acceptance": acceptance,
             "imported": [
                 {
                     "chapter_id": item.chapter_id,
@@ -196,27 +218,207 @@ class NovelApplicationService:
         output: Path,
         *,
         format_name: str = "md",
+        purpose: str = "backup",
+        preflight_revision: str = "",
         title: str = "",
         author: str = "",
         language: str = "zh-CN",
         cover: Path | None = None,
     ) -> Path:
+        from tools.export_preflight import ExportPreflightError, ExportPreflightService
         from tools.novel_workspace import export_manuscript
+        from tools.project_lock import ProjectBusyError, ProjectWriteLock
 
+        preflight = ExportPreflightService(self.project_root, self.novel_id)
+        destination = Path(output)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, staged_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.",
+            suffix=".exporting",
+            dir=destination.parent,
+        )
+        os.close(descriptor)
+        staged = Path(staged_name)
+        previous = staged.with_name(staged.name + ".previous")
+        committed = False
         try:
-            path: Path = export_manuscript(
+            destination_sha = self._export_file_revision(destination)
+            with ProjectWriteLock(
                 self.project_root,
                 self.novel_id,
-                Path(output),
-                format_name=format_name,
-                title=title or str(self.config.get("title") or ""),
-                author=author or str(self.config.get("author") or ""),
-                language=language or str(self.config.get("language") or "zh-CN"),
-                cover=cover,
-            )
-            return path
+                operation=f"export:{format_name}:{purpose}",
+            ):
+                checked = preflight.require_exportable(
+                    format_name=format_name,
+                    purpose=purpose,
+                    expected_revision=preflight_revision,
+                )
+                path: Path = export_manuscript(
+                    self.project_root,
+                    self.novel_id,
+                    staged,
+                    format_name=format_name,
+                    title=title or str(checked["metadata"].get("title") or ""),
+                    author=author or str(checked["metadata"].get("author") or ""),
+                    language=language or str(checked["metadata"].get("language") or "zh-CN"),
+                    cover=cover,
+                )
+                preflight.validate_output(path, format_name=format_name)
+                current = preflight.inspect(format_name=format_name, purpose=purpose)
+                if current["preflight_revision"] != checked["preflight_revision"]:
+                    raise ExportPreflightError(
+                        "导出期间项目内容已经变化，请重新检查",
+                        code="EXPORT_PREFLIGHT_CHANGED",
+                        details={"preflight": current},
+                    )
+                self._prepare_export_destination(
+                    destination,
+                    previous,
+                    expected_destination_sha=destination_sha,
+                )
+                current = preflight.inspect(format_name=format_name, purpose=purpose)
+                if current["preflight_revision"] != checked["preflight_revision"]:
+                    raise ExportPreflightError(
+                        "导出发布期间项目内容已经变化，请重新检查",
+                        code="EXPORT_PREFLIGHT_CHANGED",
+                        details={"preflight": current},
+                    )
+                self._publish_export(staged, destination)
+                committed = True
+                self._best_effort_unlink(previous)
+                return destination
+        except ExportPreflightError as exc:
+            raise NovelServiceError(
+                str(exc),
+                code=exc.code,
+                details=exc.details,
+            ) from exc
+        except ProjectBusyError as exc:
+            raise NovelServiceError(str(exc), code="PROJECT_BUSY") from exc
         except (OSError, ValueError) as exc:
             raise NovelServiceError(str(exc), code="INVALID_INPUT") from exc
+        finally:
+            recovery_error = None
+            if not committed:
+                recovery_error = self._restore_export_destination(destination, previous)
+            self._best_effort_unlink(staged)
+            if recovery_error is not None:
+                raise recovery_error
+
+    @staticmethod
+    def _export_file_revision(path: Path) -> str:
+        candidate = Path(path)
+        if not candidate.exists():
+            return "sha256:missing"
+        if candidate.is_symlink() or not candidate.is_file():
+            raise NovelServiceError(
+                "导出目标必须是普通文件",
+                code="INVALID_EXPORT_OUTPUT",
+            )
+        try:
+            content = candidate.read_bytes()
+        except OSError as exc:
+            raise NovelServiceError(
+                "导出目标在检查期间发生变化",
+                code="EXPORT_OUTPUT_CHANGED",
+            ) from exc
+        return "sha256:" + hashlib.sha256(content).hexdigest()
+
+    @classmethod
+    def _prepare_export_destination(
+        cls,
+        destination: Path,
+        previous: Path,
+        *,
+        expected_destination_sha: str,
+    ) -> None:
+        if expected_destination_sha == "sha256:missing":
+            return
+        try:
+            os.replace(destination, previous)
+        except FileNotFoundError as exc:
+            raise NovelServiceError(
+                "导出目标已由其他进程删除，请重新导出",
+                code="EXPORT_OUTPUT_CHANGED",
+            ) from exc
+        current_sha = cls._export_file_revision(previous)
+        if current_sha != expected_destination_sha:
+            raise NovelServiceError(
+                "导出目标已由其他进程修改，请重新导出",
+                code="EXPORT_OUTPUT_CHANGED",
+                details={"expected": expected_destination_sha, "current": current_sha},
+            )
+
+    @staticmethod
+    def _publish_export(staged: Path, destination: Path) -> None:
+        try:
+            os.link(staged, destination)
+        except FileExistsError as exc:
+            raise NovelServiceError(
+                "导出目标已由其他进程创建，请重新导出",
+                code="EXPORT_OUTPUT_CHANGED",
+            ) from exc
+
+    @staticmethod
+    def _restore_export_destination(destination: Path, previous: Path) -> NovelServiceError | None:
+        if not previous.exists():
+            return None
+        details = {
+            "destination": str(destination),
+            "recovery_path": str(previous),
+        }
+        if destination.exists():
+            return NovelServiceError(
+                "导出目标已被其他进程占用；原文件保留在恢复路径",
+                code="EXPORT_OUTPUT_CHANGED",
+                details=details,
+            )
+        try:
+            os.link(previous, destination)
+        except FileExistsError:
+            return NovelServiceError(
+                "导出目标已被其他进程创建；原文件保留在恢复路径",
+                code="EXPORT_OUTPUT_CHANGED",
+                details=details,
+            )
+        except OSError as exc:
+            return NovelServiceError(
+                "导出失败且原文件无法自动恢复；请使用恢复路径中的副本",
+                code="EXPORT_OUTPUT_RECOVERY_REQUIRED",
+                details={**details, "reason": str(exc)},
+            )
+        try:
+            previous.unlink()
+        except OSError as exc:
+            return NovelServiceError(
+                "原导出已恢复，但恢复副本未能清理",
+                code="EXPORT_OUTPUT_RECOVERY_REQUIRED",
+                details={**details, "reason": str(exc)},
+            )
+        return None
+
+    @staticmethod
+    def _best_effort_unlink(path: Path) -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def export_preflight(
+        self,
+        *,
+        format_name: str = "md",
+        purpose: str = "backup",
+    ) -> dict[str, Any]:
+        from tools.export_preflight import ExportPreflightError, ExportPreflightService
+
+        try:
+            return ExportPreflightService(self.project_root, self.novel_id).inspect(
+                format_name=format_name,
+                purpose=purpose,
+            )
+        except ExportPreflightError as exc:
+            raise NovelServiceError(str(exc), code=exc.code, details=exc.details) from exc
 
     def market_radar(
         self,
@@ -230,9 +432,7 @@ class NovelApplicationService:
         from tools.radar import RadarAgent
 
         if top_n < 1 or top_n > 50:
-            raise NovelServiceError(
-                "推荐数量必须在 1 到 50 之间", code="INVALID_INPUT"
-            )
+            raise NovelServiceError("推荐数量必须在 1 到 50 之间", code="INVALID_INPUT")
         try:
             llm_config = LLMConfig.from_env()
             agent = RadarAgent(
@@ -242,9 +442,7 @@ class NovelApplicationService:
                     str(self.project_root),
                 )
             )
-            result = asyncio.run(
-                agent.scan_market(platforms=platforms, top_n=top_n)
-            )
+            result = asyncio.run(agent.scan_market(platforms=platforms, top_n=top_n))
         except Exception as exc:
             raise NovelServiceError(f"市场分析失败: {exc}") from exc
         return {
@@ -278,11 +476,7 @@ class NovelApplicationService:
         if kind not in {"character", "world"}:
             raise NovelServiceError("仅支持创建人物或世界设定文档", code="INVALID_INPUT")
         clean_name = str(name or "").strip()
-        if (
-            not clean_name
-            or len(clean_name) > 80
-            or any(char in clean_name for char in "/\\\x00")
-        ):
+        if not clean_name or len(clean_name) > 80 or any(char in clean_name for char in "/\\\x00"):
             raise NovelServiceError(
                 "名称不能为空、不能超过 80 字或包含路径分隔符",
                 code="INVALID_INPUT",
@@ -314,13 +508,27 @@ class NovelApplicationService:
 
     def context_preview(self, chapter_id: str = "next") -> dict[str, Any]:
         from tools.context_builder import ContextBuilder
+        from tools.context_manifest import build_context_manifest
+        from tools.context_protection import ContextBudgetError
 
         target = self.resolve_chapter_id(chapter_id)
-        packet = self.assemble_packet(target)
-        generation = ContextBuilder(self.project_root, self.novel_id).build_generation_context(
-            target
-        )
-        return {
+        try:
+            packet = self.assemble_packet(target)
+            generation = ContextBuilder(self.project_root, self.novel_id).build_generation_context(
+                target
+            )
+        except ContextBudgetError as exc:
+            raise NovelServiceError(str(exc), code=exc.code, details=exc.details) from exc
+        manifest_packet = {
+            **packet,
+            "character_states": generation.character_states,
+            "semantic_references": generation.semantic_references,
+            "scene_context": getattr(generation, "scene_context", {}),
+        }
+        manifest = build_context_manifest(self.novel_root, manifest_packet)
+        manifest["generation_budget"] = dict(getattr(generation, "compression", {}) or {})
+        manifest["retrieval"] = dict(generation.semantic_retrieval)
+        result = {
             "chapter_id": target,
             "target_words": int(packet.get("target_words") or 0),
             "characters": list((packet.get("character_documents") or {}).keys()),
@@ -328,18 +536,27 @@ class NovelApplicationService:
             "character_states": generation.character_states,
             "semantic_references": generation.semantic_references,
             "semantic_retrieval": generation.semantic_retrieval,
+            "manifest": manifest,
             "packet": packet,
         }
+        scene_context = getattr(generation, "scene_context", {})
+        if scene_context:
+            result["scene_context"] = scene_context
+        return result
 
     def assemble_packet(self, chapter_id: str) -> dict[str, Any]:
         from tools.chapter_assembler import ChapterAssemblerV2
+        from tools.context_protection import ContextBudgetError
 
         style_id = str(self.config.get("style_id") or self.novel_id)
-        packet = ChapterAssemblerV2(
-            project_root=self.project_root,
-            novel_id=self.novel_id,
-            style_id=style_id,
-        ).assemble(chapter_id)
+        try:
+            packet = ChapterAssemblerV2(
+                project_root=self.project_root,
+                novel_id=self.novel_id,
+                style_id=style_id,
+            ).assemble(chapter_id)
+        except ContextBudgetError as exc:
+            raise NovelServiceError(str(exc), code=exc.code, details=exc.details) from exc
         if is_dataclass(packet):
             payload = asdict(cast(Any, packet))
         elif isinstance(packet, dict):
@@ -378,6 +595,24 @@ class NovelApplicationService:
 
     def write_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
         chapter_id = self.resolve_chapter_id(str(payload.get("chapter_id") or "next"))
+        from tools.manuscript_acceptance import (
+            ManuscriptAcceptanceError,
+            ManuscriptAcceptanceService,
+        )
+
+        acceptance = ManuscriptAcceptanceService(self.project_root, self.novel_id)
+        try:
+            acceptance.require_current(chapter_id)
+        except ManuscriptAcceptanceError as exc:
+            raise NovelServiceError(str(exc), code=exc.code, details=exc.details) from exc
+        if any(
+            path.is_file()
+            for path in (self.novel_root / "data" / "manuscript").glob(f"**/{chapter_id}.md")
+        ):
+            raise NovelServiceError(
+                "目标章节已有正文，请通过修订或版本恢复修改",
+                code="CHAPTER_ALREADY_EXISTS",
+            )
         args = dict(payload)
         args["chapter_id"] = chapter_id
         args.setdefault("context_packet", self.assemble_packet(chapter_id))
@@ -397,6 +632,11 @@ class NovelApplicationService:
         self._ensure_ok(result, fallback="写作失败")
         if self._writer_executor is not None:
             self._record_write_lifecycle(chapter_id, result)
+        from tools.operation_trace import summarize_context_packet
+
+        result["_operation_trace_context"] = summarize_context_packet(
+            cast(dict[str, Any], args["context_packet"])
+        )
         return result
 
     def review_chapter(
@@ -449,7 +689,18 @@ class NovelApplicationService:
             self._task_lock.release()
         self._ensure_ok(result, fallback="审稿失败")
         if self._review_executor is not None:
-            from tools.review_store import ReviewStore
+            from tools.review_store import ReviewStore, validate_review_v2_record
+
+            # Validate before persistence. A present review_v2 key is
+            # canonical data; malformed values must not become artifacts that
+            # later readers could interpret through the legacy adapter.
+            if isinstance(result, dict) and "review_v2" in result:
+                try:
+                    validate_review_v2_record(result)
+                except ValueError as exc:
+                    raise NovelServiceError(
+                        f"评审 v2 契约校验失败: {exc}", code="CONTRACT_INVALID"
+                    ) from exc
 
             store = ReviewStore(self.project_root, self.novel_id)
             store.save(target, result)
@@ -469,15 +720,31 @@ class NovelApplicationService:
 
     def multi_write(self, payload: dict[str, Any]) -> dict[str, Any]:
         from tools.chapter_pipeline import execute_multi_agent_chapter
+        from tools.manuscript_acceptance import (
+            ManuscriptAcceptanceError,
+            ManuscriptAcceptanceService,
+        )
 
         args = dict(payload)
-        args["chapter_id"] = self.resolve_chapter_id(
-            str(args.get("chapter_id") or "next")
-        )
-        if not self._task_lock.acquire(blocking=False):
-            raise NovelServiceError(
-                "已有写作或审稿任务正在运行", code="PROJECT_BUSY"
+        args["chapter_id"] = self.resolve_chapter_id(str(args.get("chapter_id") or "next"))
+        try:
+            ManuscriptAcceptanceService(self.project_root, self.novel_id).require_current(
+                args["chapter_id"]
             )
+        except ManuscriptAcceptanceError as exc:
+            raise NovelServiceError(str(exc), code=exc.code, details=exc.details) from exc
+        if any(
+            path.is_file()
+            for path in (self.novel_root / "data" / "manuscript").glob(
+                f"**/{args['chapter_id']}.md"
+            )
+        ):
+            raise NovelServiceError(
+                "目标章节已有正文，请通过修订或版本恢复修改",
+                code="CHAPTER_ALREADY_EXISTS",
+            )
+        if not self._task_lock.acquire(blocking=False):
+            raise NovelServiceError("已有写作或审稿任务正在运行", code="PROJECT_BUSY")
         try:
             result = execute_multi_agent_chapter(self.project_root, args)
         finally:
@@ -496,9 +763,7 @@ class NovelApplicationService:
         pending = manager.get_pending_nodes(min_weight=1)
         valid, validation_errors = manager.validate_dag()
         workflows = []
-        for workflow in WorkflowScheduler(
-            self.project_root, self.novel_id
-        ).list_active_workflows():
+        for workflow in WorkflowScheduler(self.project_root, self.novel_id).list_active_workflows():
             workflows.append(
                 {
                     "chapter_id": workflow.chapter_id,
@@ -536,12 +801,18 @@ class NovelApplicationService:
 
     def manage_foreshadowing(self, payload: dict[str, Any]) -> dict[str, Any]:
         from tools.foreshadowing_manager import ForeshadowingDAGManager
+        from tools.mutation_summary import MISSING_VALUE, build_mutation_summary
+        from tools.revision_service import RevisionService
 
         manager = ForeshadowingDAGManager(self.project_root, self.novel_id)
         action = str(payload.get("action") or "create")
         node_id = str(payload.get("node_id") or "").strip()
         if not node_id:
             raise NovelServiceError("伏笔 ID 不能为空", code="INVALID_INPUT")
+        before_node = manager.get_node(node_id)
+        before_text = (
+            manager.dag_file.read_text(encoding="utf-8") if manager.dag_file.exists() else ""
+        )
         if action == "create":
             created = manager.create_node(
                 node_id=node_id,
@@ -561,7 +832,25 @@ class NovelApplicationService:
             result = {"node_id": node_id, "status": status}
         else:
             raise NovelServiceError("未知伏笔操作", code="INVALID_INPUT")
-        return {"result": result, "continuity": self.continuity()}
+        after_node = manager.get_node(node_id)
+        after_text = manager.dag_file.read_text(encoding="utf-8")
+        mutation_summary = build_mutation_summary(
+            operation=f"foreshadowing.{action}",
+            entity_kind="foreshadowing",
+            entity_id=node_id,
+            path="data/foreshadowing/dag.yaml",
+            before=(MISSING_VALUE if before_node is None else before_node.model_dump(mode="json")),
+            after=(MISSING_VALUE if after_node is None else after_node.model_dump(mode="json")),
+            source_revision=("" if not before_text else RevisionService.fingerprint(before_text)),
+            result_revision=RevisionService.fingerprint(after_text),
+            field_prefix="node",
+            flatten=False,
+        )
+        return {
+            "result": result,
+            "continuity": self.continuity(),
+            "mutation_summary": mutation_summary,
+        }
 
     def extract_source(
         self,
@@ -644,9 +933,7 @@ class NovelApplicationService:
 
         source_id = self._validate_source_id(source_id)
         try:
-            return SourcePackService(self.project_root, self.novel_id).analyze_v2(
-                source_id
-            )
+            return SourcePackService(self.project_root, self.novel_id).analyze_v2(source_id)
         except SourceAnalysisError as exc:
             raise NovelServiceError(str(exc), code=exc.code) from exc
 
@@ -656,9 +943,7 @@ class NovelApplicationService:
 
         source_id = self._validate_source_id(source_id)
         try:
-            return SourcePackService(self.project_root, self.novel_id).status_v2(
-                source_id
-            )
+            return SourcePackService(self.project_root, self.novel_id).status_v2(source_id)
         except SourceAnalysisError as exc:
             raise NovelServiceError(str(exc), code=exc.code) from exc
 
@@ -668,9 +953,7 @@ class NovelApplicationService:
 
         source_id = self._validate_source_id(source_id)
         try:
-            return SourcePackService(self.project_root, self.novel_id).retry_v2(
-                source_id, chunk_id
-            )
+            return SourcePackService(self.project_root, self.novel_id).retry_v2(source_id, chunk_id)
         except SourceAnalysisError as exc:
             raise NovelServiceError(str(exc), code=exc.code) from exc
 
@@ -680,9 +963,7 @@ class NovelApplicationService:
 
         clean_ids = [self._validate_source_id(source_id) for source_id in source_ids]
         try:
-            return SourcePackService(self.project_root, self.novel_id).synthesize_v2(
-                clean_ids
-            )
+            return SourcePackService(self.project_root, self.novel_id).synthesize_v2(clean_ids)
         except SourceAnalysisError as exc:
             raise NovelServiceError(str(exc), code=exc.code) from exc
 
@@ -691,35 +972,29 @@ class NovelApplicationService:
         from tools.source_pack import SourcePackService
 
         try:
-            return SourcePackService(self.project_root, self.novel_id).profile_v2(
-                profile_id
+            return SourcePackService(self.project_root, self.novel_id).profile_v2(profile_id)
+        except SourceAnalysisError as exc:
+            raise NovelServiceError(str(exc), code=exc.code) from exc
+
+    def preview_source_promotion_v2(self, profile_id: str, target: str) -> dict[str, Any]:
+        from tools.source_analysis import SourceAnalysisError
+        from tools.source_pack import SourcePackService
+
+        try:
+            return SourcePackService(self.project_root, self.novel_id).preview_promotion_v2(
+                profile_id, target
             )
         except SourceAnalysisError as exc:
             raise NovelServiceError(str(exc), code=exc.code) from exc
 
-    def preview_source_promotion_v2(
-        self, profile_id: str, target: str
-    ) -> dict[str, Any]:
+    def apply_source_promotion_v2(self, preview_id: str, *, confirm: bool) -> dict[str, Any]:
         from tools.source_analysis import SourceAnalysisError
         from tools.source_pack import SourcePackService
 
         try:
-            return SourcePackService(
-                self.project_root, self.novel_id
-            ).preview_promotion_v2(profile_id, target)
-        except SourceAnalysisError as exc:
-            raise NovelServiceError(str(exc), code=exc.code) from exc
-
-    def apply_source_promotion_v2(
-        self, preview_id: str, *, confirm: bool
-    ) -> dict[str, Any]:
-        from tools.source_analysis import SourceAnalysisError
-        from tools.source_pack import SourcePackService
-
-        try:
-            return SourcePackService(
-                self.project_root, self.novel_id
-            ).apply_promotion_v2(preview_id, confirm=confirm)
+            return SourcePackService(self.project_root, self.novel_id).apply_promotion_v2(
+                preview_id, confirm=confirm
+            )
         except SourceAnalysisError as exc:
             raise NovelServiceError(str(exc), code=exc.code) from exc
 
@@ -845,15 +1120,11 @@ class NovelApplicationService:
         return result
 
     @staticmethod
-    def _default_source_executor(
-        root: Path, args: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _default_source_executor(root: Path, args: dict[str, Any]) -> dict[str, Any]:
         from tools.source_pack import SourcePackService
 
         config = yaml.safe_load((root / "novel_config.yaml").read_text(encoding="utf-8")) or {}
-        result: dict[str, Any] = SourcePackService(
-            root, str(config.get("novel_id") or "")
-        ).extract(
+        result: dict[str, Any] = SourcePackService(root, str(config.get("novel_id") or "")).extract(
             str(args["source_id"]),
             Path(str(args["source_file"])),
             focus=str(args.get("focus") or "style"),
@@ -861,9 +1132,7 @@ class NovelApplicationService:
         )
         return result
 
-    def _record_write_lifecycle(
-        self, chapter_id: str, result: dict[str, Any]
-    ) -> None:
+    def _record_write_lifecycle(self, chapter_id: str, result: dict[str, Any]) -> None:
         from tools.workflow_scheduler import WorkflowScheduler
 
         scheduler = WorkflowScheduler(self.project_root, self.novel_id)
@@ -891,9 +1160,7 @@ class NovelApplicationService:
             action_prefix="application_write",
         )
 
-    def _record_review_lifecycle(
-        self, chapter_id: str, result: dict[str, Any]
-    ) -> None:
+    def _record_review_lifecycle(self, chapter_id: str, result: dict[str, Any]) -> None:
         from tools.review_store import (
             ReviewStore,
             issue_review_severity,
@@ -903,9 +1170,7 @@ class NovelApplicationService:
 
         store = ReviewStore(self.project_root, self.novel_id)
         current_revision = store._source_revision(chapter_id)
-        deliverable = review_is_deliverable(
-            result, current_source_revision=current_revision
-        )
+        deliverable = review_is_deliverable(result, current_source_revision=current_revision)
         scheduler = WorkflowScheduler(self.project_root, self.novel_id)
         workflow = scheduler.load_or_create(chapter_id)
         errors: list[str] = []
@@ -948,9 +1213,7 @@ class NovelApplicationService:
 
         store = BookStateStore(self.project_root, self.novel_id)
         state = store.load_or_create()
-        if self._chapter_number(chapter_id) >= self._chapter_number(
-            state.current_chapter
-        ):
+        if self._chapter_number(chapter_id) >= self._chapter_number(state.current_chapter):
             state.current_chapter = chapter_id
         if review_passed is None:
             state.stage = BookStage.REVIEW_AND_REVISE

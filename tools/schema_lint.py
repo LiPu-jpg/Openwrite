@@ -39,8 +39,17 @@ def _type_ok(value: Any, name: str) -> bool:
     return True
 
 
-def validate_schema(value: Any, schema: Mapping[str, Any], *, path: str = "$") -> list[str]:
+def validate_schema(value: Any, schema: Mapping[str, Any], *, path: str = "$", root: Mapping[str, Any] | None = None) -> list[str]:
     """Return a list of human-readable errors; empty list means valid."""
+    if root is None:
+        root = schema
+    ref = schema.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/"):
+        resolved: Any = root
+        for part in ref[2:].split("/"):
+            resolved = resolved.get(part) if isinstance(resolved, Mapping) else None
+        if isinstance(resolved, Mapping):
+            return validate_schema(value, resolved, path=path, root=root)
     errors: list[str] = []
 
     def fail(message: str) -> None:
@@ -70,7 +79,7 @@ def validate_schema(value: Any, schema: Mapping[str, Any], *, path: str = "$") -
         for key, sub_value in value.items():
             if key in properties:
                 errors.extend(
-                    validate_schema(sub_value, properties[key], path=f"{path}.{key}")
+                    validate_schema(sub_value, properties[key], path=f"{path}.{key}", root=root)
                 )
             elif schema.get("additionalProperties") is False:
                 fail(f"unexpected property {key!r}")
@@ -79,7 +88,7 @@ def validate_schema(value: Any, schema: Mapping[str, Any], *, path: str = "$") -
                     validate_schema(
                         sub_value,
                         schema["additionalProperties"],
-                        path=f"{path}.{key}",
+                        path=f"{path}.{key}", root=root,
                     )
                 )
         min_props = schema.get("minProperties")
@@ -91,7 +100,7 @@ def validate_schema(value: Any, schema: Mapping[str, Any], *, path: str = "$") -
         if item_schema is not None:
             for index, item in enumerate(value):
                 errors.extend(
-                    validate_schema(item, item_schema, path=f"{path}[{index}]")
+                    validate_schema(item, item_schema, path=f"{path}[{index}]", root=root)
                 )
 
     if isinstance(value, (int, float)) and not isinstance(value, bool):

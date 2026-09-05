@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ from tools.project_search import (
     RetrievedChunk,
     SearchConfigurationError,
 )
+from tools.reading_order import ReadingOrderService
 
 
 def test_project_search_maps_lightrag_chunks_back_to_scoped_source_lines(tmp_path: Path):
@@ -71,6 +73,14 @@ def test_project_search_maps_lightrag_chunks_back_to_scoped_source_lines(tmp_pat
     assert payload["results"][0]["heading"] == "未解目标"
     assert payload["results"][0]["scope"] == "characters"
     assert payload["results"][0]["category_label"] == "配角"
+    assert payload["results"][0]["document_id"].startswith("doc_")
+    assert payload["results"][0]["revision"].startswith("sha256:")
+    assert payload["results"][0]["locator"] == {
+        "line": 5,
+        "quote": payload["results"][0]["snippet"],
+        "quote_sha256": "sha256:"
+        + hashlib.sha256(payload["results"][0]["snippet"].encode("utf-8")).hexdigest(),
+    }
     assert captured["query"].startswith("OpenWrite 资料范围：角色\n")
     assert "OpenWrite 资料范围" not in payload["results"][0]["snippet"]
 
@@ -96,6 +106,28 @@ def test_project_search_uses_explicit_literal_fallback_when_lightrag_is_unconfig
     assert payload["scope"] == "core"
     assert payload["warning_code"] == "LIGHTRAG_NOT_CONFIGURED"
     assert payload["results"][0]["line"] == 3
+
+
+def test_manuscript_search_identity_and_revision_match_canonical_reading_order(
+    tmp_path: Path,
+):
+    novel_root = tmp_path / "data" / "novels" / "demo"
+    chapter = novel_root / "data" / "manuscript" / "arc_001" / "ch_001.md"
+    chapter.parent.mkdir(parents=True)
+    chapter.write_text("# 第一章\n\n钟楼每天少走十三秒。\n", encoding="utf-8")
+
+    def unavailable(root):
+        del root
+        raise SearchConfigurationError("缺少 embedding")
+
+    result = ProjectSearchIndex(
+        novel_root, backend_factory=unavailable
+    ).search("十三秒", scope="chapters")["results"][0]
+    reading = ReadingOrderService(tmp_path, "demo").surface()["documents"][0]
+
+    assert result["document_id"] == reading["document_id"]
+    assert result["revision"] == reading["revision"]
+    assert result["locator"]["line"] == 3
 
 
 def test_lightrag_runtime_is_serialized_across_distinct_workspaces(

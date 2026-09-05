@@ -97,6 +97,14 @@ class StructuredAssetService:
         if path is None:
             raise StructuredAssetError("资产不存在", code="ASSET_NOT_FOUND")
         content = path.read_text(encoding="utf-8")
+        return self._read_content(asset_kind, path, content)
+
+    def _read_content(
+        self,
+        asset_kind: str,
+        path: Path,
+        content: str,
+    ) -> dict[str, Any]:
         if asset_kind == "progression":
             data = yaml.safe_load(content) or {}
             if not isinstance(data, dict):
@@ -170,6 +178,33 @@ class StructuredAssetService:
         *,
         expected_revision: str,
     ) -> dict[str, Any]:
+        preview = self.preview_update(
+            kind,
+            asset_id,
+            payload,
+            expected_revision=expected_revision,
+        )
+        asset_kind = str(preview["kind"])
+        clean_id = str(preview["id"])
+        path = Path(preview["absolute_path"])
+        content = str(preview["after_content"])
+        self._commit(
+            path,
+            content,
+            operation=f"asset_update:{asset_kind}:{clean_id}",
+            expected_revision=expected_revision,
+        )
+        return self.read(asset_kind, clean_id)
+
+    def preview_update(
+        self,
+        kind: str,
+        asset_id: str,
+        payload: dict[str, Any],
+        *,
+        expected_revision: str,
+    ) -> dict[str, Any]:
+        """Validate an asset update and render its exact canonical result without writing."""
         asset_kind = self._kind(kind)
         clean_id = self._asset_id(asset_id)
         path = self._find(asset_kind, clean_id)
@@ -188,9 +223,7 @@ class StructuredAssetService:
                 clean_id,
                 str(payload.get("raw_text") or ""),
             )
-            self._commit(path, content, operation=f"asset_update:{asset_kind}:{clean_id}")
-            return self.read(asset_kind, clean_id)
-        if asset_kind == "progression":
+        elif asset_kind == "progression":
             existing = yaml.safe_load(current) or {}
             if not isinstance(existing, dict):
                 existing = {}
@@ -217,13 +250,36 @@ class StructuredAssetService:
                 if asset_kind == "character"
                 else normalize_world_entity_document(content, fallback_id=clean_id)
             )
-        self._commit(path, content, operation=f"asset_update:{asset_kind}:{clean_id}")
-        return self.read(asset_kind, clean_id)
+        return {
+            "kind": asset_kind,
+            "id": clean_id,
+            "path": self._relative(path),
+            "absolute_path": str(path),
+            "before_content": current,
+            "after_content": content,
+            "before": self._read_content(asset_kind, path, current),
+            "after": self._read_content(asset_kind, path, content),
+        }
 
-    def _commit(self, path: Path, content: str, *, operation: str) -> None:
+    def _commit(
+        self,
+        path: Path,
+        content: str,
+        *,
+        operation: str,
+        expected_revision: str = "",
+    ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with ProjectWriteLock(self.project_root, self.novel_id, operation=operation):
+                if expected_revision:
+                    current = path.read_text(encoding="utf-8") if path.exists() else ""
+                    if self.fingerprint(current) != expected_revision:
+                        raise StructuredAssetError(
+                            "资产已在其他位置修改，请重新载入",
+                            code="ASSET_CONFLICT",
+                            recoverable=True,
+                        )
                 self._atomic_write(path, content)
         except ProjectBusyError as exc:
             raise StructuredAssetError(str(exc), code="PROJECT_BUSY", recoverable=True) from exc

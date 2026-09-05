@@ -140,19 +140,53 @@ class RevisionService:
         issue_ids: list[str],
         instruction: str = "",
         target_units: int = 0,
+        expected_review_revision: str = "",
+        expected_document_revision: str = "",
     ) -> dict[str, Any]:
         clean_ids = [str(item).strip() for item in issue_ids if str(item).strip()]
         if not clean_ids:
             raise RevisionError("至少选择一个审稿问题", code="INVALID_INPUT")
-        review = ReviewStore(self.project_root, self.novel_id).load(chapter_id)
-        if review is None:
+        review_store = ReviewStore(self.project_root, self.novel_id)
+        revisioned_review = review_store.load_revisioned(chapter_id)
+        if revisioned_review is None:
             raise RevisionError("未找到该章节的审稿结果", code="REVIEW_NOT_FOUND")
+        review, review_revision = revisioned_review
+        expected_review = str(expected_review_revision or "").strip()
+        if expected_review and expected_review != review_revision:
+            raise RevisionError(
+                "审稿结果已变化，请重新选择问题",
+                code="REVIEW_CONFLICT",
+                recoverable=True,
+                details={"expected": expected_review, "current": review_revision},
+            )
         issues = normalize_review_issues(chapter_id, review.get("issue_details", []))
         selected = [item for item in issues if item["id"] in set(clean_ids)]
         if len(selected) != len(set(clean_ids)):
             raise RevisionError("部分审稿问题不存在或已变化", code="REVIEW_ISSUE_NOT_FOUND")
         path = self._chapter_path(chapter_id)
         content = path.read_text(encoding="utf-8")
+        document_revision = self.fingerprint(content)
+        expected_document = str(expected_document_revision or "").strip()
+        if expected_document and expected_document != document_revision:
+            raise RevisionError(
+                "正文已变化，请重新打开审稿问题",
+                code="DOCUMENT_CONFLICT",
+                recoverable=True,
+                details={"expected": expected_document, "current": document_revision},
+            )
+        review_source_revision = str(review.get("source_revision") or "").strip()
+        if review.get("stale") or (
+            review_source_revision and review_source_revision != document_revision
+        ):
+            raise RevisionError(
+                "审稿结果对应的正文已经变化，请先重新评审",
+                code="REVIEW_STALE",
+                recoverable=True,
+                details={
+                    "review_source_revision": review_source_revision,
+                    "current_document_revision": document_revision,
+                },
+            )
         anchors = [self._resolve_issue_anchor(content, issue) for issue in selected]
         if any(anchor is None for anchor in anchors):
             missing = [
@@ -182,6 +216,29 @@ class RevisionService:
             request=request,
             review_issues=selected,
         )
+        current_review = review_store.load_revisioned(chapter_id)
+        current_content = path.read_text(encoding="utf-8")
+        current_document_revision = self.fingerprint(current_content)
+        if current_review is None or current_review[1] != review_revision:
+            raise RevisionError(
+                "模型生成期间审稿结果发生变化，提案未保存",
+                code="REVIEW_CONFLICT",
+                recoverable=True,
+                details={
+                    "expected": review_revision,
+                    "current": "" if current_review is None else current_review[1],
+                },
+            )
+        if current_document_revision != document_revision:
+            raise RevisionError(
+                "模型生成期间正文发生变化，提案未保存",
+                code="DOCUMENT_CONFLICT",
+                recoverable=True,
+                details={
+                    "expected": document_revision,
+                    "current": current_document_revision,
+                },
+            )
         proposal = self._new_proposal(
             chapter_id=chapter_id,
             kind="review_fix",
@@ -192,6 +249,17 @@ class RevisionService:
             review_issue_ids=clean_ids,
             generation=generation,
         )
+        proposal["review_revision"] = review_revision
+        proposal["review_source_revision"] = review_source_revision
+        proposal["review_issue_provenance"] = [
+            {
+                "issue_id": str(issue["id"]),
+                "dimension": str(issue.get("dimension") or ""),
+                "evidence": dict(issue.get("evidence") or {}),
+                "anchor": dict(issue.get("anchor") or {}),
+            }
+            for issue in selected
+        ]
         self.store.save(proposal)
         return self.present(proposal)
 
@@ -235,6 +303,8 @@ class RevisionService:
                 issue_ids=list(previous.get("review_issue_ids") or []),
                 instruction=str((previous.get("request") or {}).get("instruction") or ""),
                 target_units=int((previous.get("request") or {}).get("target_units") or 0),
+                expected_review_revision=str(previous.get("review_revision") or ""),
+                expected_document_revision=str(previous.get("source_revision") or ""),
             )
         return self.create_selection(
             chapter_id=str(previous["chapter_id"]),
@@ -271,31 +341,31 @@ class RevisionService:
                 self.novel_id,
                 operation=f"revision:{proposal_id}",
             ):
+                locked_proposal = self.store.load(proposal_id)
+                if locked_proposal is None:
+                    raise RevisionError("修订提案不存在", code="REVISION_NOT_FOUND")
+                if locked_proposal.get("status") != "proposed":
+                    raise RevisionError(
+                        "只有待确认提案可以应用",
+                        code="REVISION_NOT_PROPOSED",
+                        details={"status": locked_proposal.get("status")},
+                    )
+                proposal = locked_proposal
                 current = path.read_text(encoding="utf-8")
                 self._check_conflict(proposal, current)
                 selection = proposal.get("selection") or {}
                 start = int(selection.get("start") or 0)
                 end = int(selection.get("end") or 0)
-                replacement = (
-                    str(proposal.get("replacement_text") or "")
-                    if replacement_text is None
-                    else str(replacement_text)
+                replacement, accepted_hunks = self._accepted_replacement(
+                    proposal,
+                    replacement_text=replacement_text,
+                    selected_hunk_ids=selected_hunk_ids,
                 )
                 if len(replacement.encode("utf-8")) > MAX_CHAPTER_BYTES:
                     raise RevisionError(
                         "确认后的替换文本过大",
                         code="REVISION_RESULT_TOO_LARGE",
                     )
-                accepted_hunks = [str(item) for item in (selected_hunk_ids or [])]
-                available_hunks = {
-                    str(item.get("id"))
-                    for item in self._diff(
-                        str(selection.get("original_text") or ""),
-                        str(proposal.get("replacement_text") or ""),
-                    )["hunks"]
-                }
-                if any(item not in available_hunks for item in accepted_hunks):
-                    raise RevisionError("差异块选择已失效", code="INVALID_INPUT")
                 proposal = self.store.update_status(
                     proposal_id,
                     "proposed",
@@ -323,7 +393,7 @@ class RevisionService:
                     if proposal.get("kind") == "full_chapter_revision"
                     else "ai_revision"
                 )
-                ManuscriptVersionStore(
+                history_version = ManuscriptVersionStore(
                     self.project_root, self.novel_id
                 ).checkpoint(
                     chapter_id,
@@ -342,6 +412,7 @@ class RevisionService:
                             "applied_at": self._now(),
                             "applied_revision": self.fingerprint(updated),
                             "backup_path": backup.relative_to(self.novel_root).as_posix(),
+                            "history_version_id": history_version.version_id,
                             "validation": findings,
                         },
                     )
@@ -349,6 +420,15 @@ class RevisionService:
                 except Exception:
                     self._atomic_write(path, current)
                     raise
+                from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+                acceptance = ManuscriptAcceptanceService(
+                    self.project_root, self.novel_id
+                ).start_acceptance(
+                    chapter_id,
+                    source="revision",
+                    expected_previous_revision=self.fingerprint(current),
+                )
         except ProjectBusyError as exc:
             raise RevisionError(str(exc), code="PROJECT_BUSY", recoverable=True) from exc
         except RevisionStoreError as exc:
@@ -360,13 +440,90 @@ class RevisionService:
             "revision": self.fingerprint(updated),
             "version": str(path.stat().st_mtime_ns),
         }
+        result["acceptance"] = acceptance
+        from tools.mutation_summary import build_mutation_summary
+
+        result["mutation_summary"] = build_mutation_summary(
+            operation="revision.apply",
+            entity_kind="manuscript",
+            entity_id=chapter_id,
+            path=result["document"]["path"],
+            before=str((proposal.get("selection") or {}).get("original_text") or ""),
+            after=replacement,
+            source_revision=str(proposal.get("source_revision") or ""),
+            result_revision=result["document"]["revision"],
+            field_prefix="content.selection",
+            flatten=False,
+        )
         return result
+
+    def _accepted_replacement(
+        self,
+        proposal: dict[str, Any],
+        *,
+        replacement_text: str | None,
+        selected_hunk_ids: list[str] | None,
+    ) -> tuple[str, list[str]]:
+        proposed = str(proposal.get("replacement_text") or "")
+        if selected_hunk_ids is None:
+            return (
+                proposed if replacement_text is None else str(replacement_text),
+                [],
+            )
+
+        accepted_hunks = [str(item).strip() for item in selected_hunk_ids]
+        if (
+            not accepted_hunks
+            or any(not item for item in accepted_hunks)
+            or len(set(accepted_hunks)) != len(accepted_hunks)
+        ):
+            raise RevisionError("差异块选择格式无效", code="INVALID_INPUT")
+
+        original = str((proposal.get("selection") or {}).get("original_text") or "")
+        segments = self._diff(original, proposed)["segments"]
+        available_hunks = {
+            str(item.get("id"))
+            for item in segments
+            if item.get("tag") != "equal"
+        }
+        if any(item not in available_hunks for item in accepted_hunks):
+            raise RevisionError("差异块选择已失效", code="INVALID_INPUT")
+
+        selected = set(accepted_hunks)
+        composed = "".join(
+            str(item.get("after") if item.get("id") in selected else item.get("before"))
+            for item in segments
+        )
+        if replacement_text is not None and str(replacement_text) != composed:
+            raise RevisionError(
+                "确认文本与所选差异块不一致",
+                code="HUNK_SELECTION_MISMATCH",
+                recoverable=True,
+                details={"selected_hunk_ids": accepted_hunks},
+            )
+        canonical_order = [
+            str(item.get("id"))
+            for item in segments
+            if item.get("id") in selected
+        ]
+        return composed, canonical_order
 
     def present(self, proposal: dict[str, Any]) -> dict[str, Any]:
         payload = dict(proposal)
         original = str((payload.get("selection") or {}).get("original_text") or "")
         replacement = str(payload.get("replacement_text") or "")
         payload["diff"] = self._diff(original, replacement)
+        hunk_ids = [str(item["id"]) for item in payload["diff"]["hunks"]]
+        payload["issue_hunk_provenance"] = [
+            {
+                "issue_id": str(issue_id),
+                "hunk_ids": hunk_ids,
+                "relation": "generated_in_shared_proposal_scope",
+                "review_revision": str(payload.get("review_revision") or ""),
+                "source_revision": str(payload.get("source_revision") or ""),
+            }
+            for issue_id in payload.get("review_issue_ids") or []
+        ]
         return payload
 
     def _new_proposal(
@@ -616,26 +773,20 @@ class RevisionService:
         proposal: dict[str, Any],
     ) -> None:
         store = ReviewStore(self.project_root, self.novel_id)
-        review = store.load(chapter_id)
-        if review is None:
-            return
-        history = list(review.get("revision_history") or [])
-        history.append(
-            {
+        store.mark_stale(
+            chapter_id,
+            reason="chapter_revised",
+            current_source_revision=str(proposal.get("applied_revision") or ""),
+            history_entry={
                 "proposal_id": proposal_id,
                 "applied_at": proposal.get("applied_at"),
+                "applied_revision": str(proposal.get("applied_revision") or ""),
                 "issue_ids": list(proposal.get("review_issue_ids") or []),
-            }
+                "original_issue_ids": list(proposal.get("review_issue_ids") or []),
+                "review_revision": str(proposal.get("review_revision") or ""),
+                "source_revision": str(proposal.get("source_revision") or ""),
+            },
         )
-        review.update(
-            {
-                "stale": True,
-                "stale_at": self._now(),
-                "stale_reason": "chapter_revised",
-                "revision_history": history,
-            }
-        )
-        store.save(chapter_id, review)
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:

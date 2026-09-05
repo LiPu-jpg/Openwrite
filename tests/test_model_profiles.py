@@ -30,6 +30,18 @@ def profile(profile_id: str, model: str, *, context_tokens: int = 64000) -> dict
     }
 
 
+def embedding_profile(profile_id: str, model: str, *, provider: str = "openai") -> dict:
+    return {
+        "id": profile_id,
+        "label": profile_id.title(),
+        "provider": provider,
+        "base_url": "" if provider == "local" else "https://embeddings.example/v1",
+        "model": model,
+        "dimension": 512 if provider == "local" else 3072,
+        "max_tokens": 512 if provider == "local" else 8192,
+    }
+
+
 def test_legacy_single_model_maps_to_default_without_exposing_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -124,68 +136,111 @@ def test_profile_persists_task_scoped_thinking_modes(tmp_path: Path):
 
 def test_search_profile_keeps_embedding_credentials_private(tmp_path: Path):
     store = ModelProfileStore(tmp_path)
-    search_profile = {
-        **profile("search", "graph-extractor"),
-        "embedding_base_url": "https://embeddings.example/v1",
-        "embedding_model": "text-embedding-3-large",
-        "embedding_dimension": 3072,
-        "embedding_max_tokens": 8192,
-    }
-    store.save_profile(
-        search_profile,
-        api_key="llm-secret",
-        embedding_api_key="embedding-secret",
+    store.save_profile(profile("search", "graph-extractor"), api_key="llm-secret")
+    store.save_embedding_profile(
+        embedding_profile("search-embedding", "text-embedding-3-large"),
+        api_key="embedding-secret",
     )
+    store.select_embedding_profile("search-embedding")
     store.save_routes({"search": "search"})
 
-    resolved = store.resolve("search")
+    resolved_chat = store.resolve("search")
+    resolved_embedding = store.resolve_embedding()
     surface_text = json.dumps(store.surface(), ensure_ascii=False)
 
-    assert resolved["embedding_api_key"] == "embedding-secret"
-    assert resolved["embedding_model"] == "text-embedding-3-large"
-    assert resolved["embedding_dimension"] == 3072
+    assert resolved_chat["api_key"] == "llm-secret"
+    assert resolved_embedding["api_key"] == "embedding-secret"
+    assert resolved_embedding["model"] == "text-embedding-3-large"
+    assert resolved_embedding["dimension"] == 3072
     assert "llm-secret" not in surface_text
     assert "embedding-secret" not in surface_text
 
 
-def test_local_embedding_profile_is_ready_without_embedding_credentials(tmp_path: Path):
+def test_local_embedding_profile_is_ready_without_embedding_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     store = ModelProfileStore(tmp_path)
-    local_profile = {
-        **profile("local-search", "graph-extractor"),
-        "embedding_provider": "local",
-        "embedding_model": "BAAI/bge-small-zh-v1.5",
-        "embedding_dimension": 512,
-        "embedding_max_tokens": 512,
-    }
-    store.save_profile(local_profile, api_key="llm-secret")
+    local_profile = embedding_profile("local-search", "BAAI/bge-small-zh-v1.5", provider="local")
+    store.save_embedding_profile(local_profile)
 
-    surface = store.surface()["profiles"][0]
+    surface = store.surface()["embedding_profiles"][0]
     candidate = store.test_embedding_candidate(local_profile)
 
-    assert surface["embedding_configured"] is True
-    assert surface["embedding_key_configured"] is False
-    assert candidate["embedding_provider"] == "local"
-    assert candidate["embedding_api_key"] == ""
+    assert surface["configured"] is True
+    assert surface["active"] is True
+    assert candidate["provider"] == "local"
+    assert candidate["api_key"] == ""
 
 
-def test_vector_search_profile_resolves_without_chat_credentials(tmp_path: Path):
+def test_id_only_probe_hydrates_stored_chat_and_local_embedding_profiles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     store = ModelProfileStore(tmp_path)
-    local_profile = {
-        **profile("local-search", "unused-in-vector-mode"),
-        "embedding_provider": "local",
-        "embedding_model": "BAAI/bge-small-zh-v1.5",
-        "embedding_dimension": 512,
-        "embedding_max_tokens": 512,
-        "search_mode": "vector",
-    }
-    store.save_profile(local_profile)
+    store.save_profile(profile("critic", "reviewer-model"), api_key="stored-chat-secret")
+    store.save_embedding_profile(
+        embedding_profile("local-search", "BAAI/bge-small-zh-v1.5", provider="local")
+    )
+
+    chat = store.test_candidate({"id": "critic"})
+    embedding = store.test_embedding_candidate({"id": "local-search"})
+
+    assert chat["model"] == "reviewer-model"
+    assert chat["base_url"] == "https://models.example/v1"
+    assert chat["api_key"] == "stored-chat-secret"
+    assert embedding["provider"] == "local"
+    assert embedding["model"] == "BAAI/bge-small-zh-v1.5"
+    assert embedding["api_key"] == ""
+
+
+def test_probe_merges_partial_explicit_fields_over_stored_profile(tmp_path: Path) -> None:
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("writer", "stored-model"), api_key="stored-secret")
+
+    candidate = store.test_candidate({"id": "writer", "model": "candidate-model"})
+
+    assert candidate["model"] == "candidate-model"
+    assert candidate["provider"] == "openai"
+    assert candidate["base_url"] == "https://models.example/v1"
+    assert candidate["api_key"] == "stored-secret"
+
+
+@pytest.mark.parametrize("kind", ["chat", "embedding"])
+def test_id_only_probe_rejects_unknown_profile_with_stable_error(
+    tmp_path: Path, kind: str
+) -> None:
+    store = ModelProfileStore(tmp_path)
+    probe = store.test_candidate if kind == "chat" else store.test_embedding_candidate
+
+    with pytest.raises(ModelProfileError) as error:
+        probe({"id": "missing"})
+
+    assert error.value.code == "MODEL_PROFILE_NOT_FOUND"
+
+
+def test_vector_search_profile_resolves_without_chat_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    chat_profile = {**profile("local-search", "unused-in-vector-mode"), "search_mode": "vector"}
+    store.save_profile(chat_profile)
+    store.save_embedding_profile(
+        embedding_profile("local-vector", "BAAI/bge-small-zh-v1.5", provider="local")
+    )
     store.save_routes({"search": "local-search"})
 
-    resolved = store.resolve("search")
+    resolved_chat = store.resolve("search")
+    resolved_embedding = store.resolve_embedding()
 
-    assert resolved["api_key"] == ""
-    assert resolved["embedding_provider"] == "local"
-    store.save_profile({**local_profile, "search_mode": "graph"})
+    assert resolved_chat["api_key"] == ""
+    assert resolved_embedding["provider"] == "local"
+    assert resolved_embedding["api_key"] == ""
+    store.save_profile({**chat_profile, "search_mode": "graph"})
     with pytest.raises(ModelProfileError) as error:
         store.resolve("search")
     assert error.value.code == "MODEL_CREDENTIAL_MISSING"
@@ -223,6 +278,8 @@ def test_disabling_credential_persistence_clears_an_existing_key(
 def test_credential_update_timestamps_are_server_managed_and_preserved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     store = ModelProfileStore(tmp_path)
     first_timestamp = "2026-08-25T08:00:00Z"
     second_timestamp = "2026-08-25T09:30:00Z"
@@ -233,21 +290,26 @@ def test_credential_update_timestamps_are_server_managed_and_preserved(
     )
 
     saved = store.save_profile(
-        {
-            **profile("prose", "writer"),
-            "credential_updated_at": "2099-01-01T00:00:00Z",
-            "embedding_credential_updated_at": "2099-01-01T00:00:00Z",
-        },
+        {**profile("prose", "writer"), "credential_updated_at": "2099-01-01T00:00:00Z"},
         api_key="test-chat-credential-a",
-        embedding_api_key="test-embedding-credential-a",
+    )
+    saved_embedding = store.save_embedding_profile(
+        {
+            **embedding_profile("prose-vector", "text-embedding-3-large"),
+            "credential_updated_at": "2099-01-01T00:00:00Z",
+        },
+        api_key="test-embedding-credential-a",
     )
 
     assert saved["credential_updated_at"] == first_timestamp
-    assert saved["embedding_credential_updated_at"] == first_timestamp
+    assert saved_embedding["credential_updated_at"] == first_timestamp
 
     metadata_only = store.save_profile({**profile("prose", "writer"), "label": "Updated label"})
+    embedding_metadata_only = store.save_embedding_profile(
+        {**embedding_profile("prose-vector", "text-embedding-3-large"), "label": "Updated vector"}
+    )
     assert metadata_only["credential_updated_at"] == first_timestamp
-    assert metadata_only["embedding_credential_updated_at"] == first_timestamp
+    assert embedding_metadata_only["credential_updated_at"] == first_timestamp
 
     monkeypatch.setattr(
         ModelProfileStore,
@@ -256,7 +318,9 @@ def test_credential_update_timestamps_are_server_managed_and_preserved(
     )
     rotated = store.save_profile(profile("prose", "writer"), api_key="test-chat-credential-b")
     assert rotated["credential_updated_at"] == second_timestamp
-    assert rotated["embedding_credential_updated_at"] == first_timestamp
+    store.select_embedding_profile("prose-vector")
+    embedding_after = store.resolve_embedding()
+    assert embedding_after["credential_updated_at"] == first_timestamp
 
     surface_text = json.dumps(store.surface(), ensure_ascii=False)
     profile_text = store.profiles_path.read_text(encoding="utf-8")
@@ -280,21 +344,28 @@ def test_clearing_credentials_clears_update_timestamps(
         staticmethod(lambda: "2026-08-25T08:00:00Z"),
     )
     store = ModelProfileStore(tmp_path)
-    store.save_profile(
-        profile("prose", "writer"),
-        api_key="test-chat-credential",
-        embedding_api_key="test-embedding-credential",
+    store.save_profile(profile("prose", "writer"), api_key="test-chat-credential")
+    store.save_embedding_profile(
+        embedding_profile("prose-vector", "text-embedding-3-large"),
+        api_key="test-embedding-credential",
     )
 
     cleared = store.save_profile(profile("prose", "writer"), remember_api_key=False)
+    cleared_embedding = store.save_embedding_profile(
+        embedding_profile("prose-vector", "text-embedding-3-large"),
+        remember_api_key=False,
+    )
     surface_profile = next(item for item in store.surface()["profiles"] if item["id"] == "prose")
+    surface_embedding = next(
+        item for item in store.surface()["embedding_profiles"] if item["id"] == "prose-vector"
+    )
 
     assert "credential_updated_at" not in cleared
-    assert "embedding_credential_updated_at" not in cleared
     assert "credential_updated_at" not in surface_profile
-    assert "embedding_credential_updated_at" not in surface_profile
     assert surface_profile["configured"] is False
-    assert surface_profile["embedding_key_configured"] is False
+    assert "credential_updated_at" not in cleared_embedding
+    assert "credential_updated_at" not in surface_embedding
+    assert surface_embedding["configured"] is False
 
 
 def test_existing_credential_without_timestamp_does_not_invent_one(tmp_path: Path):
@@ -424,3 +495,285 @@ def test_unknown_route_and_last_profile_deletion_are_rejected(
     with pytest.raises(ModelProfileError) as delete_error:
         store.delete_profile("only")
     assert delete_error.value.code == "MODEL_PROFILE_LAST_PROFILE"
+
+
+def test_surface_exposes_credential_free_profile_state_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("prose", "writer-model"), api_key="surface-secret")
+    store.save_profile(profile("critic", "review-model"), api_key="critic-secret")
+    store.save_routes({"chapter_write": "prose", "review": "critic"})
+
+    surface = store.surface({"review": "prose"})
+    serialized = json.dumps(surface, ensure_ascii=False)
+    entries = {item["id"]: item for item in surface["profiles"]}
+
+    prose = entries["prose"]
+    assert prose["schema_version"] == "openwrite.model-profile.v1"
+    assert prose["capabilities"] == {"chat": True}
+    # Effective routes include project overrides and the default-profile
+    # fallback (prose is the default): every route resolves to prose here.
+    assert prose["used_by_routes"] == [
+        "goethe",
+        "dante",
+        "chapter_write",
+        "review",
+        "source_extract",
+        "revision",
+        "search",
+        "research",
+    ]
+    assert entries["critic"]["used_by_routes"] == []
+    assert prose["last_test"] is None
+    assert "last_embedding_test" not in prose
+    assert "surface-secret" not in serialized
+    assert "critic-secret" not in serialized
+
+
+def test_surface_keeps_chat_and_embedding_capabilities_independent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    bare = profile("bare", "chat-only")
+    saved = store.save_profile(bare, api_key="secret")
+    embedding = store.save_embedding_profile(
+        embedding_profile("vector", "BAAI/bge-small-zh-v1.5", provider="local")
+    )
+    surface = store.surface()
+    entry = surface["profiles"][0]
+    embedding_entry = surface["embedding_profiles"][0]
+    assert "embedding_model" not in saved
+    assert entry["capabilities"] == {"chat": True}
+    assert embedding["model"] == "BAAI/bge-small-zh-v1.5"
+    assert embedding_entry["configured"] is True
+    assert embedding_entry["active"] is True
+
+
+def test_record_test_result_persists_without_touching_config_or_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("prose", "writer-model"), api_key="test-credential-xyz")
+    store.save_routes({"chapter_write": "prose"})
+    credentials_before = store.credentials_path.read_bytes()
+    routes_before = dict(store.load()["routes"])
+    profile_before = {
+        key: value for key, value in store.load()["profiles"][0].items() if key != "last_test"
+    }
+
+    store.record_test_result(
+        "prose",
+        "last_test",
+        {
+            "status": "failed",
+            "tested_at": "2026-09-01T08:00:00Z",
+            "latency_ms": 17,
+            "provider": "openai",
+            "resolved_model": "writer-model",
+            "error_code": "MODEL_TEST_TIMEOUT",
+            "failed_stage": None,
+        },
+    )
+
+    entry = store.surface()["profiles"][0]
+    assert entry["last_test"] == {
+        "status": "failed",
+        "tested_at": "2026-09-01T08:00:00Z",
+        "latency_ms": 17,
+        "provider": "openai",
+        "resolved_model": "writer-model",
+        "error_code": "MODEL_TEST_TIMEOUT",
+        "failed_stage": None,
+    }
+    assert "last_embedding_test" not in entry
+    assert store.credentials_path.read_bytes() == credentials_before
+    assert store.load()["routes"] == routes_before
+    profile_after = {
+        key: value for key, value in store.load()["profiles"][0].items() if key != "last_test"
+    }
+    assert profile_after == profile_before
+    assert "test-credential-xyz" not in store.profiles_path.read_text(encoding="utf-8")
+
+
+def test_save_profile_preserves_test_records_and_rejects_forged_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("prose", "writer-model"), api_key="secret")
+    store.record_test_result(
+        "prose",
+        "last_test",
+        {
+            "status": "ok",
+            "tested_at": "2026-09-01T08:00:00Z",
+            "latency_ms": 5,
+            "provider": "openai",
+            "resolved_model": "writer-model",
+            "error_code": None,
+            "failed_stage": None,
+        },
+    )
+
+    forged = {
+        **profile("prose", "writer-model"),
+        "label": "Renamed",
+        "last_test": {"status": "ok", "tested_at": "1999-01-01T00:00:00Z"},
+    }
+    saved = store.save_profile(forged)
+
+    assert saved["label"] == "Renamed"
+    assert saved["last_test"]["tested_at"] == "2026-09-01T08:00:00Z"
+    assert saved["last_test"]["latency_ms"] == 5
+
+
+def test_delete_profile_preview_reports_impact_without_mutating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("prose", "writer"), api_key="one")
+    store.save_profile(profile("fallback", "backup"), api_key="two")
+    store.save_routes({"chapter_write": "prose", "dante": "prose", "review": "fallback"})
+    before = store.profiles_path.read_bytes()
+
+    blocked = store.delete_profile_preview("prose")
+    assert blocked["deletable"] is False
+    assert blocked["blocking_reasons"] == ["MODEL_PROFILE_IN_USE"]
+    assert blocked["used_by_routes"] == ["dante", "chapter_write"]
+    assert blocked["routes_that_would_fail"] == ["dante", "chapter_write"]
+    assert blocked["resulting_routes"] is None
+    assert {item["id"] for item in blocked["fallback_candidates"]} == {"fallback"}
+    assert blocked["fallback_candidates"][0]["configured"] is True
+
+    allowed = store.delete_profile_preview("prose", fallback_id="fallback")
+    assert allowed["deletable"] is True
+    assert allowed["blocking_reasons"] == []
+    assert allowed["routes_that_would_fail"] == []
+    assert allowed["resulting_routes"]["chapter_write"] == "fallback"
+    assert allowed["resulting_routes"]["dante"] == "fallback"
+    assert allowed["resulting_routes"]["review"] == "fallback"
+
+    # The preview is read-only: the store file is byte-identical afterwards.
+    assert store.profiles_path.read_bytes() == before
+
+
+def test_delete_profile_preview_blocking_reasons(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("prose", "writer"), api_key="one")
+    store.save_profile(profile("raw", "backup"))
+    store.save_routes({"chapter_write": "prose"})
+
+    same = store.delete_profile_preview("prose", fallback_id="prose")
+    assert same["blocking_reasons"] == ["MODEL_PROFILE_FALLBACK_INVALID"]
+    missing = store.delete_profile_preview("prose", fallback_id="ghost")
+    assert missing["blocking_reasons"] == ["MODEL_PROFILE_FALLBACK_INVALID"]
+    unconfigured = store.delete_profile_preview("prose", fallback_id="raw")
+    assert unconfigured["blocking_reasons"] == ["MODEL_PROFILE_FALLBACK_UNCONFIGURED"]
+    assert unconfigured["fallback_candidates"] == [
+        {"id": "raw", "label": "Raw", "configured": False}
+    ]
+
+    store.delete_profile("raw")
+    last = store.delete_profile_preview("prose", fallback_id="raw")
+    assert last["deletable"] is False
+    assert last["blocking_reasons"] == ["MODEL_PROFILE_LAST_PROFILE"]
+    assert last["fallback_candidates"] == []
+
+    with pytest.raises(ModelProfileError) as error:
+        store.delete_profile_preview("ghost")
+    assert error.value.code == "MODEL_PROFILE_NOT_FOUND"
+
+
+def test_delete_profile_enforces_fallback_validity(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("prose", "writer"), api_key="one")
+    store.save_profile(profile("raw", "backup"))
+    store.save_routes({"chapter_write": "prose"})
+
+    with pytest.raises(ModelProfileError) as same:
+        store.delete_profile("prose", fallback_id="prose")
+    assert same.value.code == "MODEL_PROFILE_FALLBACK_INVALID"
+    with pytest.raises(ModelProfileError) as missing:
+        store.delete_profile("prose", fallback_id="ghost")
+    assert missing.value.code == "MODEL_PROFILE_FALLBACK_INVALID"
+    with pytest.raises(ModelProfileError) as unconfigured:
+        store.delete_profile("prose", fallback_id="raw")
+    assert unconfigured.value.code == "MODEL_PROFILE_FALLBACK_UNCONFIGURED"
+    # Rejected deletes never rewrite the routes.
+    assert store.load()["routes"]["chapter_write"] == "prose"
+
+
+def test_save_routes_validates_entire_map_before_swapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("prose", "writer"), api_key="one")
+    store.save_profile(profile("critic", "reviewer"), api_key="two")
+    store.save_routes({"chapter_write": "prose"})
+
+    saved = store.save_routes({"review": "critic", "dante": "critic"})
+    assert saved["routes"]["chapter_write"] == "prose"
+    assert saved["impact"]["changed_routes"] == [
+        {"route": "dante", "from": None, "to": "critic"},
+        {"route": "review", "from": None, "to": "critic"},
+    ]
+    assert saved["impact"]["profiles_affected"] == ["critic"]
+
+    before = dict(store.load()["routes"])
+    with pytest.raises(ModelProfileError) as unknown_key:
+        store.save_routes({"polishing": "prose"})
+    assert unknown_key.value.code == "INVALID_MODEL_ROUTE"
+    with pytest.raises(ModelProfileError) as unknown_profile:
+        store.save_routes({"review": "ghost"})
+    assert unknown_profile.value.code == "MODEL_PROFILE_NOT_FOUND"
+    # A rejected save never partially applies.
+    assert store.load()["routes"] == before
+
+
+def test_save_routes_concurrent_swaps_never_mix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.save_profile(profile("alpha", "model-a"), api_key="a")
+    store.save_profile(profile("beta", "model-b"), api_key="b")
+    map_alpha = {
+        key: "alpha"
+        for key in (
+            "goethe",
+            "dante",
+            "chapter_write",
+            "review",
+            "source_extract",
+            "revision",
+            "search",
+            "research",
+        )
+    }
+    map_beta = {key: "beta" for key in map_alpha}
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    for _ in range(10):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(store.save_routes, dict(map_alpha))
+            second = pool.submit(store.save_routes, dict(map_beta))
+            first.result()
+            second.result()
+        final = store.load()["routes"]
+        assert final == map_alpha or final == map_beta

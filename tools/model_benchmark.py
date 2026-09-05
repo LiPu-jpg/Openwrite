@@ -123,6 +123,78 @@ def _safe_error_code(value: Any, fallback: str) -> str:
     return normalized or fallback
 
 
+def _text_or_none(value: Any) -> str | None:
+    if value is None or isinstance(value, (dict, list, tuple, set)):
+        return None
+    rendered = str(value).strip()
+    return rendered or None
+
+
+def _benchmark_comparison(record: dict[str, Any]) -> dict[str, Any]:
+    """Derive the exact experiment identity used to compare benchmark runs.
+
+    Historical v1 artifacts predate explicit comparison metadata.  The identity
+    is therefore read-time data: callers get a stable group without rewriting
+    the source artifact.  Unknown legacy fields stay null so the UI cannot label
+    them as a modern execution path or silently mix them with complete runs.
+    """
+
+    config = record.get("config") if isinstance(record.get("config"), dict) else {}
+    snapshot = (
+        record.get("context_snapshot")
+        if isinstance(record.get("context_snapshot"), dict)
+        else {}
+    )
+    manifest = snapshot.get("manifest") if isinstance(snapshot.get("manifest"), dict) else {}
+    measurement = (
+        manifest.get("measurement")
+        if isinstance(manifest.get("measurement"), dict)
+        else {}
+    )
+    schema_version = _text_or_none(manifest.get("schema_version"))
+    comparison = {
+        "context_hash": _text_or_none(record.get("context_hash")),
+        "prompt_version": _text_or_none(record.get("prompt_version")),
+        "rubric_version": _text_or_none(record.get("rubric_version")),
+        "execution_mode": _text_or_none(config.get("execution_mode")),
+        "manifest_schema_version": schema_version,
+        "context_strategy": _text_or_none(manifest.get("strategy")),
+        "token_estimator": _text_or_none(measurement.get("estimator")),
+        "packet_revision": _text_or_none(
+            manifest.get("packet_revision") or manifest.get("revision")
+        ),
+        "source_revision": _text_or_none(manifest.get("source_revision")),
+    }
+    identity_fields = {
+        key: comparison[key]
+        for key in (
+            "context_hash",
+            "prompt_version",
+            "rubric_version",
+            "execution_mode",
+            "manifest_schema_version",
+            "context_strategy",
+            "token_estimator",
+            "packet_revision",
+            "source_revision",
+        )
+    }
+    required = (
+        "context_hash",
+        "prompt_version",
+        "rubric_version",
+        "execution_mode",
+        "manifest_schema_version",
+        "context_strategy",
+        "token_estimator",
+    )
+    return {
+        "key": "sha256:" + hashlib.sha256(_json_bytes(identity_fields)).hexdigest(),
+        "basis_complete": all(comparison[field] is not None for field in required),
+        **comparison,
+    }
+
+
 def _review_diagnostics(review_v2: dict[str, Any]) -> dict[str, Any]:
     domains = [item for item in review_v2.get("domains") or [] if isinstance(item, dict)]
     gates = [item for item in review_v2.get("gates") or [] if isinstance(item, dict)]
@@ -212,7 +284,11 @@ class BenchmarkStore:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
-        return value if isinstance(value, dict) else None
+        if not isinstance(value, dict):
+            return None
+        decorated = dict(value)
+        decorated["comparison"] = _benchmark_comparison(value)
+        return decorated
 
     def list(self, limit: int = 20) -> list[dict[str, Any]]:
         if not self.root.is_dir():
@@ -221,6 +297,7 @@ class BenchmarkStore:
         for path in sorted(self.root.glob("bench_*.json"), reverse=True):
             record = self.load(path.stem)
             if record:
+                comparison = dict(record.get("comparison") or {})
                 records.append(
                     {
                         "run_id": record.get("run_id"),
@@ -230,9 +307,10 @@ class BenchmarkStore:
                         "context_hash": record.get("context_hash"),
                         "candidate_count": len(record.get("candidates") or []),
                         "evaluation_count": len(record.get("evaluations") or []),
-                        "execution_mode": str(
-                            (record.get("config") or {}).get("execution_mode") or "creative"
-                        ),
+                        "execution_mode": comparison.get("execution_mode"),
+                        "prompt_version": record.get("prompt_version"),
+                        "rubric_version": record.get("rubric_version"),
+                        "comparison": comparison,
                         "summary": record.get("summary") or {},
                     }
                 )
@@ -250,6 +328,7 @@ class ModelBenchmarkService:
         *,
         generation_executor: GenerationExecutor | None = None,
         review_executor: ReviewExecutor | None = None,
+        readiness_gate: bool = True,
     ):
         self.project_root = Path(project_root).resolve()
         self.novel_id = str(novel_id)
@@ -257,6 +336,10 @@ class ModelBenchmarkService:
         self.store = BenchmarkStore(self.project_root, self.novel_id)
         self._generation_executor = generation_executor or self._generate_creative
         self._review_executor = review_executor or self._review_direct
+        # Production default ON: refuse to benchmark un-authored projects or
+        # chapters without an outline node.  Service-level unit tests that
+        # exercise pipeline mechanics on blank fixtures opt out explicitly.
+        self._readiness_gate = readiness_gate
 
     def surface(self, limit: int = 20) -> dict[str, Any]:
         return {
@@ -271,6 +354,8 @@ class ModelBenchmarkService:
         *,
         progress: Callable[[str, str], None] | None = None,
         cancelled: Callable[[], bool] | None = None,
+        report: Callable[[int, int, str], None] | None = None,
+        task_id: str = "",
     ) -> dict[str, Any]:
         writer_ids = self._profile_ids(
             payload.get("writer_profile_ids"), "writer_profile_ids", maximum=8
@@ -298,6 +383,19 @@ class ModelBenchmarkService:
         packet = context_preview.get("packet")
         if not isinstance(packet, dict):
             raise ValueError("benchmark requires the full novel_context_preview packet")
+        # Readiness gate: refuse to run on un-authored projects or on chapters
+        # that have no outline node.  Otherwise the model free-writes against a
+        # thin context and blind review cannot catch the drift (garbage-in).
+        if self._readiness_gate:
+            from tools.write_guard import validate_chapter_writable
+
+            guard = validate_chapter_writable(self.project_root, self.novel_id, chapter_id)
+            if not guard.get("ok"):
+                raise BenchmarkFrameworkError(
+                    str(guard.get("message") or "项目未就绪或目标章节无大纲节点"),
+                    code=str(guard.get("code") or "PROJECT_NOT_READY"),
+                )
+        strict_review = bool(payload.get("strict_review") or payload.get("strict", False))
         snapshot = {
             "chapter_id": chapter_id,
             "target_words": target_words,
@@ -330,6 +428,9 @@ class ModelBenchmarkService:
         jobs = [
             (profile_id, repeat) for profile_id in writer_ids for repeat in range(1, repeats + 1)
         ]
+        # Generation units are honest and known up front: writers × repeats.
+        if report:
+            report(0, len(jobs), "candidates")
         with ThreadPoolExecutor(
             max_workers=concurrency, thread_name_prefix="openwrite-benchmark-write"
         ) as pool:
@@ -354,17 +455,23 @@ class ModelBenchmarkService:
                         pending.cancel()
                     raise RuntimeError("benchmark cancelled")
                 candidates.append(future.result())
+                if report:
+                    report(len(candidates), len(jobs), "candidates")
         candidates.sort(key=lambda item: (str(item["writer_profile"]["id"]), int(item["repeat"])))
 
         if progress:
             progress("validating", "使用独立评审模型执行盲评")
         evaluations: list[dict[str, Any]] = []
+        # Review units are computed only after generation ends, so provider
+        # failures honestly reduce the total: committed candidates × reviewers.
         review_jobs = [
             (candidate, reviewer_profiles[reviewer_id])
             for candidate in candidates
             if candidate["reliability_status"] == "completed"
             for reviewer_id in reviewer_ids
         ]
+        if report and review_jobs:
+            report(0, len(review_jobs), "evaluations")
         with ThreadPoolExecutor(
             max_workers=concurrency, thread_name_prefix="openwrite-benchmark-review"
         ) as pool:
@@ -376,6 +483,7 @@ class ModelBenchmarkService:
                     packet,
                     execution_mode,
                     search_profile,
+                    strict_review,
                 ): (
                     str(candidate["candidate_id"]),
                     str(reviewer["id"]),
@@ -388,6 +496,8 @@ class ModelBenchmarkService:
                         pending.cancel()
                     raise RuntimeError("benchmark cancelled")
                 evaluations.append(future.result())
+                if report:
+                    report(len(evaluations), len(review_jobs), "evaluations")
         evaluations.sort(
             key=lambda item: (str(item["candidate_id"]), str(item["reviewer_profile"]["id"]))
         )
@@ -420,11 +530,18 @@ class ModelBenchmarkService:
         reasoning_tokens = sum(int(item.get("reasoning_tokens") or 0) for item in billable_items)
         reported_cost_items = sum(item.get("cost_reported") is True for item in billable_items)
         total_cost_usd = round(sum(float(item.get("cost_usd") or 0) for item in billable_items), 8)
+        reported_latencies = [
+            int(item["latency_ms"])
+            for item in billable_items
+            if isinstance(item.get("latency_ms"), int)
+            and not isinstance(item.get("latency_ms"), bool)
+        ]
         artifact = {
             "schema_version": BENCHMARK_SCHEMA_VERSION,
             "run_id": run_id,
             "status": status,
             "created_at": created_at,
+            "started_at": created_at,
             "completed_at": _utc_now(),
             "chapter_id": chapter_id,
             "context_hash": context_hash,
@@ -451,9 +568,11 @@ class ModelBenchmarkService:
             "summary": {
                 "requested_candidates": len(jobs),
                 "completed_candidates": completed_candidates,
+                "failed_candidates": len(candidates) - completed_candidates,
                 "requested_evaluations": len(review_jobs),
                 "completed_evaluations": completed_evaluations,
                 "average_quality_score": round(sum(scores) / len(scores), 2) if scores else None,
+                "latency_ms_total": (sum(reported_latencies) if reported_latencies else None),
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "reasoning_tokens": reasoning_tokens,
@@ -467,6 +586,8 @@ class ModelBenchmarkService:
                 and reported_cost_items == len(billable_items),
             },
         }
+        if task_id:
+            artifact["task_id"] = task_id
         if progress:
             progress("committing", "保存隔离 benchmark artifact")
         path = self.store.save(artifact)
@@ -569,11 +690,14 @@ class ModelBenchmarkService:
         packet: dict[str, Any],
         execution_mode: str,
         search_profile: dict[str, Any] | None,
+        strict_review: bool = False,
     ) -> dict[str, Any]:
         started = time.perf_counter()
         try:
             if execution_mode == "framework":
-                result = self._review_framework(profile, candidate, search_profile)
+                result = self._review_framework(
+                    profile, candidate, search_profile, strict_review=strict_review
+                )
             else:
                 result = self._review_executor(profile, str(candidate["content"]), packet)
             usage = dict(result.get("token_usage") or result.get("usage") or {})
@@ -724,6 +848,7 @@ class ModelBenchmarkService:
         profile: dict[str, Any],
         candidate: dict[str, Any],
         search_profile: dict[str, Any] | None,
+        strict_review: bool = False,
     ) -> dict[str, Any]:
         from tools.chapter_pipeline import execute_review_chapter
         from tools.chapter_run_v2 import ChapterRunV2Store
@@ -753,6 +878,8 @@ class ModelBenchmarkService:
                 {
                     "chapter_id": str(candidate.get("chapter_id") or ""),
                     "run_id_v2": run_id_v2,
+                    "strict": strict_review,
+                    "canon_gate": strict_review,
                 },
             )
         manifest = ChapterRunV2Store(workspace, self.novel_id).load(run_id_v2)

@@ -23,6 +23,7 @@ class ProjectWriteLock:
         *,
         operation: str,
         stale_after_seconds: int = 6 * 60 * 60,
+        initialization_grace_seconds: float = 5.0,
     ):
         self.path = (
             Path(project_root).resolve()
@@ -35,6 +36,7 @@ class ProjectWriteLock:
         )
         self.operation = operation
         self.stale_after_seconds = stale_after_seconds
+        self.initialization_grace_seconds = initialization_grace_seconds
         self.token = uuid4().hex
         self.acquired = False
 
@@ -82,11 +84,11 @@ class ProjectWriteLock:
         owner = self._read_owner()
         raw_pid = owner.get("pid")
         if not isinstance(raw_pid, (int, str)):
-            return True
+            return age > self.initialization_grace_seconds
         try:
             pid = int(raw_pid)
         except (TypeError, ValueError):
-            return True
+            return age > self.initialization_grace_seconds
         if pid <= 0:
             return True
         try:

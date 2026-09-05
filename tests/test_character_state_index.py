@@ -11,6 +11,7 @@ from tools.character_state_index import (
     parse_relation_annotations,
     strip_character_state_annotations,
 )
+from tools.manuscript_acceptance import ManuscriptAcceptanceService
 
 
 def _project(tmp_path: Path) -> tuple[Path, Path]:
@@ -21,6 +22,20 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
         "novel_id: demo\ncurrent_chapter: ch_070\n", encoding="utf-8"
     )
     return tmp_path, novel_root
+
+
+def _accept_manuscript(root: Path) -> None:
+    service = ManuscriptAcceptanceService(root, "demo")
+    operation = service.establish_baseline(confirm=True)
+    service.resume(
+        operation["operation_id"],
+        analyzer=lambda chapter_id, title, content, prior: {
+            "chapter_summary": "",
+            "observations": "",
+            "legacy_updates": {},
+            "state_delta": {},
+        },
+    )
 
 
 def test_parser_infers_chapters_and_ignores_fenced_examples():
@@ -117,6 +132,7 @@ def test_query_returns_old_current_state_outside_recent_history(tmp_path: Path):
         encoding="utf-8",
     )
     (manuscript / "ch_070.md").write_text("# 第七十章\n", encoding="utf-8")
+    _accept_manuscript(root)
 
     result = CharacterStateIndex(root, "demo").query("沈烬", lookback=50)
 
@@ -153,6 +169,7 @@ def test_query_uses_active_book_state_when_editing_older_chapter(tmp_path: Path)
         ),
         encoding="utf-8",
     )
+    _accept_manuscript(root)
 
     result = CharacterStateIndex(root, "demo").query("沈烬")
 
@@ -174,6 +191,7 @@ def test_actual_annotation_wins_over_outline_at_same_chapter(tmp_path: Path):
     chapter.write_text(
         "# 第六十三章\n//**沈烬[位置]：工坊 -> 实际地点**\n", encoding="utf-8"
     )
+    _accept_manuscript(root)
 
     result = CharacterStateIndex(root, "demo").query(
         "沈烬", target_chapter="ch_063"
@@ -195,6 +213,7 @@ def test_query_refreshes_rebuildable_index_after_external_edit(tmp_path: Path):
     chapter.write_text(
         "# 第六十三章\n//**沈烬[位置]：工坊 -> 归墟港**\n", encoding="utf-8"
     )
+    _accept_manuscript(root)
     index = CharacterStateIndex(root, "demo")
 
     first = index.query("沈烬", target_chapter="ch_063")
@@ -204,7 +223,8 @@ def test_query_refreshes_rebuildable_index_after_external_edit(tmp_path: Path):
     second = index.query("沈烬", target_chapter="ch_063")
 
     assert first["current"][0]["state"] == "归墟港"
-    assert second["current"][0]["state"] == "旧剧场"
+    assert second["current"] == []
+    assert ManuscriptAcceptanceService(root, "demo").inspect()["status"] == "external_change"
     assert index.index_path.is_file()
 
 
@@ -225,6 +245,7 @@ def test_agent_tool_only_needs_character_name(tmp_path: Path):
     chapter.write_text(
         "# 第七十章\n//**沈烬[位置]：工坊 -> 归墟港**\n", encoding="utf-8"
     )
+    _accept_manuscript(root)
 
     result = build_tool_executors(root)["get_character_state"]({"name": "沈烬"})
 
@@ -241,6 +262,7 @@ def test_context_builder_renders_latest_state_for_active_characters(tmp_path: Pa
     chapter.write_text(
         "# 第六十三章\n//**沈烬[位置]：工坊 -> 归墟港**\n", encoding="utf-8"
     )
+    _accept_manuscript(root)
     builder = ContextBuilder(root, "demo")
 
     rendered = builder._get_inline_character_states(

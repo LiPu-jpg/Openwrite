@@ -1,0 +1,924 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenWrite 小红书轮播图</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #161817;
+      --muted: #646a67;
+      --paper: #f4f6f3;
+      --white: #ffffff;
+      --line: #cfd5d1;
+      --blue: #2d5fe8;
+      --coral: #e45d45;
+      --green: #2f7a55;
+      --yellow: #f2cb63;
+      --font-sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+      --font-serif: "Songti SC", STSong, serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: #dfe3e0;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      letter-spacing: 0;
+    }
+
+    body.single {
+      width: 1080px;
+      height: 1440px;
+      overflow: hidden;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, 1080px);
+      justify-content: center;
+      gap: 32px;
+      padding: 32px;
+    }
+
+    body.single main {
+      display: block;
+      width: 1080px;
+      height: 1440px;
+      padding: 0;
+    }
+
+    .poster {
+      position: relative;
+      width: 1080px;
+      height: 1440px;
+      overflow: hidden;
+      background: var(--paper);
+      isolation: isolate;
+    }
+
+    body.single .poster {
+      display: none;
+    }
+
+    body.single .poster.active {
+      display: block;
+    }
+
+    .poster::before {
+      position: absolute;
+      inset: 0;
+      z-index: -2;
+      background-image:
+        linear-gradient(rgba(22, 24, 23, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(22, 24, 23, 0.045) 1px, transparent 1px);
+      background-size: 48px 48px;
+      content: "";
+    }
+
+    .poster.clean::before {
+      display: none;
+    }
+
+    .poster.dark {
+      background: var(--ink);
+      color: var(--white);
+    }
+
+    .poster.dark::before {
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    }
+
+    .poster.blue {
+      background: var(--blue);
+      color: var(--white);
+    }
+
+    .poster-inner {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      padding: 58px 64px 54px;
+    }
+
+    .brand-row,
+    .footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex: 0 0 auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 24px;
+      font-weight: 650;
+    }
+
+    .brand img {
+      width: 185px;
+      height: auto;
+    }
+
+    .poster.dark .brand img,
+    .poster.blue .brand img {
+      filter: brightness(0) invert(1);
+    }
+
+    .series-label {
+      color: var(--muted);
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .poster.dark .series-label,
+    .poster.blue .series-label {
+      color: rgba(255, 255, 255, 0.72);
+    }
+
+    .kicker {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 64px;
+      color: var(--blue);
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .kicker::before {
+      width: 40px;
+      height: 8px;
+      background: currentColor;
+      content: "";
+    }
+
+    .poster.dark .kicker,
+    .poster.blue .kicker {
+      color: var(--yellow);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      margin-top: 34px;
+      max-width: 940px;
+      font-size: 88px;
+      font-weight: 760;
+      line-height: 1.09;
+    }
+
+    h2 {
+      margin-top: 28px;
+      max-width: 930px;
+      font-size: 70px;
+      font-weight: 760;
+      line-height: 1.14;
+    }
+
+    .serif {
+      font-family: var(--font-serif);
+      font-weight: 700;
+    }
+
+    .accent-blue {
+      color: var(--blue);
+    }
+
+    .accent-coral {
+      color: var(--coral);
+    }
+
+    .accent-green {
+      color: var(--green);
+    }
+
+    .marker {
+      position: relative;
+      display: inline-block;
+      z-index: 0;
+    }
+
+    .marker::after {
+      position: absolute;
+      right: -8px;
+      bottom: 6px;
+      left: -8px;
+      z-index: -1;
+      height: 23px;
+      background: var(--yellow);
+      content: "";
+    }
+
+    .lead {
+      margin-top: 28px;
+      max-width: 880px;
+      color: var(--muted);
+      font-size: 31px;
+      line-height: 1.55;
+    }
+
+    .cover-lead {
+      max-width: 952px;
+      font-size: 30px;
+    }
+
+    .poster.dark .lead,
+    .poster.blue .lead {
+      color: rgba(255, 255, 255, 0.74);
+    }
+
+    .spacer {
+      flex: 1 1 auto;
+    }
+
+    .footer-row {
+      margin-top: 30px;
+      color: var(--muted);
+      font-size: 19px;
+      font-weight: 550;
+    }
+
+    .poster.dark .footer-row,
+    .poster.blue .footer-row {
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .page-number {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .page-number::before {
+      width: 44px;
+      height: 2px;
+      background: currentColor;
+      content: "";
+    }
+
+    .screen {
+      position: relative;
+      overflow: hidden;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: var(--white);
+      box-shadow: 18px 20px 0 var(--ink);
+    }
+
+    .screen::before {
+      display: block;
+      height: 42px;
+      border-bottom: 2px solid var(--ink);
+      background:
+        radial-gradient(circle at 22px 20px, var(--coral) 0 6px, transparent 7px),
+        radial-gradient(circle at 46px 20px, var(--yellow) 0 6px, transparent 7px),
+        radial-gradient(circle at 70px 20px, var(--green) 0 6px, transparent 7px),
+        #eef1ee;
+      content: "";
+    }
+
+    .screen img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .screen.cover-screen {
+      margin-top: 58px;
+      transform: rotate(-1.2deg);
+    }
+
+    .cover-screen img {
+      width: 950px;
+    }
+
+    .cover-chip {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      margin-top: 62px;
+      border: 2px solid var(--ink);
+      border-radius: 999px;
+      padding: 12px 20px;
+      background: var(--white);
+      color: var(--ink);
+      font-size: 21px;
+      font-weight: 700;
+    }
+
+    .pain-list {
+      display: grid;
+      gap: 20px;
+      margin-top: 58px;
+    }
+
+    .pain-item {
+      display: grid;
+      grid-template-columns: 94px 1fr;
+      min-height: 162px;
+      overflow: hidden;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: var(--white);
+    }
+
+    .pain-index {
+      display: grid;
+      place-items: center;
+      border-right: 2px solid var(--ink);
+      background: var(--yellow);
+      font-size: 34px;
+      font-weight: 800;
+    }
+
+    .pain-copy {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 26px 34px;
+    }
+
+    .pain-copy h3 {
+      font-size: 32px;
+      line-height: 1.25;
+    }
+
+    .pain-copy p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 23px;
+      line-height: 1.45;
+    }
+
+    .statement-band {
+      margin: 52px -64px 0;
+      padding: 30px 64px;
+      background: var(--ink);
+      color: var(--white);
+      font-size: 29px;
+      font-weight: 650;
+      line-height: 1.45;
+    }
+
+    .overview-screen {
+      margin-top: 44px;
+    }
+
+    .overview-screen img {
+      width: 948px;
+    }
+
+    .truth-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      margin-top: 50px;
+      border-top: 2px solid var(--ink);
+      border-bottom: 2px solid var(--ink);
+    }
+
+    .truth-item {
+      min-height: 146px;
+      padding: 26px 24px;
+      border-right: 2px solid var(--ink);
+    }
+
+    .truth-item:last-child {
+      border-right: 0;
+    }
+
+    .truth-item small {
+      display: block;
+      color: var(--muted);
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    .truth-item strong {
+      display: block;
+      margin-top: 10px;
+      font-size: 27px;
+      line-height: 1.35;
+    }
+
+    .feature-screen {
+      margin-top: 48px;
+    }
+
+    .feature-screen img {
+      width: 948px;
+    }
+
+    .feature-notes {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      margin-top: 42px;
+    }
+
+    .feature-note {
+      flex: 1 1 0;
+      border-top: 5px solid var(--blue);
+      padding-top: 16px;
+      font-size: 26px;
+      font-weight: 650;
+      line-height: 1.38;
+    }
+
+    .feature-note:nth-child(2) {
+      border-color: var(--coral);
+    }
+
+    .feature-note:nth-child(3) {
+      border-color: var(--green);
+    }
+
+    .context-flow {
+      display: grid;
+      grid-template-columns: 1fr 54px 1fr;
+      gap: 12px 8px;
+      align-items: center;
+      margin-top: 50px;
+    }
+
+    .flow-source,
+    .flow-result {
+      display: grid;
+      place-items: center;
+      min-height: 94px;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: var(--white);
+      font-size: 25px;
+      font-weight: 700;
+    }
+
+    .flow-arrow {
+      text-align: center;
+      font-size: 34px;
+      font-weight: 800;
+    }
+
+    .flow-result {
+      grid-row: 1 / span 4;
+      grid-column: 3;
+      height: 100%;
+      padding: 26px;
+      background: var(--blue);
+      color: var(--white);
+      text-align: center;
+    }
+
+    .editor-screen {
+      margin-top: 42px;
+    }
+
+    .editor-screen img {
+      width: 948px;
+    }
+
+    .review-layout {
+      display: grid;
+      grid-template-columns: 1.45fr 0.55fr;
+      gap: 26px;
+      align-items: stretch;
+      margin-top: 48px;
+    }
+
+    .review-screen {
+      height: 600px;
+      box-shadow: 14px 16px 0 var(--ink);
+    }
+
+    .review-screen img {
+      width: auto;
+      height: calc(100% - 42px);
+      object-fit: cover;
+      object-position: 44% center;
+    }
+
+    .review-points {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .review-point {
+      display: flex;
+      flex: 1 1 0;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      padding: 24px 22px;
+      background: var(--white);
+    }
+
+    .review-point span {
+      color: var(--muted);
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .review-point strong {
+      font-size: 29px;
+      line-height: 1.25;
+    }
+
+    .review-point:nth-child(1) {
+      border-top: 10px solid var(--coral);
+    }
+
+    .review-point:nth-child(2) {
+      border-top: 10px solid var(--yellow);
+    }
+
+    .review-point:nth-child(3) {
+      border-top: 10px solid var(--green);
+    }
+
+    .control-flow {
+      display: grid;
+      grid-template-columns: 1fr 72px 1fr;
+      align-items: stretch;
+      margin-top: 70px;
+    }
+
+    .control-step {
+      display: flex;
+      min-height: 320px;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 3px solid var(--white);
+      border-radius: 8px;
+      padding: 38px 34px;
+    }
+
+    .control-step small {
+      color: var(--yellow);
+      font-size: 20px;
+      font-weight: 750;
+    }
+
+    .control-step strong {
+      font-size: 42px;
+      line-height: 1.25;
+    }
+
+    .control-step p {
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 23px;
+      line-height: 1.45;
+    }
+
+    .control-arrow {
+      display: grid;
+      place-items: center;
+      color: var(--yellow);
+      font-size: 44px;
+      font-weight: 800;
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-top: 48px;
+    }
+
+    .principle {
+      border-top: 2px solid rgba(255, 255, 255, 0.5);
+      padding-top: 20px;
+    }
+
+    .principle strong {
+      display: block;
+      font-size: 28px;
+    }
+
+    .principle span {
+      display: block;
+      margin-top: 8px;
+      color: rgba(255, 255, 255, 0.65);
+      font-size: 20px;
+      line-height: 1.4;
+    }
+
+    .closing-title {
+      margin-top: 120px;
+      font-size: 78px;
+      line-height: 1.13;
+    }
+
+    .closing-title em {
+      color: var(--yellow);
+      font-family: var(--font-serif);
+      font-style: normal;
+    }
+
+    .question {
+      margin-top: 72px;
+      border-top: 3px solid var(--white);
+      border-bottom: 3px solid var(--white);
+      padding: 32px 0;
+      font-size: 34px;
+      font-weight: 700;
+    }
+
+    .choices {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 30px;
+    }
+
+    .choice {
+      display: flex;
+      align-items: center;
+      min-height: 92px;
+      border: 2px solid rgba(255, 255, 255, 0.8);
+      border-radius: 8px;
+      padding: 18px 24px;
+      background: rgba(255, 255, 255, 0.08);
+      font-size: 24px;
+      font-weight: 650;
+    }
+
+    .choice b {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      margin-right: 16px;
+      background: var(--yellow);
+      color: var(--ink);
+      font-size: 20px;
+    }
+
+    .github-line {
+      margin-top: 42px;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 24px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="poster clean" data-card="1">
+      <div class="poster-inner">
+        <div class="brand-row">
+          <div class="brand"><img src="../../../logo-light.svg" alt="OpenWrite"></div>
+          <div class="series-label">长篇小说 × AI</div>
+        </div>
+        <div class="cover-chip">独立开发 · 开源</div>
+        <h1>写到第 30 章，<br>AI 还记得<br><span class="marker">第 1 章</span>吗？</h1>
+        <p class="lead cover-lead">我做了 OpenWrite：一个面向长篇小说的 AI Agent 创作工作台。</p>
+        <div class="screen cover-screen">
+          <img src="../../../screenshots/studio-overview.jpg" alt="OpenWrite 小说总览">
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-row">
+          <span>不是一键成书，是把整本书维护下去</span>
+          <span class="page-number">01 / 08</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="2">
+      <div class="poster-inner">
+        <div class="brand-row">
+          <div class="brand"><img src="../../../logo-light.svg" alt="OpenWrite"></div>
+          <div class="series-label">AI 写长篇的真实痛点</div>
+        </div>
+        <div class="kicker">写得出来，不等于写得下去</div>
+        <h2>长篇最容易坏在<br>一个字：<span class="accent-coral serif">忘</span></h2>
+        <div class="pain-list">
+          <div class="pain-item">
+            <div class="pain-index">01</div>
+            <div class="pain-copy">
+              <h3>人物状态忘了</h3>
+              <p>上一章还在受伤，下一章已经满血行动。</p>
+            </div>
+          </div>
+          <div class="pain-item">
+            <div class="pain-index">02</div>
+            <div class="pain-copy">
+              <h3>设定边界忘了</h3>
+              <p>规则、时间线和人物认知悄悄互相打架。</p>
+            </div>
+          </div>
+          <div class="pain-item">
+            <div class="pain-index">03</div>
+            <div class="pain-copy">
+              <h3>作者意图忘了</h3>
+              <p>局部写得很热闹，整本书却越写越偏。</p>
+            </div>
+          </div>
+        </div>
+        <div class="statement-band">普通聊天窗口擅长回答这一刻，却很难长期维护一本书。</div>
+        <div class="spacer"></div>
+        <div class="footer-row">
+          <span>OpenWrite / 长篇小说创作工作台</span>
+          <span class="page-number">02 / 08</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="poster clean" data-card="3">
+      <div class="poster-inner">
+        <div class="brand-row">
+          <div class="brand"><img src="../../../logo-light.svg" alt="OpenWrite"></div>
+          <div class="series-label">OpenWrite 是什么</div>
+        </div>
+        <div class="kicker">一个项目，一套持续创作流程</div>
+        <h2>不是“一键成书”<br>是把<span class="accent-blue">整本书</span>维护下去</h2>
+        <div class="screen overview-screen">
+          <img src="../../../screenshots/studio-overview.jpg" alt="OpenWrite 小说总览">
+        </div>
+        <div class="truth-strip">
+          <div class="truth-item">
+            <small>方向</small>
+            <strong>作者意图<br>始终是罗盘</strong>
+          </div>
+          <div class="truth-item">
+            <small>事实</small>
+            <strong>人物与世界<br>持续更新</strong>
+          </div>
+          <div class="truth-item">
+            <small>协作</small>
+            <strong>规划、写作<br>审稿连起来</strong>
+          </div>
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-row">
+          <span>所有状态都落进真实的小说项目</span>
+          <span class="page-number">03 / 08</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="4">
+      <div class="poster-inner">
+        <div class="brand-row">
+          <div class="brand"><img src="../../../logo-light.svg" alt="OpenWrite"></div>
+          <div class="series-label">滚动大纲</div>
+        </div>
+        <div class="kicker">规划不是写完就放着</div>
+        <h2>大纲会跟着正文<br><span class="accent-blue">一起往前走</span></h2>
+        <p class="lead">从全书结构到下一章目标，都可以在同一个视图里持续调整。</p>
+        <div class="screen feature-screen">
+          <img src="../../../screenshots/studio-outline.jpg" alt="OpenWrite 滚动大纲">
+        </div>
+        <div class="feature-notes">
+          <div class="feature-note">卷 → 幕 → 节 → 章<br>分层管理</div>
+          <div class="feature-note">待写 / 已写<br>状态清晰</div>
+          <div class="feature-note">从章纲直接<br>创建正文</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-row">
+          <span>大纲是创作中的导航，不是归档文件</span>
+          <span class="page-number">04 / 08</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="poster clean" data-card="5">
+      <div class="poster-inner">
+        <div class="brand-row">
+          <div class="brand"><img src="../../../logo-light.svg" alt="OpenWrite"></div>
+          <div class="series-label">上下文写作</div>
+        </div>
+        <div class="kicker">AI 不是凭空续写</div>
+        <h2>动笔前，先读懂<br><span class="accent-green">这一章</span>该怎么写</h2>
+        <div class="context-flow">
+          <div class="flow-source">作者意图</div><div class="flow-arrow">→</div>
+          <div class="flow-source">本章大纲</div><div class="flow-arrow">→</div>
+          <div class="flow-source">人物状态</div><div class="flow-arrow">→</div>
+          <div class="flow-source">最近正文</div><div class="flow-arrow">→</div>
+          <div class="flow-result">有边界的<br>本章上下文</div>
+        </div>
+        <div class="screen editor-screen">
+          <img src="../../../screenshots/studio-editor.jpg" alt="OpenWrite 正文编辑器">
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-row">
+          <span>相关信息进入本章，不把整本书硬塞给模型</span>
+          <span class="page-number">05 / 08</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="6">
+      <div class="poster-inner">
+        <div class="brand-row">
+          <div class="brand"><img src="../../../logo-light.svg" alt="OpenWrite"></div>
+          <div class="series-label">审稿工作区</div>
+        </div>
+        <div class="kicker">写完不是结束</div>
+        <h2>把问题找出来，<br>再<span class="accent-coral">定位回原文</span></h2>
+        <p class="lead">审稿结果不是一句笼统评价，而是可以继续处理的问题清单。</p>
+        <div class="review-layout">
+          <div class="screen review-screen">
+            <img src="../../../screenshots/studio-review.jpg" alt="OpenWrite 审稿工作区">
+          </div>
+          <div class="review-points">
+            <div class="review-point"><span>RHYTHM</span><strong>节奏<br>是否停顿</strong></div>
+            <div class="review-point"><span>MOTIVE</span><strong>动机<br>是否成立</strong></div>
+            <div class="review-point"><span>CANON</span><strong>事实<br>是否冲突</strong></div>
+          </div>
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-row">
+          <span>检查、定位、修订，回到同一条创作流程</span>
+          <span class="page-number">06 / 08</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="poster dark" data-card="7">
+      <div class="poster-inner">
+        <div class="brand-row">
+          <div class="brand"><img src="../../../logo-light.svg" alt="OpenWrite"></div>
+          <div class="series-label">作者始终掌舵</div>
+        </div>
+        <div class="kicker">这条边界很重要</div>
+        <h2>AI 可以参与，<br>但不能<span style="color: var(--yellow)">偷偷改设定</span></h2>
+        <div class="control-flow">
+          <div class="control-step">
+            <small>STEP 01</small>
+            <strong>先展示<br>改动差异</strong>
+            <p>人物、世界、大纲等正式资产，修改前先让作者看见。</p>
+          </div>
+          <div class="control-arrow">→</div>
+          <div class="control-step">
+            <small>STEP 02</small>
+            <strong>本轮确认后<br>才写入</strong>
+            <p>旧消息、模型猜测和口头完成声明，都不能替代确认。</p>
+          </div>
+        </div>
+        <div class="principles">
+          <div class="principle"><strong>本地优先</strong><span>作品保留在自己的项目里</span></div>
+          <div class="principle"><strong>真源清晰</strong><span>大纲、人物、世界各有确认版</span></div>
+          <div class="principle"><strong>过程可追踪</strong><span>结果以真实文件和工具为准</span></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-row">
+          <span>让 AI 协作，而不是让作者失去控制</span>
+          <span class="page-number">07 / 08</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="poster blue" data-card="8">
+      <div class="poster-inner">
+        <div class="brand-row">
+          <div class="brand"><img src="../../../logo-light.svg" alt="OpenWrite"></div>
+          <div class="series-label">持续开发中</div>
+        </div>
+        <h1 class="closing-title">我想做的，<br>不是替你写，<br>而是陪你把<br><em>长篇写完。</em></h1>
+        <div class="question">你最希望 AI 帮你解决哪一步？</div>
+        <div class="choices">
+          <div class="choice"><b>A</b>整理灵感和设定</div>
+          <div class="choice"><b>B</b>规划大纲和章节</div>
+          <div class="choice"><b>C</b>辅助正文写作</div>
+          <div class="choice"><b>D</b>审稿与连续性检查</div>
+        </div>
+        <div class="github-line">GitHub · LiPu-jpg/Openwrite</div>
+        <div class="spacer"></div>
+        <div class="footer-row">
+          <span>欢迎告诉我你的真实创作痛点</span>
+          <span class="page-number">08 / 08</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const requestedCard = new URLSearchParams(window.location.search).get("card");
+    if (requestedCard) {
+      document.body.classList.add("single");
+      const selected = document.querySelector(`[data-card="${requestedCard}"]`);
+      if (selected) selected.classList.add("active");
+    }
+  </script>
+</body>
+</html>

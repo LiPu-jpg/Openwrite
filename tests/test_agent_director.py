@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,6 +16,7 @@ from tools.agent.director import MultiAgentDirector
 from tools.agent.reviewer import ReviewResult
 from tools.agent.writer import WritingResult
 from tools.chapter_assembler import ChapterAssemblerV2, ChapterAssemblyPacket
+from tools.context_protection import ContextBudgetError
 from tools.init_project import init_project
 from tools.llm.context import ContextBudgetPolicy
 from tools.truth_manager import TruthFilesManager
@@ -202,6 +204,66 @@ def test_packet_budget_uses_staircase_tier_and_proportional_document_shares(
     assert packet.compression["level"] == 4
     assert packet.compression["final_estimated_tokens"] <= 1000
     assert set(packet.character_documents) == {"沈烬", "刑无咎"}
+
+
+def test_packet_budget_never_truncates_protected_controls_canon_or_requirements(
+    tmp_path: Path,
+):
+    assembler = ChapterAssemblerV2(tmp_path, "demo")
+    assembler._context_policy = ContextBudgetPolicy(
+        2600, 0, input_budget_override=2600
+    )
+    packet = ChapterAssemblyPacket(
+        novel_id="demo",
+        chapter_id="ch_001",
+        author_intent="人物不能违背承诺。",
+        creative_focus="本章必须完成关系反转。",
+        core_documents={"foundation": "复活必须付出等价记忆。"},
+        continuity_documents={"current_state": "钟楼仍然封闭。"},
+        chapter_requirements={"goals": ["找到旧信"], "hooks": ["门后传来回声"]},
+        previous_chapter_content="可压缩上文。" * 1200,
+        style_documents={"work.composed": "可压缩风格提示。" * 800},
+    )
+    protected = (
+        packet.author_intent,
+        packet.creative_focus,
+        dict(packet.core_documents),
+        dict(packet.continuity_documents),
+        dict(packet.chapter_requirements),
+    )
+
+    assembler._enforce_context_budget(packet)
+
+    assert (
+        packet.author_intent,
+        packet.creative_focus,
+        packet.core_documents,
+        packet.continuity_documents,
+        packet.chapter_requirements,
+    ) == protected
+    assert packet.compression["protected_unchanged"] is True
+    assert packet.compression["within_budget"] is True
+
+
+def test_packet_protected_content_over_budget_is_actionable(tmp_path: Path):
+    assembler = ChapterAssemblerV2(tmp_path, "demo")
+    assembler._context_policy = ContextBudgetPolicy(
+        1000, 0, input_budget_override=1000
+    )
+    packet = ChapterAssemblyPacket(
+        novel_id="demo",
+        chapter_id="ch_001",
+        author_intent="绝不能改写人物底线。" * 400,
+        chapter_requirements={"goals": ["必须在本章揭示真相" * 300]},
+    )
+
+    with pytest.raises(ContextBudgetError) as raised:
+        assembler._enforce_context_budget(packet)
+
+    assert raised.value.code == "PROTECTED_CONTEXT_OVER_BUDGET"
+    assert raised.value.details["budget_tokens"] == 1000
+    assert "author_intent" in raised.value.details["protected_items"]
+    assert "chapter_requirements" in raised.value.details["protected_items"]
 
 
 def test_director_run_uses_runtime_truth_files_for_writer_and_reviewer(tmp_path: Path):

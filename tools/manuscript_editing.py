@@ -13,6 +13,8 @@ from uuid import uuid4
 
 from models.manuscript_editing import ManuscriptAnnotationV1, ManuscriptVersionV1
 from tools.novel_workspace import count_writing_units
+from tools.project_lock import ProjectBusyError, ProjectWriteLock
+from tools.review_store import ReviewStore
 
 
 class ManuscriptEditingError(RuntimeError):
@@ -22,6 +24,8 @@ class ManuscriptEditingError(RuntimeError):
 
 
 class ManuscriptVersionStore:
+    AUTOSAVE_COALESCE_SECONDS = 10 * 60
+
     def __init__(self, project_root: Path, novel_id: str) -> None:
         self.project_root = Path(project_root).resolve()
         self.novel_id = self._novel_id(novel_id)
@@ -34,6 +38,12 @@ class ManuscriptVersionStore:
                 "无效作品 ID", code="INVALID_NOVEL_ID"
             ) from exc
         self.root = self.novel_root / "data" / "manuscript_versions"
+        self._last_acceptance: dict[str, Any] | None = None
+
+    @property
+    def last_acceptance(self) -> dict[str, Any] | None:
+        """Return the acceptance operation started by the latest restore."""
+        return None if self._last_acceptance is None else dict(self._last_acceptance)
 
     def checkpoint(
         self,
@@ -82,6 +92,53 @@ class ManuscriptVersionStore:
                 continue
         return sorted(versions, key=lambda item: item.created_at, reverse=True)
 
+    def checkpoint_before_change(
+        self,
+        chapter_id: str,
+        *,
+        reason: str,
+        label: str,
+        content: str,
+    ) -> tuple[ManuscriptVersionV1, bool]:
+        """Keep the oldest source in one short autosave burst, but retain named saves."""
+        clean_chapter = self._chapter_id(chapter_id)
+        now = datetime.now(timezone.utc)
+        if reason == "autosave":
+            versions = self.list(clean_chapter)
+            if versions and versions[0].reason == "autosave":
+                try:
+                    created_at = datetime.fromisoformat(versions[0].created_at)
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
+                    if (now - created_at).total_seconds() <= self.AUTOSAVE_COALESCE_SECONDS:
+                        return versions[0], False
+                except ValueError:
+                    pass
+        return (
+            self.checkpoint(
+                clean_chapter,
+                reason=reason,
+                label=label,
+                content=content,
+            ),
+            True,
+        )
+
+    def compare(self, chapter_id: str, version_id: str) -> dict[str, Any]:
+        clean_chapter = self._chapter_id(chapter_id)
+        target, target_content = self.load(clean_chapter, version_id)
+        current_content = self.chapter_path(clean_chapter).read_text(encoding="utf-8")
+        from tools.revision_service import RevisionService
+
+        return {
+            "version": target.model_dump(mode="json"),
+            "current": {
+                "revision": self.fingerprint(current_content),
+                "writing_units": count_writing_units(current_content),
+            },
+            "diff": RevisionService._diff(current_content, target_content),
+        }
+
     def load(self, chapter_id: str, version_id: str) -> tuple[ManuscriptVersionV1, str]:
         clean_chapter = self._chapter_id(chapter_id)
         clean_version = self._version_id(version_id)
@@ -116,15 +173,45 @@ class ManuscriptVersionStore:
         current_revision: str,
         confirm: bool = False,
     ) -> ManuscriptVersionV1:
+        self._last_acceptance = None
         if not confirm:
             raise ManuscriptEditingError("恢复版本需要显式确认", code="CONFIRMATION_REQUIRED")
-        path = self.chapter_path(chapter_id)
-        current = path.read_text(encoding="utf-8")
-        if not self.revision_matches(current_revision, self.fingerprint(current)):
-            raise ManuscriptEditingError("当前正文已变化", code="STALE_REVISION")
-        version, content = self.load(chapter_id, version_id)
-        self.checkpoint(chapter_id, reason="restore", label=f"恢复前: {version_id}")
-        self._atomic_text(path, content)
+        clean_chapter = self._chapter_id(chapter_id)
+        clean_version = self._version_id(version_id)
+        try:
+            with ProjectWriteLock(
+                self.project_root,
+                self.novel_id,
+                operation=f"manuscript_restore:{clean_chapter}:{clean_version}",
+            ):
+                path = self.chapter_path(clean_chapter)
+                current = path.read_text(encoding="utf-8")
+                if not self.revision_matches(current_revision, self.fingerprint(current)):
+                    raise ManuscriptEditingError("当前正文已变化", code="STALE_REVISION")
+                version, content = self.load(clean_chapter, clean_version)
+                self.checkpoint(
+                    clean_chapter,
+                    reason="restore",
+                    label=f"恢复前: {clean_version}",
+                    content=current,
+                )
+                self._atomic_text(path, content)
+                ReviewStore(self.project_root, self.novel_id).mark_stale(
+                    clean_chapter,
+                    reason="history_restored",
+                    current_source_revision=self.fingerprint(content),
+                )
+                from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+                self._last_acceptance = ManuscriptAcceptanceService(
+                    self.project_root, self.novel_id
+                ).start_acceptance(
+                    clean_chapter,
+                    source="history_restore",
+                    expected_previous_revision=self.fingerprint(current),
+                )
+        except ProjectBusyError as exc:
+            raise ManuscriptEditingError(str(exc), code="PROJECT_BUSY") from exc
         return version
 
     def chapter_path(self, chapter_id: str) -> Path:
@@ -341,6 +428,8 @@ def manuscript_editing_action(
             chapter_id, str(payload.get("version_id") or "")
         )
         return {"version": version.model_dump(mode="json"), "content": content}
+    if action == "compare":
+        return versions.compare(chapter_id, str(payload.get("version_id") or ""))
     if action == "checkpoint":
         return versions.checkpoint(
             chapter_id,
@@ -348,12 +437,16 @@ def manuscript_editing_action(
             label=str(payload.get("label") or ""),
         ).model_dump(mode="json")
     if action == "restore":
-        return versions.restore(
+        restored = versions.restore(
             chapter_id,
             str(payload.get("version_id") or ""),
             current_revision=str(payload.get("revision") or ""),
             confirm=bool(payload.get("confirm")),
-        ).model_dump(mode="json")
+        )
+        return {
+            **restored.model_dump(mode="json"),
+            "acceptance": versions.last_acceptance,
+        }
     if action == "annotations":
         return {
             "annotations": [

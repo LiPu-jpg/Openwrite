@@ -15,11 +15,13 @@ from tools.agent.confirmation import guard_confirmable_executors
 from tools.agent.tool_runtime import build_tool_executors
 from tools.cli import _save_chapter
 from tools.init_project import init_project
+from tools.manuscript_acceptance import ManuscriptAcceptanceService
 from tools.manuscript_editing import (
     ManuscriptAnnotationStore,
     ManuscriptEditingError,
     ManuscriptVersionStore,
 )
+from tools.project_lock import ProjectWriteLock
 from tools.revision_service import RevisionService
 from tools.studio import StudioApplication, create_server
 from tools.studio_contracts import StudioError
@@ -43,6 +45,11 @@ def test_checkpoint_load_restore_and_metadata_identity_guards(tmp_path: Path) ->
 
     changed = original + "\n新增一段。\n"
     chapter.write_text(changed, encoding="utf-8")
+    ManuscriptAcceptanceService(tmp_path, "demo").start_acceptance(
+        "ch_001",
+        source="manual",
+        expected_previous_revision=store.fingerprint(original),
+    )
     with pytest.raises(ManuscriptEditingError) as confirmation:
         store.restore(
             "ch_001",
@@ -67,7 +74,14 @@ def test_checkpoint_load_restore_and_metadata_identity_guards(tmp_path: Path) ->
         confirm=True,
     )
     assert restored.version_id == version.version_id
+    assert isinstance(restored, type(version))
     assert chapter.read_text(encoding="utf-8") == original
+    assert store.last_acceptance is not None
+    assert store.last_acceptance["source"] == "history_restore"
+    assert store.last_acceptance["chapter_id"] == "ch_001"
+    assert store.last_acceptance["expected_previous_revision"] == store.fingerprint(changed)
+    assert store.last_acceptance["accepted_revision"] == ""
+    assert store.last_acceptance["target_revision"] == store.fingerprint(original)
     restore_checkpoint = store.list("ch_001")[0]
     assert restore_checkpoint.reason == "restore"
     assert store.load("ch_001", restore_checkpoint.version_id)[1] == changed
@@ -79,6 +93,45 @@ def test_checkpoint_load_restore_and_metadata_identity_guards(tmp_path: Path) ->
     with pytest.raises(ManuscriptEditingError) as invalid:
         store.load("ch_001", version.version_id)
     assert invalid.value.code == "INVALID_VERSION"
+
+
+def test_restore_participates_in_the_shared_project_write_lock(tmp_path: Path) -> None:
+    chapter = _project(tmp_path)
+    store = ManuscriptVersionStore(tmp_path, "demo")
+    original = chapter.read_text(encoding="utf-8")
+    version = store.checkpoint("ch_001", label="锁测试")
+    changed = original + "\n锁外修改。\n"
+    chapter.write_text(changed, encoding="utf-8")
+
+    with ProjectWriteLock(tmp_path, "demo", operation="other-writer"):
+        with pytest.raises(ManuscriptEditingError) as busy:
+            store.restore(
+                "ch_001",
+                version.version_id,
+                current_revision=store.fingerprint(changed),
+                confirm=True,
+            )
+
+    assert busy.value.code == "PROJECT_BUSY"
+    assert chapter.read_text(encoding="utf-8") == changed
+
+
+def test_compare_version_previews_current_to_target_without_writing(tmp_path: Path) -> None:
+    chapter = _project(tmp_path)
+    store = ManuscriptVersionStore(tmp_path, "demo")
+    original = chapter.read_text(encoding="utf-8")
+    version = store.checkpoint("ch_001", label="初稿")
+    changed = original.replace("钟声", "远处的钟声")
+    chapter.write_text(changed, encoding="utf-8")
+
+    preview = store.compare("ch_001", version.version_id)
+
+    assert preview["version"]["version_id"] == version.version_id
+    assert preview["current"]["revision"] == store.fingerprint(changed)
+    assert preview["diff"]["hunks"]
+    assert "远处的钟声" in preview["diff"]["hunks"][0]["before"]
+    assert "远处的钟声" not in preview["diff"]["hunks"][0]["after"]
+    assert chapter.read_text(encoding="utf-8") == changed
 
 
 def test_annotations_relocate_only_on_one_exact_match_then_detach(tmp_path: Path) -> None:
@@ -189,6 +242,7 @@ def test_agent_tools_expose_versions_annotations_and_guard_restore(tmp_path: Pat
         }
     )
     assert restored["version_id"] == created["version_id"]
+    assert restored["acceptance"]["source"] == "history_restore"
 
 
 def test_studio_contract_and_cli_checkpoint_smoke(
@@ -196,11 +250,20 @@ def test_studio_contract_and_cli_checkpoint_smoke(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _project(tmp_path)
+    chapter = _project(tmp_path)
     app = StudioApplication(tmp_path)
     try:
         checkpoint = app.manuscript_editing_action(
             {"action": "checkpoint", "chapter_id": "ch_001", "label": "Studio"}
+        )
+        original = chapter.read_text(encoding="utf-8")
+        changed = original + "\n恢复前新增。\n"
+        chapter.write_text(changed, encoding="utf-8")
+        changed_revision = ManuscriptVersionStore.fingerprint(changed)
+        ManuscriptAcceptanceService(tmp_path, "demo").start_acceptance(
+            "ch_001",
+            source="manual",
+            expected_previous_revision=ManuscriptVersionStore.fingerprint(original),
         )
         with pytest.raises(StudioError) as unconfirmed:
             app.manuscript_editing_action(
@@ -208,10 +271,26 @@ def test_studio_contract_and_cli_checkpoint_smoke(
                     "action": "restore",
                     "chapter_id": "ch_001",
                     "version_id": checkpoint["version_id"],
-                    "revision": checkpoint["source_revision"],
+                    "revision": changed_revision,
                 }
             )
         assert unconfirmed.value.status == HTTPStatus.PRECONDITION_REQUIRED
+        restored = app.manuscript_editing_action(
+            {
+                "action": "restore",
+                "chapter_id": "ch_001",
+                "version_id": checkpoint["version_id"],
+                "revision": changed_revision,
+                "confirm": True,
+            }
+        )
+        assert restored["document"]["revision"] == checkpoint["source_revision"]
+        assert restored["acceptance"]["source"] == "history_restore"
+        mutation = restored["mutation_summary"]
+        assert mutation["source_revision"] == changed_revision
+        assert mutation["result_revision"] == checkpoint["source_revision"]
+        assert mutation["items"][0]["before"]["value"] == changed
+        assert mutation["items"][0]["after"]["value"] == original
     finally:
         if app._task_runner is not None:
             app._task_runner.shutdown(wait=True)

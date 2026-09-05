@@ -137,6 +137,19 @@ def validate_model_profile_surface(value: Any) -> dict[str, Any]:
             raise ValueError("model profile surface has incomplete profile")
         if any(secret in item for secret in ("api_key", "embedding_api_key", "secret")):
             raise ValueError("model profile surface must not contain credentials")
+        if "embedding_provider" in item or "embedding_model" in item or "last_embedding_test" in item:
+            raise ValueError("embedding settings must live in the independent embedding surface")
+    embeddings = surface.get("embedding_profiles")
+    if not isinstance(embeddings, list):
+        raise ValueError("model profile surface embedding_profiles must be an array")
+    if not isinstance(surface.get("active_embedding_profile_id"), str):
+        raise ValueError("model profile surface active_embedding_profile_id must be a string")
+    for profile in embeddings:
+        item = _require_mapping(profile, "embedding profile")
+        if not {"id", "label", "provider", "model", "dimension", "max_tokens", "configured", "active"} <= item.keys():
+            raise ValueError("embedding profile surface has incomplete profile")
+        if any(secret in item for secret in ("api_key", "embedding_api_key", "secret")):
+            raise ValueError("embedding profile surface must not contain credentials")
     return dict(surface)
 
 

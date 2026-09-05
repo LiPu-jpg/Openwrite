@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openwrite.dev/schemas/research-surface-v1.schema.json",
+  "title": "OpenWrite research surface v1 (credential-free)",
+  "type": "object",
+  "required": [
+    "schema_version", "available", "node_ready", "pnpm_ready", "package_ready",
+    "dependencies_ready", "setup_hint", "settings", "reports", "model_route"
+  ],
+  "additionalProperties": true,
+  "disallowed": ["api_key", "credential", "secret"],
+  "properties": {
+    "schema_version": {"const": "openwrite.research-surface.v1"},
+    "available": {"type": "boolean"},
+    "node_ready": {"type": "boolean"},
+    "pnpm_ready": {"type": "boolean"},
+    "package_ready": {"type": "boolean"},
+    "dependencies_ready": {"type": "boolean"},
+    "setup_hint": {"type": "string"},
+    "settings": {
+      "type": "object",
+      "required": ["search_provider", "search_providers"],
+      "additionalProperties": true,
+      "disallowed": ["api_key", "credential", "secret"],
+      "properties": {
+        "search_provider": {"enum": ["bocha", "bing", "jina", "none"]},
+        "search_providers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id", "label", "requires_api_key", "configured", "credential_configured"
+            ],
+            "additionalProperties": true,
+            "disallowed": ["api_key", "credential", "secret"],
+            "properties": {
+              "id": {"enum": ["bocha", "bing", "jina", "none"]},
+              "label": {"type": "string", "minLength": 1},
+              "requires_api_key": {"type": "boolean"},
+              "configured": {"type": "boolean"},
+              "credential_configured": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "reports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id", "title", "status", "episode_id", "task_id", "created_at",
+          "completed_at", "model_profile", "search_provider", "sources",
+          "sources_status", "source_count", "word_count", "latency_ms", "usage",
+          "cost_usd", "failure", "metrics", "path", "bytes"
+        ],
+        "additionalProperties": true,
+        "disallowed": ["api_key", "credential", "secret"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string"},
+          "status": {
+            "enum": ["succeeded", "failed", "needs_human_review", "unknown"]
+          },
+          "episode_id": {"type": ["string", "null"]},
+          "task_id": {"type": ["string", "null"]},
+          "created_at": {"type": ["string", "null"]},
+          "completed_at": {"type": ["string", "null"]},
+          "model_profile": {
+            "type": ["object", "null"],
+            "required": ["id", "label", "model", "provider"],
+            "additionalProperties": true,
+            "disallowed": ["api_key", "credential", "secret"],
+            "properties": {
+              "id": {"type": ["string", "null"]},
+              "label": {"type": ["string", "null"]},
+              "model": {"type": ["string", "null"]},
+              "provider": {"type": ["string", "null"]}
+            }
+          },
+          "search_provider": {"type": ["string", "null"]},
+          "sources": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "required": ["title", "url", "source_type", "cited"],
+              "additionalProperties": true,
+              "properties": {
+                "title": {"type": "string"},
+                "url": {"type": "string"},
+                "source_type": {"type": "string"},
+                "cited": {"type": "boolean"}
+              }
+            }
+          },
+          "sources_status": {"enum": ["ok", "unavailable"]},
+          "source_count": {"type": ["integer", "null"], "minimum": 0},
+          "word_count": {"type": ["integer", "null"], "minimum": 0},
+          "latency_ms": {"type": ["integer", "null"], "minimum": 0},
+          "usage": {
+            "type": "object",
+            "required": ["total_tokens", "reported"],
+            "additionalProperties": true,
+            "properties": {
+              "total_tokens": {"type": ["integer", "null"], "minimum": 0},
+              "reported": {"type": "boolean"}
+            }
+          },
+          "cost_usd": {
+            "type": "object",
+            "required": ["value", "reported"],
+            "additionalProperties": true,
+            "properties": {
+              "value": {"type": ["number", "null"], "minimum": 0},
+              "reported": {"type": "boolean"}
+            }
+          },
+          "failure": {
+            "type": ["object", "null"],
+            "required": ["code", "message"],
+            "additionalProperties": true,
+            "disallowed": ["api_key", "credential", "secret"],
+            "properties": {
+              "code": {"type": "string", "minLength": 1},
+              "message": {"type": "string"}
+            }
+          },
+          "metrics": {"type": "object"},
+          "path": {"type": "string", "minLength": 1},
+          "bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "model_route": {
+      "type": "object",
+      "required": [
+        "profile_id", "label", "model", "provider", "configured", "compatible"
+      ],
+      "additionalProperties": true,
+      "disallowed": ["api_key", "credential", "secret"],
+      "properties": {
+        "profile_id": {"type": "string"},
+        "label": {"type": "string"},
+        "model": {"type": "string"},
+        "provider": {"type": "string"},
+        "configured": {"type": "boolean"},
+        "compatible": {"type": "boolean"}
+      }
+    }
+  }
+}

@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>8 个开源 AI 小说工具对比</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #171918;
+      --muted: #666c69;
+      --paper: #f4f6f3;
+      --white: #fff;
+      --line: #cbd2ce;
+      --blue: #2855d9;
+      --green: #237451;
+      --coral: #dc5a42;
+      --yellow: #f0ca55;
+      --sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+      --serif: "Songti SC", STSong, serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      color: var(--ink);
+      background: #dfe3e0;
+      font-family: var(--sans);
+      letter-spacing: 0;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, 1080px);
+      justify-content: center;
+      gap: 32px;
+      padding: 32px;
+    }
+
+    body.single {
+      width: 1080px;
+      height: 1440px;
+      overflow: hidden;
+    }
+
+    body.single main {
+      display: block;
+      width: 1080px;
+      height: 1440px;
+      padding: 0;
+    }
+
+    .poster {
+      position: relative;
+      width: 1080px;
+      height: 1440px;
+      overflow: hidden;
+      background: var(--paper);
+    }
+
+    .poster::before {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(23, 25, 24, .04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 25, 24, .04) 1px, transparent 1px);
+      background-size: 48px 48px;
+      content: "";
+      pointer-events: none;
+    }
+
+    body.single .poster { display: none; }
+    body.single .poster.active { display: block; }
+
+    .inner {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      padding: 52px 62px 48px;
+    }
+
+    .topline, .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 19px;
+      font-weight: 600;
+    }
+
+    .index {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .index::before {
+      display: inline-block;
+      width: 34px;
+      height: 2px;
+      margin-right: 12px;
+      vertical-align: middle;
+      background: currentColor;
+      content: "";
+    }
+
+    .kicker {
+      margin-top: 46px;
+      color: var(--blue);
+      font-size: 23px;
+      font-weight: 750;
+    }
+
+    h1, h2, p { margin: 0; }
+
+    h1 {
+      max-width: 920px;
+      margin-top: 24px;
+      font-family: var(--serif);
+      font-size: 86px;
+      font-weight: 800;
+      line-height: 1.12;
+    }
+
+    h2 {
+      margin-top: 16px;
+      font-size: 72px;
+      font-weight: 780;
+      line-height: 1.08;
+    }
+
+    .cover-lead {
+      max-width: 900px;
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 29px;
+      line-height: 1.55;
+    }
+
+    .marker {
+      position: relative;
+      z-index: 0;
+      display: inline-block;
+    }
+
+    .marker::after {
+      position: absolute;
+      right: -7px;
+      bottom: 7px;
+      left: -7px;
+      z-index: -1;
+      height: 22px;
+      background: var(--yellow);
+      content: "";
+    }
+
+    .cover-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 232px 232px;
+      gap: 14px;
+      margin-top: 40px;
+    }
+
+    .cover-shot, .hero-shot {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--white);
+    }
+
+    .cover-shot img, .hero-shot img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      object-position: top center;
+    }
+
+    .cover-shot:nth-child(2) img { object-position: center; }
+
+    .audience {
+      min-height: 76px;
+      margin-top: 20px;
+      padding-left: 22px;
+      border-left: 7px solid var(--coral);
+      color: #353a37;
+      font-size: 28px;
+      font-weight: 650;
+      line-height: 1.42;
+    }
+
+    .hero-shot {
+      width: 956px;
+      height: 470px;
+      margin-top: 30px;
+      box-shadow: 0 18px 40px rgba(20, 30, 25, .11);
+    }
+
+    .hero-shot.contain img {
+      object-fit: contain;
+      object-position: center;
+    }
+
+    .terminal {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      height: 100%;
+      padding: 42px 48px;
+      color: #e9f8ef;
+      background: #17211c;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    }
+
+    .terminal .dots {
+      margin-bottom: 42px;
+      color: #ef765d;
+      font-size: 32px;
+      letter-spacing: 7px;
+    }
+
+    .terminal strong {
+      color: #86e1ad;
+      font-size: 29px;
+      line-height: 1.6;
+    }
+
+    .terminal span {
+      margin-top: 18px;
+      color: #aebbb4;
+      font-size: 21px;
+      line-height: 1.7;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      align-content: center;
+      gap: 14px;
+      height: 100%;
+      padding: 38px;
+      background: #192027;
+    }
+
+    .pipeline span {
+      display: grid;
+      place-items: center;
+      min-height: 82px;
+      padding: 8px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 5px;
+      color: #fff;
+      background: rgba(255,255,255,.07);
+      font-size: 18px;
+      font-weight: 650;
+      text-align: center;
+    }
+
+    .features {
+      display: grid;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .feature {
+      display: grid;
+      grid-template-columns: 58px 1fr;
+      align-items: center;
+      min-height: 66px;
+      border-top: 1px solid var(--line);
+      font-size: 24px;
+      line-height: 1.35;
+    }
+
+    .feature b {
+      color: var(--blue);
+      font-size: 19px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .verdict {
+      margin-top: 20px;
+      padding: 19px 22px;
+      border-left: 7px solid var(--green);
+      background: var(--white);
+      font-size: 24px;
+      font-weight: 650;
+      line-height: 1.45;
+    }
+
+    .verdict span {
+      margin-right: 10px;
+      color: var(--green);
+    }
+
+    .footer { margin-top: auto; }
+
+    .chosen {
+      background: #eef4ef;
+    }
+
+    .chosen .kicker, .chosen .feature b { color: var(--green); }
+    .chosen .audience { border-left-color: var(--green); }
+    .chosen .hero-shot { border-color: #8eaa9a; }
+
+    .choice-label {
+      display: inline-flex;
+      align-items: center;
+      height: 40px;
+      margin-left: 16px;
+      padding: 0 13px;
+      border-radius: 4px;
+      color: #fff;
+      background: var(--green);
+      font-size: 19px;
+      vertical-align: 13px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="poster" data-card="1">
+      <div class="inner">
+        <div class="topline"><span>开源 AI 小说工具横向看</span><span class="index">01 / 09</span></div>
+        <div class="kicker">不是只看 Star</div>
+        <h1>对比了 8 个工具<br><span class="marker">写中长篇</span>怎么选</h1>
+        <p class="cover-lead">自动生成、资料管理、长期写作，几个项目做的其实不是同一件事。</p>
+        <div class="cover-grid">
+          <div class="cover-shot"><img src="project-images/inkos-play.png" alt="InkOS Studio"></div>
+          <div class="cover-shot"><img src="https://raw.githubusercontent.com/syrizelink/OpenFic/main/demo.png" alt="OpenFic"></div>
+          <div class="cover-shot"><img src="https://raw.githubusercontent.com/musnows/Scriverse/main/showcase/public/scriverse-overview.png" alt="Scriverse"></div>
+          <div class="cover-shot"><img src="../../../screenshots/studio-overview.jpg" alt="OpenWrite Studio"></div>
+        </div>
+        <div class="footer"><span>每页一个项目，逐个看</span><span>个人需求向对比</span></div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="2">
+      <div class="inner">
+        <div class="topline"><span>功能范围最广</span><span class="index">02 / 09</span></div>
+        <div class="kicker">01 · InkOS</div>
+        <h2>一套系统做很多类型</h2>
+        <p class="audience">适合：除了长篇，还想做短篇、剧本、互动内容或翻译</p>
+        <div class="hero-shot"><img src="project-images/inkos-play.png" alt="InkOS Studio"></div>
+        <div class="features">
+          <div class="feature"><b>01</b><span>长短篇、剧本、互动影游和翻译都覆盖</span></div>
+          <div class="feature"><b>02</b><span>Studio、TUI、CLI 三种使用入口</span></div>
+          <div class="feature"><b>03</b><span>长篇记忆、审稿修订和多线剧情推演</span></div>
+        </div>
+        <p class="verdict"><span>我的判断</span>功能面最广，只写一种题材时先想清楚真正会用哪些。</p>
+        <div class="footer"><span>8 个开源 AI 小说工具</span><span>InkOS</span></div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="4">
+      <div class="inner">
+        <div class="topline"><span>完整 Web 系统</span><span class="index">04 / 09</span></div>
+        <div class="kicker">03 · MuMuAINovel</div>
+        <h2>浏览器里完成主要流程</h2>
+        <p class="audience">适合：习惯 Web 界面，愿意自己部署服务</p>
+        <div class="hero-shot"><img src="https://raw.githubusercontent.com/xiamuceer-j/MuMuAINovel/main/images/2.png" alt="MuMuAINovel"></div>
+        <div class="features">
+          <div class="feature"><b>01</b><span>智能向导生成大纲、角色和世界观</span></div>
+          <div class="feature"><b>02</b><span>角色关系、章节编辑、Prompt 调整和拆书</span></div>
+          <div class="feature"><b>03</b><span>可通过 Docker 部署在自己的服务器</span></div>
+        </div>
+        <p class="verdict"><span>我的判断</span>Web 产品感比较完整，不过部署组件比单机工具多一些。</p>
+        <div class="footer"><span>8 个开源 AI 小说工具</span><span>MuMuAINovel</span></div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="5">
+      <div class="inner">
+        <div class="topline"><span>自动化路线</span><span class="index">05 / 09</span></div>
+        <div class="kicker">04 · ainovel-cli</div>
+        <h2>让系统持续往下出章</h2>
+        <p class="audience">适合：命令行用户，希望把长篇生产流程自动跑起来</p>
+        <div class="hero-shot">
+          <div class="terminal">
+            <div class="dots">● ● ●</div>
+            <strong>Architect → Writer → Editor</strong>
+            <span>滚动规划下一卷与剧情弧<br>写章 → 一致性检查 → 七维评审 → 必要时重写</span>
+          </div>
+        </div>
+        <div class="features">
+          <div class="feature"><b>01</b><span>三个 Agent 分工完成规划、写作和编辑</span></div>
+          <div class="feature"><b>02</b><span>卷与剧情弧滚动规划，按长篇组织上下文</span></div>
+          <div class="feature"><b>03</b><span>七维评审，支持逐章验收与中断恢复</span></div>
+        </div>
+        <p class="verdict"><span>我的判断</span>自动化路线最明确，但它不是传统的可视化码字软件。</p>
+        <div class="footer"><span>8 个开源 AI 小说工具</span><span>ainovel-cli</span></div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="6">
+      <div class="inner">
+        <div class="topline"><span>写作与 Agent 兼顾</span><span class="index">06 / 09</span></div>
+        <div class="kicker">05 · OpenFic</div>
+        <h2>工作流可以自己调整</h2>
+        <p class="audience">适合：既想要写作界面，也想定制 Agent 与 Prompt</p>
+        <div class="hero-shot"><img src="https://raw.githubusercontent.com/syrizelink/OpenFic/main/demo.png" alt="OpenFic"></div>
+        <div class="features">
+          <div class="feature"><b>01</b><span>跨平台使用，项目数据保存在本地</span></div>
+          <div class="feature"><b>02</b><span>Prompt、Agent 与工作流都可以定制</span></div>
+          <div class="feature"><b>03</b><span>通过语义检索寻找长篇历史信息</span></div>
+        </div>
+        <p class="verdict"><span>我的判断</span>写作软件和 Agent 系统之间比较均衡，不走一键成书路线。</p>
+        <div class="footer"><span>8 个开源 AI 小说工具</span><span>OpenFic</span></div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="7">
+      <div class="inner">
+        <div class="topline"><span>提示词与流程</span><span class="index">07 / 09</span></div>
+        <div class="kicker">06 · Casting-Workflow</div>
+        <h2>把短篇拆成 12 个阶段</h2>
+        <p class="audience">适合：喜欢研究提示词和创作步骤，主要写短篇</p>
+        <div class="hero-shot">
+          <div class="pipeline">
+            <span>脑洞</span><span>灵感风暴</span><span>人设</span><span>大纲</span>
+            <span>细纲</span><span>概要</span><span>开篇</span><span>正文</span>
+            <span>优化</span><span>润色</span><span>续写</span><span>扩写</span>
+          </div>
+        </div>
+        <div class="features">
+          <div class="feature"><b>01</b><span>用本地提示词与文件组织写作流程</span></div>
+          <div class="feature"><b>02</b><span>先提炼风格指纹，再进入多阶段写作</span></div>
+          <div class="feature"><b>03</b><span>结尾加入质量与独特性检查</span></div>
+        </div>
+        <p class="verdict"><span>我的判断</span>更像可拆解的创作流水线，不是完整的日常码字软件。</p>
+        <div class="footer"><span>8 个开源 AI 小说工具</span><span>Casting-Workflow</span></div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="8">
+      <div class="inner">
+        <div class="topline"><span>桌面工作台</span><span class="index">08 / 09</span></div>
+        <div class="kicker">07 · CharacterArc</div>
+        <h2>功能集中在一个应用里</h2>
+        <p class="audience">适合：喜欢桌面 GUI，不想一直面对命令行</p>
+        <div class="hero-shot"><img src="https://raw.githubusercontent.com/uu201/character-arc/main/docs/assets/chapter_creation.png" alt="CharacterArc"></div>
+        <div class="features">
+          <div class="feature"><b>01</b><span>项目资料、人物组织、关系图与剧情大纲</span></div>
+          <div class="feature"><b>02</b><span>三栏章节编辑器、历史版本与 AI 侧栏</span></div>
+          <div class="feature"><b>03</b><span>Skill、拆书、审计与封面工作台</span></div>
+        </div>
+        <p class="verdict"><span>我的判断</span>桌面工作台功能很齐，适合偏爱传统软件体验的人。</p>
+        <div class="footer"><span>8 个开源 AI 小说工具</span><span>CharacterArc</span></div>
+      </div>
+    </section>
+
+    <section class="poster" data-card="9">
+      <div class="inner">
+        <div class="topline"><span>资料管理路线</span><span class="index">09 / 09</span></div>
+        <div class="kicker">08 · Scriverse</div>
+        <h2>把小说当成资料工程</h2>
+        <p class="audience">适合：世界设定多，愿意认真整理角色与时间线</p>
+        <div class="hero-shot"><img src="https://raw.githubusercontent.com/musnows/Scriverse/main/showcase/public/scriverse-overview.png" alt="Scriverse"></div>
+        <div class="features">
+          <div class="feature"><b>01</b><span>正文、分卷、角色、组织、世界设定和时间线</span></div>
+          <div class="feature"><b>02</b><span>关系图、大纲伏笔、全文检索和历史版本</span></div>
+          <div class="feature"><b>03</b><span>章节、关系、时间线与一致性分析任务</span></div>
+        </div>
+        <p class="verdict"><span>我的判断</span>资料管理做得很细，适合设定密集型长篇。</p>
+        <div class="footer"><span>8 个开源 AI 小说工具</span><span>Scriverse</span></div>
+      </div>
+    </section>
+
+    <section class="poster chosen" data-card="3">
+      <div class="inner">
+        <div class="topline"><span>作者主导的长期写作</span><span class="index">03 / 09</span></div>
+        <div class="kicker">02 · OpenWrite <span class="choice-label">中长篇选择</span></div>
+        <h2>AI 多干活，方向还在自己手里</h2>
+        <p class="audience">适合：自己决定故事方向，让 AI 负责上下文、初稿、审稿和修订</p>
+        <div class="hero-shot"><img src="../../../screenshots/studio-review.jpg" alt="OpenWrite 审稿工作区"></div>
+        <div class="features">
+          <div class="feature"><b>01</b><span>作者意图与近期目标优先；人物、世界和大纲只有一份确认版真源</span></div>
+          <div class="feature"><b>02</b><span>位置、伤势、认知和关系按章节结算；写章带上最近正文与相关旧章</span></div>
+          <div class="feature"><b>03</b><span>37 维审稿定位证据；AI 改稿先给 diff，冲突或失败会拦截、恢复</span></div>
+        </div>
+        <p class="verdict"><span>真正优势</span>AI 可以深度参与，但故事事实和最终修改权始终留在作者手里。</p>
+        <div class="footer"><span>8 个开源 AI 小说工具</span><span>OpenWrite</span></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const main = document.querySelector("main");
+    [...main.querySelectorAll(".poster")]
+      .sort((a, b) => Number(a.dataset.card) - Number(b.dataset.card))
+      .forEach((poster) => main.append(poster));
+    const card = new URLSearchParams(window.location.search).get("card");
+    if (card) {
+      document.body.classList.add("single");
+      document.querySelector(`[data-card="${card}"]`)?.classList.add("active");
+    }
+  </script>
+</body>
+</html>

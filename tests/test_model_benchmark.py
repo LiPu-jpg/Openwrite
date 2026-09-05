@@ -7,7 +7,7 @@ from tools.chapter_pipeline import execute_write_chapter
 from tools.chapter_run_v2 import ChapterRunV2Store
 from tools.init_project import init_project
 from tools.llm.response import ProviderResponseError
-from tools.model_benchmark import BenchmarkFrameworkError, ModelBenchmarkService
+from tools.model_benchmark import BenchmarkFrameworkError, BenchmarkStore, ModelBenchmarkService
 from tools.model_profiles import (
     ModelProfileStore,
     active_model_profile,
@@ -258,7 +258,13 @@ def test_benchmark_usage_summary_distinguishes_free_from_unknown_cost(tmp_path: 
     assert result["candidates"][0]["cost_usd"] == 0
     assert result["candidates"][0]["cost_reported"] is True
     assert result["evaluations"][0]["cost_reported"] is False
-    assert result["summary"] == {
+    summary = dict(result["summary"])
+    assert summary.pop("failed_candidates") == 0
+    latency_ms_total = summary.pop("latency_ms_total")
+    assert latency_ms_total == (
+        result["candidates"][0]["latency_ms"] + result["evaluations"][0]["latency_ms"]
+    )
+    assert summary == {
         "requested_candidates": 1,
         "completed_candidates": 1,
         "requested_evaluations": 1,
@@ -394,7 +400,7 @@ def test_framework_mode_runs_public_pipeline_in_per_candidate_workspace(
 
     monkeypatch.setattr("tools.chapter_pipeline.execute_write_chapter", framework_write)
     monkeypatch.setattr("tools.chapter_pipeline.execute_review_chapter", framework_review)
-    service = ModelBenchmarkService(tmp_path, "book", store)
+    service = ModelBenchmarkService(tmp_path, "book", store, readiness_gate=False)
     result = service.run(
         {
             "writer_profile_ids": ["writer-a", "writer-b"],
@@ -449,7 +455,7 @@ def test_benchmark_rejects_invalid_execution_mode(tmp_path: Path):
     store = ModelProfileStore(tmp_path / "profiles")
     store.save_profile(profile("writer", "model"), api_key="secret")
     store.save_profile(profile("critic", "critic"), api_key="review-secret")
-    service = ModelBenchmarkService(tmp_path, "book", store)
+    service = ModelBenchmarkService(tmp_path, "book", store, readiness_gate=False)
 
     with pytest.raises(ValueError, match="execution_mode"):
         service.run(
@@ -489,7 +495,7 @@ def test_framework_write_failure_has_no_quality_score(tmp_path: Path, monkeypatc
         }
 
     monkeypatch.setattr("tools.chapter_pipeline.execute_write_chapter", failed_write)
-    service = ModelBenchmarkService(tmp_path, "book", store)
+    service = ModelBenchmarkService(tmp_path, "book", store, readiness_gate=False)
 
     result = service.run(
         {"writer_profile_ids": ["writer"], "reviewer_profile_ids": ["critic"]},
@@ -548,7 +554,7 @@ def test_framework_review_failure_has_no_quality_score(tmp_path: Path, monkeypat
         }
 
     monkeypatch.setattr("tools.chapter_pipeline.execute_review_chapter", failed_review)
-    service = ModelBenchmarkService(tmp_path, "book", store)
+    service = ModelBenchmarkService(tmp_path, "book", store, readiness_gate=False)
 
     result = service.run(
         {"writer_profile_ids": ["writer"], "reviewer_profile_ids": ["critic"]},
@@ -573,7 +579,7 @@ def test_framework_review_failure_has_no_quality_score(tmp_path: Path, monkeypat
 def test_framework_review_rejects_workspace_not_owned_by_candidate(tmp_path: Path):
     init_project(tmp_path, "book")
     store = ModelProfileStore(tmp_path / "profiles")
-    service = ModelBenchmarkService(tmp_path, "book", store)
+    service = ModelBenchmarkService(tmp_path, "book", store, readiness_gate=False)
     wrong_workspace = service.store.root / "other" / "project"
     wrong_workspace.mkdir(parents=True)
 
@@ -591,3 +597,217 @@ def test_framework_review_rejects_workspace_not_owned_by_candidate(tmp_path: Pat
         )
 
     assert error.value.code == "BENCHMARK_WORKSPACE_INVALID"
+
+
+def test_benchmark_reports_real_units_with_honest_totals(tmp_path: Path):
+    store = ModelProfileStore(tmp_path / "profiles")
+    store.save_profile(profile("writer-a", "model-a"), api_key="secret-a")
+    store.save_profile(profile("writer-b", "model-b"), api_key="secret-b")
+    store.save_profile(profile("critic", "review-model"), api_key="secret-review")
+
+    failed_once = {"count": 0}
+
+    def generate(profile_, packet, chapter_number, target_words):
+        if profile_["id"] == "writer-b" and not failed_once["count"]:
+            failed_once["count"] += 1
+            raise RuntimeError("provider unavailable")
+        return {
+            "content": f"{profile_['id']}正文" * 50,
+            "word_count": target_words,
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15},
+        }
+
+    reports: list[tuple[int, int, str]] = []
+    service = ModelBenchmarkService(
+        tmp_path,
+        "book",
+        store,
+        generation_executor=generate,
+        review_executor=lambda *_args: {
+            "score": 80,
+            "passed": True,
+            "issue_details": [],
+            "review_v2": {
+                "execution_status": "completed",
+                "quality_score": 80,
+                "coverage": 1,
+                "gate_status": "pass",
+                "delivery_status": "pass",
+            },
+        },
+    )
+    result = service.run(
+        {
+            "writer_profile_ids": ["writer-a", "writer-b"],
+            "reviewer_profile_ids": ["critic"],
+            "repeats": 2,
+            "target_words": 1000,
+            "concurrency": 2,
+            "execution_mode": "creative",
+        },
+        {"chapter_id": "ch_001", "packet": {"outline": "固定大纲"}},
+        report=lambda completed, total, kind: reports.append((completed, total, kind)),
+    )
+
+    candidate_reports = [(c, t) for c, t, k in reports if k == "candidates"]
+    evaluation_reports = [(c, t) for c, t, k in reports if k == "evaluations"]
+    # Generation: writers × repeats = 4 units, known before the loop starts.
+    assert candidate_reports == [(0, 4), (1, 4), (2, 4), (3, 4), (4, 4)]
+    # One candidate failed → review total drops honestly to 3 × 1 reviewers,
+    # computed only after generation ended.
+    assert evaluation_reports == [(0, 3), (1, 3), (2, 3), (3, 3)]
+    assert result["status"] == "partial"
+    assert result["summary"]["failed_candidates"] == 1
+    assert result["summary"]["completed_candidates"] == 3
+    assert len(result["evaluations"]) == 3
+    artifact = json.loads(Path(result["artifact_path"]).read_text(encoding="utf-8"))
+    assert artifact["started_at"] == artifact["created_at"]
+    assert "task_id" not in artifact
+    assert artifact["summary"]["latency_ms_total"] is not None
+    failed = next(item for item in artifact["candidates"] if item["reliability_status"] == "failed")
+    assert failed["error"]["code"] == "MODEL_RUN_FAILED"
+    assert "quality_score" not in failed
+
+
+def test_benchmark_artifact_carries_task_id_when_provided(tmp_path: Path):
+    store = ModelProfileStore(tmp_path / "profiles")
+    store.save_profile(profile("writer", "model"), api_key="secret")
+    store.save_profile(profile("critic", "critic"), api_key="review-secret")
+
+    service = ModelBenchmarkService(
+        tmp_path,
+        "book",
+        store,
+        generation_executor=lambda *_args: {
+            "content": "正文",
+            "word_count": 2,
+            "usage": {"total_tokens": 3},
+        },
+        review_executor=lambda *_args: {
+            "score": 70,
+            "passed": True,
+            "issue_details": [],
+            "review_v2": {"execution_status": "completed", "quality_score": 70},
+        },
+    )
+    result = service.run(
+        {
+            "writer_profile_ids": ["writer"],
+            "reviewer_profile_ids": ["critic"],
+            "execution_mode": "creative",
+        },
+        {"chapter_id": "ch_001", "packet": {"outline": "固定大纲"}},
+        task_id="tsk_20260901000000_deadbeef00",
+    )
+
+    artifact = json.loads(Path(result["artifact_path"]).read_text(encoding="utf-8"))
+    assert artifact["task_id"] == "tsk_20260901000000_deadbeef00"
+    assert result["summary"]["latency_ms_total"] == (
+        result["candidates"][0]["latency_ms"] + result["evaluations"][0]["latency_ms"]
+    )
+
+
+def test_benchmark_store_derives_stable_comparison_groups_without_rewriting_history(
+    tmp_path: Path,
+):
+    store = BenchmarkStore(tmp_path, "book")
+
+    def artifact(run_id: str, *, prompt_version: str = "writer-v1") -> dict:
+        return {
+            "schema_version": "openwrite.model-benchmark.v1",
+            "run_id": run_id,
+            "status": "completed",
+            "created_at": "2026-09-01T00:00:00+00:00",
+            "chapter_id": "ch_001",
+            "context_hash": "sha256:fixed-context",
+            "prompt_version": prompt_version,
+            "rubric_version": "review-v2",
+            "context_snapshot": {
+                "manifest": {
+                    "schema_version": 3,
+                    "strategy": "hierarchical-provenance-v2",
+                    "packet_revision": "packet-a",
+                    "source_revision": "source-a",
+                    "measurement": {"estimator": "mixed-script-conservative-v1"},
+                }
+            },
+            "config": {
+                "writer_profile_ids": ["writer"],
+                "reviewer_profile_ids": ["critic"],
+                "execution_mode": "framework",
+            },
+            "candidates": [],
+            "evaluations": [],
+            "summary": {},
+        }
+
+    first = artifact("bench_20260901000000_aaaaaaaa")
+    second = artifact("bench_20260901000001_bbbbbbbb")
+    changed_prompt = artifact(
+        "bench_20260901000002_cccccccc", prompt_version="writer-v2"
+    )
+    for record in (first, second, changed_prompt):
+        store.save(record)
+
+    rows = {row["run_id"]: row for row in store.list()}
+    first_group = rows[first["run_id"]]["comparison"]
+    second_group = rows[second["run_id"]]["comparison"]
+    changed_group = rows[changed_prompt["run_id"]]["comparison"]
+
+    assert first_group["key"] == second_group["key"]
+    assert first_group["key"] != changed_group["key"]
+    assert first_group == {
+        "key": first_group["key"],
+        "basis_complete": True,
+        "context_hash": "sha256:fixed-context",
+        "prompt_version": "writer-v1",
+        "rubric_version": "review-v2",
+        "execution_mode": "framework",
+        "manifest_schema_version": "3",
+        "context_strategy": "hierarchical-provenance-v2",
+        "token_estimator": "mixed-script-conservative-v1",
+        "packet_revision": "packet-a",
+        "source_revision": "source-a",
+    }
+    assert store.load(first["run_id"])["comparison"] == first_group
+    # Read-time compatibility metadata must not rewrite an existing artifact.
+    persisted = json.loads((store.root / f"{first['run_id']}.json").read_text(encoding="utf-8"))
+    assert "comparison" not in persisted
+
+
+def test_benchmark_store_keeps_legacy_unknowns_explicit(tmp_path: Path):
+    store = BenchmarkStore(tmp_path, "book")
+    legacy = {
+        "schema_version": "openwrite.model-benchmark.v1",
+        "run_id": "bench_20260824000000_legacy00",
+        "status": "partial",
+        "created_at": "2026-08-24T00:00:00+00:00",
+        "chapter_id": "ch_006",
+        "context_hash": "sha256:legacy-context",
+        "prompt_version": "writer-v1",
+        "rubric_version": "review-v2",
+        "context_snapshot": {
+            "manifest": {
+                "schema_version": 2,
+                "strategy": "hierarchical-provenance-v1",
+                "revision": "legacy-packet",
+            }
+        },
+        "config": {
+            "writer_profile_ids": ["writer"],
+            "reviewer_profile_ids": ["critic"],
+        },
+        "candidates": [],
+        "evaluations": [],
+        "summary": {"total_cost_usd": 0},
+    }
+    store.save(legacy)
+
+    row = store.list()[0]
+
+    assert row["execution_mode"] is None
+    assert row["comparison"]["execution_mode"] is None
+    assert row["comparison"]["token_estimator"] is None
+    assert row["comparison"]["basis_complete"] is False
+    assert row["comparison"]["packet_revision"] == "legacy-packet"

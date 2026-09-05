@@ -79,6 +79,40 @@ def apply_runtime_delta_with_fallback(
         return fallback.model_dump(mode="json"), str(exc)
 
 
+def _apply_canon_gate(review_v2: dict[str, Any], *, strict: bool) -> dict[str, Any]:
+    """Surface unverifiable canon and optionally block delivery (strict).
+
+    The canon domain answers "does the draft contradict long-term canon?" with
+    ``inconclusive`` when there are no chapter memory / runtime-truth facts to
+    compare against (typical for imported manuscripts that never had a
+    settlement pass).  Before this gate that signal was silently ignored.
+    """
+    domains = review_v2.get("domains")
+    canon = None
+    if isinstance(domains, list):
+        for domain in domains:
+            if isinstance(domain, dict) and str(domain.get("id") or "") == "canon":
+                canon = domain
+                break
+    if canon is None or str(canon.get("status") or "inconclusive") != "inconclusive":
+        return {}
+    info: dict[str, Any] = {
+        "status": "inconclusive",
+        "blocked": bool(strict),
+        "reason": "canon_unverified",
+        "detail": (
+            "评审缺少可核对的长期正典事实（章节记忆/运行态真相缺失或不足），"
+            "无法确认本章是否与正典冲突。建议先对既有章节执行结算回填"
+            "（settle backfill），让评审有正文事实可对。"
+        ),
+    }
+    review_v2["canon_gate"] = info
+    if strict:
+        review_v2["delivery_status"] = "blocked"
+        review_v2["delivery_reason"] = "canon_unverified"
+    return info
+
+
 def _load_config(project_root: Path) -> dict[str, Any]:
     path = project_root / "novel_config.yaml"
     if not path.exists():
@@ -173,8 +207,20 @@ def save_chapter(
     title: str,
     content: str,
 ) -> Path:
-    """Atomically save a chapter in the canonical manuscript layout."""
-    return _save_chapter(Path(project_root).resolve(), novel_id, chapter_id, title, content)
+    """Atomically save and register a chapter for fact reconciliation."""
+    root = Path(project_root).resolve()
+    previous = _load_chapter(root, novel_id, chapter_id)
+    path = _save_chapter(root, novel_id, chapter_id, title, content)
+    from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+    ManuscriptAcceptanceService(root, novel_id).start_acceptance(
+        chapter_id,
+        source="agent",
+        expected_previous_revision=(
+            ManuscriptAcceptanceService.fingerprint(previous) if previous is not None else ""
+        ),
+    )
+    return path
 
 
 def _restore(path: Path, previous: bytes | None) -> None:
@@ -375,6 +421,9 @@ def build_writer_payload(
         "chapter_summaries": getattr(context, "chapter_summaries", ""),
         "active_characters": _context_characters(context),
     }
+    scene_context = getattr(context, "scene_context", {})
+    if isinstance(scene_context, dict) and scene_context.get("status") == "current":
+        payload["scene_context"] = scene_context
     chapter_outline = _render_current_chapter(context)
     if chapter_outline:
         payload["outline"] = chapter_outline
@@ -653,6 +702,9 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
         return {"ok": False, "error": "未找到项目配置", "code": "INVALID_PROJECT"}
     novel_id = str(config.get("novel_id") or "")
     chapter_id = str(args.get("chapter_id") or "ch_001")
+    from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+    ManuscriptAcceptanceService(project_root, novel_id).require_current(chapter_id)
     packet = args.get("context_packet")
     packet = packet if isinstance(packet, dict) else {}
     target_words = int(args.get("target_words") or 0)
@@ -971,6 +1023,31 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     },
                     artifact=str(draft_path),
                 )
+                from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+                acceptance = ManuscriptAcceptanceService(
+                    project_root, novel_id
+                ).record_precomputed(
+                    chapter_id,
+                    source="chapter_write",
+                    expected_previous_revision=(
+                        ManuscriptAcceptanceService.fingerprint(
+                            previous_draft.decode("utf-8")
+                        )
+                        if previous_draft is not None
+                        else ""
+                    ),
+                    source_run_id=run_v2_manifest.run_id,
+                    fact={
+                        "chapter_summary": str(
+                            getattr(result, "chapter_summary", "") or ""
+                        ),
+                        "observations": str(getattr(result, "observations", "") or ""),
+                        "state_delta": state_delta,
+                        "legacy_updates": updates,
+                        "token_usage": dict(getattr(result, "token_usage", {}) or {}),
+                    },
+                )
                 active_stage = ""
                 run_v2_active_stage = ""
             except Exception:
@@ -996,6 +1073,11 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 "finish_reason": str(getattr(result, "finish_reason", "") or ""),
                 "model": str(getattr(result, "model", "") or ""),
                 "provider": str(getattr(result, "provider", "") or ""),
+                "acceptance": {
+                    "operation_id": acceptance["operation_id"],
+                    "status": acceptance["status"],
+                    "accepted_revision": acceptance["accepted_revision"],
+                },
             }
             if state_delta_fallback:
                 response_payload["state_delta"] = state_delta
@@ -1239,6 +1321,12 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                 "strict": strict,
                 "dimensions": dimensions,
             }
+            canon_gate_on = bool(args.get("canon_gate") or strict)
+            canon_info = _apply_canon_gate(payload["review_v2"], strict=canon_gate_on)
+            if canon_info:
+                payload["canon_gate"] = canon_info
+                if canon_info.get("blocked"):
+                    payload["passed"] = False
             _task_phase(args, "validating", "整理审稿问题")
             _raise_if_task_cancelled(args)
             _task_phase(args, "committing", "保存审稿结果")
@@ -1261,7 +1349,7 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                     ],
                 },
             )
-            _sync_book_state(project_root, novel_id, chapter_id, bool(result.passed))
+            _sync_book_state(project_root, novel_id, chapter_id, bool(payload["passed"]))
             if run_manifest is not None:
                 run_store.complete_review(run_manifest, review_payload=payload)
             if run_v2_manifest is not None:
@@ -1338,6 +1426,9 @@ def execute_multi_agent_chapter(
         return {"ok": False, "error": "未找到项目配置", "code": "INVALID_PROJECT"}
     novel_id = str(config.get("novel_id") or "")
     chapter_id = str(args.get("chapter_id") or "ch_001")
+    from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+    ManuscriptAcceptanceService(project_root, novel_id).require_current(chapter_id)
     dimensions = args.get("dimensions")
     if dimensions is not None and (
         not isinstance(dimensions, list)
@@ -1415,6 +1506,7 @@ def execute_multi_agent_chapter(
                     chapter_id=chapter_id,
                     temperature=_generation_temperature(args),
                     run_review=not bool(args.get("no_review")),
+                    settle_state=False,
                     **director_options,
                 )
             )
@@ -1426,6 +1518,26 @@ def execute_multi_agent_chapter(
                 chapter_id,
                 result.draft.title,
                 result.draft.content,
+            )
+            from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+            acceptance = ManuscriptAcceptanceService(
+                project_root, novel_id
+            ).record_precomputed(
+                chapter_id,
+                source="multi_agent_write",
+                expected_previous_revision="",
+                fact={
+                    "chapter_summary": str(
+                        getattr(result.draft, "chapter_summary", "") or ""
+                    ),
+                    "observations": str(getattr(result.draft, "observations", "") or ""),
+                    "state_delta": dict(getattr(result.draft, "state_delta", {}) or {}),
+                    "legacy_updates": dict(
+                        getattr(result.draft, "state_updates", {}) or {}
+                    ),
+                    "token_usage": dict(getattr(result.draft, "token_usage", {}) or {}),
+                },
             )
             scheduler.complete_stage(
                 workflow,
@@ -1469,6 +1581,16 @@ def execute_multi_agent_chapter(
                     "strict": bool(args.get("strict", False)),
                     "dimensions": dimensions,
                 }
+                canon_gate_on = bool(
+                    args.get("canon_gate") or args.get("strict", False)
+                )
+                canon_info = _apply_canon_gate(
+                    review_payload["review_v2"], strict=canon_gate_on
+                )
+                if canon_info:
+                    review_payload["canon_gate"] = canon_info
+                    if canon_info.get("blocked"):
+                        review_payload["passed"] = False
                 ReviewStore(project_root, novel_id).save(chapter_id, review_payload)
                 scheduler.start_stage(workflow, "review")
                 scheduler.complete_stage(
@@ -1493,7 +1615,7 @@ def execute_multi_agent_chapter(
                 project_root,
                 novel_id,
                 chapter_id,
-                bool(result.review.passed) if result.review else None,
+                bool(review_payload["passed"]) if review_payload else None,
             )
             return {
                 "ok": True,
@@ -1505,6 +1627,11 @@ def execute_multi_agent_chapter(
                 "new_concepts": list(result.new_concepts or []),
                 "packet_markdown": packet_markdown,
                 "packet_path": packet_path,
+                "acceptance": {
+                    "operation_id": acceptance["operation_id"],
+                    "status": acceptance["status"],
+                    "accepted_revision": acceptance["accepted_revision"],
+                },
             }
     except ProjectBusyError as exc:
         return {

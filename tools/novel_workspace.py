@@ -116,14 +116,30 @@ def save_creative_focus(
 ) -> Path:
     path = current_focus_path(project_root, novel_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    focus = CreativeFocus(
-        goal=goal.strip(),
+    focus = normalize_creative_focus(
+        goal=goal,
+        must_keep=must_keep,
+        must_avoid=must_avoid,
+        notes=notes,
+    )
+    path.write_text(render_creative_focus(focus), encoding="utf-8")
+    return path
+
+
+def normalize_creative_focus(
+    *,
+    goal: str,
+    must_keep: Iterable[str] = (),
+    must_avoid: Iterable[str] = (),
+    notes: Iterable[str] = (),
+) -> CreativeFocus:
+    """Normalize focus input once for both preview and persistence paths."""
+    return CreativeFocus(
+        goal=str(goal or "").strip(),
         must_keep=_clean_items(must_keep),
         must_avoid=_clean_items(must_avoid),
         notes=_clean_items(notes),
     )
-    path.write_text(render_creative_focus(focus), encoding="utf-8")
-    return path
 
 
 def render_creative_focus(focus: CreativeFocus) -> str:
@@ -285,9 +301,18 @@ def export_manuscript(
 
     book_title = title.strip() or novel_id
     parts: list[str] = [f"# {book_title}" if format_name == "md" else book_title]
-    for chapter in chapters:
+    from tools.scene_integration import scene_export_chapters
+
+    scene_chapters = scene_export_chapters(project_root, novel_id)
+    export_chapters = scene_chapters if scene_chapters is not None else chapters
+    for chapter in export_chapters:
+        source_text = (
+            chapter.markdown
+            if scene_chapters is not None
+            else chapter.path.read_text(encoding="utf-8")
+        )
         text = strip_character_state_annotations(
-            chapter.path.read_text(encoding="utf-8")
+            source_text
         ).strip()
         if format_name == "txt":
             text = re.sub(r"^\s{0,3}#{1,6}\s+", "", text, flags=re.MULTILINE)

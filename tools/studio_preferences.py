@@ -132,13 +132,37 @@ class StudioModelSettingsStore:
 
 
 class StudioResearchSettingsStore:
-    """Persist DeepResearch search settings and credentials outside projects."""
+    """Persist DeepResearch search settings and credentials.
 
-    def __init__(self, directory: Path | None = None):
+    Credentials always stay in the machine-global prefs directory (0600 files,
+    shared across workspaces). Non-secret settings (``search_provider``,
+    ``remember_api_key``) may bind to a per-workspace file via
+    :meth:`for_workspace`; reads then prefer the workspace file and fall back
+    to the machine-global settings file, which keeps pre-workspace-scoping
+    installs working unchanged.
+    """
+
+    def __init__(
+        self, directory: Path | None = None, *, workspace_path: Path | None = None
+    ):
         self.directory = (directory or default_studio_preferences_dir()).resolve()
         self.settings_path = self.directory / "research-settings.json"
         self.credentials_path = self.directory / ".research-search-credentials.json"
+        self.workspace_path = (
+            Path(workspace_path).resolve() if workspace_path is not None else None
+        )
         self._session_credentials: dict[str, str] = {}
+
+    def for_workspace(self, workspace_path: Path) -> StudioResearchSettingsStore:
+        """Return a copy bound to a workspace settings file.
+
+        The bound store shares the machine-global directory and session
+        credentials; only non-secret settings reads/writes move to the
+        workspace file.
+        """
+        bound = StudioResearchSettingsStore(self.directory, workspace_path=workspace_path)
+        bound._session_credentials = self._session_credentials
+        return bound
 
     def surface(self) -> dict[str, Any]:
         settings = self.load_settings()
@@ -163,11 +187,19 @@ class StudioResearchSettingsStore:
             )
         return {"search_provider": provider, "search_providers": providers}
 
-    def load_settings(self) -> dict[str, str]:
-        payload = self._read_json(self.settings_path)
+    def load_settings(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.workspace_path is not None:
+            payload = self._read_json(self.workspace_path)
+        if not payload:
+            payload = self._read_json(self.settings_path)
         provider = str(payload.get("search_provider") or "").strip().lower()
+        remember = payload.get("remember_api_key")
         return {
-            "search_provider": provider if provider in RESEARCH_SEARCH_PROVIDERS else "bocha"
+            "search_provider": (
+                provider if provider in RESEARCH_SEARCH_PROVIDERS else "bocha"
+            ),
+            "remember_api_key": True if remember is None else bool(remember),
         }
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -191,7 +223,10 @@ class StudioResearchSettingsStore:
             self._session_credentials.pop(provider, None)
             credentials.pop(provider, None)
         self._write_private_json(self.credentials_path, credentials)
-        self._write_private_json(self.settings_path, {"search_provider": provider})
+        self._write_private_json(
+            self.workspace_path or self.settings_path,
+            {"search_provider": provider, "remember_api_key": remember},
+        )
         return self.surface()
 
     def credential(self, provider: str) -> str:
@@ -233,15 +268,17 @@ class StudioResearchSettingsStore:
         return payload if isinstance(payload, dict) else {}
 
     def _write_private_json(self, path: Path, payload: dict[str, Any]) -> None:
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            self.directory.chmod(0o700)
-        except OSError:
-            pass
+        directory = path.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        if directory == self.directory:
+            try:
+                self.directory.chmod(0o700)
+            except OSError:
+                pass
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=self.directory,
+            dir=directory,
             delete=False,
             prefix=f".{path.name}.",
             suffix=".tmp",

@@ -18,8 +18,80 @@
     "run_id": {"type": "string", "pattern": "^bench_[A-Za-z0-9_-]+$"},
     "status": {"enum": ["completed", "partial", "failed"]},
     "context_hash": {"type": "string", "minLength": 1},
-    "candidates": {"type": "array"},
-    "evaluations": {"type": "array"},
+    "task_id": {"type": "string", "minLength": 1},
+    "started_at": {"type": "string", "minLength": 1},
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "writer_profile", "reliability_status"],
+        "additionalProperties": true,
+        "disallowed": ["api_key", "embedding_api_key", "secret"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "writer_profile": {"type": "object"},
+          "reliability_status": {"enum": ["completed", "failed"]},
+          "usage": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "properties": {
+              "prompt_tokens": {"type": ["integer", "null"]},
+              "completion_tokens": {"type": ["integer", "null"]},
+              "reasoning_tokens": {"type": ["integer", "null"]},
+              "total_tokens": {"type": ["integer", "null"]}
+            }
+          },
+          "cost_usd": {"type": ["number", "null"]},
+          "cost_reported": {"type": "boolean"},
+          "latency_ms": {"type": ["integer", "null"]},
+          "error": {
+            "type": ["object", "null"],
+            "required": ["code", "message"],
+            "additionalProperties": true,
+            "properties": {
+              "code": {"type": "string", "minLength": 1},
+              "message": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "evaluations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "reviewer_profile", "execution_status"],
+        "additionalProperties": true,
+        "disallowed": ["api_key", "embedding_api_key", "secret"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "reviewer_profile": {"type": "object"},
+          "execution_status": {"enum": ["completed", "partial", "failed"]},
+          "usage": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "properties": {
+              "prompt_tokens": {"type": ["integer", "null"]},
+              "completion_tokens": {"type": ["integer", "null"]},
+              "reasoning_tokens": {"type": ["integer", "null"]},
+              "total_tokens": {"type": ["integer", "null"]}
+            }
+          },
+          "cost_usd": {"type": ["number", "null"]},
+          "cost_reported": {"type": "boolean"},
+          "latency_ms": {"type": ["integer", "null"]},
+          "error": {
+            "type": ["object", "null"],
+            "required": ["code", "message"],
+            "additionalProperties": true,
+            "properties": {
+              "code": {"type": "string", "minLength": 1},
+              "message": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
     "config": {
       "type": "object",
       "required": ["writer_profile_ids", "reviewer_profile_ids"],
@@ -33,6 +105,14 @@
         "blind_review": {"type": "boolean"},
         "run_scoped_profiles": {"type": "boolean"},
         "execution_mode": {"enum": ["framework", "creative"]}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "latency_ms_total": {"type": ["integer", "null"]},
+        "failed_candidates": {"type": "integer", "minimum": 0}
       }
     }
   }

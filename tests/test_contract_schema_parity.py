@@ -40,10 +40,16 @@ from tools.contracts_generated import (
     validate_model_profile_surface as generated_model_profile_surface,
 )
 from tools.contracts_generated import (
+    validate_research_surface_v1 as generated_research_surface_v1,
+)
+from tools.contracts_generated import (
     validate_review_manifest_v2 as generated_review_manifest_v2,
 )
 from tools.contracts_generated import (
     validate_review_v2 as generated_review_v2,
+)
+from tools.contracts_generated import (
+    validate_task_surface_v1 as generated_task_surface_v1,
 )
 from tools.schema_lint import validate_or_raise, validate_schema
 
@@ -67,14 +73,20 @@ SCHEMA_BY_KEY = {
 }
 
 
-@pytest.mark.parametrize("schema_name", [
-    "review-v2-decision.schema.json",
-    "review-manifest-v2.schema.json",
-    "delivery-manifest-v2.schema.json",
-    "delivery-stage-v2.schema.json",
-    "model-benchmark-v1.schema.json",
-    "model-profile-surface-v1.schema.json",
-])
+@pytest.mark.parametrize(
+    "schema_name",
+    [
+        "review-v2-decision.schema.json",
+        "review-manifest-v2.schema.json",
+        "delivery-manifest-v2.schema.json",
+        "delivery-stage-v2.schema.json",
+        "model-benchmark-v1.schema.json",
+        "model-profile-surface-v1.schema.json",
+        "task-surface-v1.schema.json",
+        "research-surface-v1.schema.json",
+        "model-connection-test-v1.schema.json",
+    ],
+)
 def test_contract_schemas_are_loadable_json_objects(schema_name: str) -> None:
     schema = _load(schema_name)
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -351,6 +363,128 @@ def test_generated_review_manifest_validator_matches_hand() -> None:
             generated_review_manifest_v2(bad)
 
 
+# ── task surface v1: schema-derived runtime path ──────────────────────────────
+
+
+def test_task_surface_fixture_passes_schema_and_generated_validator() -> None:
+    schema = _load("task-surface-v1.schema.json")
+    value = _payload()["task_surface"]
+    validate_or_raise(value, schema)
+    assert generated_task_surface_v1(value) == value
+
+
+def test_task_surface_rejects_surface_level_negatives() -> None:
+    schema = _load("task-surface-v1.schema.json")
+    base = _payload()["task_surface"]
+    variants = [
+        {**base, "schema_version": "openwrite.task-surface.v9"},
+        {**base, "phase_order": ["queued", "polishing"]},
+        {key: value for key, value in base.items() if key != "tasks"},
+        {key: value for key, value in base.items() if key != "counts"},
+    ]
+    for bad in variants:
+        assert validate_schema(bad, schema)
+        with pytest.raises(ValueError):
+            generated_task_surface_v1(bad)
+
+
+def test_task_surface_rejects_task_level_negatives() -> None:
+    schema = _load("task-surface-v1.schema.json")
+    mutations = [
+        {"status": "done"},
+        {"phase": "polishing"},
+        {"progress": 42},
+        {"attempt": 0},
+        {"retryable": "yes"},
+        {"api_key": "must-not-appear"},
+        {"result_ref": {"type": "outline", "id": "x"}},
+        {"error": {"code": "TASK_FAILED"}},
+    ]
+    for mutation in mutations:
+        bad = copy.deepcopy(_payload()["task_surface"])
+        bad["tasks"][0].update(mutation)
+        assert validate_schema(bad, schema), mutation
+        with pytest.raises(ValueError):
+            generated_task_surface_v1(bad)
+    missing = copy.deepcopy(_payload()["task_surface"])
+    del missing["tasks"][0]["task_id"]
+    assert validate_schema(missing, schema)
+    with pytest.raises(ValueError):
+        generated_task_surface_v1(missing)
+
+
+# ── research surface v1: schema-derived runtime path ─────────────────────────
+
+
+def test_research_surface_fixture_passes_schema_and_generated_validator() -> None:
+    schema = _load("research-surface-v1.schema.json")
+    value = _payload()["research_surface"]
+    validate_or_raise(value, schema)
+    assert generated_research_surface_v1(value) == value
+
+
+def test_research_surface_rejects_surface_level_negatives() -> None:
+    schema = _load("research-surface-v1.schema.json")
+    base = _payload()["research_surface"]
+    variants = [
+        {**base, "schema_version": "openwrite.research-surface.v9"},
+        {**base, "settings": {**base["settings"], "search_provider": "google"}},
+        {key: value for key, value in base.items() if key != "reports"},
+        {key: value for key, value in base.items() if key != "model_route"},
+    ]
+    for bad in variants:
+        assert validate_schema(bad, schema)
+        with pytest.raises(ValueError):
+            generated_research_surface_v1(bad)
+
+
+def test_research_surface_provider_entries_use_exact_key_credential_guard() -> None:
+    """The boolean metadata keys ``requires_api_key``/``credential_configured``
+    are legitimate surface content; the exact-key ``disallowed`` guard must
+    ignore them while still rejecting a real credential-valued key."""
+    schema = _load("research-surface-v1.schema.json")
+    surface = copy.deepcopy(_payload()["research_surface"])
+    surface["settings"]["search_providers"] = [
+        {
+            "id": "bocha",
+            "label": "博查",
+            "requires_api_key": True,
+            "configured": True,
+            "credential_configured": True,
+        }
+    ]
+    validate_or_raise(surface, schema)
+    assert generated_research_surface_v1(surface) == surface
+    leaked = copy.deepcopy(surface)
+    leaked["settings"]["search_providers"][0]["api_key"] = "must-not-appear"
+    assert validate_schema(leaked, schema)
+    with pytest.raises(ValueError):
+        generated_research_surface_v1(leaked)
+
+
+def test_research_surface_rejects_report_level_negatives() -> None:
+    schema = _load("research-surface-v1.schema.json")
+    mutations = [
+        {"status": "generating"},
+        {"sources": "unavailable"},
+        {"sources_status": "partial"},
+        {"usage": {"total_tokens": "many", "reported": True}},
+        {"cost_usd": {"value": 0.5}},
+        {"api_key": "must-not-appear"},
+    ]
+    for mutation in mutations:
+        bad = copy.deepcopy(_payload()["research_surface"])
+        bad["reports"][0].update(mutation)
+        assert validate_schema(bad, schema), mutation
+        with pytest.raises(ValueError):
+            generated_research_surface_v1(bad)
+    missing = copy.deepcopy(_payload()["research_surface"])
+    del missing["reports"][0]["task_id"]
+    assert validate_schema(missing, schema)
+    with pytest.raises(ValueError):
+        generated_research_surface_v1(missing)
+
+
 def test_codegen_output_is_byte_identical_to_committed_artifacts() -> None:
     """Re-running the generator must not change the committed artifacts; a
     schema edit without regeneration fails here."""
@@ -362,3 +496,198 @@ def test_codegen_output_is_byte_identical_to_committed_artifacts() -> None:
     if not ts_target.is_file():
         pytest.skip("dsh-novel checkout not found")
     assert schema_codegen.render_typescript(schemas) == ts_target.read_text(encoding="utf-8")
+
+
+# ── M1c: profile state model, benchmark detail, progress union, test payloads ──
+
+from tools.contracts_generated import (  # noqa: E402
+    validate_model_connection_test_v1 as generated_model_connection_test_v1,
+)
+
+
+def test_model_profile_surface_new_state_fields_are_enforced() -> None:
+    schema = _load("model-profile-surface-v1.schema.json")
+    base = _payload()["model_profile"]
+    validate_or_raise(base, schema)
+    generated_model_profile_surface(base)
+
+    for missing in (
+        "schema_version",
+        "capabilities",
+        "used_by_routes",
+        "last_test",
+    ):
+        bad = copy.deepcopy(base)
+        del bad["profiles"][0][missing]
+        assert validate_schema(bad, schema), missing
+        with pytest.raises(ValueError):
+            generated_model_profile_surface(bad)
+
+    mutations = [
+        {"schema_version": "openwrite.model-profile.v9"},
+        {"capabilities": {"chat": "yes", "embedding": False}},
+        {"capabilities": ["chat"]},
+        {"capabilities": None},
+        {"used_by_routes": ["polishing"]},
+        {"used_by_routes": "chapter_write"},
+        {"last_test": {"status": "passed"}},
+        {"last_test": "untested"},
+        {"last_test": {"status": "ok", "latency_ms": True}},
+    ]
+    for mutation in mutations:
+        bad = copy.deepcopy(base)
+        bad["profiles"][0].update(mutation)
+        assert validate_schema(bad, schema), mutation
+        with pytest.raises(ValueError):
+            generated_model_profile_surface(bad)
+
+    leaked = copy.deepcopy(base)
+    leaked["profiles"][0]["last_test"]["credential"] = "must-not-appear"
+    assert validate_schema(leaked, schema)
+    with pytest.raises(ValueError):
+        generated_model_profile_surface(leaked)
+
+
+def test_benchmark_candidate_and_evaluation_detail_contract() -> None:
+    schema = _load("model-benchmark-v1.schema.json")
+    base = _payload()["benchmark"]
+    validate_or_raise(base, schema)
+    generated_benchmark_v1(base)
+
+    candidate_mutations = [
+        {"reliability_status": "scored"},
+        {"cost_usd": True},
+        {"cost_reported": "yes"},
+        {"latency_ms": 12.5},
+        {"error": {"code": "X"}},
+        {"usage": {"prompt_tokens": True}},
+    ]
+    for mutation in candidate_mutations:
+        bad = copy.deepcopy(base)
+        bad["candidates"][0].update(mutation)
+        assert validate_schema(bad, schema), mutation
+        with pytest.raises(ValueError):
+            generated_benchmark_v1(bad)
+    # Failure rows honestly stay null instead of being 0-filled.
+    ok = copy.deepcopy(base)
+    ok["candidates"][0].update({"error": None, "usage": None, "cost_usd": None})
+    validate_or_raise(ok, schema)
+    generated_benchmark_v1(ok)
+
+    leaked = copy.deepcopy(base)
+    leaked["candidates"][0]["api_key"] = "must-not-appear"
+    assert validate_schema(leaked, schema)
+    with pytest.raises(ValueError):
+        generated_benchmark_v1(leaked)
+
+    bad_evaluation = copy.deepcopy(base)
+    bad_evaluation["evaluations"][0]["execution_status"] = "scored"
+    assert validate_schema(bad_evaluation, schema)
+    with pytest.raises(ValueError):
+        generated_benchmark_v1(bad_evaluation)
+
+    bad_summary = copy.deepcopy(base)
+    bad_summary["summary"]["latency_ms_total"] = True
+    assert validate_schema(bad_summary, schema)
+    with pytest.raises(ValueError):
+        generated_benchmark_v1(bad_summary)
+
+
+def test_task_surface_progress_union() -> None:
+    schema = _load("task-surface-v1.schema.json")
+    base = _payload()["task_surface"]
+    validate_or_raise(base, schema)
+    generated_task_surface_v1(base)
+    benchmark_task = next(task for task in base["tasks"] if task["type"] == "model_benchmark")
+    assert benchmark_task["progress"]["ratio"] == 0.5
+
+    mutations = [
+        {"progress": 42},
+        {"progress": "50%"},
+        {"progress": ["candidates"]},
+        {"progress": {"completed_units": 1, "total_units": 2, "ratio": 0.5}},
+        {
+            "progress": {
+                "completed_units": 1,
+                "total_units": 2,
+                "ratio": 0.5,
+                "unit_kind": "unknown",
+            }
+        },
+        {
+            "progress": {
+                "completed_units": True,
+                "total_units": 2,
+                "ratio": 0.5,
+                "unit_kind": "candidates",
+            }
+        },
+        {
+            "progress": {
+                "completed_units": 3,
+                "total_units": 2,
+                "ratio": 1.5,
+                "unit_kind": "candidates",
+            }
+        },
+    ]
+    for mutation in mutations:
+        bad = copy.deepcopy(base)
+        bad["tasks"][0].update(mutation)
+        assert validate_schema(bad, schema), mutation
+        with pytest.raises(ValueError):
+            generated_task_surface_v1(bad)
+
+
+def test_model_connection_test_payload_contract() -> None:
+    schema = _load("model-connection-test-v1.schema.json")
+    chat = {
+        "ok": True,
+        "status": "ok",
+        "provider": "openai",
+        "model": "provider/model-id",
+        "latency_ms": 42,
+        "reply": "OK",
+        "tested_at": "2026-09-01T08:00:00Z",
+    }
+    embedding = {
+        "ok": True,
+        "status": "ok",
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "latency_ms": 9,
+        "tested_at": "2026-09-01T08:00:00Z",
+        "provider_label": "云端 API",
+        "dimension": 1536,
+        "max_tokens": 8192,
+        "base_url": "https://models.invalid/v1",
+        "vectors": 2,
+    }
+    for value in (chat, embedding):
+        validate_or_raise(value, schema)
+        generated_model_connection_test_v1(value)
+
+    mutations = [
+        {"ok": False},
+        {"status": "failed"},
+        {"latency_ms": True},
+        {"latency_ms": -1},
+        {"tested_at": ""},
+        {"provider": ""},
+        {"api_key": "must-not-appear"},
+        {"credential": "must-not-appear"},
+    ]
+    for mutation in mutations:
+        bad = {**chat, **mutation}
+        assert validate_schema(bad, schema), mutation
+        with pytest.raises(ValueError):
+            generated_model_connection_test_v1(bad)
+    for missing in ("ok", "status", "provider", "model", "latency_ms", "tested_at"):
+        bad = {key: value for key, value in chat.items() if key != missing}
+        assert validate_schema(bad, schema), missing
+        with pytest.raises(ValueError):
+            generated_model_connection_test_v1(bad)
+    for bad_root in ([], None, "text", 42):
+        assert validate_schema(bad_root, schema)
+        with pytest.raises(ValueError):
+            generated_model_connection_test_v1(bad_root)

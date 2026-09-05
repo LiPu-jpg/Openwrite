@@ -3,7 +3,7 @@ import logging
 import os
 from http import HTTPStatus
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -16,8 +16,13 @@ from tools.cli import _save_chapter
 from tools.context_builder import ContextBuilder
 from tools.init_project import init_project
 from tools.llm.response import ProviderResponseError
+from tools.manuscript_editing import ManuscriptVersionStore
+from tools.manuscript_acceptance import ManuscriptAcceptanceService
 from tools.model_profiles import ModelProfileStore
+from tools.novel_service import NovelServiceError
 from tools.project_registry import ProjectRegistry
+from tools.review_store import ReviewStore
+from tools.revision_service import RevisionService
 from tools.studio import (
     StudioApplication,
     StudioError,
@@ -65,6 +70,10 @@ def test_studio_assets_load_shared_core_as_an_es_module():
     assert "\\`" not in application
     assert "innerHTML" not in application
     assert "appendSafeChatMarkup" in application
+    assert 'save_origin: silent ? "autosave" : "manual"' in application
+    assert "known_source_revision" in application
+    assert "dsh 会话预算：不可用" in application
+    assert "item.protection_reason" in application
 
 
 def test_studio_advanced_tools_explain_scope_and_support_accessible_help():
@@ -318,13 +327,11 @@ def test_studio_local_embedding_probe_does_not_require_a_key(
         {
             "id": "local-search",
             "label": "Local Search",
-            "provider": "openai",
-            "base_url": "https://models.example/v1",
-            "model": "chat-model",
-            "embedding_provider": "local",
-            "embedding_model": "BAAI/bge-small-zh-v1.5",
-            "embedding_dimension": 512,
-            "embedding_max_tokens": 512,
+            "provider": "local",
+            "base_url": "",
+            "model": "BAAI/bge-small-zh-v1.5",
+            "dimension": 512,
+            "max_tokens": 512,
         }
     )
 
@@ -806,6 +813,33 @@ def test_studio_context_preview_exposes_traceable_manifest(tmp_path: Path):
 
     assert preview["manifest"]["strategy"] == "hierarchical-provenance-v1"
     assert preview["manifest"]["revision"]
+    refreshed = app.context_preview(
+        "ch_001",
+        preview["manifest"]["packet_revision"],
+        "older-source-revision",
+    )
+    assert refreshed["manifest"]["previous_freshness"] == {
+        "status": "stale",
+        "reason": "source_revision_changed",
+        "previous_revision": preview["manifest"]["packet_revision"],
+        "current_revision": refreshed["manifest"]["packet_revision"],
+        "previous_source_revision": "older-source-revision",
+        "current_source_revision": refreshed["manifest"]["source_revision"],
+    }
+
+
+def test_protected_context_budget_error_keeps_actionable_details():
+    source = NovelServiceError(
+        "受保护上下文超过预算",
+        code="PROTECTED_CONTEXT_OVER_BUDGET",
+        details={"budget_tokens": 1000, "required_tokens": 1400},
+    )
+
+    translated = StudioApplication._translate_service_error(source)
+
+    assert translated.status == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert translated.code == "PROTECTED_CONTEXT_OVER_BUDGET"
+    assert translated.details == {"budget_tokens": 1000, "required_tokens": 1400}
 
 
 def test_studio_outline_structure_and_smart_chapter_creation(tmp_path: Path, monkeypatch):
@@ -825,6 +859,17 @@ def test_studio_outline_structure_and_smart_chapter_creation(tmp_path: Path, mon
     manuscript = novel / "data" / "manuscript" / "arc_001"
     manuscript.mkdir(parents=True, exist_ok=True)
     (manuscript / "ch_001.md").write_text("已有正文", encoding="utf-8")
+    acceptance = ManuscriptAcceptanceService(tmp_path, "demo")
+    baseline = acceptance.establish_baseline(confirm=True)
+    acceptance.resume(
+        baseline["operation_id"],
+        analyzer=lambda *args: {
+            "chapter_summary": "已有正文",
+            "observations": "",
+            "legacy_updates": {},
+            "state_delta": {},
+        },
+    )
     monkeypatch.setenv("LLM_API_KEY", "configured-for-test")
     calls = []
 
@@ -1207,6 +1252,145 @@ def test_studio_document_write_is_atomic_and_version_checked(tmp_path: Path):
     assert conflict.value.status == HTTPStatus.CONFLICT
 
 
+def test_studio_document_write_respects_the_cross_process_project_lock(tmp_path: Path):
+    from tools.project_lock import ProjectWriteLock
+
+    init_project(tmp_path, "demo")
+    app = StudioApplication(tmp_path)
+    document = app.read_document("src/story/background.md")
+
+    with ProjectWriteLock(tmp_path, "demo", operation="concurrent-write"):
+        with pytest.raises(StudioError) as busy:
+            app.write_document(document["path"], "不能越过项目锁", document["version"])
+
+    assert busy.value.status == HTTPStatus.CONFLICT
+    assert busy.value.code == "PROJECT_BUSY"
+    assert busy.value.recoverable is True
+    assert app.read_document(document["path"])["content"] == document["content"]
+
+
+def test_studio_chapter_saves_create_coalesced_author_history(tmp_path: Path):
+    init_project(tmp_path, "demo")
+    chapter = _save_chapter(tmp_path, "demo", "ch_001", "第一章", "初稿")
+    app = StudioApplication(tmp_path)
+    document = app.read_document(app._relative(chapter))
+    ReviewStore(tmp_path, "demo").save(
+        "ch_001",
+        {
+            "score": 90,
+            "passed": True,
+            "issues": 0,
+            "issue_details": [],
+            "review_v2": {
+                "schema_version": "openwrite.review.v2",
+                "execution_status": "completed",
+                "quality_score": 90,
+                "coverage": 1.0,
+                "gate_status": "pass",
+                "delivery_status": "pass",
+                "production_gate_status": "disabled_uncalibrated",
+            },
+        },
+    )
+
+    first = app.write_document(
+        document["path"], "自动稿一", document["version"], save_origin="autosave"
+    )
+    second = app.write_document(
+        document["path"], "自动稿二", first["version"], save_origin="autosave"
+    )
+    manual = app.write_document(
+        document["path"], "手动稿", second["version"], save_origin="manual"
+    )
+
+    versions = ManuscriptVersionStore(tmp_path, "demo").list("ch_001")
+    assert [item.reason for item in versions] == ["manual", "autosave"]
+    assert first["author_version"]["created"] is True
+    assert second["author_version"]["created"] is False
+    assert manual["author_version"]["created"] is True
+    assert first["acceptance"]["status"] == "pending"
+    assert second["acceptance"]["status"] == "pending"
+    assert manual["acceptance"]["status"] == "pending"
+    assert manual["acceptance"]["current_revision"] == manual["revision"]
+    assert ManuscriptVersionStore(tmp_path, "demo").load(
+        "ch_001", versions[1].version_id
+    )[1] == document["content"]
+    assert ManuscriptVersionStore(tmp_path, "demo").load(
+        "ch_001", versions[0].version_id
+    )[1] == "自动稿二"
+    review = ReviewStore(tmp_path, "demo").load("ch_001")
+    assert review is not None
+    assert review["stale"] is True
+    assert review["review_v2"]["freshness_status"] == "stale"
+    chapter_review = app.workspace()["documents"]["chapters"][0]["review"]
+    assert chapter_review["stale"] is True
+    workspace = app.workspace()
+    assert workspace["manuscript_acceptance"]["status"] == "pending"
+    assert workspace["documents"]["chapters"][0]["acceptance"]["operation_id"] == manual[
+        "acceptance"
+    ]["operation_id"]
+    assert chapter_review["review_v2"]["delivery_status"] == "stale"
+
+
+def test_studio_document_write_response_stays_bound_to_its_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A later writer must not change the content/version acknowledged to the first."""
+    init_project(tmp_path, "demo")
+    first_app = StudioApplication(tmp_path)
+    second_app = StudioApplication(tmp_path)
+    initial = first_app.read_document("src/story/background.md")
+    first_replaced = Event()
+    release_first = Event()
+
+    def staged_refresh(_index):
+        if not first_replaced.is_set():
+            first_replaced.set()
+            assert release_first.wait(timeout=5)
+        return {}
+
+    monkeypatch.setattr(
+        "tools.studio_application.CharacterStateIndex.refresh",
+        staged_refresh,
+    )
+    outcome: dict[str, object] = {}
+
+    def write_first() -> None:
+        try:
+            outcome["first"] = first_app.write_document(
+                initial["path"],
+                "请求 A",
+                initial["version"],
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            outcome["error"] = exc
+
+    thread = Thread(target=write_first)
+    thread.start()
+    assert first_replaced.wait(timeout=5)
+    after_first_replace = second_app.read_document(initial["path"])
+    assert after_first_replace["content"] == "请求 A"
+    try:
+        second = second_app.write_document(
+            initial["path"],
+            "请求 B",
+            after_first_replace["version"],
+        )
+    finally:
+        release_first.set()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert "error" not in outcome
+    first = outcome["first"]
+    assert isinstance(first, dict)
+    assert first["content"] == "请求 A"
+    assert first["revision"] == RevisionService.fingerprint("请求 A")
+    assert first["version"] == after_first_replace["version"]
+    assert second["content"] == "请求 B"
+
+
 def test_studio_manual_chapter_delete_is_latest_only_and_cleans_derived_data(
     tmp_path: Path,
 ):
@@ -1282,6 +1466,34 @@ def test_studio_manual_chapter_delete_is_latest_only_and_cleans_derived_data(
     assert cleared_state.stage == BookStage.ROLLING_OUTLINE
 
 
+def test_studio_batch_delete_removes_only_latest_tail(tmp_path: Path):
+    init_project(tmp_path, "demo")
+    app = StudioApplication(tmp_path)
+    for number in range(1, 5):
+        _save_chapter(tmp_path, "demo", f"ch_{number:03d}", f"第{number}章", f"正文 {number}")
+
+    latest = app.read_document("data/manuscript/arc_001/ch_004.md")
+    with pytest.raises(StudioError) as stale:
+        app.delete_chapters_batch({
+            "keep_through": "ch_002",
+            "confirm": "DELETE_AFTER:ch_002",
+            "version": "stale",
+        })
+    assert stale.value.status == HTTPStatus.CONFLICT
+
+    result = app.delete_chapters_batch({
+        "keep_through": "ch_002",
+        "confirm": "DELETE_AFTER:ch_002",
+        "version": latest["version"],
+    })
+    assert result["deleted_count"] == 2
+    assert [item["chapter_id"] for item in result["deleted_chapters"]] == ["ch_004", "ch_003"]
+    assert (tmp_path / "data/novels/demo/data/manuscript/arc_001/ch_001.md").exists()
+    assert (tmp_path / "data/novels/demo/data/manuscript/arc_001/ch_002.md").exists()
+    assert not (tmp_path / "data/novels/demo/data/manuscript/arc_001/ch_003.md").exists()
+    assert not (tmp_path / "data/novels/demo/data/manuscript/arc_001/ch_004.md").exists()
+
+
 def test_studio_rejects_paths_outside_novel_documents(tmp_path: Path):
     init_project(tmp_path, "demo")
     app = StudioApplication(tmp_path)
@@ -1347,6 +1559,10 @@ def test_studio_focus_and_writer_reuse_openwrite_pipeline(tmp_path: Path, monkey
     result = app.write_next_chapter({"target_words": 800, "guidance": "从敲门声开始"})
     assert calls[0]["target_words"] == 800
     assert result["result"]["chapter_id"] == "ch_001"
+    chapter_change = result["mutation_summary"]
+    assert chapter_change["items"][0]["entity_kind"] == "manuscript"
+    assert chapter_change["items"][0]["before"]["kind"] == "missing"
+    assert chapter_change["items"][0]["after"]["value"] == "# 第一章\n\n测试正文"
     assert len(result["workspace"]["documents"]["chapters"]) == 1
     written_state = BookStateStore(tmp_path, "demo").load_or_create()
     assert written_state.stage == BookStage.REVIEW_AND_REVISE
@@ -1357,6 +1573,8 @@ def test_studio_focus_and_writer_reuse_openwrite_pipeline(tmp_path: Path, monkey
     chapter_path = result["workspace"]["documents"]["chapters"][0]["path"]
     review = app.review_chapter({"path": chapter_path})
     assert review["result"]["score"] == 90
+    assert review["review_framework"]["id"] == "openwrite.standard-chapter-review"
+    assert review["review_framework"]["invariants"]["node_count"] == 47
     review_path = tmp_path / "data" / "novels" / "demo" / "data" / "reviews" / "ch_001.json"
     assert review_path.exists()
     refreshed = app.workspace()
@@ -1367,8 +1585,48 @@ def test_studio_focus_and_writer_reuse_openwrite_pipeline(tmp_path: Path, monkey
     assert reviewed_state.blocking_reason == "review_revision_requested"
 
 
+@pytest.mark.parametrize("bad_v2", [None, [], "invalid", 42, True, {}])
+def test_review_v2_boundary_rejects_malformed_before_persistence(
+    tmp_path: Path, bad_v2: object
+):
+    init_project(tmp_path, "demo")
+    chapter = (
+        tmp_path
+        / "data"
+        / "novels"
+        / "demo"
+        / "data"
+        / "manuscript"
+        / "arc_001"
+        / "ch_001.md"
+    )
+    chapter.parent.mkdir(parents=True, exist_ok=True)
+    chapter.write_text("# Chapter\n\n正文\n", encoding="utf-8")
+
+    def reviewer(root: Path, args: dict) -> dict:
+        return {
+            "ok": True,
+            "chapter_id": args["chapter_id"],
+            "score": 95,
+            "passed": True,
+            "issue_details": [],
+            "review_v2": bad_v2,
+        }
+
+    app = StudioApplication(tmp_path, review_executor=reviewer)
+    with pytest.raises(StudioError) as error:
+        app.review_chapter({"path": "data/manuscript/arc_001/ch_001.md"})
+    assert error.value.code == "CONTRACT_INVALID"
+    review_path = tmp_path / "data" / "novels" / "demo" / "data" / "reviews" / "ch_001.json"
+    assert not review_path.exists()
+
+
 def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
     init_project(tmp_path, "demo")
+    chapter = _save_chapter(tmp_path, "demo", "ch_001", "第一章", "旧正文")
+    history = ManuscriptVersionStore(tmp_path, "demo")
+    historical = history.checkpoint("ch_001", label="HTTP 历史")
+    chapter.write_text("# 第一章\n\n当前正文", encoding="utf-8")
     server = create_server(tmp_path, port=0)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1377,6 +1635,17 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
     try:
         health = _read_json(f"{base}/api/health")
         assert health == {"ok": True}
+
+        versions = _read_json(f"{base}/api/manuscript/versions?chapter=ch_001")
+        assert versions["data"]["versions"][0]["label"] == "HTTP 历史"
+        preview = _read_json(
+            f"{base}/api/manuscript/versions/{historical.version_id}/compare"
+            "?chapter=ch_001"
+        )
+        assert preview["data"]["current"]["revision"] == history.fingerprint(
+            chapter.read_text(encoding="utf-8")
+        )
+        assert preview["data"]["diff"]["hunks"]
 
         with opener.open(f"{base}/") as response:
             html = response.read().decode("utf-8")
@@ -1492,6 +1761,143 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
         with opener.open(save_request) as response:
             saved = json.loads(response.read())
         assert "HTTP 保存测试" in saved["content"]
+
+        preview_request = Request(
+            f"{base}/api/document/change-plan",
+            method="POST",
+            data=json.dumps(
+                {
+                    "action": "preview",
+                    "path": document["path"],
+                    "edits": [
+                        {"old_text": "HTTP 保存测试", "new_text": "确认后的 HTTP 修改"}
+                    ],
+                }
+            ).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-OpenWrite-Studio": "1",
+                "X-OpenWrite-Workspace-Root": str(tmp_path),
+                "X-OpenWrite-Session-Id": "ses_trace",
+                "X-OpenWrite-Tool-Call-Id": "call_preview",
+                "X-OpenWrite-Root-Call-Id": "call_root",
+                "X-OpenWrite-Tool-Name": "novel_document_change_plan",
+            },
+        )
+        with opener.open(preview_request) as response:
+            planned = json.loads(response.read())["data"]
+        assert planned["applied"] is False
+        assert planned["mutation_summary"]["execution_status"] == "proposed"
+        assert planned["operation_trace"]["schema_version"] == "openwrite.operation-trace.v1"
+
+        apply_request = Request(
+            f"{base}/api/document/change-plan",
+            method="POST",
+            data=json.dumps(
+                {"action": "apply", "preview_token": planned["preview_token"]}
+            ).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-OpenWrite-Studio": "1",
+                "X-OpenWrite-Workspace-Root": str(tmp_path),
+                "X-OpenWrite-Session-Id": "ses_trace",
+                "X-OpenWrite-Tool-Call-Id": "call_apply",
+                "X-OpenWrite-Root-Call-Id": "call_root",
+                "X-OpenWrite-Tool-Name": "novel_document_change_plan",
+            },
+        )
+        with opener.open(apply_request) as response:
+            applied_plan = json.loads(response.read())["data"]
+        assert applied_plan["applied"] is True
+        assert applied_plan["undo_preview_token"]
+        assert applied_plan["mutation_summary"]["execution_status"] == "committed"
+        trace_request = Request(
+            f"{base}/api/traces?limit=5",
+            headers={"X-OpenWrite-Workspace-Root": str(tmp_path)},
+        )
+        with opener.open(trace_request) as response:
+            traces = json.loads(response.read())["data"]["records"]
+        applied_trace = next(
+            item for item in traces if item["trace_id"] == applied_plan["operation_trace"]["trace_id"]
+        )
+        assert applied_trace["request"]["tool_call_id"] == "call_apply"
+        assert applied_trace["request"]["root_call_id"] == "call_root"
+        assert applied_trace["request"]["tool_name"] == "novel_document_change_plan"
+        assert applied_trace["domain_change"]["execution_status"] == "committed"
+        assert applied_trace["privacy"]["raw_mutation_values_stored"] is False
+        changed_document = _read_json(
+            f"{base}/api/document?path=src%2Fstory%2Fbackground.md"
+        )
+        assert "确认后的 HTTP 修改" in changed_document["content"]
+
+        focus_path = (
+            tmp_path
+            / "data"
+            / "novels"
+            / "demo"
+            / "src"
+            / "story"
+            / "current_focus.md"
+        )
+        focus_before = focus_path.read_text(encoding="utf-8")
+        structured_preview_request = Request(
+            f"{base}/api/structured/change-plan",
+            method="POST",
+            data=json.dumps(
+                {
+                    "action": "preview",
+                    "change_kind": "focus",
+                    "change": {"goal": "HTTP 结构化确认", "must_keep": ["雨夜"]},
+                }
+            ).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-OpenWrite-Studio": "1",
+                "X-OpenWrite-Workspace-Root": str(tmp_path),
+                "X-OpenWrite-Session-Id": "ses_trace",
+                "X-OpenWrite-Tool-Call-Id": "call_structured_preview",
+                "X-OpenWrite-Root-Call-Id": "call_root",
+                "X-OpenWrite-Tool-Name": "novel_structured_change_plan",
+            },
+        )
+        with opener.open(structured_preview_request) as response:
+            structured_plan = json.loads(response.read())["data"]
+        assert focus_path.read_text(encoding="utf-8") == focus_before
+        assert structured_plan["status"] == "proposed"
+
+        structured_apply_request = Request(
+            f"{base}/api/structured/change-plan",
+            method="POST",
+            data=json.dumps(
+                {
+                    "action": "apply",
+                    "preview_token": structured_plan["preview_token"],
+                }
+            ).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-OpenWrite-Studio": "1",
+                "X-OpenWrite-Workspace-Root": str(tmp_path),
+                "X-OpenWrite-Session-Id": "ses_trace",
+                "X-OpenWrite-Tool-Call-Id": "call_structured_apply",
+                "X-OpenWrite-Root-Call-Id": "call_root",
+                "X-OpenWrite-Tool-Name": "novel_structured_change_plan",
+            },
+        )
+        with opener.open(structured_apply_request) as response:
+            structured_applied = json.loads(response.read())["data"]
+        assert structured_applied["status"] == "applied"
+        assert structured_applied["mutation_summary"]["execution_status"] == "committed"
+        assert "HTTP 结构化确认" in focus_path.read_text(encoding="utf-8")
+        with opener.open(trace_request) as response:
+            structured_traces = json.loads(response.read())["data"]["records"]
+        structured_trace = next(
+            item
+            for item in structured_traces
+            if item["trace_id"] == structured_applied["operation_trace"]["trace_id"]
+        )
+        assert structured_trace["request"]["tool_name"] == "novel_structured_change_plan"
+        assert structured_trace["domain_change"]["execution_status"] == "committed"
     finally:
         server.shutdown()
         server.server_close()
@@ -1571,6 +1977,293 @@ def test_studio_continuity_and_foreshadowing_management(tmp_path: Path):
     assert nodes[0]["id"] == "hook_clock_001"
     assert created["workspace"]["snapshot"]["pending_foreshadowing"] == 1
     assert created["continuity"]["foreshadowing_validation"]["valid"] is True
+
+
+def test_studio_mutations_report_entity_level_before_after_and_revisions(
+    tmp_path: Path,
+):
+    init_project(tmp_path, "demo", "变更摘要")
+    app = StudioApplication(tmp_path)
+
+    document = app.read_document("src/story/background.md")
+    saved = app.write_document(
+        "src/story/background.md",
+        "# 主题\n\n新的主题约束。\n",
+        document["version"],
+        save_origin="manual",
+    )
+    document_change = saved["mutation_summary"]
+    assert document_change["schema_version"] == "openwrite.mutation-summary.v1"
+    assert document_change["execution_status"] == "committed"
+    assert document_change["source_revision"] == document["revision"]
+    assert document_change["result_revision"] == saved["revision"]
+    assert document_change["items"][0]["entity_kind"] == "canon"
+    assert document_change["items"][0]["field"] == "content"
+    assert document_change["items"][0]["before"]["value"] == document["content"]
+    assert document_change["items"][0]["after"]["value"] == "# 主题\n\n新的主题约束。\n"
+
+    character = app.create_asset(
+        {"kind": "character", "id": "lin_cen", "data": {"name": "林岑", "goal": "逃离"}}
+    )["asset"]
+    changed_character = app.update_asset(
+        {
+            "kind": "character",
+            "id": "lin_cen",
+            "revision": character["revision"],
+            "data": {"goal": "保护旧城"},
+        }
+    )
+    character_items = changed_character["mutation_summary"]["items"]
+    goal_change = next(item for item in character_items if item["field"] == "data.goal")
+    assert goal_change["entity_kind"] == "character"
+    assert goal_change["before"]["value"] == "逃离"
+    assert goal_change["after"]["value"] == "保护旧城"
+    assert goal_change["source_revision"] == character["revision"]
+    assert goal_change["result_revision"] == changed_character["asset"]["revision"]
+
+    world = app.create_asset(
+        {"kind": "world", "id": "old_city", "data": {"name": "旧城", "status": "封闭"}}
+    )["asset"]
+    changed_world = app.update_asset(
+        {
+            "kind": "world",
+            "id": "old_city",
+            "revision": world["revision"],
+            "data": {"status": "戒严"},
+        }
+    )
+    status_change = next(
+        item for item in changed_world["mutation_summary"]["items"]
+        if item["field"] == "data.status"
+    )
+    assert status_change["entity_kind"] == "world"
+    assert status_change["before"]["value"] == "封闭"
+    assert status_change["after"]["value"] == "戒严"
+
+    outline_before = app.outline_structure()
+    outline_edit = app.edit_outline_structure(
+        {
+            "operation": "rename",
+            "node_id": outline_before["roots"][0]["id"],
+            "title": "改名后的第一卷",
+            "revision": outline_before["revision"],
+        }
+    )
+    outline_change = outline_edit["mutation_summary"]
+    assert outline_change["items"][0]["entity_kind"] == "outline"
+    assert outline_change["source_revision"] == outline_before["revision"]
+    assert outline_change["result_revision"] == outline_edit["outline"]["revision"]
+
+    hook = app.manage_foreshadowing(
+        {
+            "action": "create",
+            "node_id": "hook_mutation_001",
+            "content": "钟楼停摆",
+            "weight": 8,
+            "target_chapter": "ch_010",
+        }
+    )
+    hook_item = hook["mutation_summary"]["items"][0]
+    assert hook_item["entity_kind"] == "foreshadowing"
+    assert hook_item["field"] == "node"
+    assert hook_item["before"]["kind"] == "missing"
+    assert hook_item["after"]["value"]["content"] == "钟楼停摆"
+
+    focus_before = app._service().focus_snapshot()
+    focus = app.update_focus(
+        {"goal": "守住旧城", "must_keep": ["雨夜"], "must_avoid": ["旁白解释"]}
+    )
+    focus_items = focus["mutation_summary"]["items"]
+    assert any(
+        item["field"] == "goal"
+        and item["before"]["value"] == focus_before["goal"]
+        and item["after"]["value"] == "守住旧城"
+        for item in focus_items
+    )
+
+    targets = app.update_writing_targets({"chapter_words": 3600})
+    target_item = next(
+        item for item in targets["mutation_summary"]["items"]
+        if item["field"] == "chapter_words"
+    )
+    assert target_item["entity_kind"] == "project"
+    assert target_item["before"]["value"] != target_item["after"]["value"]
+
+
+def test_structured_change_plans_preview_and_apply_all_direct_domain_writes(
+    tmp_path: Path,
+):
+    init_project(tmp_path, "demo", "结构化变更计划")
+    app = StudioApplication(tmp_path)
+    novel = tmp_path / "data" / "novels" / "demo"
+
+    character = app.create_asset(
+        {"kind": "character", "id": "lin_cen", "data": {"name": "林岑", "goal": "逃离"}}
+    )["asset"]
+    outline = app.outline_structure()
+    cases = [
+        (
+            "outline",
+            {
+                "operation": "rename",
+                "node_id": outline["roots"][0]["id"],
+                "title": "雨夜卷",
+                "revision": outline["revision"],
+            },
+            novel / "src" / "outline.md",
+            "outline",
+        ),
+        (
+            "asset",
+            {
+                "kind": "character",
+                "id": "lin_cen",
+                "revision": character["revision"],
+                "data": {"goal": "守住旧城"},
+            },
+            novel / character["path"],
+            "character",
+        ),
+        (
+            "focus",
+            {"goal": "守住旧城", "must_keep": ["雨夜"], "must_avoid": ["旁白解释"]},
+            novel / "src" / "story" / "current_focus.md",
+            "canon",
+        ),
+        (
+            "foreshadowing",
+            {
+                "action": "create",
+                "node_id": "hook_plan_001",
+                "content": "钟楼少走十三秒",
+                "weight": 8,
+                "target_chapter": "ch_010",
+            },
+            novel / "data" / "foreshadowing" / "dag.yaml",
+            "foreshadowing",
+        ),
+        (
+            "writing_targets",
+            {"chapter_words": 3600, "outline_chapter_words": 240},
+            tmp_path / "novel_config.yaml",
+            "project",
+        ),
+    ]
+
+    for change_kind, change, target, entity_kind in cases:
+        before = target.read_text(encoding="utf-8")
+        preview = app.structured_change_plan(
+            {"action": "preview", "change_kind": change_kind, "change": change}
+        )
+        assert target.read_text(encoding="utf-8") == before
+        assert preview["status"] == "proposed"
+        assert preview["applied"] is False
+        assert preview["changed"] is True
+        assert len(preview["preview_token"]) == 24
+        assert preview["mutation_summary"]["execution_status"] == "proposed"
+        assert preview["mutation_summary"]["items"][0]["entity_kind"] == entity_kind
+
+        applied = app.structured_change_plan(
+            {"action": "apply", "preview_token": preview["preview_token"]}
+        )
+        after = target.read_text(encoding="utf-8")
+        assert after != before
+        assert applied["status"] == "applied"
+        assert applied["applied"] is True
+        assert applied["source_revision"] == preview["source_revision"]
+        assert applied["result_revision"] == preview["result_revision"]
+        assert applied["mutation_summary"]["execution_status"] == "committed"
+        assert len(applied["undo_preview_token"]) == 24
+
+        undone = app.structured_change_plan(
+            {"action": "undo", "preview_token": applied["undo_preview_token"]}
+        )
+        assert undone["status"] == "undone"
+        assert target.read_text(encoding="utf-8") == before
+
+
+def test_structured_change_plan_reject_retry_conflict_and_token_integrity(
+    tmp_path: Path,
+):
+    init_project(tmp_path, "demo", "结构化变更计划")
+    app = StudioApplication(tmp_path)
+    focus_path = (
+        tmp_path
+        / "data"
+        / "novels"
+        / "demo"
+        / "src"
+        / "story"
+        / "current_focus.md"
+    )
+
+    rejected = app.structured_change_plan(
+        {"action": "preview", "change_kind": "focus", "change": {"goal": "先守桥"}}
+    )
+    app.structured_change_plan(
+        {"action": "reject", "preview_token": rejected["preview_token"]}
+    )
+    with pytest.raises(StudioError) as consumed:
+        app.structured_change_plan(
+            {"action": "apply", "preview_token": rejected["preview_token"]}
+        )
+    assert consumed.value.code == "STRUCTURED_PREVIEW_INVALID"
+
+    preview = app.structured_change_plan(
+        {"action": "preview", "change_kind": "focus", "change": {"goal": "守住旧城"}}
+    )
+    focus_path.write_text(focus_path.read_text(encoding="utf-8") + "\n外部修改\n", encoding="utf-8")
+    with pytest.raises(StudioError) as conflict:
+        app.structured_change_plan(
+            {"action": "apply", "preview_token": preview["preview_token"]}
+        )
+    assert conflict.value.status == HTTPStatus.CONFLICT
+    assert conflict.value.code == "STRUCTURED_REVISION_CONFLICT"
+
+    retried = app.structured_change_plan(
+        {"action": "retry", "preview_token": preview["preview_token"]}
+    )
+    assert retried["retried_from"] == preview["preview_token"]
+    assert retried["source_revision"] != preview["source_revision"]
+    applied = app.structured_change_plan(
+        {"action": "apply", "preview_token": retried["preview_token"]}
+    )
+    committed = focus_path.read_text(encoding="utf-8")
+    focus_path.write_text(committed + "\n并发追加\n", encoding="utf-8")
+    with pytest.raises(StudioError) as unsafe_undo:
+        app.structured_change_plan(
+            {"action": "undo", "preview_token": applied["undo_preview_token"]}
+        )
+    assert unsafe_undo.value.code == "STRUCTURED_REVISION_CONFLICT"
+    assert focus_path.read_text(encoding="utf-8").endswith("并发追加\n")
+
+    integrity = app.structured_change_plan(
+        {"action": "preview", "change_kind": "focus", "change": {"goal": "篡改测试"}}
+    )
+    record_path = (
+        tmp_path
+        / "data"
+        / "novels"
+        / "demo"
+        / "data"
+        / "workflows"
+        / "structured_change_plans"
+        / f"{integrity['preview_token']}.json"
+    )
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["result_content"] = "伪造内容"
+    record_path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(StudioError) as invalid_record:
+        app.structured_change_plan(
+            {"action": "apply", "preview_token": integrity["preview_token"]}
+        )
+    assert invalid_record.value.code == "STRUCTURED_PREVIEW_INVALID"
+
+    with pytest.raises(StudioError) as tampered:
+        app.structured_change_plan(
+            {"action": "apply", "preview_token": "0" * 24}
+        )
+    assert tampered.value.code == "STRUCTURED_PREVIEW_INVALID"
 
 
 def test_studio_chat_and_source_extraction_use_injected_real_surfaces(

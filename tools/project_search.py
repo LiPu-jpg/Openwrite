@@ -19,12 +19,9 @@ from types import TracebackType
 from typing import Any, Protocol, TypeVar
 
 from tools.embedding_runtime import (
-    DEFAULT_CLOUD_MODEL,
     DEFAULT_LOCAL_DIMENSION,
     DEFAULT_LOCAL_MAX_TOKENS,
-    DEFAULT_LOCAL_MODEL,
     EmbeddingRuntime,
-    EmbeddingRuntimeError,
     EmbeddingSettings,
     normalize_embedding_provider,
 )
@@ -49,6 +46,12 @@ T = TypeVar("T")
 # LightRAG owns process-global asyncio locks even when its working directories differ.
 # Serialize its synchronous entrypoints while surrounding writer jobs remain parallel.
 _LIGHTRAG_RUNTIME_LOCK = threading.Lock()
+
+
+def stable_document_id(novel_id: str, relative_path: str) -> str:
+    """Return the path-stable identity used for non-manuscript documents."""
+    digest = hashlib.sha256(f"{novel_id}\0{relative_path}".encode()).hexdigest()
+    return f"doc_{digest[:24]}"
 
 
 class SearchConfigurationError(RuntimeError):
@@ -76,6 +79,8 @@ class SearchResult:
     score: float
     retrieval: tuple[str, ...] = ()
     excerpt: str = ""
+    document_id: str = ""
+    revision: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,6 +96,14 @@ class SearchResult:
             "score": self.score,
             "retrieval": list(self.retrieval),
             "excerpt": self.excerpt or self.snippet,
+            "document_id": self.document_id,
+            "revision": self.revision,
+            "locator": {
+                "line": self.line,
+                "quote": self.snippet,
+                "quote_sha256": "sha256:"
+                + hashlib.sha256(self.snippet.encode("utf-8")).hexdigest(),
+            },
         }
 
 
@@ -105,6 +118,8 @@ class IndexedDocument:
     revision: str
     doc_id: str
     source_key: str
+    document_id: str = ""
+    current_revision: str = ""
 
 
 @dataclass(frozen=True)
@@ -153,7 +168,11 @@ class LightRAGConfiguration:
     @classmethod
     def from_runtime(cls) -> LightRAGConfiguration:
         from tools.llm.client import LLMConfig
-        from tools.model_profiles import active_model_profile, active_search_model_profile
+        from tools.model_profiles import (
+            ModelProfileStore,
+            active_model_profile,
+            active_search_model_profile,
+        )
 
         search_profile = active_search_model_profile()
         active = search_profile or active_model_profile() or {}
@@ -183,38 +202,13 @@ class LightRAGConfiguration:
             )
 
         try:
-            embedding_provider = normalize_embedding_provider(
-                os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER", "").strip()
-                or active.get("embedding_provider")
-                or "openai"
-            )
-        except EmbeddingRuntimeError as exc:
+            embedding = ModelProfileStore().resolve_embedding()
+            embedding_provider = normalize_embedding_provider(embedding.get("provider"))
+        except Exception as exc:
             raise SearchConfigurationError(str(exc)) from exc
+        embedding_base_url = str(embedding.get("base_url") or "").rstrip("/")
+        embedding_api_key = str(embedding.get("api_key") or "")
 
-        explicit_embedding_key = os.environ.get(
-            "OPENWRITE_LIGHTRAG_EMBEDDING_API_KEY", ""
-        ).strip()
-        profile_embedding_key = str(active.get("embedding_api_key") or "").strip()
-        explicit_embedding_base = os.environ.get(
-            "OPENWRITE_LIGHTRAG_EMBEDDING_BASE_URL", ""
-        ).strip()
-        profile_embedding_base = str(active.get("embedding_base_url") or "").strip()
-        embedding_base_url = ""
-        embedding_api_key = ""
-        if embedding_provider == "openai":
-            embedding_base_url = (
-                explicit_embedding_base or profile_embedding_base or llm.base_url
-            ).rstrip("/")
-            embedding_api_key = explicit_embedding_key or profile_embedding_key or llm.api_key
-
-        if embedding_provider == "openai" and llm.provider == "anthropic" and not (
-            (explicit_embedding_key or profile_embedding_key)
-            and (explicit_embedding_base or profile_embedding_base)
-        ):
-            raise SearchConfigurationError(
-                "Anthropic 不提供 embedding；请在模型档案中配置独立的 "
-                "Embedding Base URL 和 API Key"
-            )
         if embedding_provider == "openai" and "deepseek.com" in embedding_base_url.casefold():
             raise SearchConfigurationError(
                 "DeepSeek 接口不提供 embedding；请在模型档案中配置独立的 "
@@ -227,21 +221,17 @@ class LightRAGConfiguration:
                 "本地 Embedding 依赖未安装，请重新运行 OpenWrite 启动器"
             )
 
-        embedding_model = (
-            os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_MODEL", "").strip()
-            or str(active.get("embedding_model") or "").strip()
-            or (DEFAULT_LOCAL_MODEL if embedding_provider == "local" else DEFAULT_CLOUD_MODEL)
-        )
+        embedding_model = str(embedding.get("model") or "").strip()
         embedding_dimension = _bounded_env_int(
             "OPENWRITE_LIGHTRAG_EMBEDDING_DIM",
-            active.get("embedding_dimension"),
+            embedding.get("dimension"),
             default=DEFAULT_LOCAL_DIMENSION if embedding_provider == "local" else 1536,
             minimum=1,
             maximum=65536,
         )
         embedding_max_tokens = _bounded_env_int(
             "OPENWRITE_LIGHTRAG_EMBEDDING_MAX_TOKENS",
-            active.get("embedding_max_tokens"),
+            embedding.get("max_tokens"),
             default=(
                 DEFAULT_LOCAL_MAX_TOKENS if embedding_provider == "local" else 8192
             ),
@@ -871,6 +861,7 @@ class ProjectSearchIndex:
 
     def _documents(self) -> list[IndexedDocument]:
         documents = []
+        canonical_ids = self._canonical_document_ids()
         for path in self._iter_documents():
             try:
                 raw_body = path.read_text(encoding="utf-8")
@@ -893,9 +884,34 @@ class ProjectSearchIndex:
                     revision=revision,
                     doc_id=self._doc_id(relative, revision),
                     source_key=self._source_key(relative),
+                    document_id=canonical_ids.get(
+                        relative, self._stable_document_id(relative)
+                    ),
+                    current_revision="sha256:"
+                    + hashlib.sha256(raw_body.encode("utf-8")).hexdigest(),
                 )
             )
         return documents
+
+    def _canonical_document_ids(self) -> dict[str, str]:
+        """Map manuscript paths to reading-order identities when available."""
+        try:
+            from tools.reading_order import ReadingOrderService
+
+            project_root = self.novel_root.parents[2]
+            surface = ReadingOrderService(project_root, self.novel_root.name).surface()
+        except (IndexError, OSError, RuntimeError, ValueError):
+            return {}
+        return {
+            str(item.get("path") or ""): str(item.get("document_id") or "")
+            for item in surface.get("documents", [])
+            if isinstance(item, dict)
+            and str(item.get("path") or "")
+            and str(item.get("document_id") or "")
+        }
+
+    def _stable_document_id(self, relative: str) -> str:
+        return stable_document_id(self.novel_root.name, relative)
 
     def _iter_documents(self) -> Iterable[Path]:
         roots = [
@@ -1065,6 +1081,8 @@ class ProjectSearchIndex:
                     score=1000.0 - chunk.rank + literal_hits,
                     retrieval=("semantic",),
                     excerpt=self._source_excerpt(document.body, line),
+                    document_id=document.document_id,
+                    revision=document.current_revision,
                 )
             )
             seen_paths.add(document.path)
@@ -1302,16 +1320,18 @@ class ProjectSearchIndex:
             return None
         score, line, matched_heading, snippet = best
         return SearchResult(
-            document.path,
-            document.title,
-            line,
-            matched_heading,
-            snippet,
-            document.scope,
-            document.category,
-            document.category_label,
-            score,
-            ("literal",),
+            path=document.path,
+            title=document.title,
+            line=line,
+            heading=matched_heading,
+            snippet=snippet,
+            scope=document.scope,
+            category=document.category,
+            category_label=document.category_label,
+            score=score,
+            retrieval=("literal",),
+            document_id=document.document_id,
+            revision=document.current_revision,
         )
 
 

@@ -15,6 +15,7 @@ from typing import Any, cast
 import yaml
 
 from tools.novel_service import NovelApplicationService, NovelServiceError
+from tools.project_lock import ProjectBusyError, ProjectWriteLock
 from tools.text_range import (
     normalized_text_spans,
     select_folded_range_anchors,
@@ -644,9 +645,49 @@ def _read_project_document(
 def _edit_project_document(
     project_root: Path, novel_id: str, args: dict[str, Any]
 ) -> dict[str, Any]:
-    confirm = bool(args.get("confirm"))
+    action = str(args.get("action") or "").strip().lower()
+    confirm = bool(args.get("confirm")) or action in {"apply", "undo"}
+    if not action:
+        action = "apply" if confirm else "preview"
+    if action not in {"preview", "apply", "reject", "retry", "undo"}:
+        return {"ok": False, "applied": False, "error": "invalid_document_plan_action"}
     stored_preview_path: Path | None = None
     preview_token = str(args.get("preview_token") or "").strip()
+    if action == "reject":
+        _record, stored_preview_path, preview_error = _load_document_edit_preview(
+            project_root, novel_id, preview_token
+        )
+        if preview_error or stored_preview_path is None:
+            return {
+                "ok": False,
+                "applied": False,
+                "error": "document_preview_invalid",
+                "message": preview_error,
+            }
+        stored_preview_path.unlink(missing_ok=True)
+        return {
+            "ok": True,
+            "applied": False,
+            "status": "rejected",
+            "preview_token": preview_token,
+        }
+    if action == "retry":
+        stored_preview, stored_preview_path, preview_error = _load_document_edit_preview(
+            project_root, novel_id, preview_token
+        )
+        if preview_error:
+            return {
+                "ok": False,
+                "applied": False,
+                "error": "document_preview_invalid",
+                "message": preview_error,
+            }
+        args = {
+            "action": "preview",
+            "path": stored_preview["path"],
+            "edits": stored_preview["edits"],
+        }
+        confirm = False
     if confirm and preview_token:
         stored_preview, stored_preview_path, preview_error = (
             _load_document_edit_preview(project_root, novel_id, preview_token)
@@ -663,6 +704,7 @@ def _edit_project_document(
             "path": stored_preview["path"],
             "edits": stored_preview["edits"],
             "revision": stored_preview["revision"],
+            "confirmed_result_revision": stored_preview.get("result_revision", ""),
         }
 
     path_result = _resolve_project_document(project_root, novel_id, args)
@@ -926,6 +968,31 @@ def _edit_project_document(
         "diff": diff,
         "next_action": "用户确认后仅传 preview_token，并设置 confirm=true",
     }
+    from tools.mutation_summary import build_mutation_summary, document_entity_kind
+
+    source_revision = "sha256:" + hashlib.sha256(original.encode("utf-8")).hexdigest()
+    predicted_revision = "sha256:" + hashlib.sha256(revised.encode("utf-8")).hexdigest()
+    confirmed_result_revision = str(args.get("confirmed_result_revision") or "")
+    if confirm and confirmed_result_revision and confirmed_result_revision != predicted_revision:
+        return {
+            "ok": False,
+            "applied": False,
+            "error": "document_preview_result_mismatch",
+            "message": "确认内容与已展示预览不一致，请重新预览。",
+        }
+    payload["mutation_summary"] = build_mutation_summary(
+        operation="document.change_plan",
+        entity_kind=document_entity_kind(relative),
+        entity_id=path.stem,
+        path=relative,
+        before=original,
+        after=revised,
+        source_revision=source_revision,
+        result_revision=predicted_revision,
+        field_prefix="content",
+        flatten=False,
+        execution_status="proposed",
+    )
     if not confirm:
         if revised != original:
             payload["preview_token"] = _save_document_edit_preview(
@@ -934,7 +1001,11 @@ def _edit_project_document(
                 relative,
                 revision,
                 edits,
+                predicted_revision,
             )
+            if stored_preview_path is not None:
+                stored_preview_path.unlink(missing_ok=True)
+                payload["retried_from"] = preview_token
         return payload
     if revised == original:
         if stored_preview_path is not None:
@@ -950,14 +1021,102 @@ def _edit_project_document(
     ) as handle:
         handle.write(revised)
         temporary = Path(handle.name)
-    os.replace(temporary, path)
+    acceptance: dict[str, Any] | None = None
+    acceptance_error: dict[str, Any] | None = None
+    is_manuscript = relative.startswith("data/manuscript/") and bool(
+        re.fullmatch(r"ch_\d+", path.stem)
+    )
+    try:
+        if is_manuscript:
+            from tools.manuscript_acceptance import (
+                ManuscriptAcceptanceError,
+                ManuscriptAcceptanceService,
+            )
+
+            with ProjectWriteLock(
+                project_root,
+                novel_id,
+                operation=f"document_change_plan:{relative}",
+            ):
+                os.replace(temporary, path)
+                try:
+                    acceptance = ManuscriptAcceptanceService(
+                        project_root, novel_id
+                    ).start_acceptance(
+                        path.stem,
+                        source="agent",
+                        expected_previous_revision=source_revision,
+                    )
+                except ManuscriptAcceptanceError as exc:
+                    acceptance_error = {
+                        "status": "reconcile_required",
+                        "code": exc.code,
+                        "message": str(exc),
+                    }
+        else:
+            os.replace(temporary, path)
+    except ProjectBusyError as exc:
+        temporary.unlink(missing_ok=True)
+        return {
+            "ok": False,
+            "applied": False,
+            "blocked": True,
+            "error": "PROJECT_BUSY",
+            "message": str(exc),
+        }
+    result_revision = hashlib.sha256(revised.encode("utf-8")).hexdigest()
+    undo_preview_token = _save_document_edit_preview(
+        project_root,
+        novel_id,
+        relative,
+        result_revision[:16],
+        [{"old_text": revised, "new_text": original}],
+        source_revision,
+    )
     if stored_preview_path is not None:
         stored_preview_path.unlink(missing_ok=True)
-    return {
+    result = {
         **payload,
         "applied": True,
-        "revision": hashlib.sha256(revised.encode("utf-8")).hexdigest()[:16],
+        "status": "applied",
+        "revision": result_revision[:16],
+        "undo_preview_token": undo_preview_token,
+        "mutation_summary": build_mutation_summary(
+            operation="document.change_apply" if action != "undo" else "document.change_undo",
+            entity_kind=document_entity_kind(relative),
+            entity_id=path.stem,
+            path=relative,
+            before=original,
+            after=revised,
+            source_revision=source_revision,
+            result_revision=f"sha256:{result_revision}",
+            field_prefix="content",
+            flatten=False,
+        ),
     }
+    if acceptance is not None:
+        result["acceptance"] = {
+            "operation_id": str(acceptance.get("operation_id") or ""),
+            "status": str(acceptance.get("status") or "pending"),
+            "accepted_revision": str(
+                acceptance.get("expected_previous_revision") or ""
+            ),
+            "current_revision": f"sha256:{result_revision}",
+            "message": "正文已保存，关联事实待更新",
+        }
+    elif acceptance_error is not None:
+        result["acceptance"] = {
+            **acceptance_error,
+            "current_revision": f"sha256:{result_revision}",
+        }
+    return result
+
+
+def project_document_change_plan(
+    project_root: Path, novel_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Public boundary for preview/apply/reject/retry/undo document plans."""
+    return _edit_project_document(project_root, novel_id, payload)
 
 
 def _replace_document_text_range(
@@ -1129,14 +1288,18 @@ def _document_edit_preview_record(
     path: str,
     revision: str,
     edits: list[Any],
+    result_revision: str = "",
 ) -> dict[str, Any]:
-    return {
-        "schema_version": 1,
+    record = {
+        "schema_version": 2 if result_revision else 1,
         "novel_id": novel_id,
         "path": path,
         "revision": revision,
         "edits": edits,
     }
+    if result_revision:
+        record["result_revision"] = result_revision
+    return record
 
 
 def _document_edit_preview_token(record: dict[str, Any]) -> str:
@@ -1155,8 +1318,11 @@ def _save_document_edit_preview(
     path: str,
     revision: str,
     edits: list[Any],
+    result_revision: str = "",
 ) -> str:
-    record = _document_edit_preview_record(novel_id, path, revision, edits)
+    record = _document_edit_preview_record(
+        novel_id, path, revision, edits, result_revision
+    )
     token = _document_edit_preview_token(record)
     preview_root = _document_edit_preview_root(project_root, novel_id)
     preview_root.mkdir(parents=True, exist_ok=True)
@@ -1195,11 +1361,15 @@ def _load_document_edit_preview(
         return {}, None, "文档预览凭据损坏，请重新预览。"
     edits = raw.get("edits")
     if (
-        raw.get("schema_version") != 1
+        raw.get("schema_version") not in {1, 2}
         or raw.get("novel_id") != novel_id
         or not isinstance(raw.get("path"), str)
         or not isinstance(raw.get("revision"), str)
         or not isinstance(edits, list)
+        or (
+            raw.get("schema_version") == 2
+            and not re.fullmatch(r"sha256:[0-9a-f]{64}", str(raw.get("result_revision") or ""))
+        )
     ):
         return {}, None, "文档预览凭据与当前作品不匹配，请重新预览。"
     record = _document_edit_preview_record(
@@ -1207,6 +1377,7 @@ def _load_document_edit_preview(
         raw["path"],
         raw["revision"],
         edits,
+        str(raw.get("result_revision") or ""),
     )
     if _document_edit_preview_token(record) != preview_token:
         return {}, None, "文档预览凭据校验失败，请重新预览。"

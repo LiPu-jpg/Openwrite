@@ -23,6 +23,18 @@ class TaskAwaitingConfirmation(RuntimeError):
 
 TaskHandler = Callable[[dict[str, Any], "TaskContext"], dict[str, Any]]
 
+PROGRESS_UNIT_KINDS = ("candidates", "evaluations", "chapters", "files")
+
+
+def _record_origin(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Carry workspace origin markers into a retried/confirmed task."""
+    origin = {
+        key: record.get(key)
+        for key in ("workspace_id", "session_id", "context_epoch")
+        if record.get(key) is not None
+    }
+    return origin or None
+
 
 class TaskContext:
     def __init__(self, store: TaskStore, task_id: str):
@@ -52,6 +64,37 @@ class TaskContext:
     def progress_callback(self, phase: str, note: str = "") -> None:
         self.phase(phase, note)
 
+    def report_progress(
+        self,
+        completed_units: int,
+        total_units: int,
+        unit_kind: str,
+    ) -> None:
+        """Persist real unit accounting (never derived from polling or time)."""
+        if unit_kind not in PROGRESS_UNIT_KINDS:
+            raise TaskStoreError(f"Invalid progress unit kind: {unit_kind}")
+        completed = int(completed_units)
+        total = int(total_units)
+        if completed < 0 or total < 0:
+            raise TaskStoreError("Progress units must be non-negative")
+        self.store.transition(
+            self.task_id,
+            updates={
+                "progress": {
+                    "completed_units": completed,
+                    "total_units": total,
+                    "ratio": round(completed / total, 4) if total else None,
+                    "unit_kind": unit_kind,
+                }
+            },
+            event="task_progress_updated",
+            details={
+                "unit_kind": unit_kind,
+                "completed_units": completed,
+                "total_units": total,
+            },
+        )
+
     def persist_progress(self, result: dict[str, Any]) -> None:
         self.store.transition(
             self.task_id,
@@ -73,10 +116,11 @@ class PersistentTaskRunner:
         novel_id: str,
         *,
         handlers: dict[str, TaskHandler] | None = None,
+        on_change: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.project_root = Path(project_root).resolve()
         self.novel_id = str(novel_id)
-        self.store = TaskStore(self.project_root, self.novel_id)
+        self.store = TaskStore(self.project_root, self.novel_id, on_change=on_change)
         self.handlers = dict(handlers or {})
         self._executor = ThreadPoolExecutor(
             max_workers=1,
@@ -99,6 +143,7 @@ class PersistentTaskRunner:
         retryable: bool = True,
         retry_of: str = "",
         attempt: int = 1,
+        origin: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if task_type not in self.handlers:
             raise TaskStoreError(f"No handler registered for task type: {task_type}")
@@ -110,6 +155,7 @@ class PersistentTaskRunner:
             retryable=retryable,
             retry_of=retry_of,
             attempt=attempt,
+            origin=origin,
         )
         self._schedule(str(task["task_id"]))
         return task
@@ -136,6 +182,7 @@ class PersistentTaskRunner:
             retryable=True,
             retry_of=task_id,
             attempt=int(previous.get("attempt") or 1) + 1,
+            origin=_record_origin(previous),
         )
 
     def cancel(self, task_id: str) -> dict[str, Any]:
@@ -166,6 +213,7 @@ class PersistentTaskRunner:
             retryable=bool(previous.get("retryable")),
             retry_of=task_id,
             attempt=int(previous.get("attempt") or 1) + 1,
+            origin=_record_origin(previous),
         )
 
     def shutdown(self, *, wait: bool = False) -> None:
@@ -196,6 +244,7 @@ class PersistentTaskRunner:
                         "code": "TASK_HANDLER_MISSING",
                         "message": "任务处理器不存在",
                         "recoverable": False,
+                        "failed_stage": task.get("phase") or None,
                     }
                 },
                 event="task_failed",
@@ -250,6 +299,7 @@ class PersistentTaskRunner:
                         "code": str(getattr(exc, "code", "TASK_FAILED")),
                         "message": str(exc),
                         "recoverable": bool(task.get("retryable")),
+                        "failed_stage": context.phase_name or None,
                     }
                 },
                 event="task_failed",
