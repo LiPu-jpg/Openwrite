@@ -11,6 +11,11 @@
 
 ## 未发布
 
+- 安装器默认从 `Fun10165/dsh-dog` 获取固定的 `v1.2.0`，原子安装到
+  `$DSH_HOME/extensions/dsh-dog`，构建后只挂载 web profile；已有安装可复用，也可用
+  `DSH_DOG_DIR` 指向开发工作树或用 `DSH_DOG_AUTO_INSTALL=0` 跳过。获取失败会在清理
+  临时目录后尝试禁用 Git HTTP(S) 代理直连；DoG 以当前会话 Workspace 为图根，静态
+  `dog.workspaceRoot` 只作兜底，切换作品不再需要改配置或重启。
 - 评审体系升级为 review v2：原 37 项恰好映射到六个计分域和一个硬门禁，使用有正文
   证据才得分的累加机制；`quality_score`、`coverage`、`gate_status`、
   `delivery_status` 分离，issue 不再直接扣分，severity 与 `revision_priority` 独立。

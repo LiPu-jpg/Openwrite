@@ -232,9 +232,10 @@ leaf 检查章节数量与 target 是否一致；根节点保留 agentic 聚合�
 
 安装脚本会把 `scripts/dog/*.js` 复制到 DoG 的
 `~/.dsh/dog/scripts/`（评审、交付与拆书导入 verifier）。拆书导入仍可使用其独立的 agentic run，
-不放入 `smart_import.py` 的 headless 子流程。安装脚本在启用 dsh-dog 时会自动
-写入 `~/.dsh/settings.yaml` 的 `dog.workspaceRoot`（也可用
-`DSH_DOG_WORKSPACE_ROOT=/path/to/novel` 覆盖）。由于 graph 的 target 是相对于
+不放入 `smart_import.py` 的 headless 子流程。安装脚本会自动获取、构建并挂载固定版本的
+dsh-dog，同时在缺少配置时写入 `~/.dsh/settings.yaml` 的 `dog.workspaceRoot` 兜底值
+（也可用 `DSH_DOG_WORKSPACE_ROOT=/path/to/novel` 覆盖）。dsh-dog v1.2 优先使用调用会话
+的 Workspace，因此作品切换无需编辑配置或重启。由于 graph 的 target 是相对于
 OpenWrite 项目根目录的路径，DoG 设置应由宿主配置（示例）：
 
 ```yaml

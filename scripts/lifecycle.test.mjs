@@ -48,6 +48,20 @@ fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({command:path.basename(pr
   for (const name of ['npm', 'pnpm']) {
     await put(join(root, 'bin', name), `#!/usr/bin/env node\n${logCode}\n`, true);
   }
+  await put(join(root, 'bin/git'), `#!/usr/bin/env node
+${logCode}
+const a=process.argv.slice(2);
+const cloneIndex=a.indexOf('clone');
+if(cloneIndex<0) { console.error('Unexpected git invocation: '+a.join(' ')); process.exit(89); }
+const failMarker=path.join(process.env.HOME,'.git-clone-failed-once');
+if(process.env.GIT_CLONE_FAIL_ONCE && !fs.existsSync(failMarker)) {
+  fs.mkdirSync(path.dirname(failMarker),{recursive:true}); fs.writeFileSync(failMarker,'failed'); process.exit(17);
+}
+const target=a.at(-1);
+fs.mkdirSync(target,{recursive:true});
+fs.writeFileSync(path.join(target,'package.json'),JSON.stringify({name:'@dsh-external/dsh-dog'}));
+fs.writeFileSync(path.join(target,'pnpm-lock.yaml'),'lockfileVersion: 9\\n');
+`, true);
   await put(join(root, 'bin/rsync'), `#!/usr/bin/env node
 const fs = require('node:fs'); const args=process.argv.slice(2);
 fs.cpSync(args.at(-2),args.at(-1),{recursive:true});
@@ -91,7 +105,7 @@ http.createServer((req,res)=>{res.statusCode=process.env.STUDIO_UNHEALTHY?'503':
 `, true);
   const env = { ...process.env, HOME: join(root, 'home'), PATH: `${join(root, 'bin')}:${process.env.PATH}`,
     TEST_LOG: join(root, 'commands.jsonl'), DSH_PID_FILE: join(root, 'dsh.pid'),
-    STUDIO_PID_FILE: join(root, 'studio.pid'), DSH_DOG_DIR: '',
+    STUDIO_PID_FILE: join(root, 'studio.pid'), DSH_DOG_DIR: '', DSH_DOG_AUTO_INSTALL: '0',
   };
   delete env.DSH_HOME;
   for (const key of ['DSH_TEST_EXIT', 'STUDIO_TEST_EXIT', 'STUDIO_UNHEALTHY', 'STUDIO_DESCENDANT', 'FAIL_HEADLESS']) delete env[key];
@@ -175,6 +189,36 @@ test('install exposes headless initialization failures and honors DSH_HOME', asy
   const calls = await commands(f);
   assert.ok(calls.every((c) => c.dshHome === custom));
   assert.equal(calls.filter((c) => c.args[0] === 'plugin').length, 0);
+});
+
+test('install automatically bootstraps and reuses the pinned dsh-dog integration', async (t) => {
+  const f = await fixture(t);
+  const overrides = {
+    DSH_DOG_AUTO_INSTALL: '1',
+    DSH_DOG_REPOSITORY: 'https://example.invalid/Fun10165/dsh-dog.git',
+    DSH_DOG_REF: 'v1.2.0',
+    GIT_CLONE_FAIL_ONCE: '1',
+  };
+  let result = await launch(f, 'install.sh', overrides).done;
+  assert.equal(result.code, 0, result.output);
+
+  const dogDir = join(f.home, 'extensions/dsh-dog');
+  const web = await json(join(f.home, 'profiles/web/package.json'));
+  const headless = await json(join(f.home, 'profiles/headless/package.json'));
+  assert.deepEqual(web.dsh.profile.bundles, [
+    '@dsh-novel/openwrite-bridge', '@dsh-novel/studio-panel', '@dsh-external/dsh-dog',
+  ]);
+  assert.deepEqual(headless.dsh.profile.bundles, ['@dsh-novel/openwrite-bridge']);
+  assert.match(await readFile(join(f.home, 'settings.yaml'), 'utf8'), new RegExp(`workspaceRoot: ${f.root}`));
+  assert.equal(await exists(join(dogDir, '.dsh-openwrite-managed')), true);
+
+  result = await launch(f, 'install.sh', overrides).done;
+  assert.equal(result.code, 0, result.output);
+  const calls = await commands(f);
+  const clones = calls.filter((call) => call.command === 'git' && call.args.includes('clone'));
+  assert.equal(clones.length, 2);
+  assert.deepEqual(clones[1].args.slice(0, 4), ['-c', 'http.proxy=', '-c', 'https.proxy=']);
+  assert.match(result.output, /复用已安装的 dsh-dog/);
 });
 
 test('dev rejects an occupied Studio port without starting or killing other services', async (t) => {

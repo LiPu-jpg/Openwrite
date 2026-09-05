@@ -95,7 +95,10 @@ web/headless 初始化均用 `--dump-config`，不调用模型；任一步失败
 `$DSH_HOME/.agent-presets-legacy/<name>.XXXXXXXX/preset`，保留之前的备份。
 
 自定义 `DSH_HOME` 时，安装、doctor、启动三步必须使用相同值。
-可选 DoG 使用 `DSH_DOG_DIR`；其源码自身需要可用锁文件。已有 `dog:` 设置保留原值。
+DoG 默认从 `Fun10165/dsh-dog` 的固定 `v1.2.0` 标签自动安装到
+`$DSH_HOME/extensions/dsh-dog`；已有目录会复用。`DSH_DOG_DIR` 可指向开发工作树，
+`DSH_DOG_AUTO_INSTALL=0` 可明确跳过。已有 `dog:` 设置保留原值；v1.2 会以调用会话的
+Workspace 为捕获根，静态 `workspaceRoot` 只是缺少会话上下文时的兜底。
 安装不会重启已有 dsh 进程，更新后需要退出原进程再启动。
 
 开发 supervisor 只管理自己创建的 Studio/dsh 进程组：端口占用拒绝启动，

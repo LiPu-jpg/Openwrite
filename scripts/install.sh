@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 安装 dsh-novel：构建插件、安装统一 OpenWrite 预设、把插件装进 dsh profile。
+# 安装 dsh-Openwrite：构建插件、安装统一 OpenWrite 预设、把插件装进 dsh profile。
 # 幂等，可重复运行。用法：scripts/install.sh
 set -euo pipefail
 
@@ -8,6 +8,9 @@ BRIDGE="$ROOT/packages/openwrite-bridge"
 PANEL="$ROOT/packages/studio-panel"
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 DSH_DOG_DIR="${DSH_DOG_DIR:-}"
+DSH_DOG_AUTO_INSTALL="${DSH_DOG_AUTO_INSTALL:-1}"
+DSH_DOG_REPOSITORY="${DSH_DOG_REPOSITORY:-https://github.com/Fun10165/dsh-dog.git}"
+DSH_DOG_REF="${DSH_DOG_REF:-v1.2.0}"
 DSH_DOG_WORKSPACE_ROOT="${DSH_DOG_WORKSPACE_ROOT:-$ROOT}"
 # dsh 装在项目内（devDependency，pin 版本）；不走 npx——npx 的缓存自旋过
 DSH=("$ROOT/node_modules/.bin/dsh")
@@ -15,12 +18,51 @@ DSH=("$ROOT/node_modules/.bin/dsh")
 for command in node npm pnpm rsync; do
   command -v "$command" >/dev/null || { echo "缺少命令: $command" >&2; exit 2; }
 done
+
+case "$DSH_DOG_AUTO_INSTALL" in
+  0|1) ;;
+  *) echo "DSH_DOG_AUTO_INSTALL 只能是 0 或 1" >&2; exit 2 ;;
+esac
+
+if [[ -z "$DSH_DOG_DIR" && "$DSH_DOG_AUTO_INSTALL" == "1" ]]; then
+  DSH_DOG_DIR="$DSH_HOME/extensions/dsh-dog"
+  if [[ ! -f "$DSH_DOG_DIR/package.json" ]]; then
+    command -v git >/dev/null || { echo "自动安装 dsh-dog 需要 git" >&2; exit 2; }
+    if [[ -e "$DSH_DOG_DIR" ]]; then
+      echo "自动安装目录已存在但不是有效的 dsh-dog 仓库: $DSH_DOG_DIR" >&2
+      exit 2
+    fi
+    dog_tmp="${DSH_DOG_DIR}.tmp.$$"
+    mkdir -p "$(dirname "$DSH_DOG_DIR")"
+    rm -rf "$dog_tmp"
+    echo "==> 自动获取 dsh-dog $DSH_DOG_REF"
+    dog_clone_args=(clone --depth 1 --branch "$DSH_DOG_REF" "$DSH_DOG_REPOSITORY" "$dog_tmp")
+    if ! git "${dog_clone_args[@]}"; then
+      rm -rf "$dog_tmp"
+      echo "    通过当前 Git 代理获取失败，尝试直连"
+      if ! git -c http.proxy= -c https.proxy= "${dog_clone_args[@]}"; then
+        rm -rf "$dog_tmp"
+        exit 1
+      fi
+    fi
+    mv "$dog_tmp" "$DSH_DOG_DIR"
+    printf 'repository=%s\nref=%s\n' "$DSH_DOG_REPOSITORY" "$DSH_DOG_REF" \
+      > "$DSH_DOG_DIR/.dsh-openwrite-managed"
+  else
+    echo "==> 复用已安装的 dsh-dog: $DSH_DOG_DIR"
+  fi
+fi
 if [[ -n "$DSH_DOG_DIR" && ! -f "$DSH_DOG_DIR/package.json" ]]; then
   echo "DSH_DOG_DIR 不是有效的 dsh-dog 仓库: $DSH_DOG_DIR" >&2
   exit 2
 fi
 if [[ -n "$DSH_DOG_DIR" ]]; then
   DSH_DOG_DIR="$(cd "$DSH_DOG_DIR" && pwd)"
+  dog_package_name="$(node -e 'const p=require(process.argv[1]); process.stdout.write(String(p.name || ""))' "$DSH_DOG_DIR/package.json")"
+  if [[ "$dog_package_name" != "@dsh-external/dsh-dog" ]]; then
+    echo "dsh-dog package 名称不匹配: $dog_package_name" >&2
+    exit 2
+  fi
 fi
 
 echo "==> 1/6 按锁文件安装项目内 dsh CLI"
@@ -76,11 +118,11 @@ configure_dog_settings() {
   touch "$settings"
   if grep -Eq '^dog:[[:space:]]*$' "$settings"; then
     echo "    dog.workspaceRoot 已存在，未覆盖: $settings"
-    echo "    如需切换项目，请手动设置 dog.workspaceRoot=$DSH_DOG_WORKSPACE_ROOT 后重启 dsh"
+    echo "    当前会话 Workspace 会覆盖该兜底值，无需为切换作品修改它"
     return
   fi
   {
-    printf '\n# dsh-novel DoG workspace (由 scripts/install.sh 写入)\n'
+    printf '\n# dsh-Openwrite DoG fallback (由 scripts/install.sh 写入)\n'
     printf 'dog:\n'
     printf '  workspaceRoot: %s\n' "$DSH_DOG_WORKSPACE_ROOT"
     printf '  scriptsDirectory: dog/scripts\n'
@@ -98,7 +140,7 @@ if [[ -n "$DSH_DOG_DIR" ]]; then
   install_pkg web "$DSH_DOG_DIR" '@dsh-external/dsh-dog'
   configure_dog_settings
 else
-  echo "    未安装 dsh-dog（设置 DSH_DOG_DIR=/path/to/dsh-dog 可启用 web 插件）"
+  echo "    已按 DSH_DOG_AUTO_INSTALL=0 跳过 dsh-dog"
 fi
 
 # dsh-dog's programmatic kernel resolves scripts from the user-level library.

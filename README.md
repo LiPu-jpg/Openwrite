@@ -71,15 +71,17 @@ npm run doctor -- --profiles    # 只读核对本机 web/headless 是否链接�
 `check:plugin` 不需要服务、小说或模型凭据，GitHub Actions 也执行此门禁。
 真实系统另跑 `scripts/verify.sh` 和 `npm run test:e2e`；E2E 跳过不算运行时通过。
 
-## 可选 DoG 集成
+## 自动 DoG 集成
 
-如需启用分层评审/交付 DoG 查询，先准备朋友的 `dsh-dog` 工作树，再执行
-`DSH_DOG_DIR=/path/to/dsh-dog scripts/install.sh`；它只安装 web profile，
-并不会把 dsh-dog 源码复制进本项目。
-安装脚本会先构建该工作树，再挂载插件。
-安装时会把 `dog.workspaceRoot` 写入 `~/.dsh/settings.yaml`；默认是本项目根目录，
-也可用 `DSH_DOG_WORKSPACE_ROOT=/path/to/novel scripts/install.sh` 指定。已有 `dog:`
-配置不会被覆盖，切换项目时需手动修改该字段并重启 dsh。
+`scripts/install.sh` 默认自动获取固定的 `dsh-dog v1.2.0`，保存到
+`$DSH_HOME/extensions/dsh-dog`，完成构建并只挂载到 web profile；重复运行会复用该目录。
+如需使用已有工作树，可传入 `DSH_DOG_DIR=/path/to/dsh-dog`；明确不安装时设置
+`DSH_DOG_AUTO_INSTALL=0`。
+
+安装器会在缺少 `dog:` 配置时写入安全兜底值。DoG v1.2 优先使用发起调用的 dsh 会话
+Workspace，所以切换作品会自动切换评审/交付图根目录，无需修改 `workspaceRoot` 或重启。
+`novel_review_chapter` 和后台章节评审完成时会自动实例化标准章节审稿 DAG；DoG 只查询
+已物化产物，不会重复调用模型。
 
 然后打开 http://127.0.0.1:3080 ，新建会话时选择 **OpenWrite 创作** 预设。
 会话头部只增加「创作 / 资料 / 任务」三个工作流 tab；
