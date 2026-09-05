@@ -1,0 +1,116 @@
+{
+  "captured_at": "2026-09-05T02:12:27+08:00",
+  "popularity_source": "GitHub repository HTML embedded sidebarAbout snapshot",
+  "popularity_note": "Mutable attention indicators, not quality scores. Watchers are explicit subscribers, not page views.",
+  "code_count_method": "git tracked plus current untracked nonignored files; extensions: py/go/ts/tsx/js/jsx/vue/mjs/cjs/rs/java/kt/kts/svelte. Lines include blank and tracked generated/vendor-like code. Test files use path/name heuristics. Approximate cases use static regex for Python test_*, Go Test*, JS/TS it()/test(), and Rust #[test]. These counts indicate surface area, not quality or passing status. External repositories use fixed shallow-clone HEADs; OpenWrite and dsh-novel use their current dirty worktrees at the recorded HEAD.",
+  "projects": [
+    {
+      "project": "Casting-Workflow",
+      "repository": "dama-cyber/Casting-Workflow",
+      "snapshot": "2e1eae2026c546ee6ab0235ead8dfb00def12e60",
+      "stars": 577,
+      "forks": 107,
+      "watchers": 2,
+      "implementation_files_including_tests": 6,
+      "source_lines_including_tests": 1610,
+      "test_files": 0,
+      "approx_test_cases": 0
+    },
+    {
+      "project": "ainovel-cli",
+      "repository": "voocel/ainovel-cli",
+      "snapshot": "47df100f25ab7e6460db526cacb38329b6c36549",
+      "stars": 1919,
+      "forks": 398,
+      "watchers": 7,
+      "implementation_files_including_tests": 323,
+      "source_lines_including_tests": 73339,
+      "test_files": 119,
+      "approx_test_cases": 785
+    },
+    {
+      "project": "Scriverse",
+      "repository": "musnows/Scriverse",
+      "snapshot": "e5ddeced886a5a38aa543fe6c807346b72d84f41",
+      "stars": 192,
+      "forks": 38,
+      "watchers": 1,
+      "implementation_files_including_tests": 480,
+      "source_lines_including_tests": 157084,
+      "test_files": 285,
+      "approx_test_cases": 1461
+    },
+    {
+      "project": "OpenFic",
+      "repository": "syrizelink/OpenFic",
+      "snapshot": "809a071e34ed651e5177f31ac1b8a461a589edab",
+      "stars": 993,
+      "forks": 112,
+      "watchers": 4,
+      "implementation_files_including_tests": 1168,
+      "source_lines_including_tests": 233610,
+      "test_files": 198,
+      "approx_test_cases": 1694
+    },
+    {
+      "project": "CharacterArc",
+      "repository": "uu201/character-arc",
+      "snapshot": "1a81dca0af259f8912cdc745f15848dc8c6ca876",
+      "stars": 548,
+      "forks": 82,
+      "watchers": 0,
+      "implementation_files_including_tests": 348,
+      "source_lines_including_tests": 111242,
+      "test_files": 39,
+      "approx_test_cases": 143
+    },
+    {
+      "project": "MuMuAINovel",
+      "repository": "xiamuceer-j/MuMuAINovel",
+      "snapshot": "600be7038539e4dd0568b63e6e534fdcfaf91687",
+      "stars": 2956,
+      "forks": 577,
+      "watchers": 17,
+      "implementation_files_including_tests": 259,
+      "source_lines_including_tests": 108229,
+      "test_files": 0,
+      "approx_test_cases": 0
+    },
+    {
+      "project": "InkOS",
+      "repository": "Narcooo/inkos",
+      "snapshot": "091048383f411eb99948a8764f42b6fd13006f9b",
+      "stars": 9421,
+      "forks": 1761,
+      "watchers": 41,
+      "implementation_files_including_tests": 787,
+      "source_lines_including_tests": 175623,
+      "test_files": 308,
+      "approx_test_cases": 2634
+    },
+    {
+      "project": "OpenWrite",
+      "repository": "LiPu-jpg/Openwrite",
+      "snapshot": "dbbcf28db0d0d6eee4b4cea1129b2090ef67d2c1",
+      "stars": 685,
+      "forks": 113,
+      "watchers": 3,
+      "implementation_files_including_tests": 450,
+      "source_lines_including_tests": 171117,
+      "test_files": 137,
+      "approx_test_cases": 1840
+    },
+    {
+      "project": "dsh-Openwrite",
+      "repository": "LiPu-jpg/dsh-Openwrite",
+      "snapshot": "44292439c37a660b334aba22b3bc21681a75be82",
+      "stars": 0,
+      "forks": 0,
+      "watchers": 0,
+      "implementation_files_including_tests": 85,
+      "source_lines_including_tests": 23731,
+      "test_files": 14,
+      "approx_test_cases": 121
+    }
+  ]
+}

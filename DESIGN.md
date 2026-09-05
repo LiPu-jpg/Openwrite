@@ -1,4 +1,4 @@
-# dsh-novel 架构设计
+# dsh-Openwrite 架构设计
 
 把 OpenWrite 的完整小说创作能力接入 DeepSeek Harness (dsh) 的 agent 运行时：
 **OpenWrite 提供无界面的小说领域后端，dsh 负责唯一的 agent 编排、交互壳与创作工作台。**
@@ -10,8 +10,7 @@
 │ dsh web (127.0.0.1:3080)    │      │ OpenWrite Studio             │
 │ agent 控制台 + 创作工作台    │      │ (127.0.0.1:4567)             │
 │                             │      │                              │
-│  goethe 预设 ──┐            │      │  无界面领域 HTTP 服务         │
-│  dante 预设 ───┤  会话      │      │  存储 / 校验 / 流水线         │
+│  OpenWrite 预设 ─┤  会话      │      │  无界面领域 HTTP 服务         │
 │  (persona +   │            │      │                              │
 │   技能 + 工具) │            │      │  HTTP 动作面 (POST /api/*)   │
 └──────┬────────┼────────────┘      └──────────────┬───────────────┘
@@ -32,7 +31,7 @@
 - **领域逻辑零搬迁**：大纲、写作、评审、伏笔、风格等全部仍由 OpenWrite 实现，
   dsh 侧只有薄桥接。OpenWrite 升级后桥接只需跟进 HTTP 契约。
 - **agent 唯一归属 dsh**：persona、技能目录、子代理委派、会话持久化、长上下文压缩
-  全部使用 dsh 的机制。OpenWrite 自带的 ReAct agent 层（Goethe/Dante Python 循环、
+  全部使用 dsh 的机制。OpenWrite 自带的 ReAct agent 层（旧版 Goethe/Dante Python 循环、
   /api/chat、Studio 助手面板）不参与本方案——草案生成等创作推理由 dsh agent 自身完成，
   OpenWrite 只暴露确定性领域服务（存储、校验、上下文装配、章节流水线、评审）。
 - **唯一前端**：dsh web 同时承担对话、编排和创作编辑。Studio UI 不进入默认工作流，
@@ -45,7 +44,7 @@
 
 | OpenWrite Studio 界面 | dsh 原生形态 | 状态 |
 |---|---|---|
-| AI 协作（Goethe/Dante 聊天） | goethe/dante agent 预设 + dsh 会话 | ✅ |
+| AI 协作（规划与写作） | openwrite agent 预设 + dsh 会话 | ✅ |
 | 大纲视图 | 「大纲」原生视图 tab（studio-panel） | ✅ |
 | 人物/世界观资产看板 | 「资产」原生视图 tab + `novel_asset_*` 工具 | ✅ |
 | 审稿报告 | `novel_review_chapter` 自定义工具卡片 + 评审工具 | ✅ |
@@ -72,11 +71,8 @@ agent 运行时唯一归属 dsh，见职责划分原则。
 主模式：**Agent 预设（agent preset）+ 自定义插件 + Web profile**。
 辅助模式：Python SDK（`deepseek-harness-sdk`）用于自动化编排（conductor）。
 
-- goethe / dante 做成两个 dsh agent 预设（`~/.dsh/.agent-presets/` 下），
-  各自携带 persona、精选工具集和技能目录；在 dsh web 建会话时选择。
-- dante 预设内通过 `dsh-tool-subagent` 额外挂载一个 `subagent_goethe` 委派工具
-  （dsh 的子代理不能跨预设，但可按工具实例配置 persona + toolFilter，
-  正好表达"Dante 写作时向 Goethe 咨询规划"的关系）。
+- OpenWrite 做成一个 dsh agent 预设（`~/.dsh/.agent-presets/` 下），
+  在同一长期会话内按阶段切换规划与写作职责；不再要求跨 preset 切换。
 - 技能复用 OpenWrite 现成的 SKILL.md（dsh 技能格式与之兼容，
   `metadata.openwrite` 扩展字段会被忽略，无副作用）。
 
@@ -94,18 +90,19 @@ TS 插件，`apply(ctx)` 中 `ctx.tools.register(defineTool({...}))` 注册一�
 | `timeoutMs` | `600000` | 单工具超时（写章耗时长） |
 | `outputDir` | 系统临时目录下 `openwrite-exports/` | 导出文件保存目录 |
 
-工具集（63 个，覆盖 Studio 动作面全部端点；按域分组）：
+工具集（90 个，覆盖 Studio 动作面全部端点；按域分组）：
 
 | 域 | 工具 | 端点 |
 |---|---|---|
-| 基础读写 | `novel_status` / `novel_context_preview` / `novel_outline_read` / `novel_search` / `novel_doc_read` | GET /api/workspace、/api/context、/api/outline、/api/search、/api/document |
+| 基础读写 | `novel_status` / `novel_review_framework` / `novel_context_preview` / `novel_outline_read` / `novel_reading_order` / `novel_reading_packet` / `novel_chapter_work` / `novel_search` / `novel_doc_read` | GET /api/workspace、/api/review/framework、/api/context、/api/outline、/api/reading-order、/api/reading-packet、/api/chapters/{id}/work-brief、/api/search、/api/document |
 | 核心写作 | `novel_outline_edit` / `novel_write_chapter` / `novel_review_chapter` / `novel_doc_write` / `novel_focus` / `novel_export` | POST /api/outline/edit、/api/write、/api/review，PUT /api/document，POST /api/focus，GET /api/export |
 | 资产 | `novel_assets_list` / `novel_asset_read` / `novel_asset_create` / `novel_asset_update` / `novel_assets_package_export` / `novel_assets_package_preview` / `novel_assets_package_import` | GET/POST /api/assets*（含 package 导入导出） |
 | 伏笔 | `novel_foreshadowing` | POST /api/foreshadowing |
+| 场景结构 | `novel_scene_structure` / `novel_chapter_scenes` / `novel_scene_migration_preview` / `novel_scene_migration_apply` / `novel_scene_migration_rollback` / `novel_scene_update` / `novel_scene_move` | GET /api/scenes、/api/chapters/{id}/scenes、/api/scenes/migration-preview；POST /api/scenes/migration/*、/api/scenes/metadata、/api/scenes/move |
 | 修订提案 | `novel_revisions_list` / `novel_revision_get` / `novel_revision_create_selection` / `novel_revision_create_from_review` / `novel_revision_apply` / `novel_revision_reject` / `novel_revision_regenerate` | GET /api/revisions*，POST /api/revisions/selection、/from-review、/{rev_*}/apply\|reject\|regenerate |
 | 后台任务 | `novel_tasks_list` / `novel_task_get` / `novel_task_create` / `novel_task_cancel` / `novel_task_retry` / `novel_task_confirm` / `novel_multi_write` | GET /api/tasks*，POST /api/tasks、/{tsk_*}/cancel\|retry\|confirm；multi_write 封装 continuous_write 任务 |
 | 项目生命周期 | `novel_project_init` / `novel_project_open` / `novel_project_delete` | POST /api/project/init（免项目）、/open（免项目）、/delete |
-| 章节/文档/导入 | `novel_chapter_delete` / `novel_doc_create` / `novel_import_preview` / `novel_import` / `novel_sync` / `novel_writing_targets` | POST /api/chapter/delete、/api/document/create、/api/import*、/api/sync、/api/project/writing-targets |
+| 章节/文档/导入 | `novel_chapter_delete` / `novel_chapter_delete_batch` / `novel_doc_create` / `novel_import_preview` / `novel_import` / `novel_sync` / `novel_writing_targets` | POST /api/chapter/delete、/api/chapter/delete-batch、/api/document/create、/api/import*、/api/sync、/api/project/writing-targets |
 | 连续性/诊断 | `novel_continuity` / `novel_diagnostics` | GET /api/continuity，POST /api/diagnostics |
 | 规划面 | `novel_chapter_run_action` / `novel_rolling_plan_action` / `novel_narrative_forecast_action` / `novel_manuscript_edit_action` | POST /api/chapter-runs-v2、/api/rolling-plans、/api/narrative-forecasts、/api/manuscript-editing（action 分发器） |
 | 风格/参考库 | `novel_source_action` / `novel_reference_library_action` / `novel_runtime_skill_action` / `novel_rule_action` | POST /api/source、/api/reference-library、/api/runtime-skills、/api/rules（action 分发器） |
@@ -130,19 +127,12 @@ dsh web 的 client 插件，把 Studio 的关键界面原生融入会话 UI（�
   每 15 秒兜底全量同步；会话头、composer context、
   八类工具卡和 Turn 写操作汇总复用同一状态。
 
-### 3. 双 agent 预设（`presets/goethe/`、`presets/dante/`）
+### 3. OpenWrite 单一 agent 预设（`presets/openwrite/`）
 
 每个预设目录：`agent.cordis.yml` + `preset.yml` + `skills/`。
 
-- `presets/goethe/`：persona 移植自 OpenWrite `DEFAULT_GOETHE_SYSTEM_PROMPT`
-  （规划 Agent：收敛灵感/人物/设定/大纲，正文交给 Dante）。
-  工具集：bridge 中的读类 + 大纲/资产/伏笔工具 + dsh 基础检索工具；
-  技能：oh-story-long-scan、foreshadowing-system、novel-creator 等。
-- `presets/dante/`：persona 移植自 `DEFAULT_DANTE_SYSTEM_PROMPT`
-  （正文创作 Agent：预检→写章→评审→结算；资产不齐时回退 Goethe）。
-  工具集：bridge 写章/评审/上下文/文档工具 + `subagent_goethe` 委派工具；
-  技能：oh-story-long-write、oh-story-deslop、oh-story-review、dialogue、
-  `dog-review-query`、`dog-import-query` 等。
+- `presets/openwrite/`：合并 Goethe 规划与 Dante 写作 persona，覆盖规划、资产、
+  上下文预检、正文、评审、修订、研究和模型测试；技能目录是原两套技能的并集。
 
 预设经 `scripts/install.sh` 复制到 `~/.dsh/.agent-presets/`（dsh 的用户预设根，
 copy-only 语义，不在原地改）。
@@ -150,15 +140,13 @@ copy-only 语义，不在原地改）。
 ### 4. 技能移植（`presets/*/skills/`）
 
 从 `/Users/jiaoziang/OpenWrite/skills/` 与 `tools/runtime_skills/` 复制 SKILL.md
-目录树，按预设分工拆分随包携带：goethe 带 foreshadowing-system、novel-creator、
-oh-story-long-analyze/scan、style-system、world-query；dante 带 dialoguequality、
-novel-reviewer、oh-story-long-write/deslop/review、truth-validation、workflow-manager。
+目录树，统一随 `openwrite` 预设携带规划、写作、评审、连续性和研究技能。
 预设经 `customSkillDirs`（baseUrl 相对路径）自带加载，安装时随预设 rsync。
 格式已兼容（name/description frontmatter），无需改写内容。
 
 ### 5. 组合与启动（`scripts/`）
 
-- `scripts/install.sh`：构建两个插件 → 复制预设到 `~/.dsh/.agent-presets/` →
+- `scripts/install.sh`：构建两个插件 → 复制统一预设到 `~/.dsh/.agent-presets/` →
   初始化 web/headless profile → 把插件 `pnpm add -w` 进 profile 并追加到
   `dsh.profile.bundles`（bundle 路径自动挂载插件行，无需 patch 层；
   各包内 `cordis.patch.yml` 仅作 `--patch` 手动挂载的备用通道）。
@@ -323,10 +311,9 @@ dsh-novel/
 ├── DESIGN.md                  # 本文档
 ├── README.md                  # 使用说明
 ├── GOAL.md                    # 跨仓库目标、状态、凭据引用和验证日志
-├── packages/openwrite-bridge/ # TS 桥接插件：63 个 novel_* 工具
-├── packages/studio-panel/     # dsh web 原生工作台（3 tab、双 DAG、模型测试台）
-├── presets/goethe/            # Goethe 规划 agent 预设（含自带 skills/）
-├── presets/dante/             # Dante 写作 agent 预设（含自带 skills/）
+├── packages/openwrite-bridge/ # TS 桥接插件：90 个 novel_* 工具
+├── packages/studio-panel/     # dsh web 原生工作台（3 tab、章节任务、场景双序、双 DAG、模型测试台）
+├── presets/openwrite/         # OpenWrite 全流程 agent 预设（含自带 skills/）
 ├── scripts/install.sh, dev.sh, verify.sh, e2e-web.py
 └── conductor/                 # Python 编排器（任务驱动流水线 + SDK 指导会话）
 ```
@@ -335,7 +322,7 @@ dsh-novel/
 
 1. 契约层：OpenWrite pytest 覆盖评分、HTTP、benchmark 隔离和 golden fixtures；
    `npm run test:dog` 覆盖 Python/TypeScript 图一致性、无环和 stale review。
-2. 插件层：bridge build + smoke 验证 63 个工具、benchmark list/get/run、proxy、任务压缩，
+2. 插件层：bridge build + smoke 验证 90 个工具、场景与章节任务、benchmark list/get/run、proxy、任务压缩，
    再用 `dsh --profile web --dump-config` 确认插件加载。
 3. 端到端：只对 `~/my_novel` 启动 Studio 与 dsh，用 Playwright 验证桌面/移动双 DAG、
    37 项展开、blocker 过滤、详情和模型测试任务；同时检查画布非空、节点不重叠和文字不溢出。

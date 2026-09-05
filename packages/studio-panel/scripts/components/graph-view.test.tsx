@@ -19,6 +19,9 @@ const harness = vi.hoisted(() => ({ tasksEpoch: 0 }))
 
 vi.mock('../../src/client/WorkbenchStore.ts', () => ({
   useWorkbench: () => ({
+    context: null,
+    contextEpoch: 0,
+    workspaceError: null,
     epochs: {
       workspace: 0, manuscript: 0, outline: 0, assets: 0,
       tasks: harness.tasksEpoch, benchmark: 0, models: 0,
@@ -67,6 +70,11 @@ const CONTINUITY = {
 const DOG_SURFACE = {
   chapter_id: 'ch_001',
   chapters: ['ch_001'],
+  review_framework: {
+    id: 'openwrite.standard-chapter-review', version: '1.0.0',
+    revision: `sha256:${'a'.repeat(64)}`,
+    invariants: { domain_count: 6, legacy_check_count: 37, criterion_count: 20 },
+  },
   review: {
     graph: {
       root: 'root',
@@ -120,6 +128,9 @@ describe('GraphView DAG epoch refresh', () => {
     // fetches twice on mount: once with chapter='', then again after it
     // adopts the server-returned chapter — both land before settle.)
     await screen.findByText('交付决策')
+    expect(screen.getByText(/graph\.reviewFramework v1\.0\.0/).textContent).toContain(
+      '6 graph.reviewDomains · 37 graph.reviewChecks · 20 graph.reviewCriteria',
+    )
     expect(api.dogCalls.length).toBeGreaterThanOrEqual(1)
     expect(api.dogCalls[0]).toBe('/dog/graphs')
     const settled = api.dogCalls.length

@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type { JsonValue } from './client.js'
 import { validateReviewV2Decision } from './contracts-generated.js'
+import { assertContained, assertWorkspaceRootMatch } from './dog-delivery.js'
 
 type RecordValue = Record<string, unknown>
 
@@ -34,6 +35,135 @@ function record(value: unknown): RecordValue {
 
 function values(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
+}
+
+const FRAMEWORK_REVISION_FIELDS = [
+  'schema_version', 'id', 'version', 'rubric_version', 'graph_schema_version',
+  'root', 'topology_locked', 'topology',
+] as const
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const source = value as RecordValue
+    return `{${Object.keys(source).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(source[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+export function dogReviewFrameworkRevision(frameworkValue: unknown): string {
+  const framework = record(frameworkValue)
+  const identity: RecordValue = {}
+  for (const key of FRAMEWORK_REVISION_FIELDS) identity[key] = framework[key]
+  return `sha256:${createHash('sha256').update(canonicalJson(identity)).digest('hex')}`
+}
+
+/** Bind OpenWrite's versioned review blueprint to one chapter. The bridge
+ * supplies paths only; all nodes and edges come from the canonical server. */
+export function instantiateDogReviewFramework(
+  frameworkValue: unknown,
+  chapterId: string,
+  relativeDirectory: string,
+): RecordValue {
+  const framework = record(frameworkValue)
+  if (framework['schema_version'] !== 'openwrite.review-dag-framework.v1') {
+    throw new Error(`unsupported review DAG framework: ${String(framework['schema_version'] ?? 'missing')}`)
+  }
+  if (framework['id'] !== 'openwrite.standard-chapter-review') {
+    throw new Error(`unsupported review DAG framework id: ${String(framework['id'] ?? 'missing')}`)
+  }
+  if (!/^sha256:[a-f0-9]{64}$/.test(String(framework['revision'] ?? ''))) {
+    throw new Error('review DAG framework lacks a valid revision')
+  }
+  if (framework['revision'] !== dogReviewFrameworkRevision(framework)) {
+    throw new Error('review DAG framework revision does not match its content')
+  }
+  if (!/^ch_\d+$/.test(chapterId)) throw new Error('review DAG chapter id must match ch_<digits>')
+  const prefix = relativeDirectory.replaceAll('\\', '/').replace(/\/+$/, '')
+  if (!prefix || prefix.startsWith('/') || prefix.split('/').includes('..')) {
+    throw new Error('review DAG artifact directory must be a contained relative path')
+  }
+  const topology = record(framework['topology'])
+  const templates = record(topology['nodes'])
+  const contains = values(topology['contains'])
+  const dependsOn = values(topology['dependsOn'])
+  const invariants = record(framework['invariants'])
+  if (framework['graph_schema_version'] !== '0.9') throw new Error('unsupported review DAG graph schema')
+  if (Object.keys(templates).length !== Number(invariants['node_count'] ?? -1) || Object.keys(templates).length !== 47) {
+    throw new Error('review DAG framework node count does not match its invariant')
+  }
+  if (contains.length !== Number(invariants['contains_count'] ?? -1) || dependsOn.length !== Number(invariants['dependency_count'] ?? -1)) {
+    throw new Error('review DAG framework edge counts do not match its invariants')
+  }
+  for (let checkId = 1; checkId <= 37; checkId += 1) {
+    if (!Object.hasOwn(templates, `dim-${String(checkId).padStart(2, '0')}`)) {
+      throw new Error(`review DAG framework is missing legacy check ${checkId}`)
+    }
+  }
+  const root = String(framework['root'] ?? '')
+  if (!Object.hasOwn(templates, root) || record(templates[root])['kind'] !== 'composite') {
+    throw new Error('review DAG framework root must be a composite node')
+  }
+  const nodeIds = new Set(Object.keys(templates))
+  const parentByChild = new Map<string, string>()
+  for (const edgeValue of contains) {
+    const edge = record(edgeValue)
+    const parent = String(edge['parent'] ?? '')
+    const child = String(edge['child'] ?? '')
+    if (!nodeIds.has(parent) || !nodeIds.has(child)) throw new Error('review DAG contains edge references an unknown node')
+    if (parentByChild.has(child)) throw new Error(`review DAG node has multiple parents: ${child}`)
+    parentByChild.set(child, parent)
+  }
+  if (parentByChild.size !== nodeIds.size - 1 || parentByChild.has(root)) {
+    throw new Error('review DAG containment must form one rooted tree')
+  }
+  const adjacency = new Map([...nodeIds].map(nodeId => [nodeId, [] as string[]]))
+  for (const edgeValue of dependsOn) {
+    const edge = record(edgeValue)
+    const source = String(edge['source'] ?? '')
+    const target = String(edge['target'] ?? '')
+    if (!nodeIds.has(source) || !nodeIds.has(target)) throw new Error('review DAG dependency references an unknown node')
+    adjacency.get(target)?.push(source)
+  }
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (nodeId: string): void => {
+    if (visiting.has(nodeId)) throw new Error('review DAG framework dependencies must be acyclic')
+    if (visited.has(nodeId)) return
+    visiting.add(nodeId)
+    for (const successor of adjacency.get(nodeId) ?? []) visit(successor)
+    visiting.delete(nodeId)
+    visited.add(nodeId)
+  }
+  for (const nodeId of nodeIds) visit(nodeId)
+  const nodes: RecordValue = {}
+  for (const [nodeId, templateValue] of Object.entries(templates)) {
+    const template = record(templateValue)
+    const artifact = String(template['artifact'] ?? '')
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*\.json$/.test(artifact)) {
+      throw new Error(`review DAG node ${nodeId} has an unsafe artifact binding`)
+    }
+    const titleTemplate = typeof template['title_template'] === 'string'
+      ? template['title_template']
+      : String(template['title'] ?? nodeId)
+    const node: RecordValue = {
+      kind: template['kind'],
+      title: titleTemplate.replaceAll('{chapter_id}', chapterId),
+      constraint: template['constraint'],
+      target: `${prefix}/${artifact}`,
+      verifier: template['verifier'],
+    }
+    if (template['completion'] !== undefined) node['completion'] = template['completion']
+    nodes[nodeId] = node
+  }
+  return {
+    schemaVersion: String(framework['graph_schema_version'] ?? ''),
+    id: `novel-review-${chapterId}`,
+    root,
+    nodes,
+    contains: JSON.parse(JSON.stringify(contains)) as unknown,
+    dependsOn: JSON.parse(JSON.stringify(dependsOn)) as unknown,
+  }
 }
 
 function dimension(value: unknown): number | undefined {
@@ -134,8 +264,9 @@ export function buildDogReviewBundle(reviewValue: unknown, chapterId: string, th
   // a present review_v2 key (even null) must be a non-empty JSON object
   // declaring the supported schema version; only records without the key
   // ride the legacy v1 adapter.
+  const hasV2 = Object.hasOwn(review, 'review_v2')
   const rawV2 = review['review_v2']
-  if (rawV2 !== undefined) {
+  if (hasV2) {
     if (rawV2 === null || typeof rawV2 !== 'object' || Array.isArray(rawV2)) {
       throw new Error(`review_v2 must be a JSON object when present, got ${rawV2 === null ? 'null' : typeof rawV2}`)
     }
@@ -214,7 +345,7 @@ export function buildDogReviewBundle(reviewValue: unknown, chapterId: string, th
       dimensionCount: 37, issueCount: dimensionRecords.reduce((sum, item) => sum + Number(item['issueCount']), 0) + unmappedIssues.length,
       unmappedIssueCount: unmappedIssues.length, unmappedIssues, sourceRevision: String(review['source_revision'] ?? ''),
       provenance: record(v2['provenance']), domains, dimensions: dimensionRecords,
-      decisionSource: Object.keys(reviewV2(review)).length > 0 ? 'v2' : 'v1-adapter',
+      decisionSource: Object.hasOwn(review, 'review_v2') ? 'v2' : 'v1-adapter',
     },
     dimensionRecords,
   }
@@ -236,18 +367,25 @@ async function findNamedFiles(root: string, filename: string): Promise<string[]>
 }
 
 /** Materialize the review response into model-free files consumable by dsh-dog. */
-export async function materializeDogReview(response: unknown, chapterId: string, threshold: number): Promise<JsonValue> {
+export async function materializeDogReview(response: unknown, chapterId: string, threshold: number, expectedRoot?: string): Promise<JsonValue> {
   const outer = record(response)
   const review = record(outer['result'] ?? response)
+  const framework = record(outer['review_framework'])
   const workspace = record(outer['workspace'])
   const project = record(workspace['project'])
   const snapshot = record(workspace['snapshot'])
   const root = String(project['root'] ?? '')
   const novelId = String(snapshot['novel_id'] ?? '')
   if (!root || !novelId) throw new Error('review response lacks workspace project root or novel_id')
+  if (expectedRoot !== undefined) assertWorkspaceRootMatch(root, expectedRoot)
   try { if (!(await stat(root)).isDirectory()) throw new Error('not a directory') } catch { throw new Error(`invalid project root: ${root}`) }
 
   const { manifest, dimensionRecords } = buildDogReviewBundle(review, chapterId, threshold)
+  // The artifact records retain the exact blueprint identity so a historical
+  // review can always be explained against the topology that produced it.
+  manifest['frameworkId'] = framework['id']
+  manifest['frameworkVersion'] = framework['version']
+  manifest['frameworkRevision'] = framework['revision']
   const manuscriptFiles = await findNamedFiles(join(root, 'data', 'novels', novelId, 'data', 'manuscript'), `${chapterId}.md`)
   const currentRevision = manuscriptFiles.length === 1
     ? `sha256:${createHash('sha256').update(await readFile(manuscriptFiles[0]!)).digest('hex')}`
@@ -260,7 +398,9 @@ export async function materializeDogReview(response: unknown, chapterId: string,
   if (stale) { manifest['verdict'] = 'inconclusive'; manifest['deliveryStatus'] = 'stale' }
 
   const relativeDir = join('data', 'novels', novelId, 'data', 'dog', 'reviews', chapterId).replaceAll('\\', '/')
+  const graph = instantiateDogReviewFramework(framework, chapterId, relativeDir)
   const directory = join(root, relativeDir)
+  assertContained(directory, root)
   await mkdir(directory, { recursive: true })
   const write = async (name: string, value: unknown) => writeFile(join(directory, name), `${JSON.stringify(value, null, 2)}\n`, 'utf8')
   await write('review.json', manifest)
@@ -284,47 +424,17 @@ export async function materializeDogReview(response: unknown, chapterId: string,
   for (const item of dimensionRecords) await write(`dim_${String(item['dimension']).padStart(2, '0')}.json`, item)
 
   const target = (name: string) => `${relativeDir}/${name}`
-  const domainIds = DOG_REVIEW_DOMAINS.map(spec => `domain-${spec.id}`)
-  const nodes: RecordValue = {
-    root: {
-      kind: 'composite', title: `${chapterId} 评审 DAG`, constraint: 'hard', target: target('review.json'),
-      completion: { op: 'all', items: ['context', ...domainIds, 'gate', 'aggregate'].map(id => ({ op: 'ref', id })) },
-      verifier: { mode: 'programmatic', script: 'review-record' },
-    },
-    context: { kind: 'leaf', title: '上下文完整性', constraint: 'hard', target: target('context.json'), verifier: { mode: 'programmatic', script: 'review-record' } },
-    gate: {
-      kind: 'composite', title: '硬门禁', constraint: 'hard', target: target('gate.json'),
-      completion: { op: 'all', items: [{ op: 'ref', id: 'dim-27' }] }, verifier: { mode: 'programmatic', script: 'review-record' },
-    },
-    aggregate: { kind: 'leaf', title: '聚合与交付判定', constraint: 'hard', target: target('aggregate.json'), verifier: { mode: 'programmatic', script: 'review-record' } },
-  }
-  const contains: RecordValue[] = ['context', ...domainIds, 'gate', 'aggregate'].map(child => ({ parent: 'root', child, required: true, failure: 'fatal' }))
-  for (const spec of DOG_REVIEW_DOMAINS) {
-    const domainId = `domain-${spec.id}`
-    nodes[domainId] = {
-      kind: 'composite', title: spec.name, constraint: 'soft', target: target(`domain_${spec.id}.json`),
-      completion: { op: 'all', items: spec.legacyCheckIds.map(number => ({ op: 'ref', id: `dim-${String(number).padStart(2, '0')}` })) },
-      verifier: { mode: 'programmatic', script: 'review-record' },
-    }
-    for (const number of spec.legacyCheckIds) {
-      const id = `dim-${String(number).padStart(2, '0')}`
-      nodes[id] = { kind: 'leaf', title: `${number}. ${DOG_REVIEW_DIMENSIONS[number]}`, constraint: 'soft', target: target(`dim_${String(number).padStart(2, '0')}.json`), verifier: { mode: 'programmatic', script: 'review-dimension' } }
-      contains.push({ parent: domainId, child: id, required: true, failure: 'warn' })
-    }
-  }
-  nodes['dim-27'] = { kind: 'leaf', title: '27. 敏感词检查', constraint: 'hard', target: target('dim_27.json'), verifier: { mode: 'programmatic', script: 'review-dimension' } }
-  contains.push({ parent: 'gate', child: 'dim-27', required: true, failure: 'fatal' })
-  const dependsOn: RecordValue[] = DOG_REVIEW_DOMAINS.map(spec => ({ source: `domain-${spec.id}`, target: 'context', data: ['review-context'] }))
-  dependsOn.push({ source: 'gate', target: 'context', data: ['review-context'] })
-  dependsOn.push(...DOG_REVIEW_DOMAINS.map(spec => ({ source: 'aggregate', target: `domain-${spec.id}`, data: ['domain-result'] })))
-  dependsOn.push({ source: 'aggregate', target: 'gate', data: ['gate-result'] })
-  const graph = { schemaVersion: '0.9', id: `novel-review-${chapterId}`, root: 'root', nodes, contains, dependsOn }
   const graphPath = join(directory, 'dog-graph.json')
   await write('dog-graph.json', graph)
-  return { status: 'ready', graphPath, manifestPath: join(directory, 'review.json'), graphTarget: relative(root, graphPath), manifestTarget: target('review.json'), dimensions: 37, domains: 6 } as unknown as JsonValue
+  return {
+    status: 'ready', graphPath, manifestPath: join(directory, 'review.json'),
+    graphTarget: relative(root, graphPath), manifestTarget: target('review.json'),
+    dimensions: 37, domains: 6,
+    framework: { id: framework['id'], version: framework['version'], revision: framework['revision'] },
+  } as unknown as JsonValue
 }
 
-export async function materializeCompletedDogTaskReview(response: unknown, workspace: unknown, threshold = 70): Promise<JsonValue | undefined> {
+export async function materializeCompletedDogTaskReview(response: unknown, workspace: unknown, framework: unknown, threshold = 70, expectedRoot?: string): Promise<JsonValue | undefined> {
   const outer = record(response)
   const task = record(outer['task'] ?? response)
   if (task['type'] !== 'chapter_review' || task['status'] !== 'completed') return undefined
@@ -333,7 +443,7 @@ export async function materializeCompletedDogTaskReview(response: unknown, works
   const chapterId = String(task['chapter_id'] ?? review['chapter_id'] ?? '').trim()
     || String(input['path'] ?? '').match(/(?:^|\/)(ch_\d+)\.md$/)?.[1]
   if (!chapterId || !/^ch_\d+$/.test(chapterId)) throw new Error('completed chapter_review task lacks a resolvable chapter id')
-  return await materializeDogReview({ result: review, workspace }, chapterId, threshold)
+  return await materializeDogReview({ result: review, workspace, review_framework: framework }, chapterId, threshold, expectedRoot)
 }
 
 export function reviewChapterId(args: { path?: string; chapter_id?: string }): string {

@@ -18,6 +18,21 @@ export type JsonObject = { [key: string]: JsonValue }
 /** Header OpenWrite requires on every write request (POST/PUT). */
 const WRITE_HEADER = 'X-OpenWrite-Studio'
 
+/**
+ * Request-scoped Workspace identity, per docs/WORKSPACE_CONTEXT_CONTRACT.md §3.
+ * `workspaceRoot` is the canonical (realpath'd) absolute path — the only root
+ * identity; the id/epoch fields are audit/diagnostic metadata.
+ */
+export interface WorkspaceContext {
+  workspaceRoot: string
+  workspaceId?: string
+  sessionId?: string
+  contextEpoch?: number
+  toolCallId?: string
+  rootCallId?: string
+  toolName?: string
+}
+
 /** A normalized Studio failure: HTTP status plus the server's machine-readable code. */
 export class StudioError extends Error {
   readonly status: number
@@ -39,7 +54,9 @@ export interface StudioClientOptions {
   /** Per-request timeout in milliseconds (backstop; the dsh timeout policy owns the budget). */
   timeoutMs: number
   /** Notify the owning domain service after a successful mutation. */
-  onMutation?: (path: string) => void
+  onMutation?: (path: string, context?: WorkspaceContext) => void
+  /** Request-scoped Workspace context stamped onto every request (see `scoped`). */
+  context?: WorkspaceContext
 }
 
 /** A downloaded export file. */
@@ -88,19 +105,45 @@ function applyParams(url: URL, params: QueryParams): void {
 export class StudioClient {
   private readonly baseUrl: string
   private readonly timeoutMs: number
-  private readonly onMutation: ((path: string) => void) | undefined
+  private readonly onMutation: ((path: string, context?: WorkspaceContext) => void) | undefined
+  /** Workspace context stamped onto every request; undefined for legacy (unscoped) clients. */
+  readonly context: WorkspaceContext | undefined
 
   constructor(options: StudioClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
     this.timeoutMs = options.timeoutMs
     this.onMutation = options.onMutation
+    this.context = options.context
+  }
+
+  /**
+   * Derive a lightweight request-scoped client sharing baseUrl/timeout/onMutation.
+   * Every request it makes carries the §3 context headers, and mutation
+   * notifications report this context so invalidation stays per-root.
+   */
+  scoped(context: WorkspaceContext): StudioClient {
+    return new StudioClient({ baseUrl: this.baseUrl, timeoutMs: this.timeoutMs, onMutation: this.onMutation, context })
+  }
+
+  /** §3 context headers; empty for a legacy (unscoped) client. */
+  private contextHeaders(): Record<string, string> {
+    const context = this.context
+    if (context === undefined) return {}
+    const headers: Record<string, string> = { 'X-OpenWrite-Workspace-Root': context.workspaceRoot }
+    if (context.workspaceId !== undefined) headers['X-OpenWrite-Workspace-Id'] = context.workspaceId
+    if (context.sessionId !== undefined) headers['X-OpenWrite-Session-Id'] = context.sessionId
+    if (context.contextEpoch !== undefined) headers['X-OpenWrite-Context-Epoch'] = String(context.contextEpoch)
+    if (context.toolCallId !== undefined) headers['X-OpenWrite-Tool-Call-Id'] = context.toolCallId
+    if (context.rootCallId !== undefined) headers['X-OpenWrite-Root-Call-Id'] = context.rootCallId
+    if (context.toolName !== undefined) headers['X-OpenWrite-Tool-Name'] = context.toolName
+    return headers
   }
 
   /** GET a JSON endpoint. `params` entries are URL-encoded; undefined values are dropped. */
   async getJson(path: string, params: QueryParams = {}, signal?: AbortSignal): Promise<JsonValue> {
     const url = new URL(`${this.baseUrl}${path}`)
     applyParams(url, params)
-    const response = await this.request(url, { method: 'GET' }, signal)
+    const response = await this.request(url, { method: 'GET', headers: this.contextHeaders() }, signal)
     return this.readJson(response)
   }
 
@@ -110,13 +153,13 @@ export class StudioClient {
       new URL(`${this.baseUrl}${path}`),
       {
         method: 'POST',
-        headers: { [WRITE_HEADER]: '1', 'Content-Type': 'application/json' },
+        headers: { [WRITE_HEADER]: '1', ...this.contextHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       },
       signal,
     )
     const result = await this.readJson(response)
-    this.onMutation?.(path)
+    this.onMutation?.(path, this.context)
     return result
   }
 
@@ -126,13 +169,13 @@ export class StudioClient {
       new URL(`${this.baseUrl}${path}`),
       {
         method: 'PUT',
-        headers: { [WRITE_HEADER]: '1', 'Content-Type': 'application/json' },
+        headers: { [WRITE_HEADER]: '1', ...this.contextHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       },
       signal,
     )
     const result = await this.readJson(response)
-    this.onMutation?.(path)
+    this.onMutation?.(path, this.context)
     return result
   }
 
@@ -140,7 +183,7 @@ export class StudioClient {
   async download(path: string, params: QueryParams, signal?: AbortSignal): Promise<StudioDownload> {
     const url = new URL(`${this.baseUrl}${path}`)
     applyParams(url, params)
-    const response = await this.request(url, { method: 'GET' }, signal)
+    const response = await this.request(url, { method: 'GET', headers: this.contextHeaders() }, signal)
     if (!response.ok) {
       // Error downloads are still JSON payloads.
       await this.readJson(response)
@@ -185,7 +228,9 @@ export class StudioClient {
         const details: JsonValue = 'details' in body ? body['details'] : null
         throw new StudioError(error, response.status, code, details)
       }
-      if (body['ok'] === true && 'data' in body) return body['data']
+      // HTTP status remains authoritative even when a proxy or incompatible
+      // server sends a success-shaped envelope with an error status.
+      if (response.ok && body['ok'] === true && 'data' in body) return body['data']
     }
     if (!response.ok) {
       throw new StudioError(`Studio returned HTTP ${response.status}`, response.status, 'HTTP_ERROR')

@@ -1,171 +1,267 @@
-/**
- * Research view (研究): OpenWrite deep-research reports rendered natively —
- * a master-detail list (title/status/date) with the full report body rendered
- * as markdown. launching research submits a managed background task
- * (POST /api/tasks { type: 'research', input: { prompt } } — the same lane the
- * Tasks tab renders); saving API settings stays with Studio / agent tools.
- *
- * Wire shape (verified against OpenWrite tools/studio_http.py do_GET +
- * tools/studio_application.py research_surface/research_report +
- * tools/research_service.py status/list_reports/read_report):
- * GET /api/research answers WITH the success envelope —
- * { ok, data: {
- *     available, node_ready, pnpm_ready, package_ready, dependencies_ready,
- *     setup_hint,
- *     settings: { search_provider, search_providers: [...], ... },
- *     reports: [{ id, title, status, episode_id, created_at, path, bytes,
- *                 metrics: { ... } }],
- *     model_route: { profile_id, label, model, provider, configured, ... },
- *   }, error, request_id }
- * GET /api/research/reports/{id} answers WITH the envelope —
- * { ok, data: { id, metadata: { title, status, episode_id, created_at, ... },
- *               content: <markdown string> }, ... }
- */
-
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Download, ExternalLink, RefreshCw, Search } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
 import css from './views.module.css'
 
-/** One report-list entry (the fields this view reads; the payload carries more). */
+interface ResearchModelProfile {
+  id: string
+  label: string
+  model: string
+  provider: string
+}
+
+interface ResearchSource {
+  title: string
+  url: string
+  sourceType: string
+  cited: boolean
+}
+
 interface ResearchReport {
   id: string
   title: string
+  prompt: string
   status: string
-  episodeId: string
-  createdAt: string
-  quality: string
-  language: string
+  episodeId: string | null
+  taskId: string | null
+  createdAt: string | null
+  completedAt: string | null
+  modelProfile: ResearchModelProfile | null
+  searchProvider: string | null
+  sources: ResearchSource[] | null
+  sourcesStatus: string
+  sourceCount: number | null
+  wordCount: number | null
+  latencyMs: number | null
+  usage: { totalTokens: number | null; reported: boolean }
+  cost: { value: number | null; reported: boolean }
+  failure: { code: string; message: string } | null
+  metrics: Record<string, unknown>
 }
 
 interface ResearchSurface {
   available: boolean
   setupHint: string
   reports: ResearchReport[]
+  searchProvider: string | null
+  modelRoute: ResearchModelProfile | null
 }
 
-/** A fetched report body. */
 interface ReportBody {
-  title: string
-  status: string
-  episodeId: string
-  createdAt: string
+  metadata: ResearchReport
   content: string
 }
 
 type LoadState = 'loading' | 'error' | 'ready'
+type StatusFilter = 'all' | 'succeeded' | 'failed' | 'needs_human_review' | 'unknown'
+type SourceFilter = 'all' | 'available' | 'unavailable'
 
-/** Narrow one wire report entry, tolerating missing/extra fields. */
-function parseReport(raw: unknown): ResearchReport {
-  const record = (raw !== null && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-  const text = (value: unknown): string => (typeof value === 'string' ? value : '')
-  const metrics = (record['metrics'] !== null && typeof record['metrics'] === 'object' ? record['metrics'] : {}) as Record<string, unknown>
-  // quality/language surface either top-level or inside metrics, as scalars.
-  const scalar = (value: unknown): string =>
-    typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function text(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function nullableText(value: unknown): string | null {
+  const rendered = text(value).trim()
+  return rendered === '' ? null : rendered
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function parseModel(value: unknown): ResearchModelProfile | null {
+  const item = record(value)
+  if (Object.keys(item).length === 0) return null
   return {
-    id: text(record['id']),
-    title: text(record['title']) || text(record['id']),
-    status: text(record['status']),
-    episodeId: text(record['episode_id']),
-    createdAt: text(record['created_at']),
-    quality: scalar(record['quality']) || scalar(metrics['quality']),
-    language: scalar(record['language']) || scalar(metrics['language']),
+    id: text(item['id'] ?? item['profile_id']),
+    label: text(item['label']),
+    model: text(item['model']),
+    provider: text(item['provider']),
   }
 }
 
-/** Unwrap the success envelope and narrow the surface (empty on garbage). */
-function parseSurface(data: unknown): ResearchSurface {
-  const envelope = (data !== null && typeof data === 'object' ? data : {}) as Record<string, unknown>
-  const inner = (envelope['data'] !== null && typeof envelope['data'] === 'object' ? envelope['data'] : {}) as Record<string, unknown>
+function parseSources(value: unknown): ResearchSource[] | null {
+  if (!Array.isArray(value)) return null
+  return value.map(raw => {
+    const item = record(raw)
+    return {
+      title: text(item['title']),
+      url: text(item['url']),
+      sourceType: text(item['source_type']),
+      cited: item['cited'] === true,
+    }
+  })
+}
+
+function parseReport(raw: unknown, fallbackId = ''): ResearchReport {
+  const item = record(raw)
+  const model = parseModel(item['model_profile'])
+  const usage = record(item['usage'])
+  const cost = record(item['cost_usd'])
+  const failure = record(item['failure'])
+  const sources = parseSources(item['sources'])
+  const id = text(item['id']) || fallbackId
+  return {
+    id,
+    title: text(item['title']) || id,
+    prompt: text(item['prompt']),
+    status: text(item['status']) || 'unknown',
+    episodeId: nullableText(item['episode_id']),
+    taskId: nullableText(item['task_id']),
+    createdAt: nullableText(item['created_at']),
+    completedAt: nullableText(item['completed_at']),
+    modelProfile: model,
+    searchProvider: nullableText(item['search_provider']),
+    sources,
+    sourcesStatus: text(item['sources_status']) || (sources === null ? 'unavailable' : 'ok'),
+    sourceCount: finiteNumber(item['source_count']),
+    wordCount: finiteNumber(item['word_count']),
+    latencyMs: finiteNumber(item['latency_ms']),
+    usage: { totalTokens: finiteNumber(usage['total_tokens']), reported: usage['reported'] === true },
+    cost: { value: finiteNumber(cost['value']), reported: cost['reported'] === true },
+    failure: Object.keys(failure).length === 0 ? null : { code: text(failure['code']), message: text(failure['message']) },
+    metrics: record(item['metrics']),
+  }
+}
+
+function unwrap(value: unknown): Record<string, unknown> {
+  return record(record(value)['data'])
+}
+
+function parseSurface(value: unknown): ResearchSurface {
+  const inner = unwrap(value)
+  const settings = record(inner['settings'])
   return {
     available: inner['available'] === true,
-    setupHint: typeof inner['setup_hint'] === 'string' ? inner['setup_hint'] : '',
-    reports: Array.isArray(inner['reports']) ? inner['reports'].map(parseReport) : [],
+    setupHint: text(inner['setup_hint']),
+    reports: Array.isArray(inner['reports']) ? inner['reports'].map(raw => parseReport(raw)) : [],
+    searchProvider: nullableText(settings['search_provider']),
+    modelRoute: parseModel(inner['model_route']),
   }
 }
 
-/** Unwrap the report-body envelope. */
-function parseReportBody(data: unknown): ReportBody {
-  const envelope = (data !== null && typeof data === 'object' ? data : {}) as Record<string, unknown>
-  const inner = (envelope['data'] !== null && typeof envelope['data'] === 'object' ? envelope['data'] : {}) as Record<string, unknown>
-  const metadata = (inner['metadata'] !== null && typeof inner['metadata'] === 'object' ? inner['metadata'] : {}) as Record<string, unknown>
-  const text = (value: unknown): string => (typeof value === 'string' ? value : '')
+function parseReportBody(value: unknown): ReportBody {
+  const inner = unwrap(value)
   return {
-    title: text(metadata['title']) || text(inner['id']),
-    status: text(metadata['status']),
-    episodeId: text(metadata['episode_id']),
-    createdAt: text(metadata['created_at']),
+    metadata: parseReport(inner['metadata'], text(inner['id'])),
     content: text(inner['content']),
   }
 }
 
-/** `2026-08-20T11:21:41` → `08-20 11:21` (defensive: unrecognized shapes pass through trimmed). */
-function shortTime(iso: string): string {
-  const match = /^\d{4}-(\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(iso)
-  return match !== null ? `${match[1]} ${match[2]}` : iso.slice(0, 16)
+function shortTime(value: string | null): string {
+  if (value === null) return '—'
+  const match = /^\d{4}-(\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(value)
+  return match !== null ? `${match[1]} ${match[2]}` : value.slice(0, 16)
 }
 
-/** Full research-view props: conversation-view runtime share & injected fetch & locale seat. */
-export type ResearchViewProps =
-  ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
+function formatNumber(value: number | null): string {
+  return value === null ? '—' : Math.round(value).toLocaleString()
+}
 
-export function ResearchView({ fetchStudioApi, postStudioApi, t }: ResearchViewProps) {
+function formatCost(value: number | null, reported: boolean): string {
+  if (!reported || value === null) return '—'
+  if (value === 0) return '$0'
+  return value >= 1 ? `$${value.toFixed(2)}` : `$${value.toFixed(6)}`
+}
+
+function safeSourceUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null
+  } catch {
+    return null
+  }
+}
+
+export type ResearchViewProps =
+  ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'> & {
+    initialReportId?: string
+  }
+
+export function ResearchView({ fetchStudioApi, postStudioApi, t, initialReportId = '' }: ResearchViewProps) {
   const [state, setState] = useState<LoadState>('loading')
   const [surface, setSurface] = useState<ResearchSurface | null>(null)
   const [error, setError] = useState('')
   const [selectedId, setSelectedId] = useState('')
-  const [reportState, setReportState] = useState<LoadState>('loading')
+  const [reportState, setReportState] = useState<LoadState>('ready')
   const [report, setReport] = useState<ReportBody | null>(null)
   const [reportError, setReportError] = useState('')
-  /** 发起研究：折叠面板状态 */
+  const [keyword, setKeyword] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
   const [launchOpen, setLaunchOpen] = useState(false)
   const [launchPrompt, setLaunchPrompt] = useState('')
   const [launchBusy, setLaunchBusy] = useState(false)
   const [launchNote, setLaunchNote] = useState<{ text: string; bad: boolean } | null>(null)
+  const mounted = useRef(true)
+  const detailRequest = useRef(0)
+  const openedInitial = useRef('')
 
-  const load = useCallback(() => {
+  useEffect(() => () => { mounted.current = false }, [])
+
+  const load = useCallback(async () => {
     setState('loading')
-    let cancelled = false
-    fetchStudioApi('/research')
-      .then((data) => {
-        if (cancelled) return
-        setSurface(parseSurface(data))
-        setState('ready')
-      })
-      .catch((cause: unknown) => {
-        if (cancelled) return
-        setError(cause instanceof Error ? cause.message : String(cause))
-        setState('error')
-      })
-    return () => { cancelled = true }
+    try {
+      const next = parseSurface(await fetchStudioApi('/research'))
+      if (!mounted.current) return
+      setSurface(next)
+      setError('')
+      setState('ready')
+    } catch (cause: unknown) {
+      if (!mounted.current) return
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setState('error')
+    }
   }, [fetchStudioApi])
 
-  useEffect(() => load(), [load])
+  useEffect(() => { void load() }, [load])
 
-  const openReport = useCallback((id: string) => {
+  const openReport = useCallback(async (id: string) => {
+    const request = ++detailRequest.current
     setSelectedId(id)
     setReportState('loading')
     setReport(null)
     setReportError('')
-    let cancelled = false
-    fetchStudioApi(`/research/reports/${encodeURIComponent(id)}`)
-      .then((data) => {
-        if (cancelled) return
-        setReport(parseReportBody(data))
-        setReportState('ready')
-      })
-      .catch((cause: unknown) => {
-        if (cancelled) return
-        setReportError(cause instanceof Error ? cause.message : String(cause))
-        setReportState('error')
-      })
-    return () => { cancelled = true }
+    try {
+      const next = parseReportBody(await fetchStudioApi(`/research/reports/${encodeURIComponent(id)}`))
+      if (!mounted.current || request !== detailRequest.current) return
+      setReport(next)
+      setReportState('ready')
+    } catch (cause: unknown) {
+      if (!mounted.current || request !== detailRequest.current) return
+      setReportError(cause instanceof Error ? cause.message : String(cause))
+      setReportState('error')
+    }
   }, [fetchStudioApi])
 
-  /** Submit one deep-research task; progress shows up in the Tasks tab. */
+  useEffect(() => {
+    if (state !== 'ready' || initialReportId === '' || openedInitial.current === initialReportId) return
+    openedInitial.current = initialReportId
+    void openReport(initialReportId)
+  }, [initialReportId, openReport, state])
+
+  const visibleReports = useMemo(() => {
+    const query = keyword.trim().toLowerCase()
+    return (surface?.reports ?? []).filter(item => {
+      if (statusFilter !== 'all' && item.status !== statusFilter) return false
+      if (sourceFilter === 'available' && item.sourcesStatus !== 'ok') return false
+      if (sourceFilter === 'unavailable' && item.sourcesStatus === 'ok') return false
+      if (query === '') return true
+      const model = item.modelProfile
+      return [
+        item.id, item.title, item.prompt, item.status, item.taskId ?? '', item.episodeId ?? '',
+        item.searchProvider ?? '', model?.id ?? '', model?.label ?? '', model?.provider ?? '', model?.model ?? '',
+      ].some(value => value.toLowerCase().includes(query))
+    })
+  }, [keyword, sourceFilter, statusFilter, surface])
+
   const submitResearch = async () => {
     const prompt = launchPrompt.trim()
     if (prompt === '' || launchBusy) return
@@ -175,137 +271,106 @@ export function ResearchView({ fetchStudioApi, postStudioApi, t }: ResearchViewP
       await postStudioApi('/tasks', { type: 'research', input: { prompt } })
       setLaunchNote({ text: t('research.launch.submitted'), bad: false })
       setLaunchPrompt('')
-      load()
+      await load()
     } catch (cause: unknown) {
-      setLaunchNote({
-        text: `${t('research.launch.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`,
-        bad: true,
-      })
+      setLaunchNote({ text: `${t('research.launch.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, bad: true })
     } finally {
-      setLaunchBusy(false)
+      if (mounted.current) setLaunchBusy(false)
     }
   }
 
-  const selected = surface?.reports.find(item => item.id === selectedId)
+  const exportMarkdown = () => {
+    if (report === null || selectedId === '') return
+    const blob = new Blob([report.content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${selectedId}.md`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
 
-  return (
-    <div className={css.root}>
-      <div className={css.toolbar}>
-        <span className={css.toolbarMeta}>
-          {state === 'ready' && surface !== null && (
-            surface.available
-              ? `${t('research.reports')}: ${surface.reports.length}`
-              : surface.setupHint !== '' ? surface.setupHint : t('research.unavailable')
-          )}
-        </span>
-        <button
-          type="button"
-          className={css.button}
-          disabled={!surface?.available || launchBusy}
-          title={surface?.available === false ? surface.setupHint : undefined}
-          onClick={() => { setLaunchOpen(previous => !previous) }}
-        >
-          {t('research.launch')}
-        </button>
-        <button type="button" className={css.button} onClick={() => { load() }}>
-          {t('refresh')}
-        </button>
-      </div>
-      {launchOpen && (
-        <div className={css.launchPanel}>
-          <textarea
-            className={css.summaryTextarea}
-            rows={3}
-            value={launchPrompt}
-            placeholder={t('research.launch.placeholder')}
-            onChange={event => { setLaunchPrompt(event.target.value) }}
-          />
-          <div className={css.inlineActions}>
-            <button
-              type="button"
-              className={css.button}
-              disabled={launchBusy || launchPrompt.trim() === ''}
-              onClick={() => { void submitResearch() }}
-            >
-              {launchBusy ? t('research.launch.submitting') : t('research.launch.submit')}
-            </button>
-            <span className={css.toolbarMeta}>{t('research.launch.hint')}</span>
-          </div>
-          {launchNote !== null && (
-            <div className={css.notice}>
-              <span className={launchNote.bad ? css.errorText : undefined}>{launchNote.text}</span>
-            </div>
-          )}
-        </div>
-      )}
-      {state === 'loading' && <div className={css.body}><div className={css.notice}>{t('loading')}</div></div>}
-      {state === 'error' && (
-        <div className={css.body}>
-          <div className={css.notice}>
-            <span className={css.errorText}>{error}</span>
-            <button type="button" className={css.button} onClick={() => { load() }}>{t('retry')}</button>
-          </div>
-        </div>
-      )}
-      {state === 'ready' && surface !== null && (
-        <div className={css.libraryRoot}>
-          <div className={css.sidebar}>
-            <div className={css.sidebarList}>
-              {surface.reports.length === 0 && (
-                <div className={css.sidebarEmpty}>{t('research.empty')}</div>
-              )}
-              {surface.reports.map(item => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={css.assetRow}
-                  data-active={item.id === selectedId}
-                  onClick={() => { openReport(item.id) }}
-                >
-                  <span className={css.assetRowName}>{item.title}</span>
-                  <span className={css.assetRowMeta}>
-                    {[item.status, item.createdAt !== '' ? shortTime(item.createdAt) : '']
-                      .filter(part => part !== '').join(' · ')}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className={css.mainPane}>
-            {selectedId === '' && <div className={css.detailNotice}>{t('research.selectHint')}</div>}
-            {selectedId !== '' && reportState === 'loading' && (
-              <div className={css.detailNotice}>{t('research.report.loading')}</div>
-            )}
-            {selectedId !== '' && reportState === 'error' && (
-              <div className={css.detailNotice}>
-                <span className={css.errorText}>{reportError}</span>{' '}
-                <button type="button" className={css.button} onClick={() => { openReport(selectedId) }}>{t('retry')}</button>
-              </div>
-            )}
-            {selectedId !== '' && reportState === 'ready' && report !== null && (
-              <div className={css.detail}>
-                <div className={css.detailHeader}>
-                  <div className={css.detailTitleRow}>
-                    <span className={css.detailTitle}>{report.title}</span>
-                  </div>
-                  <div className={css.assetMeta}>
-                    {report.status !== '' && <span className={css.tag}>{report.status}</span>}
-                    {report.episodeId !== '' && <span className={css.tag}>{report.episodeId}</span>}
-                    {report.createdAt !== '' && <span className={css.tag}>{shortTime(report.createdAt)}</span>}
-                    {selected?.quality !== undefined && selected.quality !== '' && (
-                      <span className={css.tag}>{t('research.quality')} {selected.quality}</span>
-                    )}
-                    {selected?.language !== undefined && selected.language !== '' && (
-                      <span className={css.tag}>{t('research.language')} {selected.language}</span>
-                    )}
-                  </div>
-                </div>
-                {report.content !== '' && <div className={css.detailBody}><MarkdownText text={report.content} /></div>}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+  const selected = surface?.reports.find(item => item.id === selectedId)
+  const detail = report?.metadata ?? selected ?? null
+
+  return <div className={css.root}>
+    <div className={css.toolbar}>
+      <span className={css.toolbarMeta}>
+        {state === 'ready' && surface !== null && (surface.available
+          ? `${t('research.reports')}: ${visibleReports.length}/${surface.reports.length} · ${surface.searchProvider ?? '—'} · ${surface.modelRoute?.model ?? '—'}`
+          : surface.setupHint || t('research.unavailable'))}
+      </span>
+      <button type="button" className={css.button} disabled={!surface?.available || launchBusy} title={surface?.available === false ? surface.setupHint : undefined} onClick={() => setLaunchOpen(previous => !previous)}>{t('research.launch')}</button>
+      <button type="button" className={css.button} onClick={() => void load()}><RefreshCw size={14} /> {t('refresh')}</button>
     </div>
-  )
+    {launchOpen && <div className={css.launchPanel}>
+      <textarea className={css.summaryTextarea} rows={3} value={launchPrompt} placeholder={t('research.launch.placeholder')} onChange={event => setLaunchPrompt(event.target.value)} />
+      <div className={css.inlineActions}>
+        <button type="button" className={css.button} disabled={launchBusy || launchPrompt.trim() === ''} onClick={() => void submitResearch()}>{launchBusy ? t('research.launch.submitting') : t('research.launch.submit')}</button>
+        <span className={css.toolbarMeta}>{t('research.launch.hint')}</span>
+      </div>
+      {launchNote !== null && <div className={css.notice}><span className={launchNote.bad ? css.errorText : undefined}>{launchNote.text}</span></div>}
+    </div>}
+    {state === 'loading' && surface === null && <div className={css.body}><div className={css.notice}>{t('loading')}</div></div>}
+    {state === 'error' && <div className={css.body}><div className={css.notice}><span className={css.errorText}>{error}</span><button type="button" className={css.button} onClick={() => void load()}>{t('retry')}</button></div></div>}
+    {state === 'ready' && surface !== null && <div className={`${css.libraryRoot} ${css.researchWorkspace}`}>
+      <aside className={css.sidebar}>
+        <div className={css.researchFilters}>
+          <label className={css.researchSearch}><Search size={13} /><input value={keyword} placeholder={t('research.filter.keyword')} onChange={event => setKeyword(event.target.value)} /></label>
+          <label>{t('research.filter.status')}<select aria-label={t('research.filter.status')} value={statusFilter} onChange={event => setStatusFilter(event.target.value as StatusFilter)}>
+            <option value="all">{t('research.filter.all')}</option><option value="succeeded">{t('research.status.succeeded')}</option><option value="failed">{t('research.status.failed')}</option><option value="needs_human_review">{t('research.status.needsReview')}</option><option value="unknown">{t('research.status.unknown')}</option>
+          </select></label>
+          <label>{t('research.filter.sources')}<select aria-label={t('research.filter.sources')} value={sourceFilter} onChange={event => setSourceFilter(event.target.value as SourceFilter)}>
+            <option value="all">{t('research.filter.all')}</option><option value="available">{t('research.sourcesAvailable')}</option><option value="unavailable">{t('research.sourcesUnavailable')}</option>
+          </select></label>
+        </div>
+        <div className={css.sidebarList}>
+          {visibleReports.length === 0 && <div className={css.sidebarEmpty}>{t('research.empty')}</div>}
+          {visibleReports.map(item => <button key={item.id} type="button" className={css.assetRow} data-active={item.id === selectedId} onClick={() => void openReport(item.id)}>
+            <span className={css.assetRowName}>{item.title}</span>
+            <span className={css.assetRowMeta}>{item.status} · {shortTime(item.createdAt)}</span>
+          </button>)}
+        </div>
+      </aside>
+      <main className={css.mainPane}>
+        {selectedId === '' && <div className={css.detailNotice}>{t('research.selectHint')}</div>}
+        {selectedId !== '' && reportState === 'loading' && <div className={css.detailNotice}>{t('research.report.loading')}</div>}
+        {selectedId !== '' && reportState === 'error' && <div className={css.detailNotice}><span className={css.errorText}>{reportError}</span> <button type="button" className={css.button} onClick={() => void openReport(selectedId)}>{t('retry')}</button></div>}
+        {selectedId !== '' && reportState === 'ready' && report !== null && detail !== null && <article className={css.detail}>
+          <header className={css.detailHeader}>
+            <div className={css.detailTitleRow}><span className={css.detailTitle}>{detail.title}</span><button type="button" className={css.button} onClick={exportMarkdown}><Download size={14} /> {t('research.exportMarkdown')}</button></div>
+            <div className={css.assetMeta}><span className={css.tag}>{detail.status}</span><span className={css.tag}>{shortTime(detail.createdAt)}</span>{detail.sourceCount !== null && <span className={css.tag}>{t('research.sources')} {detail.sourceCount}</span>}</div>
+          </header>
+          <div className={css.researchReferenceOnly}>{t('research.referenceOnly')}</div>
+          {detail.failure !== null && <div className={css.researchFailure} data-testid="research-failure"><strong>{detail.failure.code || 'RESEARCH_FAILED'}</strong><span>{detail.failure.message || '—'}</span></div>}
+          <dl className={css.researchProvenance} data-testid="research-provenance">
+            <div><dt>{t('research.prompt')}</dt><dd>{detail.prompt || '—'}</dd></div>
+            <div><dt>{t('research.taskId')}</dt><dd>{detail.taskId ?? '—'}</dd></div>
+            <div><dt>{t('research.episodeId')}</dt><dd>{detail.episodeId ?? '—'}</dd></div>
+            <div><dt>{t('research.model')}</dt><dd>{detail.modelProfile === null ? '—' : [detail.modelProfile.label || detail.modelProfile.id, detail.modelProfile.provider, detail.modelProfile.model].filter(Boolean).join(' · ')}</dd></div>
+            <div><dt>{t('research.searchProvider')}</dt><dd>{detail.searchProvider ?? '—'}</dd></div>
+            <div><dt>{t('research.createdAt')}</dt><dd>{detail.createdAt ?? '—'}</dd></div>
+            <div><dt>{t('research.completedAt')}</dt><dd>{detail.completedAt ?? '—'}</dd></div>
+            <div><dt>{t('research.latency')}</dt><dd>{detail.latencyMs === null ? '—' : `${detail.latencyMs.toLocaleString()} ms`}</dd></div>
+            <div><dt>{t('research.wordCount')}</dt><dd>{formatNumber(detail.wordCount)}</dd></div>
+            <div><dt>{t('research.tokens')}</dt><dd>{detail.usage.reported ? formatNumber(detail.usage.totalTokens) : '—'}</dd></div>
+            <div><dt>{t('research.cost')}</dt><dd>{formatCost(detail.cost.value, detail.cost.reported)}</dd></div>
+            <div><dt>{t('research.sourcesStatus')}</dt><dd>{detail.sourcesStatus === 'ok' ? t('research.sourcesAvailable') : t('research.sourcesUnavailable')}</dd></div>
+          </dl>
+          <section className={css.researchSources} data-testid="research-sources">
+            <h3>{t('research.sourceCheck')}</h3>
+            {detail.sources === null ? <div className={css.detailNotice}>{t('research.sourcesUnavailable')}</div> : detail.sources.length === 0 ? <div className={css.detailNotice}>{t('research.sourcesEmpty')}</div> : <div className={css.researchSourceList}>{detail.sources.map((source, index) => {
+              const href = safeSourceUrl(source.url)
+              return <article key={`${source.url}:${index}`}>
+                <div>{href === null ? <strong>{source.title || source.url || `#${index + 1}`}</strong> : <a href={href} target="_blank" rel="noreferrer"><strong>{source.title || href}</strong><ExternalLink size={12} /></a>}<span data-cited={source.cited}>{source.cited ? t('research.source.cited') : t('research.source.uncited')}</span></div>
+                <small>{source.sourceType || '—'} · {source.url || '—'}</small>
+              </article>
+            })}</div>}
+          </section>
+          {Object.keys(detail.metrics).length > 0 && <details className={css.researchMetrics}><summary>{t('research.metrics')}</summary><dl>{Object.entries(detail.metrics).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd></div>)}</dl></details>}
+          {report.content !== '' && <div className={css.detailBody}><MarkdownText text={report.content} /></div>}
+        </article>}
+      </main>
+    </div>}
+  </div>
 }

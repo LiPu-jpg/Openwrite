@@ -77,7 +77,7 @@ try {
 } finally {
   delete globalThis.window
 }
-assert.deepEqual(exports_.inject, ['slots', 'locale', 'conversationEvents'])
+assert.deepEqual(exports_.inject, ['slots', 'locale', 'conversationEvents', 'workspaces', 'sessions'])
 
 const registrations = []
 const dictionaries = []
@@ -85,6 +85,8 @@ let definition = null
 const fakeClientCtx = {
   effect(run) { run() },
   conversationEvents: { register(value) { definition = value; return () => {} } },
+  workspaces: { marker: 'workspaces' },
+  sessions: { marker: 'sessions' },
   locale: {
     register(ns, dicts) { dictionaries.push({ ns, dicts }); return () => {} },
     bind: () => key => key,
@@ -115,6 +117,8 @@ for (const view of views) {
   assert.equal(typeof injected.fetchStudioApi, 'function')
   assert.equal(typeof injected.postStudioApi, 'function')
   assert.equal(typeof injected.putStudioApi, 'function')
+  assert.equal(injected.workspaces?.marker, 'workspaces')
+  assert.equal(injected.sessions?.marker, 'sessions')
 }
 
 assert.equal(registrations.filter(entry => entry.options.name === 'conversation.session.header.actions').length, 1)

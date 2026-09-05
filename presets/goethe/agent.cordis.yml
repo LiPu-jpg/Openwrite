@@ -1,10 +1,10 @@
 # The `goethe` agent preset: OpenWrite 规划 Agent（长期会话），移植自 OpenWrite
 # 的 DEFAULT_GOETHE_SYSTEM_PROMPT，组合结构以 dsh  shipped `standard` 预设为基座，
-# 另加 openwrite-bridge 插件（novel_* 工具）与预设自带的技能目录。
+# 使用 host profile 已注册的 openwrite-bridge（novel_* 工具），并加载预设自带的技能目录。
 #
 # 规则提醒（来自 dsh agent-presets README）：任何发布服务的行必须放在带
 # `isolate` realm 的 cordis:group 内；本文件中的 planning/compaction/delegation
-# 分组原样沿用 standard 的写法。persona / bridge / skill 等行只向注册表登记，
+# 分组原样沿用 standard 的写法。persona / skill 等行只向注册表登记，
 # 不发布服务，无需 realm。
 
 # ── identity ────────────────────────────────────────────────────────────────
@@ -178,14 +178,9 @@
   config:
     maxBytes: 65536
 
-# ── openwrite-bridge ──────────────────────────────────────────────────────────
-
-# 桥接插件：注册 novel_* 工具（内部 fetch 到 OpenWrite Studio HTTP 动作面）。
-# 只注册工具、不发布服务，无需 realm。配置全部用默认值：
-# baseUrl=http://127.0.0.1:4567，timeoutMs=600000，outputDir=系统临时目录。
-# 目标小说项目由 Studio 启动参数（--project）决定，不在插件配置里。
-- id: openwrite-bridge
-  name: '@dsh-novel/openwrite-bridge'
+# OpenWrite bridge is mounted once by the host profile (cordis.patch.yml).
+# Keep it out of this per-agent preset: mounting it here again would register
+# the process-level `novelDomain` service twice and make this preset unloadable.
 
 # ── shell ───────────────────────────────────────────────────────────────────
 

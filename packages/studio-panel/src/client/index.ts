@@ -3,26 +3,25 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
-import { fetchStudioApi, postStudioApi, putStudioApi, type StudioApiInjected } from './api.ts'
+import { fetchStudioApi, postStudioApi, putStudioApi } from './api.ts'
 import { CreationView } from './CreationView.tsx'
 import { LibraryView } from './LibraryView.tsx'
 import { OperationsView } from './OperationsView.tsx'
-import { ProjectSwitcherChip, HeaderProjectStatus, HeaderUtilities } from './HeaderChrome.tsx'
+import { WorkspaceContextChip, HeaderProjectStatus, HeaderUtilities } from './HeaderChrome.tsx'
 import { createDomainToolCard, type ToolFamily } from './DomainToolCard.tsx'
 import { en, NS, zh } from './locales.ts'
 import { NovelReviewCard } from './ReviewCard.tsx'
 import { novelMutationDefinition, TurnMutationSummaryView } from './TurnMutationSummary.tsx'
+import type { StudioPanelInjected } from './workspace-context.ts'
 
-export const inject = ['slots', 'locale', 'conversationEvents']
-
-const studioApi: StudioApiInjected = { fetchStudioApi, postStudioApi, putStudioApi }
+export const inject = ['slots', 'locale', 'conversationEvents', 'workspaces', 'sessions']
 
 const FAMILY_TOOLS: Readonly<Record<ToolFamily, readonly string[]>> = {
   status: ['novel_status', 'novel_focus', 'novel_writing_targets', 'novel_continuity', 'novel_diagnostics'],
   context: ['novel_context_preview'],
-  manuscript: ['novel_doc_read', 'novel_doc_write', 'novel_doc_create', 'novel_write_chapter', 'novel_multi_write', 'novel_chapter_delete', 'novel_manuscript_edit_action', 'novel_import', 'novel_import_preview'],
+  manuscript: ['novel_doc_read', 'novel_doc_write', 'novel_document_change_plan', 'novel_structured_change_plan', 'novel_doc_create', 'novel_write_chapter', 'novel_multi_write', 'novel_chapter_delete', 'novel_chapter_delete_batch', 'novel_manuscript_edit_action', 'novel_manuscript_acceptance', 'novel_manuscript_acceptance_reconcile', 'novel_export_preflight', 'novel_export', 'novel_import', 'novel_import_preview', 'novel_manuscript_import_action', 'novel_project_archive_action', 'novel_project_archive_download'],
   revision: ['novel_revisions_list', 'novel_revision_get', 'novel_revision_create_selection', 'novel_revision_create_from_review', 'novel_revision_apply', 'novel_revision_reject', 'novel_revision_regenerate'],
-  task: ['novel_tasks_list', 'novel_task_get', 'novel_task_create', 'novel_task_cancel', 'novel_task_retry', 'novel_task_confirm', 'novel_chapter_run_action', 'novel_model_benchmark'],
+  task: ['novel_tasks_list', 'novel_task_get', 'novel_task_create', 'novel_task_cancel', 'novel_task_retry', 'novel_task_confirm', 'novel_chapter_run_action', 'novel_model_benchmark', 'novel_settle_backfill'],
   search: ['novel_search'],
   asset: ['novel_assets_list', 'novel_asset_read', 'novel_asset_create', 'novel_asset_update', 'novel_assets_package_preview', 'novel_assets_package_import', 'novel_reference_library_action', 'novel_source_action'],
   outline: ['novel_outline_read', 'novel_outline_edit', 'novel_foreshadowing', 'novel_rolling_plan_action', 'novel_narrative_forecast_action'],
@@ -44,18 +43,24 @@ export function apply(ctx: Context): void {
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.conversationEvents.register(novelMutationDefinition), 'studio-panel: novel mutation turn data')
 
+  // Studio API trio plus the dsh workspace/session services the new-work flow drives.
+  const studioPanel: StudioPanelInjected = {
+    fetchStudioApi, postStudioApi, putStudioApi,
+    workspaces: ctx.workspaces, sessions: ctx.sessions,
+  }
+
   ctx.slots.inject('conversation.view', function* () {
     yield ctx.slots.register({
       name: 'conversation.view', id: 'creation', order: 22, locale: NS,
-      label: () => t('view.creation'), inject: (): StudioApiInjected => studioApi,
+      label: () => t('view.creation'), inject: (): StudioPanelInjected => studioPanel,
     }, CreationView)
     yield ctx.slots.register({
       name: 'conversation.view', id: 'library', order: 23, locale: NS,
-      label: () => t('view.library'), inject: (): StudioApiInjected => studioApi,
+      label: () => t('view.library'), inject: (): StudioPanelInjected => studioPanel,
     }, LibraryView)
     yield ctx.slots.register({
       name: 'conversation.view', id: 'tasks', order: 24, locale: NS,
-      label: () => t('view.operations'), inject: (): StudioApiInjected => studioApi,
+      label: () => t('view.operations'), inject: (): StudioPanelInjected => studioPanel,
     }, OperationsView)
   })
 
@@ -67,12 +72,15 @@ export function apply(ctx: Context): void {
     inject: () => ({ postStudioApi }),
   }, HeaderUtilities))
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
-    name: 'conversation.input.left', id: 'novel-project-switcher', order: 20, locale: NS,
-    inject: () => ({ fetchStudioApi, postStudioApi }),
-  }, ProjectSwitcherChip))
+    name: 'conversation.input.left', id: 'novel-workspace-context', order: 20, locale: NS,
+    inject: (): Pick<StudioPanelInjected, 'postStudioApi' | 'workspaces' | 'sessions'> => ({
+      postStudioApi, workspaces: ctx.workspaces, sessions: ctx.sessions,
+    }),
+  }, WorkspaceContextChip))
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
     name: 'conversation.chat.turnTail', locale: NS,
-    select: owner => owner.turn.data.get('novelMutations') ?? null,
+    select: owner => owner.turn.data.get('dsh-novel-mutations') ?? null,
+    inject: () => ({ postStudioApi }),
   }, TurnMutationSummaryView))
 
   ctx.slots.inject('tool.call.toolview', function* () {

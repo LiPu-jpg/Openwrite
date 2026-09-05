@@ -1,34 +1,125 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Download, ExternalLink, FileUp, FlaskConical, Gauge, ListTodo, RefreshCw, Cpu } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { API_PROXY_BASE, type StudioApiInjected } from './api.ts'
+import { API_PROXY_BASE, studioContextHeaders } from './api.ts'
+import { parseExportPreflight, type ExportFormatDto, type ExportPreflightDto, type ExportPurposeDto } from './dto.ts'
 import { ResearchView } from './ResearchView.tsx'
 import { BenchmarkView } from './BenchmarkView.tsx'
 import { ModelView } from './ModelView.tsx'
-import { TasksView } from './TasksView.tsx'
+import { TasksView, type NavigationRequest } from './TasksView.tsx'
+import { ManuscriptImportWorkspace, ProjectArchiveWorkspace } from './TransferWorkspaces.tsx'
 import { useWorkbench, workbenchStore } from './WorkbenchStore.ts'
+import { createNovelWorkspace, initWorkspaceProject, useBindStudioContext, type StudioPanelInjected } from './workspace-context.ts'
 import css from './Workbench.module.css'
 
 type OperationsMode = 'tasks' | 'benchmark' | 'models' | 'research' | 'transfer'
-type ExportFormat = 'md' | 'txt' | 'epub'
 
-interface ImportPlan {
-  filename: string
-  arc_id: string
-  start_number: number
-  chapter_count: number
-  writing_units: number
-  conflicts: string[]
-  can_import: boolean
+export type OperationsViewProps = ConvViewProps & InjectFace<StudioPanelInjected> & PropsLocale<'studio-panel'>
+
+function ExportPreflightCard({ preflight, t }: { preflight: ExportPreflightDto; t: OperationsViewProps['t'] }) {
+  const chapters = new Map(preflight.chapters.map(chapter => [chapter.chapter_id, chapter]))
+  const duplicateRows = Object.entries(preflight.structure.duplicates)
+    .filter(([, ids]) => ids.length > 0)
+    .map(([number, ids]) => `${number}: ${ids.join(', ')}`)
+  const structureRows = [
+    [t('tools.export.structure.duplicates'), duplicateRows],
+    [t('tools.export.structure.missing'), preflight.structure.missing],
+    [t('tools.export.structure.empty'), preflight.structure.empty],
+    [t('tools.export.structure.unreadable'), preflight.structure.unreadable],
+  ] as const
+  const reviewRows = [
+    [t('tools.export.reviews.missing'), preflight.reviews.missing],
+    [t('tools.export.reviews.current'), preflight.reviews.current],
+    [t('tools.export.reviews.stale'), preflight.reviews.stale],
+    [t('tools.export.reviews.approved'), preflight.reviews.approved],
+    [t('tools.export.reviews.notApproved'), preflight.reviews.not_approved],
+  ] as const
+  const ratio = preflight.writing_units.completion_ratio
+
+  return <article className={css.exportPreflight} data-ready={preflight.can_export}>
+    <header className={css.exportPreflightHeader}>
+      <strong>{t('tools.export.preflight')}</strong>
+      <span data-ready={preflight.can_export}>{preflight.can_export ? t('tools.export.ready') : t('tools.export.blocked')}</span>
+      <code>{t('tools.export.revision')}: <b>{preflight.preflight_revision}</b></code>
+    </header>
+    <div className={css.exportSummaryGrid}>
+      <section>
+        <h3>{t('tools.export.writingUnits')}</h3>
+        <dl>
+          <div><dt>{t('tools.export.total')}</dt><dd>{preflight.writing_units.total.toLocaleString()}</dd></div>
+          <div><dt>{t('tools.export.bookTarget')}</dt><dd>{preflight.writing_units.book_target.toLocaleString()}</dd></div>
+          <div><dt>{t('tools.export.chapterTarget')}</dt><dd>{preflight.writing_units.chapter_target.toLocaleString()}</dd></div>
+          <div><dt>{t('tools.export.completion')}</dt><dd>{ratio === null ? '—' : `${(ratio * 100).toFixed(1)}%`}</dd></div>
+        </dl>
+      </section>
+      <section>
+        <h3>{t('tools.export.metadata')}</h3>
+        <dl>
+          <div><dt>{t('tools.export.metadata.title')}</dt><dd>{preflight.metadata.title || '—'}</dd></div>
+          <div><dt>{t('tools.export.metadata.author')}</dt><dd>{preflight.metadata.author || '—'}</dd></div>
+          <div><dt>{t('tools.export.metadata.language')}</dt><dd>{preflight.metadata.language || '—'}</dd></div>
+        </dl>
+      </section>
+      <section>
+        <h3>{t('tools.export.acceptance')}</h3>
+        <dl>
+          <div><dt>{t('tools.export.status')}</dt><dd>{preflight.manuscript_acceptance.status || '—'}</dd></div>
+          <div><dt>{t('tools.export.acceptance.blockingState')}</dt><dd>{preflight.manuscript_acceptance.blocking ? t('tools.export.blocked') : t('tools.export.clear')}</dd></div>
+          <div><dt>{t('tools.export.acceptance.blocking')}</dt><dd>{preflight.manuscript_acceptance.blocking_chapters.join(', ') || '—'}</dd></div>
+          <div><dt>{t('tools.export.acceptance.needsReview')}</dt><dd>{preflight.manuscript_acceptance.needs_review.join(', ') || '—'}</dd></div>
+        </dl>
+      </section>
+    </div>
+    <section className={css.exportDetailSection}>
+      <h3>{t('tools.export.order')}</h3>
+      {preflight.actual_order.length === 0
+        ? <p>{t('tools.export.orderEmpty')}</p>
+        : <ol className={css.exportChapterList}>{preflight.actual_order.map((chapterId, index) => {
+            const chapter = chapters.get(chapterId)
+            return <li key={`${chapterId}-${String(index)}`} data-empty={chapter?.empty === true}>
+              <b>{chapterId}</b>
+              <strong>{chapter?.title || '—'}</strong>
+              <span>{chapter?.path || '—'}</span>
+              <small>{chapter?.writing_units.toLocaleString() ?? '0'} {t('tools.export.units')}</small>
+            </li>
+          })}</ol>}
+    </section>
+    <div className={css.exportSummaryGrid}>
+      <section>
+        <h3>{t('tools.export.structure')}</h3>
+        {structureRows.every(([, values]) => values.length === 0)
+          ? <p>{t('tools.export.clear')}</p>
+          : <dl>{structureRows.filter(([, values]) => values.length > 0).map(([label, values]) =>
+              <div key={label}><dt>{label}</dt><dd>{values.join(' · ')}</dd></div>)}</dl>}
+      </section>
+      <section>
+        <h3>{t('tools.export.reviews')}</h3>
+        <dl>{reviewRows.map(([label, values]) =>
+          <div key={label}><dt>{label}</dt><dd>{values.join(', ') || '—'}</dd></div>)}</dl>
+      </section>
+    </div>
+    <div className={css.exportIssues}>
+      <section data-kind="blocker">
+        <h3>{t('tools.export.blockers')}</h3>
+        {preflight.blockers.length === 0 ? <p>{t('tools.export.none')}</p> : <ul>{preflight.blockers.map((issue, index) =>
+          <li key={`${issue.code}-${String(index)}`}><code>{issue.code}</code><span>{issue.message}</span></li>)}</ul>}
+      </section>
+      <section data-kind="warning">
+        <h3>{t('tools.export.warnings')}</h3>
+        {preflight.warnings.length === 0 ? <p>{t('tools.export.none')}</p> : <ul>{preflight.warnings.map((issue, index) =>
+          <li key={`${issue.code}-${String(index)}`}><code>{issue.code}</code><span>{issue.message}</span></li>)}</ul>}
+      </section>
+    </div>
+  </article>
 }
-
-export type OperationsViewProps = ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
 
 /** Background jobs plus the less frequent transfer/maintenance commands. */
 export function OperationsView(props: OperationsViewProps) {
   const [mode, setMode] = useState<OperationsMode>('tasks')
+  const [resultTarget, setResultTarget] = useState<NavigationRequest | null>(null)
   const workbench = useWorkbench()
+  useBindStudioContext({ sessionId: props.sessionId, useWorkspaces: props.useWorkspaces })
   const items = [
     { id: 'tasks' as const, icon: ListTodo, label: props.t('view.tasks') },
     { id: 'benchmark' as const, icon: Gauge, label: props.t('view.benchmark') },
@@ -44,91 +135,129 @@ export function OperationsView(props: OperationsViewProps) {
       </button>)}
     </nav>
     <section className={css.workspaceContent}>
-      {mode === 'tasks' && <TasksView key={workbench.epochs.tasks} {...props} />}
-      {mode === 'benchmark' && <BenchmarkView key={workbench.epochs.benchmark} {...props} />}
-      {mode === 'models' && <ModelView key={workbench.epochs.models} {...props} />}
-      {mode === 'research' && <ResearchView key={workbench.epochs.research} {...props} />}
+      {mode === 'tasks' && <TasksView key={workbench.epochs.tasks} {...props} onNavigate={target => { setResultTarget(target); setMode(target.view) }} />}
+      {mode === 'benchmark' && <BenchmarkView key={workbench.epochs.benchmark} {...props} initialRunId={resultTarget?.view === 'benchmark' ? resultTarget.id : ''} />}
+      {mode === 'models' && <ModelView {...props} />}
+      {mode === 'research' && <ResearchView key={workbench.epochs.research} {...props} initialReportId={resultTarget?.view === 'research' ? resultTarget.id : ''} />}
       {mode === 'transfer' && <TransferPanel {...props} />}
     </section>
   </div>
 }
 
-function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps) {
+function TransferPanel(props: OperationsViewProps) {
+  const { fetchStudioApi, postStudioApi, workspaces, sessions, t } = props
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
-  const [importFile, setImportFile] = useState<{ filename: string; content: string } | null>(null)
-  const [plan, setPlan] = useState<ImportPlan | null>(null)
-  const [startNumber, setStartNumber] = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [currentProject, setCurrentProject] = useState('')
-  const [projectPath, setProjectPath] = useState('')
-  const [projects, setProjects] = useState<{ path: string; title: string; novel_id: string }[]>([])
+  const workbench = useWorkbench()
+  const workspace = useBindStudioContext({ sessionId: props.sessionId, useWorkspaces: props.useWorkspaces })
+  const notInitialized = workbench.workspaceError === 'WORKSPACE_NOT_INITIALIZED'
+  const [initNovelId, setInitNovelId] = useState('')
+  const [initTitle, setInitTitle] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [newNovelId, setNewNovelId] = useState('')
   const [newTitle, setNewTitle] = useState('')
-  const [newPath, setNewPath] = useState('')
+  const [exportFormat, setExportFormat] = useState<ExportFormatDto>('md')
+  const [exportPurpose, setExportPurpose] = useState<ExportPurposeDto>('delivery')
+  const [preflight, setPreflight] = useState<ExportPreflightDto | null>(null)
+  const [preflightState, setPreflightState] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
+  const [preflightError, setPreflightError] = useState('')
+  const [preflightReload, setPreflightReload] = useState(0)
 
-  const loadProjects = useCallback(() => {
-    fetchStudioApi('/project/list').then((data: unknown) => {
-      if (Array.isArray(data)) setProjects(data as { path: string; title: string; novel_id: string }[])
-    }).catch(() => {})
-    fetchStudioApi('/workspace').then((data: unknown) => {
-      const ws = data as { project?: { title?: string } }
-      if (ws.project?.title) setCurrentProject(ws.project.title)
-    }).catch(() => {})
-  }, [fetchStudioApi])
+  const say = useCallback((text: string, bad = false) => setNote({ text, bad }), [])
 
-  useEffect(() => { loadProjects() }, [loadProjects])
-
-  const say = (text: string, bad = false) => setNote({ text, bad })
-
-  const doSwitch = async (path: string) => {
-    if (path === '' || busy !== '') return
-    setBusy('switch')
-    try {
-      await postStudioApi('/project/open', { project_path: path })
-      say(t('operations.switch.done'))
-      window.location.reload()
-    } catch (cause: unknown) {
-      say(`${t('operations.switch.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
-      setBusy('')
+  useEffect(() => {
+    if (workspace === undefined || notInitialized) {
+      setPreflight(null)
+      setPreflightState('idle')
+      return
     }
-  }
+    let current = true
+    setPreflight(null)
+    setPreflightState('loading')
+    setPreflightError('')
+    const query = new URLSearchParams({ format: exportFormat, purpose: exportPurpose })
+    void fetchStudioApi(`/export/preflight?${query.toString()}`).then(value => {
+      if (!current) return
+      const result = parseExportPreflight(value)
+      if (result.schema_version !== 'openwrite.export-preflight.v1' || result.preflight_revision === '') {
+        throw new Error(t('tools.export.unavailable'))
+      }
+      if (result.format !== exportFormat || result.purpose !== exportPurpose) {
+        throw new Error(t('tools.export.unavailable'))
+      }
+      setPreflight(result)
+      setPreflightState('ready')
+    }).catch((cause: unknown) => {
+      if (!current) return
+      setPreflight(null)
+      setPreflightState('failed')
+      setPreflightError(cause instanceof Error ? cause.message : String(cause))
+    })
+    return () => { current = false }
+  }, [exportFormat, exportPurpose, fetchStudioApi, notInitialized, preflightReload, t, workspace?.workspaceId])
 
-  const switchProject = async () => {
-    if (projectPath.trim() !== '') void doSwitch(projectPath.trim())
-  }
-
-  const createProject = async () => {
-    if (busy !== '' || newNovelId.trim() === '' || newTitle.trim() === '') return
-    setBusy('create')
+  /** Onboarding for a bound-but-uninitialized Workspace (contract §5: init pins the context root). */
+  const initProject = async () => {
+    if (workspace === undefined || busy !== '' || initNovelId.trim() === '' || initTitle.trim() === '') return
+    setBusy('init')
     try {
-      await postStudioApi('/project/init', {
-        project_path: newPath.trim() || newNovelId.trim(),
-        novel_id: newNovelId.trim(),
-        title: newTitle.trim(),
+      await initWorkspaceProject(postStudioApi, workspace.path, {
+        novelId: initNovelId.trim(),
+        title: initTitle.trim(),
       })
-      say(t('operations.create.done').replace('{title}', newTitle.trim()))
-      setShowCreate(false)
-      setNewNovelId('')
-      setNewTitle('')
-      setNewPath('')
-      loadProjects()
-      window.location.reload()
+      say(t('operations.create.done').replace('{title}', initTitle.trim()))
+      setInitNovelId('')
+      setInitTitle('')
     } catch (cause: unknown) {
       say(`${t('operations.create.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
     } finally { setBusy('') }
   }
 
-  const runExport = async (format: ExportFormat) => {
-    setBusy(`export-${format}`)
+  /** New-work flow: native directory pick → workspace create → init → connect (see workspace-context.ts). */
+  const createNovel = async () => {
+    if (busy !== '' || newNovelId.trim() === '' || newTitle.trim() === '') return
+    setBusy('create')
     try {
-      const response = await fetch(`${API_PROXY_BASE}/export?format=${format}`)
-      if (!response.ok) throw new Error(await response.text())
+      const result = await createNovelWorkspace({ workspaces, sessions }, postStudioApi, {
+        novelId: newNovelId.trim(),
+        title: newTitle.trim(),
+      })
+      if (result === 'created') {
+        say(t('operations.create.done').replace('{title}', newTitle.trim()))
+        setShowCreate(false)
+        setNewNovelId('')
+        setNewTitle('')
+      }
+    } catch (cause: unknown) {
+      say(`${t('operations.create.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
+    } finally { setBusy('') }
+  }
+
+  const runExport = async () => {
+    if (preflight === null || preflightState !== 'ready' || !preflight.can_export || preflight.preflight_revision === '') return
+    const revision = preflight.preflight_revision
+    setBusy(`export-${exportFormat}`)
+    try {
+      const query = new URLSearchParams({
+        format: exportFormat,
+        purpose: exportPurpose,
+        preflight_revision: revision,
+      })
+      const response = await fetch(`${API_PROXY_BASE}/export?${query.toString()}`, { headers: studioContextHeaders() })
+      if (!response.ok) {
+        if (response.status === 409) {
+          setPreflight(null)
+          setPreflightState('loading')
+          setPreflightReload(value => value + 1)
+          say(t('tools.export.stale'), true)
+          return
+        }
+        throw new Error(await response.text())
+      }
       const blob = await response.blob()
       const disposition = response.headers.get('content-disposition') ?? ''
       const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)
-      const name = match?.[1] !== undefined ? decodeURIComponent(match[1]) : `book.${format}`
+      const name = match?.[1] !== undefined ? decodeURIComponent(match[1]) : `book.${exportFormat}`
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
@@ -139,6 +268,18 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
     } catch (cause: unknown) {
       say(`${t('tools.export.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
     } finally { setBusy('') }
+  }
+
+  const selectPurpose = (purpose: ExportPurposeDto) => {
+    if (purpose === exportPurpose) return
+    setPreflight(null)
+    setExportPurpose(purpose)
+  }
+
+  const selectFormat = (format: ExportFormatDto) => {
+    if (format === exportFormat) return
+    setPreflight(null)
+    setExportFormat(format)
   }
 
   const runSync = async () => {
@@ -152,76 +293,31 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
     } finally { setBusy('') }
   }
 
-  const chooseFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (file === undefined) return
-    const content = await file.text()
-    if (content.trim() === '') {
-      say(t('tools.import.empty'), true)
-      return
-    }
-    setImportFile({ filename: file.name, content })
-    setPlan(null)
-  }
-
-  const preview = async () => {
-    if (importFile === null) return
-    setBusy('preview')
-    try {
-      const result = await postStudioApi('/import/preview', {
-        ...importFile,
-        ...(startNumber !== '' ? { start_number: startNumber } : {}),
-      })
-      setPlan(result as ImportPlan)
-    } catch (cause: unknown) {
-      say(`${t('tools.import.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
-    } finally { setBusy('') }
-  }
-
-  const executeImport = async () => {
-    if (importFile === null || plan === null) return
-    const force = plan.conflicts.length > 0
-    if (force && !window.confirm(t('tools.import.force'))) return
-    setBusy('import')
-    try {
-      const result = await postStudioApi('/import', {
-        ...importFile,
-        ...(startNumber !== '' ? { start_number: startNumber } : {}),
-        ...(force ? { force: true } : {}),
-      }) as ImportPlan
-      say(t('tools.import.done').replace('{count}', String(result.chapter_count)).replace('{start}', String(result.start_number)))
-      setPlan(null)
-      setImportFile(null)
-      if (fileRef.current !== null) fileRef.current.value = ''
-      workbenchStore.invalidate('workspace')
-      workbenchStore.invalidate('outline')
-    } catch (cause: unknown) {
-      say(`${t('tools.import.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)
-    } finally { setBusy('') }
-  }
-
   return <div className={css.transferPanel}>
     <header><h2>{t('operations.transfer')}</h2><p>{t('operations.transferHint')}</p></header>
     {note !== null && <div className={css.operationNote} data-bad={note.bad}>{note.text}</div>}
     <section className={css.operationSection}>
       <div><strong>{t('operations.project')}</strong></div>
       <div className={css.projectSwitchRow}>
-        <span className={css.projectCurrent}>{currentProject || '—'}</span>
-        <select value={projectPath} onChange={e => { setProjectPath(e.target.value); void doSwitch(e.target.value) }}>
-          <option value="">{t('operations.switch.select')}</option>
-          {projects.filter(p => p.title !== currentProject).map(p => (
-            <option key={p.path} value={p.path}>{p.title}</option>
-          ))}
-        </select>
-        {projectPath !== '' && (
-          <button type="button" className={css.commandButton} disabled={busy !== ''}
-            onClick={() => void switchProject()}>{t('operations.switch')}</button>
-        )}
+        <span className={css.projectCurrent}>{workspace?.title ?? t('workspace.unbound')}</span>
+        {workspace !== undefined && <span className={css.projectPath}>{workspace.path}</span>}
         <button type="button" className={css.actionButton} disabled={busy !== ''}
           onClick={() => { setShowCreate(previous => !previous) }}>
           {showCreate ? t('operations.cancel') : t('operations.create.new')}
         </button>
       </div>
+      {notInitialized && workspace !== undefined && (
+        <div className={css.projectSwitchRow}>
+          <span>{t('operations.init.hint')}</span>
+          <label>{t('operations.create.id')}<input value={initNovelId} placeholder="my-novel"
+            onChange={e => setInitNovelId(e.target.value)} /></label>
+          <label>{t('operations.create.title')}<input value={initTitle}
+            placeholder={t('operations.create.titleHint')}
+            maxLength={120} onChange={e => setInitTitle(e.target.value)} /></label>
+          <button type="button" className={css.commandButton} disabled={busy !== '' || initNovelId.trim() === '' || initTitle.trim() === ''}
+            onClick={() => void initProject()}>{t('operations.init.submit')}</button>
+        </div>
+      )}
       {showCreate && (
         <div className={css.projectSwitchRow}>
           <label>{t('operations.create.id')}<input value={newNovelId} placeholder="my-novel"
@@ -229,18 +325,37 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
           <label>{t('operations.create.title')}<input value={newTitle}
             placeholder={t('operations.create.titleHint')}
             maxLength={120} onChange={e => setNewTitle(e.target.value)} /></label>
-          <label>{t('operations.create.path')}<input value={newPath}
-            placeholder={t('operations.create.pathHint')}
-            onChange={e => setNewPath(e.target.value)} /></label>
           <button type="button" className={css.commandButton} disabled={busy !== '' || newNovelId.trim() === '' || newTitle.trim() === ''}
-            onClick={() => void createProject()}>{t('operations.create.submit')}</button>
+            onClick={() => void createNovel()}>{t('operations.create.submit')}</button>
+          <span>{t('operations.create.pickHint')}</span>
         </div>
       )}
     </section>
     <section className={css.operationSection}>
       <div><Download size={18} /><strong>{t('tools.export')}</strong></div>
-      <span>{(['md', 'txt', 'epub'] as const).map(format => <button key={format} type="button" className={css.commandButton}
-        disabled={busy !== ''} onClick={() => void runExport(format)}>{format.toUpperCase()}</button>)}</span>
+      <div className={css.exportWorkspace}>
+        <div className={css.exportControls}>
+          <span className={css.exportPurpose} role="group" aria-label={t('tools.export.purpose')}>
+            {(['delivery', 'backup'] as const).map(purpose => <button key={purpose} type="button" className={css.actionButton}
+              data-active={exportPurpose === purpose} disabled={busy !== ''}
+              onClick={() => selectPurpose(purpose)}>{t(`tools.export.purpose.${purpose}`)}</button>)}
+          </span>
+          <label>{t('tools.export.format')}
+            <select aria-label={t('tools.export.format')} value={exportFormat} disabled={busy !== ''}
+              onChange={event => selectFormat(event.target.value as ExportFormatDto)}>
+              {(['md', 'txt', 'epub'] as const).map(format => <option key={format} value={format}>{format.toUpperCase()}</option>)}
+            </select>
+          </label>
+          <button type="button" className={css.actionButton} disabled={busy !== '' || preflightState === 'loading'}
+            onClick={() => setPreflightReload(value => value + 1)}><RefreshCw size={13} />{t('tools.export.refresh')}</button>
+          <button type="button" className={css.commandButton}
+            disabled={busy !== '' || preflightState !== 'ready' || preflight?.can_export !== true || preflight.preflight_revision === ''}
+            onClick={() => void runExport()}>{t('tools.export.download')}</button>
+        </div>
+        {preflightState === 'loading' && <p className={css.exportState}>{t('tools.export.loading')}</p>}
+        {preflightState === 'failed' && <p className={css.exportState} data-bad="true">{t('tools.export.unavailable')}: {preflightError}</p>}
+        {preflight !== null && <ExportPreflightCard preflight={preflight} t={t} />}
+      </div>
     </section>
     <section className={css.operationSection}>
       <div><RefreshCw size={18} /><strong>{t('tools.sync')}</strong></div>
@@ -248,18 +363,15 @@ function TransferPanel({ fetchStudioApi, postStudioApi, t }: OperationsViewProps
     </section>
     <section className={css.operationSection}>
       <div><FileUp size={18} /><strong>{t('tools.import')}</strong></div>
-      <input ref={fileRef} type="file" accept=".md,.markdown,.txt" onChange={event => void chooseFile(event)} />
-      <label>{t('tools.import.start')}<input value={startNumber} inputMode="numeric" placeholder={t('tools.import.startAuto')}
-        onChange={event => setStartNumber(event.target.value.replace(/[^0-9]/g, ''))} /></label>
-      <button type="button" className={css.commandButton} disabled={busy !== '' || importFile === null} onClick={() => void preview()}>{t('tools.import.preview')}</button>
-      {plan !== null && <div className={css.importPlan}>
-        <span>{t('tools.import.plan').replace('{count}', String(plan.chapter_count)).replace('{units}', String(plan.writing_units))
-          .replace('{start}', String(plan.start_number)).replace('{arc}', plan.arc_id)}</span>
-        {plan.conflicts.length > 0 && <span>{t('tools.import.conflicts').replace('{ids}', plan.conflicts.join(', '))}</span>}
-        <button type="button" className={css.commandButton} onClick={() => void executeImport()}>
-          {plan.conflicts.length > 0 ? t('tools.import.force') : t('tools.import.confirm')}
-        </button>
-      </div>}
+      <ManuscriptImportWorkspace fetchStudioApi={fetchStudioApi} postStudioApi={postStudioApi} t={t}
+        busy={busy} setBusy={setBusy} say={say} workspaceReady={workspace !== undefined && !notInitialized}
+        tasksEpoch={workbench.epochs.tasks} workspaceEpoch={workbench.epochs.workspace} />
+    </section>
+    <section className={css.operationSection}>
+      <div><strong>{t('tools.archive.title')}</strong></div>
+      <ProjectArchiveWorkspace fetchStudioApi={fetchStudioApi} postStudioApi={postStudioApi} workspaces={workspaces} t={t}
+        busy={busy} setBusy={setBusy} say={say} workspaceReady={workspace !== undefined && !notInitialized}
+        tasksEpoch={workbench.epochs.tasks} workspaceEpoch={workbench.epochs.workspace} />
     </section>
     <a className={css.externalLink} href="http://127.0.0.1:4567" target="_blank" rel="noreferrer">
       <ExternalLink size={15} />{t('openExternal')}

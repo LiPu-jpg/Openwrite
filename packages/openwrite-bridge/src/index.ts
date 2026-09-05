@@ -8,6 +8,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import Schema from '@deepseek-ai/schemastery'
 import { NovelDomainService } from './domain.js'
 import { registerNovelTools } from './tools.js'
@@ -31,7 +32,16 @@ export const Config: Schema<Config> = Schema.object({
 })
 
 export function apply(ctx: Context, config: Config) {
-  const domain = new NovelDomainService(ctx, { baseUrl: config.baseUrl, timeoutMs: config.timeoutMs })
-  registerNovelTools(ctx, domain.client, { timeoutMs: config.timeoutMs, outputDir: config.outputDir })
+  // The web host process mounts ctx.workspaceRegistry. Resolve it lazily on
+  // every call: plugin start order must not strand the lookup, an absent
+  // registry (null) fails closed in the domain, and ctx.inject(['webServer',
+  // ...]) would silently never fire if we inject-required a second service.
+  const resolveWorkspace = (workspaceId: string): string | undefined | null => {
+    const registry = ctx.get('workspaceRegistry')
+    if (registry === undefined) return null
+    return registry.get(workspaceId as WorkspaceId)?.path
+  }
+  const domain = new NovelDomainService(ctx, { baseUrl: config.baseUrl, timeoutMs: config.timeoutMs, resolveWorkspace })
+  registerNovelTools(ctx, domain.clientFactory(), { timeoutMs: config.timeoutMs, outputDir: config.outputDir })
   ctx.inject(['webServer'], webCtx => domain.registerWebRoutes(webCtx))
 }

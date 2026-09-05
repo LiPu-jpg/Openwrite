@@ -25,6 +25,7 @@ const MUTATIONS: Readonly<Record<string, ResourceKey>> = {
   novel_write_chapter: 'manuscript',
   novel_doc_write: 'manuscript',
   novel_chapter_delete: 'manuscript',
+  novel_chapter_delete_batch: 'manuscript',
   novel_manuscript_edit_action: 'manuscript',
   novel_outline_edit: 'outline',
   novel_asset_create: 'assets',

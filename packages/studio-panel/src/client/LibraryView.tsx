@@ -9,6 +9,7 @@ import { OutlineView } from './OutlineView.tsx'
 import { ResearchView } from './ResearchView.tsx'
 import { SearchView } from './SearchView.tsx'
 import { useWorkbench } from './WorkbenchStore.ts'
+import { useBindStudioContext } from './workspace-context.ts'
 import css from './Workbench.module.css'
 
 type LibraryMode = 'assets' | 'outline' | 'graph' | 'research' | 'search'
@@ -19,6 +20,7 @@ export type LibraryViewProps = ConvViewProps & InjectFace<StudioApiInjected> & P
 export function LibraryView(props: LibraryViewProps) {
   const [mode, setMode] = useState<LibraryMode>('assets')
   const workbench = useWorkbench()
+  useBindStudioContext({ sessionId: props.sessionId, useWorkspaces: props.useWorkspaces })
   const items = [
     { id: 'assets' as const, icon: Boxes, label: props.t('view.assets') },
     { id: 'outline' as const, icon: BookMarked, label: props.t('view.outline') },

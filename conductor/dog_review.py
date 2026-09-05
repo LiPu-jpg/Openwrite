@@ -17,25 +17,20 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from tools.review_dag_framework import instantiate_review_dag, review_dag_framework
+from tools.review_rubric import DIMENSION_NAMES, QUALITY_DOMAINS
 
-DIMENSION_NAMES: dict[int, str] = {
-    1: "OOC检查", 2: "时间线检查", 3: "设定冲突", 4: "战力崩坏", 5: "数值检查",
-    6: "伏笔检查", 7: "节奏检查", 8: "文风检查", 9: "信息越界", 10: "词汇疲劳",
-    11: "利益链断裂", 12: "年代考据", 13: "配角降智", 14: "配角工具人化", 15: "爽点虚化",
-    16: "台词失真", 17: "流水账", 18: "知识库污染", 19: "视角一致性", 20: "段落等长",
-    21: "套话密度", 22: "公式化转折", 23: "列表式结构", 24: "支线停滞", 25: "弧线平坦",
-    26: "节奏单调", 27: "敏感词检查", 28: "正传事件冲突", 29: "未来信息泄露",
-    30: "世界规则跨书一致性", 31: "番外伏笔隔离", 32: "读者期待管理", 33: "大纲偏离检测",
-    34: "角色还原度", 35: "世界规则遵守", 36: "关系动态", 37: "正典事件一致性",
-}
 
-REVIEW_DOMAINS: tuple[dict[str, Any], ...] = (
-    {"id": "coherence", "name": "连贯与逻辑", "weight": 20, "legacyCheckIds": [2, 3, 4, 5, 9, 11, 35]},
-    {"id": "character", "name": "角色与关系", "weight": 15, "legacyCheckIds": [1, 13, 14, 16, 34, 36]},
-    {"id": "plot", "name": "情节与承诺", "weight": 20, "legacyCheckIds": [6, 15, 24, 25, 32, 33]},
-    {"id": "pacing", "name": "节奏与场景", "weight": 15, "legacyCheckIds": [7, 17, 26]},
-    {"id": "prose", "name": "文风与表达", "weight": 15, "legacyCheckIds": [8, 10, 19, 20, 21, 22, 23]},
-    {"id": "canon", "name": "正典与资料", "weight": 15, "legacyCheckIds": [12, 18, 28, 29, 30, 31, 37]},
+# Compatibility projection for the existing v2 artifact records. Membership,
+# names, and weights now come from OpenWrite's canonical rubric.
+REVIEW_DOMAINS: tuple[dict[str, Any], ...] = tuple(
+    {
+        "id": domain.id,
+        "name": domain.name,
+        "weight": domain.weight,
+        "legacyCheckIds": sorted(domain.legacy_check_ids),
+    }
+    for domain in QUALITY_DOMAINS
 )
 
 HARD_SEVERITIES = {"critical", "blocker"}
@@ -329,7 +324,11 @@ def write_review_artifacts(
     """Persist review records and return a model-free DoG-compatible graph."""
     workspace = studio.get("/api/workspace")
     root, novel_id = _workspace_project(workspace)
+    framework = review_dag_framework()
     manifest, dimensions = build_review_manifest(review, chapter_id, threshold)
+    manifest["frameworkId"] = framework["id"]
+    manifest["frameworkVersion"] = framework["version"]
+    manifest["frameworkRevision"] = framework["revision"]
     current_revision = _manuscript_revision(root, novel_id, chapter_id)
     source_revision = str(manifest.get("sourceRevision") or current_revision)
     manifest["sourceRevision"] = source_revision
@@ -340,6 +339,7 @@ def write_review_artifacts(
         manifest["deliveryStatus"] = "stale"
 
     relative_dir = Path("data") / "novels" / novel_id / "data" / "dog" / "reviews" / chapter_id
+    graph = instantiate_review_dag(chapter_id, relative_dir.as_posix(), framework=framework)
     artifact_dir = root / relative_dir
     _atomic_write_json(artifact_dir / "review.json", manifest)
     _atomic_write_json(artifact_dir / "context.json", {
@@ -368,74 +368,14 @@ def write_review_artifacts(
         _atomic_write_json(artifact_dir / f"dim_{number:02d}.json", record)
 
     target = lambda name: str((relative_dir / name).as_posix())
-    domain_ids = [f"domain-{spec['id']}" for spec in REVIEW_DOMAINS]
-    nodes: dict[str, dict[str, Any]] = {
-        "root": {
-            "kind": "composite", "title": f"{chapter_id} 评审 DAG", "constraint": "hard",
-            "target": target("review.json"),
-            "completion": {"op": "all", "items": [
-                {"op": "ref", "id": item} for item in ["context", *domain_ids, "gate", "aggregate"]
-            ]},
-            "verifier": {"mode": "programmatic", "script": "review-record"},
-        },
-        "context": {
-            "kind": "leaf", "title": "上下文完整性", "constraint": "hard",
-            "target": target("context.json"), "verifier": {"mode": "programmatic", "script": "review-record"},
-        },
-        "gate": {
-            "kind": "composite", "title": "硬门禁", "constraint": "hard", "target": target("gate.json"),
-            "completion": {"op": "all", "items": [{"op": "ref", "id": "dim-27"}]},
-            "verifier": {"mode": "programmatic", "script": "review-record"},
-        },
-        "aggregate": {
-            "kind": "leaf", "title": "聚合与交付判定", "constraint": "hard", "target": target("aggregate.json"),
-            "verifier": {"mode": "programmatic", "script": "review-record"},
-        },
-    }
-    contains: list[dict[str, Any]] = [
-        {"parent": "root", "child": child, "required": True, "failure": "fatal"}
-        for child in ["context", *domain_ids, "gate", "aggregate"]
-    ]
-    for spec in REVIEW_DOMAINS:
-        domain_id = f"domain-{spec['id']}"
-        nodes[domain_id] = {
-            "kind": "composite", "title": spec["name"], "constraint": "soft",
-            "target": target(f"domain_{spec['id']}.json"),
-            "completion": {"op": "all", "items": [
-                {"op": "ref", "id": f"dim-{number:02d}"} for number in spec["legacyCheckIds"]
-            ]},
-            "verifier": {"mode": "programmatic", "script": "review-record"},
-        }
-        for number in spec["legacyCheckIds"]:
-            node_id = f"dim-{number:02d}"
-            nodes[node_id] = {
-                "kind": "leaf", "title": f"{number}. {DIMENSION_NAMES[number]}", "constraint": "soft",
-                "target": target(f"dim_{number:02d}.json"),
-                "verifier": {"mode": "programmatic", "script": "review-dimension"},
-            }
-            contains.append({"parent": domain_id, "child": node_id, "required": True, "failure": "warn"})
-    nodes["dim-27"] = {
-        "kind": "leaf", "title": "27. 敏感词检查", "constraint": "hard",
-        "target": target("dim_27.json"), "verifier": {"mode": "programmatic", "script": "review-dimension"},
-    }
-    contains.append({"parent": "gate", "child": "dim-27", "required": True, "failure": "fatal"})
-    depends_on = [
-        {"source": f"domain-{spec['id']}", "target": "context", "data": ["review-context"]}
-        for spec in REVIEW_DOMAINS
-    ]
-    depends_on.append({"source": "gate", "target": "context", "data": ["review-context"]})
-    depends_on.extend([
-        {"source": "aggregate", "target": f"domain-{spec['id']}", "data": ["domain-result"]}
-        for spec in REVIEW_DOMAINS
-    ])
-    depends_on.append({"source": "aggregate", "target": "gate", "data": ["gate-result"]})
-    graph = {
-        "schemaVersion": "0.9", "id": f"novel-review-{chapter_id}", "root": "root",
-        "nodes": nodes, "contains": contains, "dependsOn": depends_on,
-    }
     graph_path = artifact_dir / "dog-graph.json"
     _atomic_write_json(graph_path, graph)
     return {
         "manifest": target("review.json"), "directory": str(artifact_dir), "graph_path": str(graph_path),
         "graph": graph, "dimensions": len(dimensions), "domains": len(REVIEW_DOMAINS),
+        "framework": {
+            "id": framework["id"],
+            "version": framework["version"],
+            "revision": framework["revision"],
+        },
     }

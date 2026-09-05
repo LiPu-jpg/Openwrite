@@ -11,5 +11,7 @@ dist/
 *.log
 .DS_Store
 packages/studio-panel/.pw-browsers/
+# Playwright runtime installed by the root-level E2E command.
+.pw-browsers/
 packages/studio-panel/test-results/
 packages/studio-panel/playwright-report/

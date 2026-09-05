@@ -39,27 +39,16 @@
  * (per-chapter pipeline stages). All read-only.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
+import { API_PROXY_BASE, studioContextHeaders } from './api.ts'
+import { storageKey } from './storage.ts'
 import { useWorkbench } from './WorkbenchStore.ts'
-import ELK from 'elkjs/lib/elk.bundled.js'
 import { ReviewDagView } from './DagCanvas.tsx'
-import {
-  Background,
-  BackgroundVariant,
-  Controls,
-  MarkerType,
-  ReactFlow,
-  useEdgesState,
-  useNodesState,
-  type Edge,
-  type Node,
-  type ReactFlowInstance,
-} from '@xyflow/react'
-import 'dsh-react-flow-style'
+import * as d3 from 'd3'
 import css from './views.module.css'
 
 interface ForeshadowNode {
@@ -269,10 +258,10 @@ function layoutForeshadow(nodes: readonly ForeshadowNode[]): { placed: PlacedFor
   }
 }
 
-/* --- relationship layout: deterministic force-directed seed for React Flow --- */
+/* --- relationship layout: force-directed seed for the interactive canvas --- */
 
-const REL_NODE_W = 156
-const REL_NODE_H = 52
+const REL_CANVAS_MIN = 560
+const RELATION_POSITIONS_KEY = 'dsh-novel.relationPositions.v2'
 /** Node-kind chip order; kinds outside this list bucket into 'other'. */
 const REL_KIND_ORDER = ['character', 'faction', 'place', 'concept'] as const
 
@@ -283,46 +272,6 @@ function relationKind(kind: string): RelationKind {
   return (REL_KIND_ORDER as readonly string[]).includes(kind) ? kind as RelationKind : 'other'
 }
 
-interface PlacedRelation {
-  node: RelationNode
-  x: number
-  y: number
-}
-
-async function layoutRelations(nodes: readonly RelationNode[], edges: readonly RelationEdge[] = []): Promise<{ placed: PlacedRelation[]; size: number }> {
-  const ordered = [...nodes].sort((a, b) => a.id.localeCompare(b.id))
-  const nodeById = new Map(ordered.map(node => [node.id, node]))
-  const graph = {
-    id: 'relations',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': 'RIGHT',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '64',
-      'elk.spacing.nodeNode': '28',
-      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
-    },
-    children: ordered.map(node => ({ id: node.id, width: REL_NODE_W, height: REL_NODE_H })),
-    edges: edges.filter(edge => nodeById.has(edge.source) && nodeById.has(edge.target)).map(edge => ({
-      id: edge.id, sources: [edge.source], targets: [edge.target],
-    })),
-  }
-  try {
-    const result = await new ELK().layout(graph)
-    const placed = (result.children ?? []).flatMap(child => {
-      const node = nodeById.get(child.id)
-      return node === undefined ? [] : [{ node, x: (child.x ?? 0) + 40, y: (child.y ?? 0) + 40 }]
-    })
-    const maxX = Math.max(1, ...placed.map(item => item.x + REL_NODE_W + 40))
-    const maxY = Math.max(1, ...placed.map(item => item.y + REL_NODE_H + 40))
-    return { placed, size: Math.max(maxX, maxY) }
-  } catch {
-    const placed = ordered.map((node, index) => ({ node, x: (index % 4) * 220 + 40, y: Math.floor(index / 4) * 110 + 40 }))
-    const maxX = Math.max(1, ...placed.map(item => item.x + REL_NODE_W + 40))
-    const maxY = Math.max(1, ...placed.map(item => item.y + REL_NODE_H + 40))
-    return { placed, size: Math.max(maxX, maxY) }
-  }
-}
-
 function relationNodeColor(kind: string): string {
   if (kind === 'character') return 'business'
   if (kind === 'faction') return 'warn'
@@ -331,28 +280,25 @@ function relationNodeColor(kind: string): string {
   return 'neutral'
 }
 
-function relationNodeLabel(node: RelationNode): ReactNode {
-  return <div className={css.relationFlowNode} data-kind={relationNodeColor(node.kind)}>
-    <strong title={node.label}>{node.label}</strong>
-    <small>{node.type || node.kind || 'entity'}{node.unresolved ? ' · unresolved' : ''}</small>
-  </div>
-}
-
 interface RelationshipFlowProps {
   nodes: RelationNode[]
   edges: RelationEdge[]
   t: PropsLocale<'studio-panel'>['t']
 }
 
+interface RelationRenderNode {
+  id: string
+}
+
 function RelationshipFlow({ nodes: relationNodes, edges: relationEdges, t }: RelationshipFlowProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null)
+  const workspaceId = useWorkbench().context?.workspaceId
+  const containerRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
   const [selectedId, setSelectedId] = useState('')
-  const [moving, setMoving] = useState(false)
   const relationById = useMemo(() => new Map(relationNodes.map(node => [node.id, node])), [relationNodes])
   const selected = selectedId !== '' ? relationById.get(selectedId) : undefined
   const [selectedEdgeId, setSelectedEdgeId] = useState('')
+  const [layoutNonce, setLayoutNonce] = useState(0)
   const edgeById = useMemo(() => new Map(relationEdges.map(edge => [edge.id, edge])), [relationEdges])
   const selectedEdge = selectedEdgeId !== '' ? edgeById.get(selectedEdgeId) : undefined
   const neighbors = selected === undefined ? [] : relationEdges.flatMap(edge => {
@@ -362,73 +308,147 @@ function RelationshipFlow({ nodes: relationNodes, edges: relationEdges, t }: Rel
   })
 
   useEffect(() => {
-    let active = true
-    void layoutRelations(relationNodes, relationEdges).then(({ placed }) => {
-      if (!active) return
-      let saved: Record<string, { x: number; y: number }> = {}
-      try {
-        const raw = window.localStorage.getItem('dsh-novel.relationPositions')
-        const parsed = raw ? JSON.parse(raw) : {}
-        if (parsed !== null && typeof parsed === 'object') saved = parsed as Record<string, { x: number; y: number }>
-      } catch { /* unavailable or corrupt local storage */ }
-      const nextNodes: Node[] = placed.map(({ node, x, y }) => {
-        const position = saved[node.id]
-        return {
-          id: node.id, type: 'default', position: position && Number.isFinite(position.x) && Number.isFinite(position.y) ? position : { x, y },
-          data: { label: relationNodeLabel(node) }, className: css.relationFlowNodeShell ?? '',
-          style: { width: REL_NODE_W, minHeight: REL_NODE_H, padding: 0, border: 'none', background: 'transparent', boxShadow: 'none' },
-        }
-      })
-      const visibleIds = new Set(relationNodes.map(node => node.id))
-      const nextEdges: Edge[] = relationEdges
-        .filter(edge => visibleIds.has(edge.source) && visibleIds.has(edge.target))
-        .map(edge => ({
-          id: edge.id, source: edge.source, target: edge.target,
-          ...(edge.label === '' ? {} : { label: edge.label }), animated: false,
-          markerEnd: { type: MarkerType.ArrowClosed },
-          style: { strokeWidth: edge.confirmed ? 1.5 : 1, strokeDasharray: edge.confirmed ? undefined : '5 4' },
-        }))
-      setNodes(nextNodes)
-      setEdges(nextEdges)
-      const frame = requestAnimationFrame(() => {
-        if (flow !== null) void flow.fitView({ padding: 0.22, minZoom: 0.45, maxZoom: 1.2 })
-      })
-      window.setTimeout(() => cancelAnimationFrame(frame), 0)
-    })
-    return () => { active = false }
-  }, [flow, relationEdges, relationNodes, setEdges, setNodes])
+    const container = containerRef.current
+    const svgElement = svgRef.current
+    if (!container || !svgElement || relationNodes.length === 0) return
+    const width = Math.max(640, container.clientWidth)
+    const height = Math.max(REL_CANVAS_MIN, container.clientHeight)
+    const svg = d3.select(svgElement).attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`)
+    svg.selectAll('*').remove()
+    const defs = svg.append('defs')
+    const glow = defs.append('filter').attr('id', `relation-glow-${layoutNonce}`).attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%')
+    glow.append('feGaussianBlur').attr('stdDeviation', 4).attr('result', 'blur')
+    const merge = glow.append('feMerge')
+    merge.append('feMergeNode').attr('in', 'blur')
+    merge.append('feMergeNode').attr('in', 'SourceGraphic')
+    const root = svg.append('g')
+    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.15, 5]).on('zoom', event => root.attr('transform', event.transform))
+    svg.call(zoom)
 
+    interface SimNode extends RelationNode { x: number; y: number; fx?: number | null; fy?: number | null; linkCount: number }
+    interface SimLink { source: string | SimNode; target: string | SimNode; edge: RelationEdge }
+    const degree = new Map<string, number>()
+    relationEdges.forEach(edge => {
+      degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1)
+      degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1)
+    })
+    let saved: Record<string, { x: number; y: number }> = {}
+    try {
+      const raw = window.localStorage.getItem(storageKey(RELATION_POSITIONS_KEY, workspaceId))
+      const parsed: unknown = raw ? JSON.parse(raw) : {}
+      if (parsed !== null && typeof parsed === 'object') saved = parsed as Record<string, { x: number; y: number }>
+    } catch { /* unavailable or corrupt local storage */ }
+    const simNodes: SimNode[] = relationNodes.map((node, index) => {
+      const prior = saved[node.id]
+      const angle = (2 * Math.PI * index) / Math.max(1, relationNodes.length)
+      return {
+        ...node,
+        linkCount: degree.get(node.id) ?? 0,
+        x: prior?.x ?? width / 2 + Math.cos(angle) * Math.min(width, height) * 0.28,
+        y: prior?.y ?? height / 2 + Math.sin(angle) * Math.min(width, height) * 0.28,
+        // Positions written after a drag are restored as pinned nodes, so a
+        // later selection or data refresh cannot undo the user's arrangement.
+        ...(prior !== undefined ? { fx: prior.x, fy: prior.y } : {}),
+      }
+    })
+    const simLinks: SimLink[] = relationEdges
+      .filter(edge => relationById.has(edge.source) && relationById.has(edge.target))
+      .map(edge => ({ source: edge.source, target: edge.target, edge }))
+    const nodeRadius = (node: SimNode) => Math.max(5, Math.sqrt(node.linkCount + 1) * 5.5)
+    const simulation = d3.forceSimulation<SimNode>(simNodes)
+      .force('link', d3.forceLink<SimNode, SimLink>(simLinks).id(node => node.id).distance(160).strength(0.35))
+      .force('charge', d3.forceManyBody<SimNode>().strength(-400))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collision', d3.forceCollide<SimNode>().radius(node => nodeRadius(node) + 10))
+      .force('x', d3.forceX<SimNode>(width / 2).strength(0.03))
+      .force('y', d3.forceY<SimNode>(height / 2).strength(0.03))
+    const link = root.append('g').attr('class', css.relationD3Links ?? '').selectAll<SVGLineElement, SimLink>('line').data(simLinks).join('line')
+      .attr('stroke-width', edge => edge.edge.confirmed ? 1.2 : 1)
+      .attr('stroke-dasharray', edge => edge.edge.confirmed ? null : '5 4')
+      .attr('data-edge-id', edge => edge.edge.id)
+      .on('click', (event, edge) => { event.stopPropagation(); setSelectedEdgeId(edge.edge.id); setSelectedId('') })
+    const node = root.append('g').attr('class', css.relationD3Nodes ?? '').selectAll<SVGGElement, SimNode>('g').data(simNodes).join('g')
+      .attr('data-node-id', item => item.id)
+      .style('cursor', 'pointer')
+      .call(d3.drag<SVGGElement, SimNode>()
+        .on('start', (event, item) => { if (!event.active) simulation.alphaTarget(0.3).restart(); item.fx = item.x; item.fy = item.y })
+        .on('drag', (event, item) => { item.fx = event.x; item.fy = event.y })
+        .on('end', (event, item) => {
+          if (!event.active) simulation.alphaTarget(0)
+          // Keep a manually arranged node pinned. Releasing fx/fy here lets
+          // the simulation pull it back to its old equilibrium a few seconds
+          // later, which makes saved graph layouts appear to "jump" back.
+          item.fx = item.x; item.fy = item.y
+          try {
+            const key = storageKey(RELATION_POSITIONS_KEY, workspaceId)
+            const current = JSON.parse(window.localStorage.getItem(key) || '{}') as Record<string, unknown>
+            current[item.id] = { x: item.x, y: item.y }
+            window.localStorage.setItem(key, JSON.stringify(current))
+          } catch { /* unavailable storage */ }
+        }))
+    node.append('circle')
+      .attr('r', item => nodeRadius(item))
+      .attr('class', css.relationD3Circle ?? '')
+      .attr('data-kind', item => relationNodeColor(item.kind))
+      .attr('data-selected', item => item.id === selectedId ? 'true' : 'false')
+      .attr('filter', `url(#relation-glow-${layoutNonce})`)
+    node.append('text')
+      .text(item => clip(item.label, 16))
+      .attr('dx', item => nodeRadius(item) + 7)
+      .attr('dy', 4)
+      .attr('class', css.relationD3Label ?? '')
+      .attr('pointer-events', 'none')
+    node.append('title').text(item => `${item.label} · ${item.type || item.kind || 'entity'}`)
+    node.on('click', (event, item) => { event.stopPropagation(); setSelectedId(item.id); setSelectedEdgeId('') })
+    node.on('mouseover', (_event, item) => {
+      const related = new Set(relationEdges.flatMap(edge => edge.source === item.id ? [edge.target] : edge.target === item.id ? [edge.source] : []))
+      node.select('circle').attr('data-hovered', current => current.id === item.id ? 'true' : related.has(current.id) ? 'neighbor' : 'dimmed')
+      node.select('text').attr('data-hovered', current => current.id === item.id || related.has(current.id) ? 'true' : 'false')
+      link.attr('data-hovered', edge => edge.edge.source === item.id || edge.edge.target === item.id ? 'true' : 'false')
+    })
+    node.on('mouseout', () => {
+      node.select('circle').attr('data-hovered', null)
+      node.select('text').attr('data-hovered', null)
+      link.attr('data-hovered', null)
+    })
+    svg.on('click', () => { setSelectedId(''); setSelectedEdgeId('') })
+    simulation.on('tick', () => {
+      const padding = 34
+      simNodes.forEach(item => { const radius = nodeRadius(item) + padding; item.x = Math.max(radius, Math.min(width - radius, item.x)); item.y = Math.max(radius, Math.min(height - radius, item.y)) })
+      link.attr('x1', item => (typeof item.source === 'string' ? 0 : item.source.x)).attr('y1', item => (typeof item.source === 'string' ? 0 : item.source.y)).attr('x2', item => (typeof item.target === 'string' ? 0 : item.target.x)).attr('y2', item => (typeof item.target === 'string' ? 0 : item.target.y))
+      node.attr('transform', item => `translate(${item.x},${item.y})`)
+    })
+    return () => { simulation.stop(); svg.on('.zoom', null); svg.on('click', null) }
+  }, [layoutNonce, relationById, relationEdges, relationNodes, workspaceId])
+
+  // Selection is presentation state. Updating it must not tear down the force
+  // simulation, otherwise a click can reset the user's current arrangement.
   useEffect(() => {
-    setEdges(current => current.map(edge => edge.animated === moving ? edge : { ...edge, animated: moving }))
-  }, [moving, setEdges])
+    const svgElement = svgRef.current
+    if (!svgElement) return
+    d3.select(svgElement)
+      .selectAll<SVGCircleElement, RelationRenderNode>('circle[data-kind]')
+      .attr('data-selected', item => item.id === selectedId ? 'true' : 'false')
+  }, [selectedId])
 
   useEffect(() => {
     if (selectedId !== '' && !relationById.has(selectedId)) setSelectedId('')
   }, [relationById, selectedId])
 
-  return <div className={css.relationshipWorkspace} data-detail={selected !== undefined}>
-    <div className={css.relationshipCanvas}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onInit={setFlow}
-        onNodeClick={(_event, node) => { setSelectedId(node.id); setSelectedEdgeId('') }}
-        onEdgeClick={(_event, edge) => { setSelectedEdgeId(edge.id); setSelectedId('') }}
-        onNodeDragStart={() => setMoving(true)}
-        onNodeDragStop={(_event, node) => { setMoving(false); try { const current = JSON.parse(window.localStorage.getItem('dsh-novel.relationPositions') || '{}') as Record<string, unknown>; current[node.id] = node.position; window.localStorage.setItem('dsh-novel.relationPositions', JSON.stringify(current)) } catch { /* unavailable storage */ } }}
-        nodesDraggable
-        nodesConnectable={false}
-        elementsSelectable
-        fitView
-        minZoom={0.25}
-        maxZoom={2}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Controls showInteractive={false} />
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
-      </ReactFlow>
+  return <div className={css.relationshipWorkspace} data-detail={selected !== undefined || selectedEdge !== undefined}>
+    <div ref={containerRef} className={css.relationshipCanvas}>
+      <div className={css.relationshipCanvasHeader}>
+        <span><b>{relationNodes.length}</b> 节点 · <b>{relationEdges.length}</b> 连接</span>
+        <button type="button" className={css.button} onClick={() => {
+          setSelectedId(''); setSelectedEdgeId('')
+          try { window.localStorage.removeItem(storageKey(RELATION_POSITIONS_KEY, workspaceId)) } catch { /* unavailable storage */ }
+          setLayoutNonce(value => value + 1)
+        }}>
+          {t('graph.relayout')}
+        </button>
+      </div>
+      <svg ref={svgRef} className={css.relationshipSvg} role="img" aria-label={t('graph.relationships')} />
+      <div className={css.relationshipStats}><b>{relationNodes.length}</b> {t('graph.nodes')} · <b>{relationEdges.length}</b> {t('graph.connections')}</div>
     </div>
     {(selected !== undefined || selectedEdge !== undefined) && <aside className={css.relationshipDetail}>
       {selectedEdge !== undefined ? <>
@@ -441,7 +461,7 @@ function RelationshipFlow({ nodes: relationNodes, edges: relationEdges, t }: Rel
         <div className={css.dagDetailRow}><b>{t('graph.entityType')}</b><span>{selected.type || selected.kind || '—'}</span></div>
         <div className={css.dagDetailRow}><b>{t('graph.entityStatus')}</b><span>{selected.status || '—'}</span></div>
         {selected.description !== '' && <p className={css.detailNotice}>{selected.description}</p>}
-        {selected.sourcePath !== '' && <a href={`/studio-panel/api/document?path=${encodeURIComponent(selected.sourcePath)}`} target="_blank" rel="noreferrer">{t('graph.source')}</a>}
+        {selected.sourcePath !== '' && <button type="button" className={css.linkButton} onClick={() => void openSourceDocument(selected.sourcePath)}>{t('graph.source')}</button>}
         {neighbors.length > 0 && <><div className={css.detailHeading}>{t('graph.neighbors')}</div><ul className={css.validationList}>{neighbors.map(neighbor => <li key={neighbor.id}><button type="button" className={css.linkButton} onClick={() => setSelectedId(neighbor.id)}>{neighbor.label}</button></li>)}</ul></>}
         {selected.unresolved && <div className={css.taskError}>{t('graph.unresolved')}</div>}
       </> : null}
@@ -453,33 +473,51 @@ function clip(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value
 }
 
+/**
+ * Open a source document through the proxied API. An <a href> cannot carry
+ * the contract's X-Dsh-Workspace-Id header, so the download goes through
+ * fetch with explicit context headers and opens as a blob.
+ */
+async function openSourceDocument(path: string): Promise<void> {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/document?path=${encodeURIComponent(path)}`, { headers: studioContextHeaders() })
+    if (!response.ok) return
+    const url = URL.createObjectURL(await response.blob())
+    window.open(url, '_blank', 'noopener,noreferrer')
+  } catch { /* unavailable without a bound context; the chip already shows that state */ }
+}
+
 /** Full graph-view props: conversation-view runtime share & injected fetch & locale seat. */
 export type GraphViewProps =
   ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
 
 export function GraphView({ fetchStudioApi, postStudioApi, t }: GraphViewProps) {
   const workbench = useWorkbench()
+  const workspaceId = workbench.context?.workspaceId
   // 评审/交付 DAG 由评审任务产出：任务失效即重载 DAG 视图。
   const dagEpoch = workbench.epochs.tasks
   const [state, setState] = useState<LoadState>('loading')
   const [payload, setPayload] = useState<ContinuityPayload | null>(null)
   const [error, setError] = useState('')
   const [segment, setSegment] = useState<Segment>('foreshadowing')
-  // Story-relevant backbone by default: characters + factions.
-  const [kindFilter, setKindFilter] = useState<ReadonlySet<RelationKind>>(new Set(['character', 'faction']))
+  // Show the complete graph by default, matching the knowledge-map view. The
+  // kind chips remain available for narrowing a dense novel workspace.
+  const [kindFilter, setKindFilter] = useState<ReadonlySet<RelationKind>>(
+    new Set<RelationKind>([...REL_KIND_ORDER, 'other']),
+  )
   const [relationQuery, setRelationQuery] = useState(() => {
-    try { return window.localStorage.getItem('dsh-novel.relationQuery') ?? '' } catch { return '' }
+    try { return window.localStorage.getItem(storageKey('dsh-novel.relationQuery', workspaceId)) ?? '' } catch { return '' }
   })
   const [connectedOnly, setConnectedOnly] = useState(() => {
-    try { return window.localStorage.getItem('dsh-novel.relationConnectedOnly') === 'true' } catch { return false }
+    try { return window.localStorage.getItem(storageKey('dsh-novel.relationConnectedOnly', workspaceId)) === 'true' } catch { return false }
   })
 
   useEffect(() => {
     try {
-      window.localStorage.setItem('dsh-novel.relationQuery', relationQuery)
-      window.localStorage.setItem('dsh-novel.relationConnectedOnly', String(connectedOnly))
+      window.localStorage.setItem(storageKey('dsh-novel.relationQuery', workspaceId), relationQuery)
+      window.localStorage.setItem(storageKey('dsh-novel.relationConnectedOnly', workspaceId), String(connectedOnly))
     } catch { /* unavailable storage */ }
-  }, [connectedOnly, relationQuery])
+  }, [connectedOnly, relationQuery, workspaceId])
 
   const load = useCallback(() => {
     setState('loading')
@@ -502,15 +540,22 @@ export function GraphView({ fetchStudioApi, postStudioApi, t }: GraphViewProps) 
 
   const foreshadow = payload !== null ? layoutForeshadow(payload.foreshadowNodes) : null
   const query = relationQuery.trim().toLocaleLowerCase()
-  const connectedIds = new Set((payload?.relationEdges ?? []).flatMap(edge => [edge.source, edge.target]))
-  const visibleRelationNodes = payload === null ? [] : payload.relationNodes.filter(node => {
+  const connectedIds = useMemo(
+    () => new Set((payload?.relationEdges ?? []).flatMap(edge => [edge.source, edge.target])),
+    [payload],
+  )
+  // Keep these references stable across WorkbenchStore connection/epoch
+  // updates. RelationshipFlow uses reference identity to decide whether the
+  // graph data changed; rebuilding arrays on every parent render used to
+  // restart the simulation on the 5s invalidation poll.
+  const visibleRelationNodes = useMemo(() => payload === null ? [] : payload.relationNodes.filter(node => {
     const matchesQuery = query === '' || `${node.label} ${node.description} ${node.id}`.toLocaleLowerCase().includes(query)
     return kindFilter.has(relationKind(node.kind)) && matchesQuery && (!connectedOnly || connectedIds.has(node.id))
-  })
-  const visibleRelationIds = new Set(visibleRelationNodes.map(node => node.id))
-  const visibleRelationEdges = payload === null ? [] : payload.relationEdges.filter(
+  }), [connectedIds, connectedOnly, kindFilter, payload, query])
+  const visibleRelationIds = useMemo(() => new Set(visibleRelationNodes.map(node => node.id)), [visibleRelationNodes])
+  const visibleRelationEdges = useMemo(() => payload === null ? [] : payload.relationEdges.filter(
     edge => visibleRelationIds.has(edge.source) && visibleRelationIds.has(edge.target),
-  )
+  ), [payload, visibleRelationIds])
   // Chips for the kinds actually present in the data (in canonical order, 'other' last).
   const presentKinds = payload === null ? [] : [...REL_KIND_ORDER, 'other' as const]
     .filter(kind => payload.relationNodes.some(node => relationKind(node.kind) === kind))

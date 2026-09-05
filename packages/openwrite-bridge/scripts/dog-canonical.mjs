@@ -73,7 +73,7 @@ const missingVersion = {
 assert.throws(() => buildDogReviewBundle(missingVersion, 'ch_093', 70), /unsupported review_v2 schema version/)
 
 // ── materializeChapterDelivery artifact-read strategy ────────────────────────
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { materializeChapterDelivery } from '../lib/dog-delivery.js'
@@ -91,6 +91,10 @@ try {
   assert.equal(absent.readyForDelivery, false)
 
   const reviewPath = join(novelRoot, 'data', 'reviews', 'ch_101.json')
+  const existingDeliveryDir = join(novelRoot, 'data', 'dog', 'deliveries', 'ch_101')
+  await mkdir(existingDeliveryDir, { recursive: true })
+  const existingDelivery = { schemaVersion: 'dsh-novel.delivery.manifest.v2', recordType: 'chapter-delivery', chapterId: 'ch_101', sentinel: 'keep' }
+  await writeFile(join(existingDeliveryDir, 'delivery.json'), JSON.stringify(existingDelivery), 'utf8')
   for (const [label, body, pattern] of [
     ['corrupt JSON', '{broken', /corrupt JSON/],
     ['non-object root', '[]', /root must be a JSON object/],
@@ -99,6 +103,8 @@ try {
     ['missing v2 version', JSON.stringify({ review_v2: { delivery_status: 'pass' } }), /unsupported review_v2 schema version/],
     ['non-object review_v2 (array)', JSON.stringify({ review_v2: [], score: 95, passed: true }), /review_v2 must be a JSON object when present/],
     ['null review_v2', JSON.stringify({ review_v2: null, score: 95, passed: true }), /review_v2 must be a JSON object when present/],
+    ['string review_v2', JSON.stringify({ review_v2: 'invalid', score: 95, passed: true }), /review_v2 must be a JSON object when present/],
+    ['number review_v2', JSON.stringify({ review_v2: 42, score: 95, passed: true }), /review_v2 must be a JSON object when present/],
   ]) {
     await writeFile(reviewPath, body, 'utf8')
     await assert.rejects(
@@ -106,6 +112,7 @@ try {
       pattern,
       label,
     )
+    assert.deepEqual(JSON.parse(await readFile(join(existingDeliveryDir, 'delivery.json'), 'utf8')), existingDelivery, `${label}: existing delivery overwritten`)
   }
 } finally {
   await rm(workspaceRoot, { recursive: true, force: true })

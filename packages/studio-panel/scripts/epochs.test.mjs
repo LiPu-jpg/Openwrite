@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { nextEpochs, triggersRefresh } from '../src/client/workbench-epochs.ts'
+import { nextEpochs, terminalTransitionResources, triggersRefresh } from '../src/client/workbench-epochs.ts'
 
 const ZERO = {
   workspace: 0, manuscript: 0, outline: 0, assets: 0, tasks: 0,
@@ -81,4 +81,86 @@ test('refresh trigger set matches workspace/manuscript/outline/tasks only', () =
   for (const resource of ['benchmark', 'models', 'graph', 'research', 'revisions', 'dag', 'assets']) {
     assert.equal(triggersRefresh(resource), false, resource)
   }
+})
+
+function taskList(tasks) {
+  return { data: { tasks } }
+}
+
+test('terminalTransitionResources: newly terminal research task bumps research', () => {
+  const before = taskList([{ task_id: 'tsk_1', type: 'research', status: 'running' }])
+  const after = taskList([{ task_id: 'tsk_1', type: 'research', status: 'completed' }])
+  assert.deepEqual(terminalTransitionResources(before, after), ['research'])
+})
+
+test('terminalTransitionResources: benchmark and review tasks map to their views', () => {
+  const before = taskList([
+    { task_id: 'tsk_b', type: 'model_benchmark', status: 'running' },
+    { task_id: 'tsk_r', type: 'chapter_review', status: 'awaiting_confirmation' },
+    { task_id: 'tsk_w', type: 'chapter_write', status: 'running' },
+    { task_id: 'tsk_s', type: 'revision_selection', status: 'pending' },
+    { task_id: 'tsk_f', type: 'revision_from_review', status: 'running' },
+  ])
+  const after = taskList([
+    { task_id: 'tsk_b', type: 'model_benchmark', status: 'failed' },
+    { task_id: 'tsk_r', type: 'chapter_review', status: 'completed' },
+    { task_id: 'tsk_w', type: 'chapter_write', status: 'cancelled' },
+    { task_id: 'tsk_s', type: 'revision_selection', status: 'interrupted' },
+    { task_id: 'tsk_f', type: 'revision_from_review', status: 'completed' },
+  ])
+  const resources = terminalTransitionResources(before, after)
+  assert.deepEqual([...resources].sort(), ['benchmark', 'dag'])
+})
+
+test('terminalTransitionResources: no transition yields nothing', () => {
+  const before = taskList([
+    { task_id: 'tsk_1', type: 'research', status: 'completed' },
+    { task_id: 'tsk_2', type: 'model_benchmark', status: 'running' },
+  ])
+  // Terminal → terminal and non-terminal → non-terminal are not transitions.
+  const after = taskList([
+    { task_id: 'tsk_1', type: 'research', status: 'completed' },
+    { task_id: 'tsk_2', type: 'model_benchmark', status: 'running' },
+  ])
+  assert.deepEqual(terminalTransitionResources(before, after), [])
+  assert.deepEqual(
+    terminalTransitionResources(
+      taskList([{ task_id: 'tsk_2', type: 'manuscript_import', status: 'running' }]),
+      taskList([{ task_id: 'tsk_2', type: 'manuscript_import', status: 'completed' }]),
+    ),
+    ['manuscript'],
+  )
+  assert.deepEqual(
+    terminalTransitionResources(
+      taskList([{ task_id: 'tsk_3', type: 'project_restore', status: 'running' }]),
+      taskList([{ task_id: 'tsk_3', type: 'project_restore', status: 'completed' }]),
+    ),
+    ['workspace'],
+  )
+  // Unknown task types carry no typed resource.
+  const unknown = taskList([{ task_id: 'tsk_4', type: 'future_task', status: 'completed' }])
+  assert.deepEqual(terminalTransitionResources(taskList([{ task_id: 'tsk_4', type: 'future_task', status: 'running' }]), unknown), [])
+})
+
+test('terminalTransitionResources: tasks absent from the previous payload are not transitions', () => {
+  // Initial loads / window re-entries stay quiet: we never observed them running.
+  assert.deepEqual(
+    terminalTransitionResources(taskList([]), taskList([{ task_id: 'tsk_1', type: 'research', status: 'completed' }])),
+    [],
+  )
+  assert.deepEqual(
+    terminalTransitionResources(null, taskList([{ task_id: 'tsk_1', type: 'research', status: 'completed' }])),
+    [],
+  )
+})
+
+test('terminalTransitionResources: malformed payloads yield [] and never throw', () => {
+  const good = taskList([{ task_id: 'tsk_1', type: 'research', status: 'running' }])
+  for (const garbage of [null, undefined, 42, 'tasks', [], { data: null }, { data: { tasks: 'nope' } }, { tasks: [] }]) {
+    assert.deepEqual(terminalTransitionResources(garbage, good), [])
+    assert.deepEqual(terminalTransitionResources(good, garbage), [])
+  }
+  // Malformed entries are skipped, valid ones still diff.
+  const mixed = taskList([null, 7, { task_id: 'tsk_1' }, { task_id: 'tsk_1', type: 'research', status: 'completed' }])
+  assert.deepEqual(terminalTransitionResources(good, mixed), ['research'])
 })

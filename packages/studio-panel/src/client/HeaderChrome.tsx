@@ -1,19 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, ChevronDown, ExternalLink, MoreHorizontal, Plus, RefreshCw } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { BookOpen, ExternalLink, MoreHorizontal, RefreshCw } from 'lucide-react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
 import { useWorkbench, workbenchStore } from './WorkbenchStore.ts'
+import { initWorkspaceProject, useBindStudioContext, type StudioPanelInjected } from './workspace-context.ts'
 import css from './Workbench.module.css'
 
 type HeaderProps = PropsRuntime<'conversation.session.header.actions'> & PropsLocale<'studio-panel'>
 type UtilityProps = PropsRuntime<'conversation.session.header.utilities'> & PropsLocale<'studio-panel'> & Pick<StudioApiInjected, 'postStudioApi'>
-type ContextChipProps = PropsRuntime<'conversation.input.left'> & PropsLocale<'studio-panel'> & Pick<StudioApiInjected, 'fetchStudioApi' | 'postStudioApi'>
-
-interface ProjectEntry {
-  path: string
-  title: string
-  novel_id: string
-}
+type ContextChipProps = PropsRuntime<'conversation.input.left'> & PropsLocale<'studio-panel'>
+  & Pick<StudioPanelInjected, 'postStudioApi' | 'workspaces' | 'sessions'>
 
 export function HeaderProjectStatus({ t }: HeaderProps) {
   const workbench = useWorkbench()
@@ -72,19 +68,25 @@ export function HeaderUtilities({ postStudioApi, t }: UtilityProps) {
 }
 
 /**
- * Input-bar project selector chip: always visible, shows the currently bound
- * OpenWrite project. Click to open a dropdown listing registered projects —
- * select one to switch via POST /api/project/open.
+ * Input-bar Workspace chip: reflects the session's dsh Workspace binding and
+ * owns binding it into the WorkbenchStore context barrier. When the binding
+ * needs action it is a button opening a small popover: an unbound session
+ * gets the directory-pick attach flow; a bound-but-uninitialized workspace
+ * gets the inline init form (novel id + title, pinned to the canonical
+ * path). An initialized workspace renders read-only.
  */
-export function ProjectSwitcherChip({ fetchStudioApi, postStudioApi, t }: ContextChipProps) {
+export function WorkspaceContextChip(props: ContextChipProps) {
+  const { t, postStudioApi, workspaces, sessions } = props
   const workbench = useWorkbench()
+  const workspace = useBindStudioContext({ sessionId: props.sessionId, useWorkspaces: props.useWorkspaces })
+  const notInitialized = workbench.workspaceError === 'WORKSPACE_NOT_INITIALIZED'
+  const actionable = workspace === undefined || notInitialized
   const [open, setOpen] = useState(false)
-  const [projects, setProjects] = useState<ProjectEntry[]>([])
-  const [creating, setCreating] = useState(false)
-  const [newTitle, setNewTitle] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [novelId, setNovelId] = useState('')
+  const [title, setTitle] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
-
   useEffect(() => {
     if (!open) return
     const dismiss = (event: PointerEvent) => {
@@ -94,79 +96,67 @@ export function ProjectSwitcherChip({ fetchStudioApi, postStudioApi, t }: Contex
     return () => document.removeEventListener('pointerdown', dismiss)
   }, [open])
 
-  const loadProjects = useCallback(() => {
-    fetchStudioApi('/project/list').then((data: unknown) => {
-      if (Array.isArray(data)) setProjects(data as ProjectEntry[])
-    }).catch(() => {})
-  }, [fetchStudioApi])
-
-  useEffect(() => {
-    if (open) loadProjects()
-  }, [open, loadProjects])
-
-  const current = workbench.projectTitle || 'OpenWrite'
-
-  const switchTo = async (path: string) => {
+  /** Unbound session: pick a directory, register it as a dsh Workspace, connect a session. */
+  const attachWorkspace = async () => {
     if (busy) return
     setBusy(true)
+    setError('')
     try {
-      await postStudioApi('/project/open', { project_path: path })
-      window.location.reload()
+      const picked = await workspaces.pickDirectory()
+      if (picked !== null) {
+        const created = await workspaces.create({ path: picked })
+        const sessionId = await workspaces.connectWorkspace(created.workspaceId)
+        sessions.open(sessionId)
+      }
+      setOpen(false)
+    } catch (cause: unknown) {
+      setError(`${t('workspace.bind.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`)
     } finally { setBusy(false) }
   }
 
-  const createProject = async () => {
-    const title = newTitle.trim()
-    if (!title || busy) return
-    const novelId = 'novel_' + title.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').slice(0, 40).toLowerCase()
+  /** Bound-but-uninitialized workspace: init in place at the canonical path. */
+  const initProject = async () => {
+    if (workspace === undefined || busy || novelId.trim() === '' || title.trim() === '') return
     setBusy(true)
+    setError('')
     try {
-      await postStudioApi('/project/init', {
-        project_path: novelId,
-        novel_id: novelId,
-        title,
-      })
-      window.location.reload()
-    } catch {
-      setBusy(false)
-    }
+      await initWorkspaceProject(postStudioApi, workspace.path, { novelId: novelId.trim(), title: title.trim() })
+      setOpen(false)
+      setNovelId('')
+      setTitle('')
+    } catch (cause: unknown) {
+      setError(`${t('operations.create.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`)
+    } finally { setBusy(false) }
   }
 
+  const label = <><BookOpen size={13} />
+    <span>{workspace?.title ?? t('workspace.unbound')}</span>
+    {notInitialized && <span className={css.contextChipBadge}>{t('workspace.notInitialized')}</span>}</>
+
   return <div className={css.contextChipRoot} ref={rootRef}>
-    <button type="button" className={css.contextChip} aria-expanded={open}
-      onClick={() => { setOpen(value => !value); loadProjects() }}>
-      <BookOpen size={13} />
-      <span>{current}</span>
-      <ChevronDown size={12} />
-    </button>
-    {open && <div className={css.contextChipMenu}>
-      <div className={css.contextChipLabel}>{t('project.switcher.label')}</div>
-      {projects.map(project => (
-        <button key={project.path} type="button" className={css.contextChipMenuItem}
-          data-active={project.title === current}
-          disabled={busy} onClick={() => { void switchTo(project.path) }}>
-          <BookOpen size={14} />
-          <span>{project.title}</span>
-          {project.title === current && <span className={css.contextChipCurrentMark}>✓</span>}
-        </button>
-      ))}
-      <div className={css.contextChipDivider} />
-      {!creating ? (
-        <button type="button" className={css.contextChipMenuItem} onClick={() => setCreating(true)}>
-          <Plus size={14} />{t('project.switcher.new')}
-        </button>
-      ) : (
-        <div className={css.contextChipCreateForm}>
-          <input value={newTitle} placeholder={t('project.switcher.newTitle')}
-            onChange={e => setNewTitle(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && newTitle.trim()) void createProject() }}
-            autoFocus />
-          <button type="button" className={css.contextChipMenuItem} disabled={!newTitle.trim() || busy}
-            onClick={() => void createProject()}>
-            {t('project.switcher.create')}
-          </button>
-        </div>
-      )}
+    {actionable
+      ? <button type="button" className={css.contextChip} data-actionable="true"
+          data-unbound={workspace === undefined} aria-expanded={open}
+          title={workspace !== undefined ? workspace.path : t('workspace.bind.hint')}
+          onClick={() => setOpen(value => !value)}>{label}</button>
+      : <span className={css.contextChip} title={workspace.path}>{label}</span>}
+    {open && workspace === undefined && <div className={css.contextChipPopover}>
+      <span className={css.contextChipHint}>{t('workspace.bind.hint')}</span>
+      <button type="button" className={css.commandButton} disabled={busy}
+        onClick={() => void attachWorkspace()}>{t('workspace.bind.pick')}</button>
+      {error !== '' && <span className={css.contextChipError}>{error}</span>}
+    </div>}
+    {open && workspace !== undefined && notInitialized && <div className={css.contextChipPopover}>
+      <span className={css.contextChipHint}>{t('operations.init.hint')}</span>
+      <label className={css.contextChipField}>{t('operations.create.id')}
+        <input value={novelId} placeholder="my-novel" onChange={e => setNovelId(e.target.value)} /></label>
+      <label className={css.contextChipField}>{t('operations.create.title')}
+        <input value={title} placeholder={t('operations.create.titleHint')} maxLength={120}
+          onChange={e => setTitle(e.target.value)} /></label>
+      <button type="button" className={css.commandButton}
+        disabled={busy || novelId.trim() === '' || title.trim() === ''}
+        onClick={() => void initProject()}>{t('operations.init.submit')}</button>
+      {error !== '' && <span className={css.contextChipError}>{error}</span>}
     </div>}
   </div>
 }

@@ -1,7 +1,7 @@
 [project]
-name = "dsh-novel-conductor"
+name = "dsh-openwrite-conductor"
 version = "0.1.0"
-description = "dsh-novel 无人值守流水线：按大纲连续写章 → 37 维评审 → 低于阈值回炉（OpenWrite HTTP 契约 + 可选 dsh SDK 指导综合）"
+description = "dsh-Openwrite 无人值守流水线：按大纲连续写章 → 六域评审 → 低于阈值回炉（OpenWrite HTTP 契约 + 可选 dsh SDK 指导综合）"
 requires-python = ">=3.10"
 dependencies = [
   "deepseek-harness-sdk>=0.1.1rc1",

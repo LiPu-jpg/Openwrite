@@ -12,6 +12,7 @@ from dog_import import write_import_artifacts
 from dog_delivery import write_delivery_artifacts
 from dog_review import build_review_manifest, write_review_artifacts
 from smart_import import detect_and_convert
+from tools.review_dag_framework import instantiate_review_dag, review_dag_framework
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -168,10 +169,34 @@ class DogArtifactTests(unittest.TestCase):
             self.assertEqual(manifest["issueCount"], 2)
             self.assertEqual(manifest["unmappedIssueCount"], 1)
             self.assertEqual(manifest["schemaVersion"], "dsh-novel.review.manifest.v2")
+            self.assertEqual(manifest["frameworkId"], "openwrite.standard-chapter-review")
+            self.assertEqual(manifest["frameworkRevision"], result["framework"]["revision"])
             self.assertEqual(len(manifest["domains"]), 6)
             self.assertEqual(_run_verifier("review-record", artifact_dir / "gate.json")["verdict"], "fail")
             _assert_acyclic(result["graph"])
             _validate_with_dog(graph_path, root)
+
+    def test_python_and_typescript_instantiate_the_same_canonical_framework(self) -> None:
+        framework = review_dag_framework()
+        relative_dir = "data/novels/book/data/dog/reviews/ch_007"
+        python_graph = instantiate_review_dag("ch_007", relative_dir, framework=framework)
+        script = """
+import fs from 'node:fs'
+import { instantiateDogReviewFramework } from './packages/openwrite-bridge/lib/dog-review.js'
+const framework = JSON.parse(fs.readFileSync(0, 'utf8'))
+process.stdout.write(JSON.stringify(instantiateDogReviewFramework(
+  framework, 'ch_007', 'data/novels/book/data/dog/reviews/ch_007'
+)))
+"""
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=REPO_ROOT,
+            input=json.dumps(framework, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(json.loads(result.stdout), python_graph)
 
     def test_python_and_typescript_review_contracts_match(self) -> None:
         review = {

@@ -39,6 +39,7 @@ interface DogSurface {
   chapters: string[]
   review: GraphArtifact | null
   delivery: GraphArtifact | null
+  reviewFramework: RecordValue
 }
 
 interface ReviewDagViewProps {
@@ -58,6 +59,7 @@ const DAG_FIELD_LABELS: Record<string, string> = {
   status: '状态', verdict: '判定', qualityScore: '质量分', coverage: '覆盖率',
   gateStatus: '硬门禁', deliveryStatus: '交付结论', executionStatus: '执行状态',
   currentRevision: '当前正文版本', sourceRevision: '评审基线版本', threshold: '阈值',
+  frameworkId: '审稿框架', frameworkVersion: '框架版本', frameworkRevision: '框架修订',
   legacyCheckIds: '兼容检查项', criteria: '评分细则', issues: '问题',
   evidence: '证据原文', provenance: '模型与调用', score: '旧版得分',
 }
@@ -326,6 +328,7 @@ export function ReviewDagView({ fetchStudioApi, postStudioApi, kind, t }: Review
           chapters: Array.isArray(data['chapters']) ? data['chapters'].map(text) : [],
           review: data['review'] === null || data['review'] === undefined ? null : record(data['review']) as unknown as GraphArtifact,
           delivery: data['delivery'] === null || data['delivery'] === undefined ? null : record(data['delivery']) as unknown as GraphArtifact,
+          reviewFramework: record(data['review_framework']),
         }
         setSurface(parsed)
         if (chapter === '' && parsed.chapter_id !== '') setChapter(parsed.chapter_id)
@@ -340,11 +343,21 @@ export function ReviewDagView({ fetchStudioApi, postStudioApi, kind, t }: Review
   }, [chapter, fetchStudioApi])
 
   const artifact = surface?.[kind] ?? null
+  const framework = surface?.reviewFramework ?? {}
+  const frameworkInvariants = record(framework['invariants'])
   return <>
     <div className={css.kindFilterRow}>
       <select className={css.scopeSelect} value={chapter} onChange={event => setChapter(event.target.value)}>
         {(surface?.chapters ?? []).map(item => <option key={item} value={item}>{item}</option>)}
       </select>
+      {kind === 'review' && text(framework['id']) !== '' && (
+        <span title={text(framework['revision'])}>
+          {t('graph.reviewFramework')} v{text(framework['version'])}
+          {' · '}{text(frameworkInvariants['domain_count'])} {t('graph.reviewDomains')}
+          {' · '}{text(frameworkInvariants['legacy_check_count'])} {t('graph.reviewChecks')}
+          {' · '}{text(frameworkInvariants['criterion_count'])} {t('graph.reviewCriteria')}
+        </span>
+      )}
     </div>
     {state === 'loading' && <div className={css.notice}>{t('loading')}</div>}
     {state === 'error' && <div className={css.notice}><span className={css.errorText}>{error}</span></div>}

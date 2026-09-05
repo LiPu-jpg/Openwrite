@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative } from 'node:path'
-import type { JsonValue } from './client.js'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
+import { StudioError, type JsonValue } from './client.js'
 import { validateReviewV2Decision } from './contracts-generated.js'
 
 type RecordValue = Record<string, unknown>
@@ -105,11 +106,48 @@ function stage(chapterId: string, name: string, verdict: string, status: string,
   }
 }
 
+/**
+ * Anti-drift guard (docs/WORKSPACE_CONTEXT_CONTRACT.md §7): the workspace
+ * payload's project root must canonicalize to the current tool context root.
+ * Anything else means the Studio response belongs to another Workspace and
+ * materializing it here would leak artifacts across roots.
+ */
+export function assertWorkspaceRootMatch(payloadRoot: string, expectedRoot: string): void {
+  let canonical: string
+  try {
+    canonical = realpathSync(payloadRoot)
+  } catch {
+    throw new StudioError(
+      `DoG materialization workspace root cannot be canonicalized: ${payloadRoot}`,
+      409, 'WORKSPACE_CONTEXT_MISMATCH', { reason: 'not_found' },
+    )
+  }
+  if (canonical !== expectedRoot) {
+    throw new StudioError(
+      `DoG materialization workspace root "${canonical}" does not match the current context root "${expectedRoot}"`,
+      409, 'WORKSPACE_CONTEXT_MISMATCH', { reason: 'root_mismatch' },
+    )
+  }
+}
+
+/** Refuse write targets that escape the project root (e.g. via a hostile novel_id). */
+export function assertContained(target: string, root: string): void {
+  const resolvedRoot = resolve(root)
+  const resolvedTarget = resolve(target)
+  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(resolvedRoot + sep)) {
+    throw new StudioError(
+      `DoG materialization target escapes the workspace root: ${target}`,
+      409, 'WORKSPACE_CONTEXT_MISMATCH', { reason: 'escape' },
+    )
+  }
+}
+
 /** Rebuild a chapter-delivery graph from canonical manuscript, review and revision records. */
 export async function materializeChapterDelivery(
   workspaceValue: unknown,
   chapterId: string,
   threshold?: number,
+  expectedRoot?: string,
 ): Promise<JsonValue> {
   const workspace = record(workspaceValue)
   const project = record(workspace['project'])
@@ -118,6 +156,7 @@ export async function materializeChapterDelivery(
   const novelId = String(snapshot['novel_id'] ?? '').trim()
   if (!root || !novelId) throw new Error('chapter delivery lacks workspace project root or novel_id')
   if (!/^ch_\d+$/.test(chapterId)) throw new Error(`invalid chapter id for delivery graph: ${chapterId}`)
+  if (expectedRoot !== undefined) assertWorkspaceRootMatch(root, expectedRoot)
   try {
     if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
   } catch {
@@ -127,6 +166,7 @@ export async function materializeChapterDelivery(
   const novelRoot = join(root, 'data', 'novels', novelId)
   const relativeDir = join('data', 'novels', novelId, 'data', 'dog', 'deliveries', chapterId).replaceAll('\\', '/')
   const directory = join(root, relativeDir)
+  assertContained(directory, root)
   const previous = await readJson(join(directory, 'delivery.json')) ?? {}
   const effectiveThreshold = threshold ?? Number(previous['threshold'] ?? 70)
   if (!Number.isInteger(effectiveThreshold) || effectiveThreshold < 0 || effectiveThreshold > 100) {
@@ -147,8 +187,9 @@ export async function materializeChapterDelivery(
   // review_v2 key (even null) must be a non-empty JSON object declaring the
   // supported schema version; only records without the key ride the legacy
   // v1 adapter.
+  const hasV2 = Object.hasOwn(review, 'review_v2')
   const rawV2 = review['review_v2']
-  if (rawV2 !== undefined) {
+  if (hasV2) {
     if (rawV2 === null || typeof rawV2 !== 'object' || Array.isArray(rawV2)) {
       throw new Error(`review_v2 must be a JSON object when present, got ${rawV2 === null ? 'null' : typeof rawV2}`)
     }
@@ -284,7 +325,7 @@ export async function materializeChapterDelivery(
     schemaVersion: 'dsh-novel.delivery.manifest.v2', recordType: 'chapter-delivery',
     chapterId, novelId, threshold: effectiveThreshold, manuscriptTarget, currentRevision,
     readyForDelivery: currentRevision !== '' && closureStage['verdict'] === 'pass', verdict: closureStage['verdict'], stages,
-    decisionSource: Object.keys(record(review['review_v2'])).length > 0 ? 'v2' : 'v1-adapter',
+    decisionSource: Object.hasOwn(review, 'review_v2') ? 'v2' : 'v1-adapter',
     revisionTrail: proposals.map(item => ({
       proposalId: String(item['proposal_id'] ?? ''), status: String(item['status'] ?? ''),
       issueIds: strings(item['review_issue_ids']), sourceRevision: String(item['source_revision'] ?? ''),

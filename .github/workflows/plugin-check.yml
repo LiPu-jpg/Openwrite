@@ -1,0 +1,25 @@
+name: Plugin maintenance
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  offline-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/openwrite-bridge/package-lock.json
+            packages/studio-panel/package-lock.json
+      - run: npm install --global pnpm@9.15.9
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix packages/openwrite-bridge --no-audit --no-fund
+      - run: npm ci --prefix packages/studio-panel --no-audit --no-fund
+      - run: npm run check:plugin
