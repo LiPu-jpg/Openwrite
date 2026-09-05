@@ -2323,7 +2323,11 @@ class StudioApplication:
             if isinstance(exc, ModelProfileError):
                 raise self._translate_model_profile_error(exc) from exc
             raise StudioError("模型档案保存失败，请检查配置目录权限") from exc
-        return {"profile": profile, "model_profiles": self.model_profiles()}
+        return {
+            "profile": profile,
+            "model_profiles": self.model_profiles(),
+            "workspace": self.workspace(),
+        }
 
     def save_embedding_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -2636,8 +2640,41 @@ class StudioApplication:
         }
 
     def _model_payload(self) -> dict[str, Any]:
-        provider = os.environ.get("LLM_PROVIDER", "openai").strip().lower() or "openai"
-        base_url = os.environ.get("LLM_BASE_URL", "").strip()
+        profiles = self.model_profiles()
+        profile_by_id = {
+            str(profile.get("id") or ""): profile
+            for profile in profiles.get("profiles", [])
+            if isinstance(profile, dict)
+        }
+        default_profile = profile_by_id.get(str(profiles.get("default_profile_id") or ""))
+        routed_ids = [
+            str(profile_id or "")
+            for profile_id in profiles.get("routes", {}).values()
+        ]
+        configured_profile = (
+            default_profile
+            if default_profile and bool(default_profile.get("configured"))
+            else next(
+                (
+                    profile_by_id[profile_id]
+                    for profile_id in routed_ids
+                    if profile_id in profile_by_id
+                    and bool(profile_by_id[profile_id].get("configured"))
+                ),
+                None,
+            )
+        )
+        legacy_configured = bool(os.environ.get("LLM_API_KEY", "").strip())
+        provider = (
+            str(configured_profile.get("provider") or "openai").strip().lower()
+            if configured_profile
+            else os.environ.get("LLM_PROVIDER", "openai").strip().lower()
+        ) or "openai"
+        base_url = (
+            str(configured_profile.get("base_url") or "").strip()
+            if configured_profile
+            else os.environ.get("LLM_BASE_URL", "").strip()
+        )
         if not base_url:
             base_url = (
                 "https://api.anthropic.com"
@@ -2645,13 +2682,29 @@ class StudioApplication:
                 else "https://api.openai.com/v1"
             )
         return {
-            "configured": bool(os.environ.get("LLM_API_KEY", "").strip()),
+            "configured": bool(configured_profile) or legacy_configured,
             "provider": provider,
             "base_url": base_url,
-            "name": os.environ.get("LLM_MODEL", "").strip() or "gpt-4o-mini",
-            "api_format": os.environ.get("LLM_API_FORMAT", "chat").strip() or "chat",
-            "context_tokens": self._env_int("OPENWRITE_CONTEXT_TOKENS", 64000),
-            "max_tokens": self._env_int("LLM_MAX_TOKENS", 24000),
+            "name": (
+                str(configured_profile.get("model") or "").strip()
+                if configured_profile
+                else os.environ.get("LLM_MODEL", "").strip()
+            ) or "gpt-4o-mini",
+            "api_format": (
+                str(configured_profile.get("api_format") or "").strip()
+                if configured_profile
+                else os.environ.get("LLM_API_FORMAT", "chat").strip()
+            ) or "chat",
+            "context_tokens": (
+                int(configured_profile.get("context_tokens") or 64000)
+                if configured_profile
+                else self._env_int("OPENWRITE_CONTEXT_TOKENS", 64000)
+            ),
+            "max_tokens": (
+                int(configured_profile.get("max_output_tokens") or 24000)
+                if configured_profile
+                else self._env_int("LLM_MAX_TOKENS", 24000)
+            ),
             "persistence": {
                 "settings_saved": self._model_settings_store.settings_persisted,
                 "credential_saved": self._model_settings_store.credential_persisted,

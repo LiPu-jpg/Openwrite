@@ -365,6 +365,8 @@ def test_studio_onboarding_ui_guides_new_projects_and_next_actions():
     assert 'writeLocalValue(productTourStorageKey, "seen")' in javascript
     assert "startProductTour" in javascript
     assert "advanceProductTourAfterAction" in javascript
+    assert "onProfileSaved" in javascript
+    assert 'advanceProductTourAfterAction("model")' in javascript
     assert "const tourAction" in javascript
     assert "告诉 Goethe 你想写什么故事" in javascript
     assert "next-action-button" in styles
@@ -1071,6 +1073,52 @@ def test_studio_model_configuration_persists_local_settings_and_never_echoes_key
     builder = ContextBuilder(tmp_path, "demo")
     assert builder.CONTEXT_WINDOW_TOKENS == 160000
     assert builder.MAX_TOKENS == 131200
+
+
+def test_workspace_model_status_uses_configured_named_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    preferences = StudioModelSettingsStore(tmp_path / "studio-settings")
+    app = StudioApplication(
+        tmp_path,
+        model_settings_store=preferences,
+        model_profile_store=ModelProfileStore(preferences.directory),
+    )
+
+    result = app.save_model_profile(
+        {
+            "id": "prose",
+            "label": "正文模型",
+            "provider": "custom",
+            "base_url": "https://models.example/v1",
+            "model": "novel-model",
+            "api_format": "chat",
+            "context_tokens": 128000,
+            "max_output_tokens": 16000,
+            "temperature": 0.7,
+            "timeout_seconds": 120,
+        }
+        | {"api_key": "named-profile-secret", "remember_api_key": True}
+    )
+
+    workspace = result["workspace"]
+    assert workspace["model"] == {
+        "configured": True,
+        "provider": "custom",
+        "base_url": "https://models.example/v1",
+        "name": "novel-model",
+        "api_format": "chat",
+        "context_tokens": 128000,
+        "max_tokens": 16000,
+        "persistence": {
+            "settings_saved": False,
+            "credential_saved": False,
+            "remember_api_key": False,
+        },
+    }
+    assert "named-profile-secret" not in json.dumps(result, ensure_ascii=False)
 
 
 def test_studio_model_configuration_does_not_persist_inherited_process_key(
