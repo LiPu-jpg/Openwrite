@@ -90,7 +90,7 @@
     },
     {
       "project": "OpenWrite",
-      "repository": "LiPu-jpg/Openwrite",
+      "repository": "LiPu-jpg/Openwrite#native-core",
       "snapshot": "dbbcf28db0d0d6eee4b4cea1129b2090ef67d2c1",
       "stars": 685,
       "forks": 113,
@@ -102,7 +102,7 @@
     },
     {
       "project": "dsh-Openwrite",
-      "repository": "LiPu-jpg/dsh-Openwrite",
+      "repository": "LiPu-jpg/Openwrite",
       "snapshot": "44292439c37a660b334aba22b3bc21681a75be82",
       "stars": 0,
       "forks": 0,

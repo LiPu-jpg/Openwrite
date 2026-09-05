@@ -48,8 +48,8 @@ OpenWrite + dsh-novel 的现有优势是：**小说领域深度、评审/交付�
 | [CharacterArc](https://github.com/uu201/character-arc) | 548 | 82 | 348 | 111,242 | 39 | 143 |
 | [MuMuAINovel](https://github.com/xiamuceer-j/MuMuAINovel) | 2,956 | 577 | 259 | 108,229 | 0 | 0 |
 | [InkOS](https://github.com/Narcooo/inkos) | 9,421 | 1,761 | 787 | 175,623 | 308 | 2,634 |
-| [OpenWrite](https://github.com/LiPu-jpg/Openwrite) | 685 | 113 | 450 | 171,117 | 137 | 1,840 |
-| [dsh-Openwrite](https://github.com/LiPu-jpg/dsh-Openwrite) | 0 | 0 | 85 | 23,731 | 14 | 121 |
+| [OpenWrite Core](https://github.com/LiPu-jpg/Openwrite/tree/native-core) | 685 | 113 | 450 | 171,117 | 137 | 1,840 |
+| [dsh-Openwrite](https://github.com/LiPu-jpg/Openwrite) | 0 | 0 | 85 | 23,731 | 14 | 121 |
 
 可以从数字得到的有限结论：
 

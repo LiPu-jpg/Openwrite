@@ -2,7 +2,7 @@
 
 核查日期：2026-09-05。对象为当前 `dsh-novel` 与相邻 `OpenWrite` 工作树。
 
-项目归属（用户确认）：[LiPu-jpg/Openwrite](https://github.com/LiPu-jpg/Openwrite) 是本团队自己的核心项目，
+项目归属（用户确认）：[OpenWrite Core](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 是本团队自己的核心项目，
 当前 `dsh-novel` 是其 DeepSeek Harness 插件版本。本文以两仓库共同构成的产品能力为基线；
 OpenWrite 已有而 dsh 面板尚未接入的能力，归为插件接入/交互缺口，不计为核心能力缺失。
 

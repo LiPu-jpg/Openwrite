@@ -2,7 +2,7 @@
 
 核查日期：2026-09-05。承接 [通用小说工具调研](OPEN_SOURCE_NOVEL_AUDIT.md)，本轮只研究用户指定的七个仓库，并对照当前 dsh-novel / OpenWrite 工作树。
 
-项目归属（用户确认）：[LiPu-jpg/Openwrite](https://github.com/LiPu-jpg/Openwrite) 是本团队自己的核心项目；
+项目归属（用户确认）：[OpenWrite Core](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 是本团队自己的核心项目；
 `dsh-novel` 是 OpenWrite 的 DeepSeek Harness 插件版本，两者共同构成此次完善对象。
 下文七个仓库是外部参考，OpenWrite 是自有基线。评估时区分“核心已有、插件尚未接入”和“核心本身需要增强”。
 

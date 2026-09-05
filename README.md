@@ -1,6 +1,6 @@
 # dsh-Openwrite
 
-[OpenWrite](https://github.com/LiPu-jpg/Openwrite) 是本团队的小说创作核心项目；
+[OpenWrite Core](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 是本团队的小说创作核心；
 **dsh-Openwrite 是 OpenWrite 的 DeepSeek Harness 插件版本**，将同一套长篇小说创作能力接入
 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 的 agent 运行时和原生工作台。
 
@@ -36,6 +36,9 @@
 安装和离线验证不调用模型；使用创作 Agent 时配置 `DEEPSEEK_API_KEY` 或 dsh 凭据。
 
 ```sh
+git clone https://github.com/LiPu-jpg/Openwrite.git dsh-Openwrite
+git clone --branch native-core --single-branch https://github.com/LiPu-jpg/Openwrite.git OpenWrite
+cd dsh-Openwrite
 scripts/install.sh   # 一次性安装（幂等）
 scripts/dev.sh       # 启动两端服务
 ```
