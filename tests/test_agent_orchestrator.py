@@ -1394,6 +1394,36 @@ def test_build_chapter_packet_persists_context_snapshot(tmp_path: Path):
     assert "角色1" not in {character["name"] for character in writer_payload["active_characters"]}
 
 
+def test_run_preflight_reuses_the_context_it_already_validated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, _novel_root = _bootstrap_novel(tmp_path)
+    state_store = BookStateStore(root, "demo")
+    state = state_store.load_or_create()
+    state.stage = BookStage.CHAPTER_PREFLIGHT
+    state_store.save(state)
+    orchestrator = OpenWriteOrchestrator.for_testing(
+        root,
+        "demo",
+        state_store=state_store,
+        planning_store=StoryPlanningStore(root, "demo"),
+    )
+    original_build = ContextBuilder.build_generation_context
+    context_builds: list[str] = []
+
+    def counted_build(builder, chapter_id, window_size=5):
+        context_builds.append(chapter_id)
+        return original_build(builder, chapter_id, window_size)
+
+    monkeypatch.setattr(ContextBuilder, "build_generation_context", counted_build)
+
+    result = orchestrator.run_chapter_preflight("ch_001")
+
+    assert result["ok"] is True
+    assert result["packet"]["chapter_id"] == "ch_001"
+    assert context_builds == ["ch_001"]
+
+
 def test_orchestrator_character_documents_keep_canonical_name_and_full_context(
     tmp_path: Path,
 ):

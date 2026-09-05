@@ -336,7 +336,9 @@ def test_model_profile_http_crud_routes_and_fallback_are_credential_free(
         assert created["ok"] is True
         assert created["error"] is None
         assert created["data"]["profile"]["id"] == "writer"
-        assert "api_key" not in json.dumps(created, ensure_ascii=False)
+        serialized = json.dumps(created, ensure_ascii=False)
+        assert '"api_key":' not in serialized
+        assert "fallback-secret" not in serialized
         routed = _request(
             opener,
             f"{base}/api/model/routes",

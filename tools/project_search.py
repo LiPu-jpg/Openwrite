@@ -317,12 +317,20 @@ class LightRAGSearchBackend:
         *,
         limit: int,
     ) -> BackendSearchResult:
-        with _LIGHTRAG_RUNTIME_LOCK:
+        if not _LIGHTRAG_RUNTIME_LOCK.acquire(blocking=False):
+            raise SearchIndexBusyError("LightRAG runtime is busy")
+        try:
             return _run_async(lambda: self._search(documents, query, limit=limit))
+        finally:
+            _LIGHTRAG_RUNTIME_LOCK.release()
 
     def refresh(self, documents: list[IndexedDocument]) -> BackendSearchResult:
-        with _LIGHTRAG_RUNTIME_LOCK:
+        if not _LIGHTRAG_RUNTIME_LOCK.acquire(blocking=False):
+            raise SearchIndexBusyError("LightRAG runtime is busy")
+        try:
             return _run_async(lambda: self._refresh(documents))
+        finally:
+            _LIGHTRAG_RUNTIME_LOCK.release()
 
     async def _search(
         self,

@@ -710,11 +710,54 @@ class TestBuildGenerationContext:
         assert context.novel_id == "test_novel"
         assert context.chapter_id == "ch_001"
 
+    def test_opening_chapter_does_not_start_an_ineligible_semantic_search(
+        self, project_dir
+    ):
+        root, novel_id = project_dir
+
+        def unexpected_backend(_novel_root):
+            raise AssertionError("ch_001 has no distant prose or reference source to query")
+
+        builder = ContextBuilder(
+            root,
+            novel_id,
+            search_index_factory=unexpected_backend,
+        )
+        chapter = OutlineNode(
+            node_id="ch_001",
+            node_type=OutlineNodeType.CHAPTER,
+            title="开篇",
+            goals=["建立冲突"],
+        )
+
+        text, diagnostic = builder._get_semantic_references(
+            "ch_001",
+            current_chapter=chapter,
+            active_characters=[],
+            character_states="",
+        )
+
+        assert text == ""
+        assert diagnostic["reason"] == "no_eligible_distant_context"
+        assert diagnostic["index"]["status"] == "not_queried"
+
     def test_semantic_context_excludes_recent_chapters_and_keeps_sources(
         self, project_dir
     ):
         root, novel_id = project_dir
         calls = []
+        source = (
+            root
+            / "data"
+            / "novels"
+            / novel_id
+            / "data"
+            / "sources"
+            / "demo"
+            / "analysis.md"
+        )
+        source.parent.mkdir(parents=True)
+        source.write_text("先压低选择空间，再揭示隐藏筹码。", encoding="utf-8")
 
         class FakeSearchIndex:
             def search(self, query, *, scope, limit):

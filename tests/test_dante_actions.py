@@ -203,6 +203,8 @@ def test_dante_action_adapter_delegates_public_orchestrator_actions(tmp_path: Pa
     assert outline["outline_draft"] == "# 测试小说"
     assert preflight["action"] == "run_chapter_preflight"
     assert preflight["chapter_id"] == "ch_001"
+    assert preflight["packet_ready"] is True
+    assert "packet" not in preflight
     assert [call[0] for call in calls] == [
         "summarize_ideation",
         "confirm_ideation_summary",

@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import tools.project_search as project_search_module
 from tools.model_profiles import activate_model_profile
 from tools.project_search import (
@@ -17,6 +19,7 @@ from tools.project_search import (
     ProjectSearchIndex,
     RetrievedChunk,
     SearchConfigurationError,
+    SearchIndexBusyError,
 )
 from tools.reading_order import ReadingOrderService
 
@@ -130,23 +133,17 @@ def test_manuscript_search_identity_and_revision_match_canonical_reading_order(
     assert result["locator"]["line"] == 3
 
 
-def test_lightrag_runtime_is_serialized_across_distinct_workspaces(
+def test_lightrag_runtime_busy_fails_fast_instead_of_waiting_forever(
     tmp_path: Path,
     monkeypatch,
 ):
-    active = 0
-    maximum_active = 0
-    guard = threading.Lock()
+    entered = threading.Event()
+    release = threading.Event()
 
     def fake_run_async(factory):
-        nonlocal active, maximum_active
         del factory
-        with guard:
-            active += 1
-            maximum_active = max(maximum_active, active)
-        time.sleep(0.05)
-        with guard:
-            active -= 1
+        entered.set()
+        assert release.wait(timeout=2)
         return BackendSearchResult(chunks=[])
 
     monkeypatch.setattr(project_search_module, "_run_async", fake_run_async)
@@ -154,11 +151,38 @@ def test_lightrag_runtime_is_serialized_across_distinct_workspaces(
         LightRAGSearchBackend.__new__(LightRAGSearchBackend),
         LightRAGSearchBackend.__new__(LightRAGSearchBackend),
     ]
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda backend: backend.search([], "query", limit=1), backends))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(backends[0].search, [], "query", limit=1)
+        assert entered.wait(timeout=1)
+        started = time.monotonic()
+        with pytest.raises(SearchIndexBusyError):
+            backends[1].search([], "query", limit=1)
+        assert time.monotonic() - started < 0.5
+        release.set()
+        assert first.result(timeout=1) == BackendSearchResult(chunks=[])
 
-    assert len(results) == 2
-    assert maximum_active == 1
+
+def test_project_search_uses_literal_fallback_while_lightrag_runtime_is_busy(
+    tmp_path: Path,
+):
+    novel_root = tmp_path / "novel"
+    story = novel_root / "src" / "story" / "background.md"
+    story.parent.mkdir(parents=True)
+    story.write_text("# 背景\n\n钟楼每天少走十三秒。\n", encoding="utf-8")
+    backend = LightRAGSearchBackend.__new__(LightRAGSearchBackend)
+
+    assert project_search_module._LIGHTRAG_RUNTIME_LOCK.acquire(blocking=False)
+    try:
+        payload = ProjectSearchIndex(
+            novel_root,
+            backend_factory=lambda root: backend,
+        ).search("十三秒", scope="story")
+    finally:
+        project_search_module._LIGHTRAG_RUNTIME_LOCK.release()
+
+    assert payload["engine"] == "literal-fallback"
+    assert payload["warning_code"] == "LIGHTRAG_INDEX_BUSY"
+    assert payload["results"][0]["line"] == 3
 
 
 def test_literal_fallback_matches_taxonomy_and_uses_yaml_display_name(tmp_path: Path):

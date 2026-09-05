@@ -287,7 +287,11 @@ class ContextBuilder:
                 "status": "disabled",
                 "reason": "disabled_by_configuration",
                 "results": 0,
-                "index": {"status": "not_queried", "updates": {}, "warning_codes": []},
+                "index": {
+                    "status": "not_queried",
+                    "updates": {},
+                    "warning_codes": [],
+                },
                 "sources": [],
             }
 
@@ -323,22 +327,40 @@ class ContextBuilder:
                 "sources": [],
             }
 
+        # The two immediately preceding chapters are already present in
+        # ``recent_text`` and are deliberately excluded from semantic recall
+        # below.  Before chapter four there can therefore be no eligible
+        # historical prose result, so do not initialize or wait for LightRAG.
+        requests = [("chapters", query, 8)] if target_number >= 4 else []
+        sources_root = self.data_dir / "sources"
+        has_reference_sources = sources_root.is_dir() and any(
+            path.is_file() for path in sources_root.rglob("*")
+        )
+        if has_reference_sources:
+            source_query = (
+                "寻找与当前章节具有相似叙事功能、冲突升级、信息揭示或节奏组织的参考片段。\n"
+                + query
+            )
+            requests.append(("sources", source_query, 6))
+
+        if not requests:
+            return "", {
+                "status": "no_match",
+                "reason": "no_eligible_distant_context",
+                "results": 0,
+                "queries": [],
+                "embedding": {},
+                "excluded_recent_chapters": 2,
+                "index": {"status": "not_queried", "updates": {}, "warning_codes": []},
+                "sources": [],
+            }
+
         if self._search_index_factory is None:
             from tools.project_search import ProjectSearchIndex
 
             search_index = ProjectSearchIndex(self.novel_dir)
         else:
             search_index = self._search_index_factory(self.novel_dir)
-
-        requests = [("chapters", query, 8)]
-        sources_root = self.data_dir / "sources"
-        style_root = self.data_dir / "style"
-        if sources_root.is_dir() or style_root.is_dir():
-            source_query = (
-                "寻找与当前章节具有相似叙事功能、冲突升级、信息揭示或节奏组织的参考片段。\n"
-                + query
-            )
-            requests.append(("sources", source_query, 6))
 
         selected: List[dict[str, Any]] = []
         diagnostics: List[dict[str, Any]] = []

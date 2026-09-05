@@ -83,9 +83,15 @@ class OpenWriteOrchestrator:
             tool_executors=tool_executors,
         )
 
-    def build_chapter_packet(self, chapter_id: str) -> dict[str, Any]:
-        builder = ContextBuilder(self.project_root, self.novel_id)
-        context = builder.build_generation_context(chapter_id)
+    def build_chapter_packet(
+        self,
+        chapter_id: str,
+        *,
+        context: Any | None = None,
+    ) -> dict[str, Any]:
+        if context is None:
+            builder = ContextBuilder(self.project_root, self.novel_id)
+            context = builder.build_generation_context(chapter_id)
         prompt_sections = context.to_prompt_sections()
         core_documents = dict(getattr(context, "core_documents", {}) or {})
         setting_documents = {
@@ -158,7 +164,9 @@ class OpenWriteOrchestrator:
                 missing_items=missing_items or [previous_chapter_id],
             )
 
-        packet = self.build_chapter_packet(chapter_id)
+        # Reuse the context already inspected above.  The old path built the
+        # complete packet twice, including two LightRAG index/query passes.
+        packet = self.build_chapter_packet(chapter_id, context=context)
         return {
             "ok": True,
             "chapter_id": chapter_id,

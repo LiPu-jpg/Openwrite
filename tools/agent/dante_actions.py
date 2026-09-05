@@ -61,6 +61,8 @@ class DanteActionAdapter:
         result = self.orchestrator.run_chapter_preflight(chapter_id)
         payload = self._wrap("run_chapter_preflight", result)
         payload.update(result if isinstance(result, dict) else {})
+        packet = payload.pop("packet", None)
+        payload["packet_ready"] = bool(isinstance(packet, dict) and packet)
         return payload
 
     def delegate_chapter_write(
