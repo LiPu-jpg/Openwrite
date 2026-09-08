@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: release-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -61,11 +64,13 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm install --global pnpm@9.15.9
+      - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
+      - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
       - uses: actions/download-artifact@v4
         with:
           name: release-package
       - run: node scripts/release-check.mjs
-      - run: node scripts/release-smoke.mjs
+      - run: node scripts/release-smoke.mjs --browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
