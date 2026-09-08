@@ -84,7 +84,7 @@ export function apply(ctx: Context): void {
       if (selected === null) return false
       const workspace = await ctx.workspaces.create({ path: selected })
       const sessionId = await ctx.sessions.create({ workspaceId: workspace.workspaceId })
-      const result = await ctx.remote.agentPresets.select(sessionId, 'openwrite-0-2-0')
+      const result = await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
       if (!result.ok) throw new Error(result.error.message)
       ctx.sessions.open(sessionId)
       // Activate a UI target to leave the blank Hero without manufacturing a user turn.
