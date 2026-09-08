@@ -1,10 +1,16 @@
-# 0.2.0 发布验收记录
+# 0.2.1 发布验收记录
 
-下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.0) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256、插件提交、Core 提交、宿主版本和原生执行记录。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物，不重新打包。
+下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.1) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256、插件提交、Core 提交、宿主版本和原生执行记录。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物，不重新打包。
 
 宿主基线：dsh 0.1.2-rc.1；Core 5.8.0 / contract 1。Core 固定提交和 DoG v1.2.0 来源见 `release/runtime-manifest.json`。构建任务记录插件提交、依赖来源和许可证，最终 `.tgz.manifest.json` 绑定产物 SHA-256。
 
-## 当前已执行
+## 本版改动与验收
+
+修复关系图侧栏中同一人物被多条关系重复列出的问题；正文同名或别名冲突改为候选选择，不再静默打开第一份资料。普通姓名与别名仍按资料身份合并。前端 266 项组件测试覆盖这些行为及切换 Workspace/章节时清除候选。
+
+以下既有核心功能沿用 0.2.0 的验收基线，最终 0.2.1 产物的重复安装、平台安装与浏览器检查以本版 Release 附件为准。
+
+## 既有功能基线（0.2.0）
 
 - macOS arm64 / Node 24.15：实际 `.tgz` 安装进隔离 DSH_HOME，重复安装、自动下载 Python、隔离依赖安装、认证后端握手、编辑器资源和标准卸载通过。没有相邻 Core 路径依赖，没有调用模型。
 - 本机已有作品检查使用 `~/my_novel`：标准预设不出现小说工作台；OpenWrite 入口创建新创作会话，空会话显示工作台，已有正文编辑器成功加载。DoG 默认不浮动占位。作者另外明确要求新建独立文件夹实测；新建作品验证单独记录，不借用已有作品数据。
@@ -14,7 +20,7 @@
 
 ## 原生平台与发布门禁
 
-`Release artifact validation` 工作流只构建一次包，Node 24 的 Linux x64、Windows x64、macOS arm64/x64，以及 Linux Node 22.19 / 26 六个原生任务下载同一个产物。Windows 不使用 WSL。真实模型检查单列：本轮人工验证了 DeepSeek 官方的只读 novel_status 调用；真实正文生成和多模型测试尚未执行，不计为通过。完整范围及用量见 Release 附件 manual-functional-check.json。
+`Release artifact validation` 工作流只构建一次包，Node 24 的 Linux x64、Windows x64、macOS arm64/x64，以及 Linux Node 22.19 / 26 六个原生任务下载同一个产物。Windows 不使用 WSL。真实模型检查单列：0.2.1 发布验收不调用模型，真实正文生成和多模型测试未计为通过。0.2.0 曾完成 DeepSeek 官方的只读 novel_status 调用，历史记录见该版本 Release 附件，不作为本版真实模型验收结果。
 
 安装任务覆盖标准与重复安装、其他插件共存、后端认证、隔离 Python、Core 契约、编辑器静态资源、原生依赖加载、动态端口、多实例、崩溃恢复、进程清理、失败升级保留活动环境、回退与卸载保留数据。浏览器实际完成首次引导、打开 OpenWrite、创建测试作品和切换工作台。GitHub 源码安装另起任务，从不带 `.git` 的源码压缩包自行构建。
 
