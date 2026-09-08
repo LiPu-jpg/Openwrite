@@ -1,6 +1,7 @@
 ---
 name: dog-import-query
 description: Query a smart-import DoG graph after a novel has been split into chapters. Use to inspect import completeness, AI precheck errors, and pending outline/asset/canonical setup.
+user-invocable: false
 ---
 
 # 拆书导入 DoG 验收

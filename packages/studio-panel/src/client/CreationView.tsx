@@ -17,11 +17,20 @@ import {
 } from './draft-store.ts'
 import { storageKey } from './storage.ts'
 import { loadVditor, VditorBody } from './VditorBody.tsx'
+import {
+  MANUSCRIPT_SELECTION_PRESERVE_ATTR, reviewIssuesForSelection, SELECTION_POLISH_ACTIONS,
+  manuscriptSelectionFromRange, selectionPolishRequest,
+  type ManuscriptSelection, type SelectionPolishKind,
+} from './manuscript-selection.ts'
+import {
+  findManuscriptMentions, parseMentionAssets,
+  type MentionAsset, type MentionSpan,
+} from './manuscript-mentions.ts'
 import { useWorkbench, workbenchStore, type ChapterSummary } from './WorkbenchStore.ts'
 import { ContinuousReader } from './ContinuousReader.tsx'
 import {
-  parseChapterWorkBrief, parseReadingOrder,
-  type ChapterWorkBriefDto, type ReadingOrderDto,
+  chapterForeshadowActions, chapterSprintStats, parseChapterWorkBrief, parseReadingOrder,
+  type ChapterForeshadowBucket, type ChapterForeshadowItemDto, type ChapterWorkBriefDto, type ReadingOrderDto,
 } from './dto.ts'
 import { useBindStudioContext } from './workspace-context.ts'
 import type { StudioPanelKey } from './locales.ts'
@@ -587,6 +596,23 @@ export function CreationView(props: CreationViewProps) {
   const [workBriefState, setWorkBriefState] = useState<LoadState>('idle')
   const [workBriefError, setWorkBriefError] = useState('')
   const [workBriefReload, setWorkBriefReload] = useState(0)
+  const [openForeshadowId, setOpenForeshadowId] = useState('')
+  const [manuscriptSelection, setManuscriptSelection] = useState<ManuscriptSelection | null>(null)
+  const [selectionBusy, setSelectionBusy] = useState<SelectionPolishKind | ''>('')
+  const [selectionNotice, setSelectionNotice] = useState('')
+  const manuscriptSelectionRef = useRef<ManuscriptSelection | null>(null)
+  const preserveManuscriptSelectionRef = useRef(false)
+  const releasePreserveListenerRef = useRef<(() => void) | null>(null)
+  const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([])
+  const [mentionCard, setMentionCard] = useState<{
+    workspaceId: string
+    chapterPath: string
+    kind: string
+    id: string
+    name: string
+    summary: string
+    aliases: string[]
+  } | null>(null)
   const [readingOrder, setReadingOrder] = useState<ReadingOrderDto | null>(null)
   const [readingOrderState, setReadingOrderState] = useState<LoadState>('idle')
   const [readingOrderError, setReadingOrderError] = useState('')
@@ -674,6 +700,20 @@ export function CreationView(props: CreationViewProps) {
     workBrief.manuscript.current_revision !== '' &&
     !workBrief.review.stale &&
     workBrief.review.current_source_revision === workBrief.manuscript.current_revision
+  const foreshadowActions = workBrief === null ? [] : chapterForeshadowActions(workBrief)
+  const sprint = workBrief === null ? null : chapterSprintStats(workBrief)
+  const foreshadowBuckets: { bucket: ChapterForeshadowBucket; label: StudioPanelKey; items: ChapterForeshadowItemDto[] }[] =
+    workBrief === null ? [] : [
+      { bucket: 'due', label: 'creation.foreshadow.due', items: workBrief.foreshadowing.due },
+      { bucket: 'overdue', label: 'creation.foreshadow.overdue', items: workBrief.foreshadowing.overdue },
+      { bucket: 'to_plant', label: 'creation.foreshadow.toPlant', items: workBrief.foreshadowing.to_plant },
+    ]
+  const mentions = useMemo(() => findManuscriptMentions(draft, mentionAssets), [draft, mentionAssets])
+  const visibleMentionCard = mentionCard !== null
+    && mentionCard.workspaceId === (workspaceId ?? '')
+    && mentionCard.chapterPath === path
+    ? mentionCard
+    : null
   const duplicateChapterKeys = useMemo(() => {
     const counts = new Map<string, number>()
     for (const chapter of orderedChapters) {
@@ -699,8 +739,31 @@ export function CreationView(props: CreationViewProps) {
   }, [path])
 
   useEffect(() => {
+    setMentionCard(null)
+  }, [workspaceId, path])
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchStudioApiRef.current('/assets').then(payload => {
+      if (cancelled) return
+      setMentionAssets(parseMentionAssets(payload))
+    }).catch(() => {
+      if (!cancelled) setMentionAssets([])
+    })
+    return () => { cancelled = true }
+  }, [workspaceId, workbench.contextEpoch, workbench.epochs.assets, workbench.epochs.workspace])
+
+  useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+      const release = releasePreserveListenerRef.current
+      if (release !== null) {
+        window.removeEventListener('mouseup', release)
+        releasePreserveListenerRef.current = null
+      }
+      preserveManuscriptSelectionRef.current = false
+    }
   }, [])
 
   useEffect(() => {
@@ -801,6 +864,9 @@ export function CreationView(props: CreationViewProps) {
       dirtyRef.current = false
       setEditorFailed(false)
       setEditorEpoch(value => value + 1)
+      setManuscriptSelection(null)
+      manuscriptSelectionRef.current = null
+      setSelectionNotice('')
       setDocumentState('ready')
       workbenchStore.setEditorStatus('saved')
       const requestDraftIdentity = draftIdentity
@@ -849,12 +915,14 @@ export function CreationView(props: CreationViewProps) {
       setWorkBrief(null)
       setWorkBriefState('idle')
       setWorkBriefError('')
+      setOpenForeshadowId('')
       return
     }
     let cancelled = false
     setWorkBrief(null)
     setWorkBriefState('loading')
     setWorkBriefError('')
+    setOpenForeshadowId('')
     const query = new URLSearchParams({ recent_limit: '20' })
     if (activeDocumentId !== '') query.set('document_id', activeDocumentId)
     void fetchStudioApiRef.current(`/chapters/${encodeURIComponent(id)}/work-brief?${query.toString()}`).then(payload => {
@@ -1456,6 +1524,84 @@ export function CreationView(props: CreationViewProps) {
     }
   }
 
+  const updateManuscriptSelection = (next: ManuscriptSelection | null) => {
+    if (next === null && preserveManuscriptSelectionRef.current) return
+    if (next !== null) manuscriptSelectionRef.current = next
+    else manuscriptSelectionRef.current = null
+    setManuscriptSelection(next)
+  }
+
+  const preserveManuscriptSelection = (event: { preventDefault: () => void }) => {
+    event.preventDefault()
+    preserveManuscriptSelectionRef.current = true
+    const previous = releasePreserveListenerRef.current
+    if (previous !== null) window.removeEventListener('mouseup', previous)
+    const release = () => {
+      preserveManuscriptSelectionRef.current = false
+      window.removeEventListener('mouseup', release)
+      if (releasePreserveListenerRef.current === release) releasePreserveListenerRef.current = null
+    }
+    releasePreserveListenerRef.current = release
+    window.addEventListener('mouseup', release)
+  }
+
+  const openMention = (span: MentionSpan) => {
+    setMentionCard({
+      workspaceId: workspaceId ?? '',
+      chapterPath: path,
+      kind: span.kind,
+      id: span.id,
+      name: span.name,
+      summary: span.summary,
+      aliases: span.aliases,
+    })
+  }
+
+  const runSelectionPolish = async (kind: SelectionPolishKind) => {
+    const selection = manuscriptSelectionRef.current
+    const id = chapterId(path)
+    if (selection === null || selectionBusy !== '' || id === '') return
+    if (dirtyRef.current) {
+      await saveRef.current(false, 'manual')
+      if (dirtyRef.current) {
+        setSelectionNotice(t('creation.selection.saveRequired'))
+        return
+      }
+    }
+    const request = selectionPolishRequest({
+      kind,
+      chapterId: id,
+      selection,
+      documentRevision: documentRef.current?.revision ?? '',
+      reviewRevision: workBrief?.review.review_revision ?? '',
+      reviewFresh: reviewCasReady,
+      issueIds: reviewIssuesForSelection(activeChapter?.review.issueDetails ?? [], selection),
+    })
+    if (!request.ok) {
+      setSelectionNotice(t(
+        request.reason === 'no-review' ? 'creation.selection.reviewRequired'
+          : request.reason === 'no-issues' ? 'creation.selection.noIssues'
+            : 'creation.selection.empty',
+      ))
+      return
+    }
+    setSelectionBusy(kind)
+    setSelectionNotice('')
+    try {
+      await postStudioApi(request.path, request.body)
+      setInspectorTab('revisions')
+      setInspectorVisible(true)
+      setRightOpen(true)
+      workbenchStore.invalidate('revisions')
+      setInspectorReload(value => value + 1)
+      setSelectionNotice(t('creation.selection.staged'))
+    } catch (cause: unknown) {
+      setSelectionNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setSelectionBusy('')
+    }
+  }
+
   const toggleRevisionHunk = (proposalId: string, hunkId: string) => {
     setRevisionSelections(previous => {
       const selected = new Set(previous[proposalId] ?? [])
@@ -1472,6 +1618,14 @@ export function CreationView(props: CreationViewProps) {
     if (historyBusy !== '') return
     const selected = revisionSelections[proposal.proposalId] ?? []
     if (action === 'apply' && selected.length === 0) return
+    if (action === 'apply') {
+      const currentRevision = documentRef.current?.revision ?? ''
+      if (proposal.sourceRevision !== '' && currentRevision !== '' && proposal.sourceRevision !== currentRevision) {
+        setHistoryNotice(t('creation.proposals.sourceConflict'))
+        setInspectorTab('revisions')
+        return
+      }
+    }
     setHistoryBusy(proposal.proposalId)
     setHistoryNotice('')
     try {
@@ -1650,6 +1804,48 @@ export function CreationView(props: CreationViewProps) {
             </button>
           </div>
         </header>
+        {!readerMode && manuscriptSelection !== null && (
+          <div className={css.selectionPolish} aria-label={t('creation.selection.title')}
+            {...{ [MANUSCRIPT_SELECTION_PRESERVE_ATTR]: '' }}
+            onMouseDown={preserveManuscriptSelection}>
+            {SELECTION_POLISH_ACTIONS.map(action => (
+              <button key={action.kind} type="button" className={css.commandButton}
+                disabled={selectionBusy !== ''}
+                onMouseDown={preserveManuscriptSelection}
+                onClick={() => { void runSelectionPolish(action.kind) }}>
+                {t(action.label)}
+              </button>
+            ))}
+            {selectionBusy !== '' && <small>{t('creation.selection.working')}</small>}
+            {selectionNotice !== '' && <span role="status">{selectionNotice}</span>}
+          </div>
+        )}
+        {!readerMode && mentions.length > 0 && (
+          <div className={css.mentionHits} aria-label={t('creation.mentions.title')}>
+            {mentions.map(span => (
+              <button key={`${String(span.start)}:${span.kind}:${span.id}:${span.text}`} type="button"
+                aria-label={`${t('creation.mentions.mention')}: ${span.text}`}
+                onClick={() => openMention(span)}>
+                {span.text}
+              </button>
+            ))}
+          </div>
+        )}
+        {!readerMode && visibleMentionCard !== null && (
+          <section className={css.mentionCard} aria-label={t('creation.mentions.card')}
+            data-asset={`${visibleMentionCard.kind}:${visibleMentionCard.id}`}>
+            <header>
+              <strong>{visibleMentionCard.name}</strong>
+              <span>{visibleMentionCard.kind}</span>
+              <button type="button" aria-label={t('creation.mentions.close')}
+                onClick={() => setMentionCard(null)}><X size={14} /></button>
+            </header>
+            {visibleMentionCard.aliases.length > 0 && (
+              <small>{t('creation.mentions.aliases')} {visibleMentionCard.aliases.join('、')}</small>
+            )}
+            {visibleMentionCard.summary !== '' && <p>{visibleMentionCard.summary}</p>}
+          </section>
+        )}
 
         {!readerMode && (acceptanceState === 'loading' || acceptanceState === 'error' || acceptance !== null) && (
           <section className={css.acceptanceCard} data-status={acceptance?.status ?? acceptanceState}
@@ -1761,9 +1957,14 @@ export function CreationView(props: CreationViewProps) {
               </div>
             )}
             {editorFailed ? (
-              <textarea className={css.manuscriptFallback} value={draft} onChange={event => updateDraft(event.target.value)} />
+              <textarea className={css.manuscriptFallback} value={draft}
+                onChange={event => updateDraft(event.target.value)}
+                onSelect={event => updateManuscriptSelection(manuscriptSelectionFromRange(
+                  event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd,
+                ))} />
             ) : (
               <VditorBody key={`${path}:${editorEpoch}`} initial={draft} disabled={false} onChange={updateDraft}
+                onSelectionChange={updateManuscriptSelection}
                 onReady={() => setEditorReady(true)} onFailed={() => { setEditorReady(true); setEditorFailed(true) }} />
             )}
             {!editorReady && !editorFailed && (
@@ -1783,7 +1984,10 @@ export function CreationView(props: CreationViewProps) {
                 data-active={inspectorTab === tab} onClick={() => setInspectorTab(tab)}>
                 {tab === 'context' ? t('creation.context')
                   : tab === 'review' ? t('creation.review')
-                    : tab === 'revisions' ? t('creation.revisions') : t('creation.activity')}
+                    : tab === 'revisions' ? t('creation.revisions')
+                      : foreshadowActions.length > 0
+                        ? `${t('creation.activity')} ${String(foreshadowActions.length)}`
+                        : t('creation.activity')}
               </button>
             ))}
           </div>
@@ -1908,6 +2112,46 @@ export function CreationView(props: CreationViewProps) {
           )}
           {inspectorTab === 'activity' && workBriefState === 'ready' && workBrief !== null && (
             <div className={css.activityPane}>
+              <section className={css.activityCard} aria-label={t('creation.foreshadow.title')}>
+                <strong>{t('creation.foreshadow.title')}</strong>
+                {foreshadowActions.length === 0
+                  ? <span>{t('creation.foreshadow.empty')}</span>
+                  : <div className={css.foreshadowBuckets}>{foreshadowBuckets.filter(group => group.items.length > 0).map(group => (
+                    <section key={group.bucket} className={css.foreshadowBucket} data-bucket={group.bucket}
+                      aria-label={t(group.label)}>
+                      <header>
+                        <b>{t(group.label)}</b>
+                        <span>{String(group.items.length)}</span>
+                      </header>
+                      <ul className={css.foreshadowActions}>{group.items.map(item => {
+                        const open = openForeshadowId === item.id
+                        const summary = item.content.trim() !== '' ? item.content : item.id
+                        return <li key={item.id}>
+                          <button type="button" className={css.foreshadowAction} data-open={open}
+                            aria-expanded={open}
+                            aria-label={`${t(group.label)}: ${summary}`}
+                            onClick={() => setOpenForeshadowId(open ? '' : item.id)}>
+                            <strong>{summary}</strong>
+                            <small>{item.id}{item.reveal_chapter_id !== '' ? ` · ${item.reveal_chapter_id}` : item.plant_chapter_id !== '' ? ` · ${item.plant_chapter_id}` : ''}</small>
+                          </button>
+                          {open && (
+                            <div className={css.foreshadowDetail}>
+                              {item.content.trim() !== '' && <p>{item.content}</p>}
+                              <dl>
+                                <div><dt>{t('creation.foreshadow.plant')}</dt><dd><code>{item.plant_chapter_id || '—'}</code></dd></div>
+                                <div><dt>{t('creation.foreshadow.reveal')}</dt><dd><code>{item.reveal_chapter_id || '—'}</code></dd></div>
+                                <div><dt>{t('creation.foreshadow.status')}</dt><dd>{item.status || '—'}</dd></div>
+                                <div><dt>{t('creation.foreshadow.weight')}</dt><dd>{String(item.weight)}</dd></div>
+                                {item.layer !== '' && <div><dt>{t('creation.foreshadow.layer')}</dt><dd>{item.layer}</dd></div>}
+                                {item.source_revision !== '' && <div><dt>{t('creation.foreshadow.source')}</dt><dd><code>{item.source_revision}</code></dd></div>}
+                              </dl>
+                            </div>
+                          )}
+                        </li>
+                      })}</ul>
+                    </section>
+                  ))}</div>}
+              </section>
               <section className={css.activityCard}>
                 <strong>{t('creation.activity.target')}</strong>
                 <div className={css.activityProgress} role="progressbar" aria-valuemin={0} aria-valuemax={100}
@@ -1918,6 +2162,22 @@ export function CreationView(props: CreationViewProps) {
                   {' · '}{t('creation.activity.remaining')} {workBrief.target.remaining_units.toLocaleString()}</span>
                 <small>{workBrief.target.source}</small>
               </section>
+              {sprint !== null && (
+                <section className={css.activityCard} aria-label={t('creation.activity.sprint')}>
+                  <strong>{t('creation.activity.sprint')}</strong>
+                  <span>
+                    {t('creation.activity.sprintAdded')} {sprint.added.toLocaleString()}
+                    {' · '}{t('creation.activity.sprintDeleted')} {sprint.deleted.toLocaleString()}
+                    {' · '}{t('creation.activity.sprintNet')} {sprint.net >= 0 ? '+' : ''}{sprint.net.toLocaleString()}
+                  </span>
+                  {sprint.aiNet !== null && (
+                    <small>{t('creation.activity.sprintRevision')} {sprint.aiNet >= 0 ? '+' : ''}{sprint.aiNet.toLocaleString()}</small>
+                  )}
+                  {sprint.humanNet !== null && (
+                    <small>{t('creation.activity.sprintSaved')} {sprint.humanNet >= 0 ? '+' : ''}{sprint.humanNet.toLocaleString()}</small>
+                  )}
+                </section>
+              )}
               <section className={css.activityCard}>
                 <strong>{t('creation.activity.identity')}</strong>
                 <dl>

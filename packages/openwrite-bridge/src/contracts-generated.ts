@@ -4,7 +4,7 @@
 //   review-manifest-v2.schema.json sha256:c74873990a9d $id: https://openwrite.dev/schemas/review-manifest-v2.schema.json
 //   delivery-manifest-v2.schema.json sha256:cb149eae6952 $id: https://openwrite.dev/schemas/delivery-manifest-v2.schema.json
 //   delivery-stage-v2.schema.json sha256:04d2637e1e4d $id: https://openwrite.dev/schemas/delivery-stage-v2.schema.json
-//   model-benchmark-v1.schema.json sha256:4d56ab63c3ea $id: https://openwrite.dev/schemas/model-benchmark-v1.schema.json
+//   model-benchmark-v1.schema.json sha256:04b62b3e4934 $id: https://openwrite.dev/schemas/model-benchmark-v1.schema.json
 //   model-profile-surface-v1.schema.json sha256:d44a07240d23 $id: https://openwrite.dev/schemas/model-profile-surface-v1.schema.json
 //   task-surface-v1.schema.json sha256:b25a2195014a $id: https://openwrite.dev/schemas/task-surface-v1.schema.json
 //   research-surface-v1.schema.json sha256:c66c3f1494a1 $id: https://openwrite.dev/schemas/research-surface-v1.schema.json
@@ -97,6 +97,11 @@ export interface ModelBenchmarkV1Candidate {
   cost_reported?: boolean
   latency_ms?: number | null
   error?: ModelBenchmarkV1CandidateError | null
+  task_type?: "chapter" | "outline"
+  outline_start_chapter?: number
+  outline_end_chapter?: number
+  outline_chapter_count?: number
+  outline_chapters?: Record<string, unknown>[]
   [key: string]: unknown
 }
 
@@ -129,6 +134,27 @@ export interface ModelBenchmarkV1Evaluation {
   [key: string]: unknown
 }
 
+/** ModelBenchmarkV1ConfigPipelineNode. Extra keys are allowed (additionalProperties). */
+export interface ModelBenchmarkV1ConfigPipelineNode {
+  id: string
+  label: string
+  depends_on: string[]
+}
+
+/** ModelBenchmarkV1ConfigPipelineReviewDomain. Extra keys are allowed (additionalProperties). */
+export interface ModelBenchmarkV1ConfigPipelineReviewDomain {
+  id?: string
+  label?: string
+}
+
+/** ModelBenchmarkV1ConfigPipeline. Extra keys are allowed (additionalProperties). */
+export interface ModelBenchmarkV1ConfigPipeline {
+  id?: string
+  execution_mode?: "framework" | "creative"
+  nodes?: ModelBenchmarkV1ConfigPipelineNode[]
+  review_domains?: ModelBenchmarkV1ConfigPipelineReviewDomain[]
+}
+
 /** ModelBenchmarkV1Config. Extra keys are allowed (additionalProperties). */
 export interface ModelBenchmarkV1Config {
   writer_profile_ids: string[]
@@ -139,6 +165,11 @@ export interface ModelBenchmarkV1Config {
   blind_review?: boolean
   run_scoped_profiles?: boolean
   execution_mode?: "framework" | "creative"
+  task_type?: "chapter" | "outline"
+  outline_start_chapter?: number
+  outline_end_chapter?: number
+  outline_chapter_count?: number
+  pipeline?: ModelBenchmarkV1ConfigPipeline
   [key: string]: unknown
 }
 
@@ -161,6 +192,7 @@ export interface ModelBenchmarkV1 {
   evaluations: ModelBenchmarkV1Evaluation[]
   config: ModelBenchmarkV1Config
   summary?: ModelBenchmarkV1Summary
+  task_type?: "chapter" | "outline"
   [key: string]: unknown
 }
 
@@ -647,10 +679,37 @@ const SCHEMAS: Record<string, SchemaMap> = {
                 "null"
               ]
             },
+            "outline_chapter_count": {
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "outline_chapters": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "outline_end_chapter": {
+              "maximum": 100000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "outline_start_chapter": {
+              "maximum": 100000,
+              "minimum": 1,
+              "type": "integer"
+            },
             "reliability_status": {
               "enum": [
                 "completed",
                 "failed"
+              ]
+            },
+            "task_type": {
+              "enum": [
+                "chapter",
+                "outline"
               ]
             },
             "usage": {
@@ -716,6 +775,74 @@ const SCHEMAS: Record<string, SchemaMap> = {
               "creative"
             ]
           },
+          "outline_chapter_count": {
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "outline_end_chapter": {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "outline_start_chapter": {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "pipeline": {
+            "properties": {
+              "execution_mode": {
+                "enum": [
+                  "framework",
+                  "creative"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "nodes": {
+                "items": {
+                  "properties": {
+                    "depends_on": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "depends_on"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "review_domains": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
           "repeats": {
             "maximum": 5,
             "minimum": 1,
@@ -734,6 +861,12 @@ const SCHEMAS: Record<string, SchemaMap> = {
             "maximum": 12000,
             "minimum": 200,
             "type": "integer"
+          },
+          "task_type": {
+            "enum": [
+              "chapter",
+              "outline"
+            ]
           },
           "writer_profile_ids": {
             "items": {
@@ -890,6 +1023,12 @@ const SCHEMAS: Record<string, SchemaMap> = {
       "task_id": {
         "minLength": 1,
         "type": "string"
+      },
+      "task_type": {
+        "enum": [
+          "chapter",
+          "outline"
+        ]
       }
     },
     "required": [

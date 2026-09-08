@@ -1,6 +1,7 @@
 ---
 name: dialoguequality
 description: Use when user wants to analyze dialogue style, extract speech patterns, compare character voices, or detect AI-sounding dialogue. Triggers include "对话", "口头禅", "角色声音", "对白", "AI味对话".
+user-invocable: false
 ---
 
 # 对话质量系统

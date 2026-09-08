@@ -161,15 +161,32 @@ export function SearchView({ fetchStudioApi, postStudioApi, t }: SearchViewProps
   const [changePlanConflict, setChangePlanConflict] = useState(false)
   const [changePlanApplied, setChangePlanApplied] = useState(false)
   const previewRequestRef = useRef(0)
+  const changePlanRequestRef = useRef(0)
+  const changePlanTokenRef = useRef('')
+
+  const discardPreviewToken = useCallback(async (previewToken: string) => {
+    if (previewToken === '') return
+    try { await postStudioApi('/document/change-plan', { action: 'reject', preview_token: previewToken }) } catch { /* never apply an unverifiable token */ }
+  }, [postStudioApi])
 
   const resetChangePlan = useCallback(() => {
+    changePlanRequestRef.current += 1
+    void discardPreviewToken(changePlanTokenRef.current)
+    changePlanTokenRef.current = ''
     setReplacement('')
     setChangePlan(null)
     setChangePlanBusy('')
     setChangePlanMessage('')
     setChangePlanConflict(false)
     setChangePlanApplied(false)
-  }, [])
+  }, [discardPreviewToken])
+
+  useEffect(() => () => {
+    previewRequestRef.current += 1
+    changePlanRequestRef.current += 1
+    void discardPreviewToken(changePlanTokenRef.current)
+    changePlanTokenRef.current = ''
+  }, [discardPreviewToken])
 
   // Debounced live search: fires 350ms after the last keystroke, immediately
   // (well, one debounce tick) on scope change. Empty query returns to idle.
@@ -263,11 +280,6 @@ export function SearchView({ fetchStudioApi, postStudioApi, t }: SearchViewProps
     setNonce(value => value + 1)
   }, [resetChangePlan])
 
-  const discardPreviewToken = useCallback(async (previewToken: string) => {
-    if (previewToken === '') return
-    try { await postStudioApi('/document/change-plan', { action: 'reject', preview_token: previewToken }) } catch { /* never apply an unverifiable token */ }
-  }, [postStudioApi])
-
   const previewReplacement = async () => {
     const current = preview
     if (current === null || current.status !== 'ready' || changePlanBusy !== '') return
@@ -275,6 +287,7 @@ export function SearchView({ fetchStudioApi, postStudioApi, t }: SearchViewProps
     const locatorCurrent = current.result.revision !== '' && current.result.revision === current.documentRevision &&
       current.result.documentId !== '' && current.result.documentId === current.documentId
     if (!locatorCurrent || oldText === '' || replacement === oldText) return
+    const request = ++changePlanRequestRef.current
     setChangePlanBusy('preview')
     setChangePlan(null)
     setChangePlanMessage('')
@@ -284,6 +297,10 @@ export function SearchView({ fetchStudioApi, postStudioApi, t }: SearchViewProps
       const plan = parseDocumentChangePlan(await postStudioApi('/document/change-plan', {
         action: 'preview', path: current.documentPath, edits: [{ old_text: oldText, new_text: replacement }],
       }))
+      if (request !== changePlanRequestRef.current) {
+        await discardPreviewToken(plan.preview_token)
+        return
+      }
       const safe = plan.path === current.documentPath && plan.changed && plan.preview_token !== '' &&
         plan.mutation_summary.execution_status === 'proposed' &&
         plan.mutation_summary.source_revision === current.result.revision &&
@@ -291,12 +308,15 @@ export function SearchView({ fetchStudioApi, postStudioApi, t }: SearchViewProps
         plan.mutation_summary.result_revision !== ''
       if (!safe) {
         await discardPreviewToken(plan.preview_token)
+        if (request !== changePlanRequestRef.current) return
         setChangePlanConflict(true)
         setChangePlanMessage(t('search.change.refreshRequired'))
         return
       }
+      changePlanTokenRef.current = plan.preview_token
       setChangePlan(plan)
     } catch (cause: unknown) {
+      if (request !== changePlanRequestRef.current) return
       const conflict = cause instanceof StudioApiError && [
         'DOCUMENT_REVISION_CONFLICT', 'DOCUMENT_PREVIEW_INVALID', 'DOCUMENT_PREVIEW_RESULT_MISMATCH',
         'OLD_TEXT_NOT_FOUND', 'AMBIGUOUS_OLD_TEXT', 'AMBIGUOUS_TEXT_RANGE',
@@ -304,65 +324,74 @@ export function SearchView({ fetchStudioApi, postStudioApi, t }: SearchViewProps
       setChangePlanConflict(conflict)
       setChangePlanMessage(conflict ? t('search.change.refreshRequired') : cause instanceof Error ? cause.message : String(cause))
     } finally {
-      setChangePlanBusy('')
+      if (request === changePlanRequestRef.current) setChangePlanBusy('')
     }
   }
 
   const applyReplacement = async () => {
     const current = preview
     const plan = changePlan
-    if (current === null || plan === null || changePlanBusy !== '') return
+    if (current === null || plan === null || plan.path !== current.documentPath || changePlanBusy !== '') return
+    const request = ++changePlanRequestRef.current
+    changePlanTokenRef.current = ''
     setChangePlanBusy('apply')
     setChangePlanMessage('')
     try {
       const applied = parseDocumentChangePlan(await postStudioApi('/document/change-plan', {
         action: 'apply', preview_token: plan.preview_token,
       }))
+      // The user may be reading another hit now; still refresh documents after
+      // the authorized write, but never attach its result to that new hit.
+      workbenchStore.invalidate('manuscript')
+      workbenchStore.invalidate('workspace')
+      if (request !== changePlanRequestRef.current) return
       if (!applied.applied || applied.path !== current.documentPath ||
         applied.mutation_summary.execution_status !== 'committed' ||
         applied.mutation_summary.source_revision !== plan.mutation_summary.source_revision ||
         applied.mutation_summary.result_revision !== plan.mutation_summary.result_revision) {
         if (!applied.applied) await discardPreviewToken(plan.preview_token)
+        if (request !== changePlanRequestRef.current) return
         setChangePlan(null)
         setChangePlanConflict(true)
         setChangePlanMessage(t('search.change.invalidApply'))
-        workbenchStore.invalidate('manuscript')
-        workbenchStore.invalidate('workspace')
         return
       }
       setChangePlan(null)
       setChangePlanMessage(t('search.change.applied'))
       setChangePlanApplied(true)
-      workbenchStore.invalidate('manuscript')
-      workbenchStore.invalidate('workspace')
     } catch (cause: unknown) {
       await discardPreviewToken(plan.preview_token)
+      workbenchStore.invalidate('manuscript')
+      workbenchStore.invalidate('workspace')
+      if (request !== changePlanRequestRef.current) return
       setChangePlan(null)
       setChangePlanConflict(true)
       setChangePlanMessage(t('search.change.refreshRequired'))
-      workbenchStore.invalidate('manuscript')
-      workbenchStore.invalidate('workspace')
     } finally {
-      setChangePlanBusy('')
+      if (request === changePlanRequestRef.current) setChangePlanBusy('')
     }
   }
 
   const rejectReplacement = async () => {
     const plan = changePlan
     if (plan === null || changePlanBusy !== '') return
+    const request = ++changePlanRequestRef.current
     setChangePlanBusy('reject')
     setChangePlanMessage('')
     try {
       const rejected = parseDocumentChangePlan(await postStudioApi('/document/change-plan', {
         action: 'reject', preview_token: plan.preview_token,
       }))
+      if (request !== changePlanRequestRef.current) return
       if (rejected.status !== 'rejected') throw new Error(t('search.change.invalidReject'))
+      changePlanTokenRef.current = ''
       setChangePlan(null)
       setChangePlanMessage(t('search.change.rejected'))
     } catch (cause: unknown) {
+      if (request !== changePlanRequestRef.current) return
       setChangePlanMessage(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      setChangePlanBusy('')
+      if (request === changePlanRequestRef.current) setChangePlanBusy('')
     }
   }
 
@@ -377,6 +406,7 @@ export function SearchView({ fetchStudioApi, postStudioApi, t }: SearchViewProps
         <span className={css.toolbarMeta}>
           <input
             type="search"
+            aria-label={t('search.placeholder')}
             className={css.searchInput}
             placeholder={t('search.placeholder')}
             value={input}

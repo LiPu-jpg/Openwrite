@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Ban, Check, ChevronDown, ChevronUp, CircleAlert, Clock3, Copy, ExternalLink, ListFilter, RefreshCw, RotateCcw, Search, X } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -82,20 +82,90 @@ export type TasksViewProps = ConvViewProps & InjectFace<StudioApiInjected> & Pro
 
 export function TasksView({ fetchStudioApi, postStudioApi, t, onNavigate }: TasksViewProps) {
   const workbench = useWorkbench(); const [state, setState] = useState<LoadState>('loading'); const [payload, setPayload] = useState<TasksPayload | null>(null); const [error, setError] = useState(''); const [selectedId, setSelectedId] = useState(''); const [detail, setDetail] = useState<TaskRecord | null>(null); const [detailState, setDetailState] = useState<LoadState>('ready'); const [filter, setFilter] = useState<TaskStatus | 'all'>('all'); const [typeFilter, setTypeFilter] = useState('all'); const [chapterFilter, setChapterFilter] = useState(''); const [keyword, setKeyword] = useState(''); const [sortNewest, setSortNewest] = useState(true); const [acting, setActing] = useState<string | null>(null); const [notice, setNotice] = useState<{ text: string; bad: boolean } | null>(null)
-  const load = useCallback((silent = false) => { if (!silent) setState('loading'); let cancelled = false; fetchStudioApi('/tasks?limit=100').then(value => { if (cancelled) return; const next = parseTasks(value); setPayload(next); setState('ready'); setError(''); setSelectedId(current => current && next.tasks.some(task => task.taskId === current) ? current : '') }).catch((cause: unknown) => { if (cancelled) return; setError(cause instanceof Error ? cause.message : String(cause)); setState('error') }); return () => { cancelled = true } }, [fetchStudioApi])
-  useEffect(() => { const cancel = load(); return () => { cancel?.() } }, [load])
-  const openDetail = useCallback(async (task: TaskRecord) => { setSelectedId(task.taskId); setDetailState('loading'); setDetail(null); try { const root = record(await fetchStudioApi(`/tasks/${encodeURIComponent(task.taskId)}`)); const inner = record(root['data']); setDetail(parseTask(inner['task'] ?? task, parseEvents(inner['events']))); setDetailState('ready') } catch (cause: unknown) { setDetail(task); setError(cause instanceof Error ? cause.message : String(cause)); setDetailState('error') } }, [fetchStudioApi])
-  const runAction = useCallback(async (task: TaskRecord, action: TaskAction) => { if (acting !== null) return; if (action === 'cancel' && !window.confirm(t('tasks.cancel.confirm'))) return; setActing(`${task.taskId}:${action}`); setNotice(null); try { await postStudioApi(`/tasks/${encodeURIComponent(task.taskId)}/${action}`, {}); setNotice({ text: t(`tasks.${action}.done`), bad: false }); await load(true); if (selectedId === task.taskId) await openDetail(task) } catch (cause: unknown) { setNotice({ text: `${t(`tasks.${action}.failed`)}: ${cause instanceof Error ? cause.message : String(cause)}`, bad: true }) } finally { setActing(null) } }, [acting, load, openDetail, postStudioApi, selectedId, t])
+  const listRequest = useRef(0)
+  const detailRequest = useRef(0)
+  const selectedRef = useRef('')
+  const actingRef = useRef(false)
+
+  const closeDetail = useCallback(() => {
+    detailRequest.current += 1
+    selectedRef.current = ''
+    setSelectedId('')
+    setDetail(null)
+  }, [])
+
+  const openDetail = useCallback(async (task: TaskRecord, silent = false) => {
+    const request = ++detailRequest.current
+    selectedRef.current = task.taskId
+    setSelectedId(task.taskId)
+    if (!silent) { setDetailState('loading'); setDetail(null) }
+    try {
+      const root = record(await fetchStudioApi(`/tasks/${encodeURIComponent(task.taskId)}`))
+      if (request !== detailRequest.current || selectedRef.current !== task.taskId) return
+      const inner = record(root['data'])
+      setDetail(parseTask(inner['task'] ?? task, parseEvents(inner['events'])))
+      setDetailState('ready')
+    } catch {
+      if (request !== detailRequest.current || selectedRef.current !== task.taskId) return
+      setDetail(task)
+      setDetailState('error')
+    }
+  }, [fetchStudioApi])
+
+  const load = useCallback(async (silent = false) => {
+    const request = ++listRequest.current
+    if (!silent) setState('loading')
+    try {
+      const next = parseTasks(await fetchStudioApi('/tasks?limit=100'))
+      if (request !== listRequest.current) return
+      setPayload(next)
+      setState('ready')
+      setError('')
+      const selected = next.tasks.find(task => task.taskId === selectedRef.current)
+      if (selected) await openDetail(selected, true)
+      else if (selectedRef.current !== '') closeDetail()
+    } catch (cause: unknown) {
+      if (request !== listRequest.current) return
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setState('error')
+    }
+  }, [closeDetail, fetchStudioApi, openDetail])
+
+  useEffect(() => {
+    void load()
+    return () => { listRequest.current += 1; detailRequest.current += 1 }
+  }, [load])
+  const tasksEpoch = useRef(workbench.epochs.tasks)
+  useEffect(() => {
+    if (tasksEpoch.current === workbench.epochs.tasks) return
+    tasksEpoch.current = workbench.epochs.tasks
+    if (!actingRef.current) void load(true)
+  }, [load, workbench.epochs.tasks])
+
+  const runAction = useCallback(async (task: TaskRecord, action: TaskAction) => {
+    if (actingRef.current) return
+    if (action === 'cancel' && !window.confirm(t('tasks.cancel.confirm'))) return
+    actingRef.current = true
+    setActing(`${task.taskId}:${action}`)
+    setNotice(null)
+    try {
+      await postStudioApi(`/tasks/${encodeURIComponent(task.taskId)}/${action}`, {})
+      setNotice({ text: t(`tasks.${action}.done`), bad: false })
+      await load(true)
+    } catch (cause: unknown) {
+      setNotice({ text: `${t(`tasks.${action}.failed`)}: ${cause instanceof Error ? cause.message : String(cause)}`, bad: true })
+    } finally { actingRef.current = false; setActing(null) }
+  }, [load, postStudioApi, t])
   const types = useMemo(() => [...new Set((payload?.tasks ?? []).map(task => task.type).filter(Boolean))].sort(), [payload])
   const visible = useMemo(() => { const query = keyword.trim().toLowerCase(); return [...(payload?.tasks ?? [])].filter(task => { if (filter !== 'all' && task.status !== filter) return false; if (typeFilter !== 'all' && task.type !== typeFilter) return false; if (chapterFilter.trim() !== '' && !task.chapterId.toLowerCase().includes(chapterFilter.trim().toLowerCase())) return false; return query === '' || [task.taskId, task.type, task.chapterId, task.inputSummary, task.errorCode].some(value => value.toLowerCase().includes(query)) }).sort((a, b) => { const left = Date.parse(a.updatedAt || a.createdAt) || 0; const right = Date.parse(b.updatedAt || b.createdAt) || 0; return sortNewest ? right - left : left - right }) }, [chapterFilter, filter, keyword, payload, sortNewest, typeFilter])
   const copyId = async (id: string) => { try { await navigator.clipboard?.writeText(id); setNotice({ text: t('tasks.detail.copied'), bad: false }) } catch { setNotice({ text: id, bad: false }) } }
   const navigateResult = (ref: ResultRef) => { if (ref.type === 'benchmark_run' || ref.type === 'research_report') { onNavigate?.({ view: ref.type === 'benchmark_run' ? 'benchmark' : 'research', id: ref.id }); return } if (ref.type === 'chapter' || ref.type === 'review') { const chapter = workbench.chapters.find(item => item.id === ref.id); if (chapter !== undefined) { workbenchStore.setActiveChapter(chapter.path); setNotice({ text: ref.type === 'review' ? t('tasks.jump.reviewHint') : t('tasks.jump.chapterHint'), bad: false }) } else setNotice({ text: t('tasks.jump.chapterMissing'), bad: true }) } }
   const counts = payload?.counts ?? {}; const summary = ([['all', t('tasks.summary.total'), payload?.tasks.length ?? 0], ['running', statusLabel('running', t), counts.running ?? 0], ['awaiting_confirmation', statusLabel('awaiting_confirmation', t), counts.awaiting_confirmation ?? 0], ['failed', statusLabel('failed', t), counts.failed ?? 0], ['completed', statusLabel('completed', t), counts.completed ?? 0]] as const)
   return <div className={css.root}>
-    <div className={css.toolbar}><div className={css.taskSummaryBar} aria-label={t('tasks.list')}>{summary.map(([key, label, count]) => <button key={key} type="button" className={css.taskSummaryItem} data-active={filter === key} onClick={() => setFilter(key as TaskStatus | 'all')}><strong>{count}</strong><span>{label}</span></button>)}</div><button type="button" className={css.button} title={t('refresh')} onClick={() => { void load() }} disabled={state === 'loading'}><RefreshCw size={14} /></button></div>
+    <div className={css.toolbar}><div className={css.taskSummaryBar} aria-label={t('tasks.list')}>{summary.map(([key, label, count]) => <button key={key} type="button" className={css.taskSummaryItem} data-active={filter === key} aria-pressed={filter === key} onClick={() => setFilter(key as TaskStatus | 'all')}><strong>{count}</strong><span>{label}</span></button>)}</div><button type="button" className={css.button} title={t('refresh')} onClick={() => { void load() }} disabled={state === 'loading' || acting !== null}><RefreshCw size={14} /></button></div>
     {notice !== null && <div className={notice.bad ? css.taskError : css.notice} role={notice.bad ? 'alert' : 'status'}>{notice.text}</div>}
-    <div className={css.taskControls}><label className={css.taskSearch}><Search size={14} /><input value={keyword} placeholder={t('tasks.filter.keyword')} onChange={event => setKeyword(event.target.value)} /></label><label><ListFilter size={14} />{t('tasks.filter.type')}<select value={typeFilter} onChange={event => setTypeFilter(event.target.value)}><option value="all">{t('tasks.filter.typeAll')}</option>{types.map(type => <option key={type} value={type}>{typeLabel(type, t)}</option>)}</select></label><label><input value={chapterFilter} placeholder={t('tasks.filter.chapter')} onChange={event => setChapterFilter(event.target.value)} /></label><button type="button" className={css.button} onClick={() => setSortNewest(current => !current)} title={t('tasks.sort.toggle')}>{sortNewest ? t('tasks.sort.newest') : t('tasks.sort.oldest')}</button>{(keyword !== '' || chapterFilter !== '' || typeFilter !== 'all' || filter !== 'all') && <button type="button" className={css.iconButton} title={t('tasks.detail.close')} onClick={() => { setKeyword(''); setChapterFilter(''); setTypeFilter('all'); setFilter('all') }}><X size={14} /></button>}</div>
-    <div className={css.body}>{state === 'loading' && payload === null && <div className={css.notice}>{t('loading')}</div>}{state === 'error' && <div className={css.notice}><span className={css.errorText}>{error}</span><button type="button" className={css.button} onClick={() => { void load() }}>{t('retry')}</button></div>}{state === 'ready' && visible.length === 0 && <div className={css.notice}>{t('tasks.empty')}</div>}<div className={css.taskList} aria-label={t('tasks.list')}>{visible.map(task => <article key={task.taskId} className={css.taskCard} data-selected={task.taskId === selectedId}><div className={css.taskCardMain}><div className={css.taskCardHeader}><span className={css.kindBadge}>{typeLabel(task.type, t)}</span><span className={css.taskStatus} data-status={task.status}>{statusLabel(task.status, t)}</span>{task.chapterId !== '' && <span className={css.taskChapter}>{task.chapterId}</span>}<time className={css.taskTime}>{shortTime(task.updatedAt || task.createdAt)}</time></div><div className={css.taskCardTitle}>{task.inputSummary || task.taskId}</div><div className={css.taskProgressLine}><span>{phaseLabel(task.phase, t)}{task.phaseIndex !== null ? ` · ${task.phaseIndex + 1}/${payload?.phaseOrder.length ?? PHASES.length}` : ''}</span>{task.progress !== null ? <span>{Math.round(task.progress.completed)}/{Math.round(task.progress.total)}{task.progress.unitKind !== '' ? ` · ${task.progress.unitKind}` : ''}</span> : (task.status === 'running' ? <span>{t('tasks.progress.unknown')}</span> : null)}</div>{task.progress !== null && task.progress.ratio !== null && <div className={css.taskProgressTrack} aria-label={`${Math.round(task.progress.ratio * 100)}%`}><span style={{ width: `${Math.round(task.progress.ratio * 100)}%` }} /></div>}{task.status === 'failed' && <div className={css.taskFailure}><CircleAlert size={14} />{task.errorCode || t('tasks.failure.system')}{task.failedStage !== '' ? ` · ${task.failedStage}` : ''}</div>}</div><div className={css.taskCardActions}><button type="button" className={css.iconButton} title={task.taskId === selectedId ? t('tasks.detail.close') : t('tasks.detail.open')} onClick={() => { if (task.taskId === selectedId) { setSelectedId(''); setDetail(null) } else void openDetail(task) }}>{task.taskId === selectedId ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>{task.status === 'awaiting_confirmation' && <button type="button" className={css.actionButton} disabled={acting !== null} title={t('tasks.confirm.title')} onClick={() => void runAction(task, 'confirm')}><Check size={14} />{acting === `${task.taskId}:confirm` ? '…' : t('tasks.confirm')}</button>}{(task.status === 'pending' || task.status === 'running' || task.status === 'awaiting_confirmation') && <button type="button" className={css.actionButton} disabled={acting !== null} title={t('tasks.cancel.title')} onClick={() => void runAction(task, 'cancel')}><Ban size={14} />{acting === `${task.taskId}:cancel` ? '…' : t('tasks.cancel')}</button>}{task.status === 'failed' && <button type="button" className={css.actionButton} disabled={acting !== null || !task.retryable} title={task.retryable ? t('tasks.retry.title') : t('tasks.retry.notRecoverable')} onClick={() => void runAction(task, 'retry')}><RotateCcw size={14} />{acting === `${task.taskId}:retry` ? '…' : t('tasks.retry')}</button>}</div>{task.taskId === selectedId && <TaskDetail task={detail ?? task} state={detailState} t={t} copyId={copyId} navigateResult={navigateResult} />}</article>)}</div></div>
+    <div className={css.taskControls}><label className={css.taskSearch}><Search size={14} /><input aria-label={t('tasks.filter.keyword')} value={keyword} placeholder={t('tasks.filter.keyword')} onChange={event => setKeyword(event.target.value)} /></label><label><ListFilter size={14} />{t('tasks.filter.type')}<select value={typeFilter} onChange={event => setTypeFilter(event.target.value)}><option value="all">{t('tasks.filter.typeAll')}</option>{types.map(type => <option key={type} value={type}>{typeLabel(type, t)}</option>)}</select></label><label><input aria-label={t('tasks.filter.chapter')} value={chapterFilter} placeholder={t('tasks.filter.chapter')} onChange={event => setChapterFilter(event.target.value)} /></label><button type="button" className={css.button} onClick={() => setSortNewest(current => !current)} title={t('tasks.sort.toggle')}>{sortNewest ? t('tasks.sort.newest') : t('tasks.sort.oldest')}</button>{(keyword !== '' || chapterFilter !== '' || typeFilter !== 'all' || filter !== 'all') && <button type="button" className={css.iconButton} title={t('tasks.detail.close')} onClick={() => { setKeyword(''); setChapterFilter(''); setTypeFilter('all'); setFilter('all') }}><X size={14} /></button>}</div>
+    <div className={css.body}>{state === 'loading' && payload === null && <div className={css.notice}>{t('loading')}</div>}{state === 'error' && <div className={css.notice}><span className={css.errorText}>{error}</span><button type="button" className={css.button} onClick={() => { void load() }}>{t('retry')}</button></div>}{state === 'ready' && visible.length === 0 && <div className={css.notice}>{t('tasks.empty')}</div>}<div className={css.taskList} aria-label={t('tasks.list')}>{visible.map(task => <article key={task.taskId} className={css.taskCard} data-selected={task.taskId === selectedId}><div className={css.taskCardMain}><div className={css.taskCardHeader}><span className={css.kindBadge}>{typeLabel(task.type, t)}</span><span className={css.taskStatus} data-status={task.status}>{statusLabel(task.status, t)}</span>{task.chapterId !== '' && <span className={css.taskChapter}>{task.chapterId}</span>}<time className={css.taskTime}>{shortTime(task.updatedAt || task.createdAt)}</time></div><div className={css.taskCardTitle}>{task.inputSummary || task.taskId}</div><div className={css.taskProgressLine}><span>{phaseLabel(task.phase, t)}{task.phaseIndex !== null ? ` · ${task.phaseIndex + 1}/${payload?.phaseOrder.length ?? PHASES.length}` : ''}</span>{task.progress !== null ? <span>{Math.round(task.progress.completed)}/{Math.round(task.progress.total)}{task.progress.unitKind !== '' ? ` · ${task.progress.unitKind}` : ''}</span> : (task.status === 'running' ? <span>{t('tasks.progress.unknown')}</span> : null)}</div>{task.progress !== null && task.progress.ratio !== null && <div className={css.taskProgressTrack} aria-label={`${Math.round(task.progress.ratio * 100)}%`}><span style={{ width: `${Math.round(task.progress.ratio * 100)}%` }} /></div>}{task.status === 'failed' && <div className={css.taskFailure}><CircleAlert size={14} />{task.errorCode || t('tasks.failure.system')}{task.failedStage !== '' ? ` · ${task.failedStage}` : ''}</div>}</div><div className={css.taskCardActions}><button type="button" className={css.iconButton} title={task.taskId === selectedId ? t('tasks.detail.close') : t('tasks.detail.open')} aria-expanded={task.taskId === selectedId} onClick={() => { if (task.taskId === selectedId) closeDetail(); else void openDetail(task) }}>{task.taskId === selectedId ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>{task.status === 'awaiting_confirmation' && <button type="button" className={css.actionButton} disabled={acting !== null} title={t('tasks.confirm.title')} onClick={() => void runAction(task, 'confirm')}><Check size={14} />{acting === `${task.taskId}:confirm` ? '…' : t('tasks.confirm')}</button>}{(task.status === 'pending' || task.status === 'running' || task.status === 'awaiting_confirmation') && <button type="button" className={css.actionButton} disabled={acting !== null} title={t('tasks.cancel.title')} onClick={() => void runAction(task, 'cancel')}><Ban size={14} />{acting === `${task.taskId}:cancel` ? '…' : t('tasks.cancel')}</button>}{task.status === 'failed' && <button type="button" className={css.actionButton} disabled={acting !== null || !task.retryable} title={task.retryable ? t('tasks.retry.title') : t('tasks.retry.notRecoverable')} onClick={() => void runAction(task, 'retry')}><RotateCcw size={14} />{acting === `${task.taskId}:retry` ? '…' : t('tasks.retry')}</button>}</div>{task.taskId === selectedId && <TaskDetail task={detail ?? task} state={detailState} t={t} copyId={copyId} navigateResult={navigateResult} />}</article>)}</div></div>
   </div>
 }
 

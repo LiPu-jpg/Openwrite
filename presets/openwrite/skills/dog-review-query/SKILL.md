@@ -1,6 +1,7 @@
 ---
 name: dog-review-query
 description: Query an existing hierarchical OpenWrite review-v2 artifact through dsh-dog. Use after novel_review_chapter or when inspecting six quality domains, evidence, coverage, blockers, delivery status, or the 37 legacy checks. Never rerun model review from DoG.
+user-invocable: false
 ---
 
 # 分层评审 DoG 查询

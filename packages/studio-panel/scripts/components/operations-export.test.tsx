@@ -60,7 +60,7 @@ function props(fetchStudioApi: ReturnType<typeof vi.fn>) {
 async function openTransfer(fetchStudioApi: ReturnType<typeof vi.fn>) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   render(<OperationsView {...(props(fetchStudioApi) as any)} />)
-  fireEvent.click(screen.getByText('operations.transfer'))
+  fireEvent.click(screen.getByRole('button', { name: 'operations.transfer' }))
   await waitFor(() => expect(fetchStudioApi).toHaveBeenCalledWith('/export/preflight?format=md&purpose=delivery'))
 }
 

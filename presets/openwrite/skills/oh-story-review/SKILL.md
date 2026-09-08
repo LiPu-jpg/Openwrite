@@ -1,6 +1,7 @@
 ---
 name: oh-story-review
 description: 对网络小说大纲、章节或短篇成稿做证据化商业审稿，按事实连续性、因果、人物选择、读者契约、节奏、信息、对话和表达分级问题。用于章节验收、整稿诊断、投稿前审查或生成优先修订清单。
+user-invocable: false
 license: MIT
 metadata:
   openwrite:

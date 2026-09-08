@@ -1,6 +1,7 @@
 ---
 name: oh-story-long-write
 description: 规划和创作长篇网络小说，覆盖选题定位、读者契约、人物与世界设定、卷纲细纲、单章写作、日更续写和结构修订。用于开书、补纲、写指定章节、续写或回炉长篇正文。
+user-invocable: false
 license: MIT
 metadata:
   openwrite:

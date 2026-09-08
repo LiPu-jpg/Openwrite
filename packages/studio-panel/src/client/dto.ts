@@ -794,6 +794,30 @@ export function parseDocumentChangePlan(value: unknown): DocumentChangePlanDto {
   }
 }
 
+export type ChapterForeshadowItemDto = {
+  id: string
+  content: string
+  status: string
+  weight: number
+  layer: string
+  planned: boolean
+  plant_chapter_id: string
+  reveal_chapter_id: string
+  earliest_reveal: string
+  source_revision: string
+  tags: string[]
+}
+
+export type ChapterForeshadowBucket = 'due' | 'overdue' | 'to_plant'
+
+export type ChapterForeshadowingDto = {
+  due: ChapterForeshadowItemDto[]
+  overdue: ChapterForeshadowItemDto[]
+  to_plant: ChapterForeshadowItemDto[]
+  source_revision: string
+  counts: Record<ChapterForeshadowBucket, number>
+}
+
 export type ChapterWorkBriefDto = {
   schema_version: string
   novel_id: string
@@ -837,6 +861,7 @@ export type ChapterWorkBriefDto = {
     progress: number
   }
   recent_edits: ChapterWorkEventDto[]
+  foreshadowing: ChapterForeshadowingDto
 }
 
 function parseClosureOutcome(value: unknown): { issue_id: string; outcome: 'resolved' | 'retained' } | null {
@@ -852,6 +877,115 @@ function parseClosureRegression(value: unknown): { issue_id: string; outcome: 'r
   return issueId !== '' && item['outcome'] === 'regressed'
     ? { issue_id: issueId, outcome: 'regressed', issue: item['issue'] }
     : null
+}
+
+function parseForeshadowItem(value: unknown): ChapterForeshadowItemDto | null {
+  const item = asRecord(value)
+  const id = asText(item['id'])
+  if (id === '') return null
+  const plant = asRecord(item['plant_anchor'])
+  const reveal = asRecord(item['reveal_anchor'])
+  return {
+    id,
+    content: asText(item['content']),
+    status: asText(item['status']),
+    weight: asInteger(item['weight'], 5),
+    layer: asText(item['layer']),
+    planned: item['planned'] === true,
+    plant_chapter_id: asText(plant['chapter_id']) || asText(item['plant_chapter']),
+    reveal_chapter_id: asText(reveal['chapter_id']) || asText(item['target_chapter']),
+    earliest_reveal: asText(item['earliest_reveal']),
+    source_revision: asText(item['source_revision']),
+    tags: asStringList(item['tags']),
+  }
+}
+
+function parseForeshadowList(value: unknown): ChapterForeshadowItemDto[] {
+  return (Array.isArray(value) ? value : [])
+    .map(parseForeshadowItem)
+    .filter((item): item is ChapterForeshadowItemDto => item !== null)
+}
+
+/** Map OpenWrite work-brief categories onto author actions; keep no second store. */
+export function parseChapterForeshadowing(value: unknown): ChapterForeshadowingDto {
+  const root = asRecord(value)
+  const due = parseForeshadowList(root['due'] ?? root['must_resolve'])
+  const overdue = parseForeshadowList(root['overdue'])
+  const toPlant = parseForeshadowList(root['to_plant'] ?? root['toPlant'])
+  const counts = asRecord(root['counts'])
+  return {
+    due,
+    overdue,
+    to_plant: toPlant,
+    source_revision: asText(root['source_revision']),
+    counts: {
+      due: asInteger(counts['due'] ?? counts['must_resolve'], due.length),
+      overdue: asInteger(counts['overdue'], overdue.length),
+      to_plant: asInteger(counts['to_plant'] ?? counts['toPlant'], toPlant.length),
+    },
+  }
+}
+
+export type ChapterSprintStats = {
+  targetUnits: number
+  actualUnits: number
+  remainingUnits: number
+  progress: number
+  added: number
+  deleted: number
+  net: number
+  knownDeltaEvents: number
+  unknownDeltaEvents: number
+  aiNet: number | null
+  humanNet: number | null
+}
+
+/** Derive sprint UX from the work-brief target (source of truth) and known edit deltas. */
+export function chapterSprintStats(brief: ChapterWorkBriefDto): ChapterSprintStats {
+  let added = 0
+  let deleted = 0
+  let knownDeltaEvents = 0
+  let unknownDeltaEvents = 0
+  let aiNet: number | null = null
+  let humanNet: number | null = null
+  for (const event of brief.recent_edits) {
+    const delta = event.writing_units_delta
+    if (delta === null) {
+      unknownDeltaEvents += 1
+      continue
+    }
+    knownDeltaEvents += 1
+    if (delta > 0) added += delta
+    else if (delta < 0) deleted += -delta
+    if (event.kind === 'revision_applied') aiNet = (aiNet ?? 0) + delta
+    else if (event.kind === 'manuscript_saved' || event.kind === 'manuscript_save') {
+      humanNet = (humanNet ?? 0) + delta
+    }
+  }
+  return {
+    targetUnits: brief.target.writing_units,
+    actualUnits: brief.target.actual_units,
+    remainingUnits: brief.target.remaining_units,
+    progress: brief.target.progress,
+    added,
+    deleted,
+    net: added - deleted,
+    knownDeltaEvents,
+    unknownDeltaEvents,
+    aiNet,
+    humanNet,
+  }
+}
+
+export function chapterForeshadowActions(brief: ChapterWorkBriefDto): {
+  bucket: ChapterForeshadowBucket
+  item: ChapterForeshadowItemDto
+}[] {
+  return [
+    ...brief.foreshadowing.due.map(item => ({ bucket: 'due' as const, item })),
+    ...brief.foreshadowing.overdue.map(item => ({ bucket: 'overdue' as const, item })),
+    ...brief.foreshadowing.to_plant.map(item => ({ bucket: 'to_plant' as const, item })),
+  ]
 }
 
 /** Narrow the chapter work projection used by editor CAS and activity UI. */
@@ -900,5 +1034,6 @@ export function parseChapterWorkBrief(value: unknown): ChapterWorkBriefDto {
         writing_units_delta: asFiniteNumber(item['writing_units_delta']), reason: asText(item['reason']),
       }
     }).filter(item => item.kind !== '' && item.updated_at !== ''),
+    foreshadowing: parseChapterForeshadowing(root['foreshadowing']),
   }
 }

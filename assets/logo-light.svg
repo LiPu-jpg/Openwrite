@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="312" height="100" viewBox="0 0 312 100" fill="none" role="img" aria-labelledby="logo-title logo-description">
+  <title id="logo-title">OpenWrite</title>
+  <desc id="logo-description">An open book and quill beside the OpenWrite wordmark. Light background version.</desc>
+  <defs>
+    <linearGradient id="quill" x1="46" y1="70" x2="80" y2="22" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2464C6"/>
+      <stop offset="1" stop-color="#244FA8"/>
+    </linearGradient>
+    <linearGradient id="wordmark" x1="192" y1="34" x2="302" y2="62" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2464C6"/>
+      <stop offset="1" stop-color="#244FA8"/>
+    </linearGradient>
+  </defs>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 36C20 28 32 25 50 34C68 25 80 28 80 36V70C80 78 68 81 50 72C32 81 20 78 20 70V36Z" fill="#F1F5FB" stroke="#7087A3" stroke-width="2"/>
+    <path d="M50 34V72" stroke="#7087A3" stroke-width="1.5"/>
+    <g stroke="#9CABC0" stroke-width="1.25">
+      <path d="M26 43C32 40 39 41 45 44M26 52C32 49 38 50 44 53M26 61C32 58 38 59 43 62"/>
+      <path d="M55 44C61 41 68 40 74 43M56 53C62 50 68 49 74 52M57 62C63 59 69 58 74 61"/>
+    </g>
+    <g transform="translate(-10 0) rotate(7 55 50)">
+      <path d="M44 71C47 66 50 58 55 48C61 36 71 26 81 22C79 30 73 40 65 49C60 55 57 60 55 64Q52 69 44 71Z" fill="url(#quill)"/>
+      <path d="M48 67C53 59 60 47 71 33" stroke="#EAF2FF" stroke-width="1.35"/>
+    </g>
+    <path d="M194 70C212 68 230 68 248 70C266 72 284 72 302 70" stroke="#809BBE" stroke-width="2"/>
+  </g>
+  <g font-family="Georgia, 'Times New Roman', serif" font-size="38" font-weight="700" letter-spacing="-1">
+    <text x="95" y="62" fill="#172435">Open</text>
+    <text x="192" y="62" fill="url(#wordmark)">Write</text>
+  </g>
+</svg>

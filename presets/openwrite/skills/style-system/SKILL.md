@@ -1,6 +1,7 @@
 ---
 name: style-system
 description: Use when user wants to initialize style, extract reusable writing signals from user-supplied text, compose a project style guide, or analyze style drift.
+user-invocable: false
 ---
 
 # 风格系统

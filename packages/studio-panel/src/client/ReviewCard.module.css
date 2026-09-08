@@ -29,7 +29,7 @@
   flex: none;
   width: 1px;
   height: 12px;
-  background: var(--dsw-alias-border-l);
+  background: var(--dsw-alias-border-l2);
 }
 
 .summary {
@@ -43,7 +43,7 @@
 .bodyWrap {
   margin: 4px 0 8px;
   padding: 12px 14px;
-  border: 1px solid var(--dsw-alias-border-l);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-2);
   max-height: 480px;
@@ -107,7 +107,7 @@
 
 .issue {
   padding: 8px 0;
-  border-top: 1px solid var(--dsw-alias-border-l);
+  border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
 .issueHead {
@@ -121,7 +121,7 @@
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 11px;
-  border: 1px solid var(--dsw-alias-border-l);
+  border: 1px solid var(--dsw-alias-border-l2);
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -142,7 +142,7 @@
 .priority {
   flex: none;
   font-size: 10px;
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .priority[data-priority='blocker'],
@@ -153,7 +153,7 @@
 .dimension {
   flex: none;
   font-size: 11px;
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .issueSummary {
@@ -165,7 +165,7 @@
 .quote {
   margin: 6px 0 0;
   padding: 4px 10px;
-  border-left: 2px solid var(--dsw-alias-border-l);
+  border-left: 2px solid var(--dsw-alias-border-l2);
   font-size: 12px;
   line-height: 1.6;
   color: var(--dsw-alias-label-tertiary);
@@ -181,7 +181,7 @@
 
 .suggestionLabel {
   margin-right: 6px;
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .rawTitle {

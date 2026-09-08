@@ -18,10 +18,10 @@
  * The injected `fetchStudioApi`/`postStudioApi` props are mocked, so no
  * network is involved. `t` is stubbed to return the locale key.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { StudioApiError } from '../../src/client/api.ts'
-import { ModelView } from '../../src/client/ModelView.tsx'
+import { ModelView, type ModelNavigationGuard } from '../../src/client/ModelView.tsx'
 
 const FAKE_CREDENTIAL = 'test-credential-abc'
 
@@ -890,5 +890,28 @@ describe('ModelView workbench (M2b)', () => {
 
     release(envelope({}))
     await waitFor(() => expect((screen.getByRole('button', { name: /models\.save/ }) as HTMLButtonElement).disabled).toBe(false))
+  })
+})
+
+
+describe('ModelView containing workspace navigation', () => {
+  it('registers a live draft guard and unregisters it on unmount', async () => {
+    const api = makeApi()
+    const onNavigationGuardChange = vi.fn()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const view = render(<ModelView {...({ ...api, t, onNavigationGuardChange } as any)} />)
+    await screen.findByLabelText('models.label')
+    const guard = onNavigationGuardChange.mock.calls[0]![0] as ModelNavigationGuard
+    const navigate = vi.fn()
+    act(() => guard(navigate))
+    expect(navigate).toHaveBeenCalledTimes(1)
+    fireEvent.change(screen.getByLabelText('models.label'), { target: { value: 'Edited after registration' } })
+    act(() => guard(navigate))
+    expect(navigate).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('models.unsavedChanges')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'models.unsavedKeep' }))
+    expect((screen.getByLabelText('models.label') as HTMLInputElement).value).toBe('Edited after registration')
+    view.unmount()
+    expect(onNavigationGuardChange).toHaveBeenLastCalledWith(null)
   })
 })

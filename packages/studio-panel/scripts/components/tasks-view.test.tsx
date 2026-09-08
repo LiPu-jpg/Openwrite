@@ -1,9 +1,16 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { TasksView } from '../../src/client/TasksView.tsx'
+import { workbenchStore } from '../../src/client/WorkbenchStore.ts'
 
 const envelope = (data: unknown) => ({ ok: true, data, error: null, request_id: 'req_tasks' })
 const t = (key: string): string => key
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(next => { resolve = next })
+  return { promise, resolve }
+}
 
 const TASKS = [
   {
@@ -55,6 +62,51 @@ function renderView(api: ReturnType<typeof makeApi>, onNavigate = vi.fn()) {
 }
 
 describe('TasksView workbench', () => {
+  it('keeps the selected task detail when an older response arrives last', async () => {
+    const api = makeApi()
+    const first = deferred<ReturnType<typeof envelope>>()
+    const second = deferred<ReturnType<typeof envelope>>()
+    const originalFetch = api.fetchStudioApi.getMockImplementation()!
+    api.fetchStudioApi.mockImplementation(path => path === '/tasks/tsk_running' ? first.promise : path === '/tasks/tsk_waiting' ? second.promise : originalFetch(path))
+    renderView(api)
+    await screen.findByText('运行模型横评')
+    fireEvent.click(screen.getByText('运行模型横评').closest('article')!.querySelector('button[title="tasks.detail.open"]')!)
+    fireEvent.click(screen.getByText('等待确认下一章').closest('article')!.querySelector('button[title="tasks.detail.open"]')!)
+    await act(async () => { second.resolve(envelope({ task: TASKS[1], events: [{ note: 'waiting event' }] })); await second.promise })
+    await act(async () => { first.resolve(envelope({ task: TASKS[0], events: [{ note: 'stale running event' }] })); await first.promise })
+    expect(screen.getByText('waiting event')).toBeTruthy()
+    expect(screen.queryByText('stale running event')).toBeNull()
+    expect(screen.getByText('tsk_waiting')).toBeTruthy()
+  })
+
+  it('keeps actions disabled until the post-action task list refresh finishes', async () => {
+    const api = makeApi()
+    const refresh = deferred<ReturnType<typeof envelope>>()
+    renderView(api)
+    await screen.findByText('等待确认下一章')
+    api.fetchStudioApi.mockImplementationOnce(() => refresh.promise)
+    const confirm = screen.getByRole('button', { name: 'tasks.confirm' }) as HTMLButtonElement
+    fireEvent.click(confirm)
+    await waitFor(() => expect(api.fetchStudioApi).toHaveBeenCalledTimes(2))
+    expect(confirm.disabled).toBe(true)
+    fireEvent.click(confirm)
+    expect(api.postStudioApi).toHaveBeenCalledTimes(1)
+    await act(async () => { refresh.resolve(envelope({ tasks: TASKS, counts: {} })); await refresh.promise })
+    await waitFor(() => expect(confirm.disabled).toBe(false))
+  })
+
+  it('refreshes background task updates without clearing active filters', async () => {
+    const api = makeApi()
+    renderView(api)
+    await screen.findByText('运行模型横评')
+    fireEvent.change(screen.getByLabelText('tasks.filter.keyword'), { target: { value: '研究' } })
+    await act(async () => { workbenchStore.invalidate('tasks') })
+    await waitFor(() => expect(api.fetchStudioApi).toHaveBeenCalledTimes(2))
+    expect((screen.getByLabelText('tasks.filter.keyword') as HTMLInputElement).value).toBe('研究')
+    expect(screen.queryByText('运行模型横评')).toBeNull()
+    expect(screen.getByText('研究失败任务')).toBeTruthy()
+  })
+
   it('shows summary counts, real progress, and never invents progress for null', async () => {
     const api = makeApi()
     renderView(api)

@@ -27,11 +27,16 @@ import {
   type RouteImpactDto,
 } from "./dto.ts";
 import { useWorkbench } from "./WorkbenchStore.ts";
+import { modelMemoryContextKey, WorkspaceViewMemory } from "./model-view-memory.ts";
 import css from "./views.module.css";
+
+export type ModelNavigationGuard = (navigate: () => void) => void;
 
 type Props = ConvViewProps &
   InjectFace<StudioApiInjected> &
-  PropsLocale<"studio-panel">;
+  PropsLocale<"studio-panel"> & {
+    onNavigationGuardChange?: (guard: ModelNavigationGuard | null) => void;
+  };
 type Form = {
   id: string;
   label: string;
@@ -59,6 +64,44 @@ type Embedding = {
   last_test: ModelTestRecordDto | null;
   api_key: string;
 };
+type DraftSection = "chat" | "embedding" | "routes";
+interface ModelDraft {
+  selectedId: string;
+  embeddingId: string;
+  tab: "chat" | "embedding";
+  chat?: { value: Form; baseline: string };
+  embedding?: { value: Embedding; baseline: string };
+  routes?: { value: Record<string, string>; baseline: Record<string, string> };
+}
+const modelDraftMemory = new WorkspaceViewMemory<ModelDraft>();
+type PendingSaveResult = { saved: boolean; error?: string };
+interface PendingModelSave { section: DraftSection; result: Promise<PendingSaveResult> }
+const pendingModelSaves = new WorkspaceViewMemory<PendingModelSave>();
+
+function trackModelSave(key: string | null, section: DraftSection): (result: PendingSaveResult) => void {
+  let resolve!: (result: PendingSaveResult) => void;
+  let finished = false;
+  const entry: PendingModelSave = { section, result: new Promise(done => { resolve = done; }) };
+  pendingModelSaves.write(key, entry);
+  return result => {
+    if (finished) return;
+    finished = true;
+    if (pendingModelSaves.read(key) === entry) pendingModelSaves.delete(key);
+    resolve(result);
+  };
+}
+
+
+// A completed request may outlive a top-level tab. Only remove the exact draft
+// that was submitted, retaining other editor sections and any newer edits.
+function clearSavedDraft(key: string | null, section: DraftSection, submitted: string): void {
+  const cached = modelDraftMemory.read(key);
+  if (!cached || JSON.stringify(cached[section]?.value) !== submitted) return;
+  const next = { ...cached };
+  delete next[section];
+  modelDraftMemory.write(key, next);
+}
+
 const emptyForm = (): Form => ({
   id: "",
   label: "",
@@ -125,17 +168,22 @@ const routeOrder = [
   "research",
 ] as const;
 
-export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
+export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardChange }: Props) {
   const workbench = useWorkbench();
+  // OperationsView keys this editor at the context barrier. Pin the identity so
+  // its cleanup always writes back to the workspace that owned these drafts.
+  const [memoryKey] = useState(() => modelMemoryContextKey(workbench.context));
+  const [restored] = useState(() => modelDraftMemory.read(memoryKey));
+  const discardedSections = useRef(new Set<DraftSection>());
   const [profiles, setProfiles] = useState<ModelProfileDto[]>([]);
   const [embeddingProfiles, setEmbeddingProfiles] = useState<Embedding[]>([]);
   const [activeEmbeddingId, setActiveEmbeddingId] = useState("");
-  const [routes, setRoutes] = useState<Record<string, string>>({});
-  const [savedRoutes, setSavedRoutes] = useState<Record<string, string>>({});
-  const [selectedId, setSelectedId] = useState("");
-  const [form, setForm] = useState<Form>(emptyForm);
-  const [embedding, setEmbedding] = useState<Embedding>(emptyEmbedding);
-  const [tab, setTab] = useState<"chat" | "embedding">("chat");
+  const [routes, setRoutes] = useState<Record<string, string>>(() => restored?.routes?.value ?? {});
+  const [savedRoutes, setSavedRoutes] = useState<Record<string, string>>(() => restored?.routes?.baseline ?? {});
+  const [selectedId, setSelectedId] = useState(restored?.selectedId ?? "");
+  const [form, setForm] = useState<Form>(() => restored?.chat?.value ?? emptyForm());
+  const [embedding, setEmbedding] = useState<Embedding>(() => restored?.embedding?.value ?? { ...emptyEmbedding(), id: restored?.embeddingId ?? "" });
+  const [tab, setTab] = useState<"chat" | "embedding">(restored?.tab ?? "chat");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<{ text: string; bad: boolean } | null>(
     null,
@@ -144,23 +192,34 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
   const [loadError, setLoadError] = useState("");
   const [routeImpact, setRouteImpact] = useState<RouteImpactDto | null>(null);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const unsavedPrompt = useRef<HTMLDivElement | null>(null);
   const [deletePreview, setDeletePreview] = useState<DeletePreviewDto | null>(null);
   const [fallbackId, setFallbackId] = useState("");
   const mounted = useRef(true);
-  const formBase = useRef(snapshot(emptyForm()));
-  const embeddingBase = useRef(embeddingSnapshot(emptyEmbedding()));
+  const formBase = useRef(restored?.chat?.baseline ?? snapshot(emptyForm()));
+  const embeddingBase = useRef(restored?.embedding?.baseline ?? embeddingSnapshot(embedding));
   const formDirty = snapshot(form) !== formBase.current;
   const embeddingDirty = embeddingSnapshot(embedding) !== embeddingBase.current;
   const routesDirty = snapshot(routes) !== snapshot(savedRoutes);
   // Reloads read the current drafts without making load() an effect dependency
   // of every keystroke. A mutation refreshes only the section it committed.
-  const drafts = useRef({ form, embedding, selectedId, routes, formDirty, embeddingDirty, routesDirty });
-  drafts.current = { form, embedding, selectedId, routes, formDirty, embeddingDirty, routesDirty };
+  const drafts = useRef({ form, embedding, selectedId, routes, savedRoutes, tab, formDirty, embeddingDirty, routesDirty, busy });
+  drafts.current = { form, embedding, selectedId, routes, savedRoutes, tab, formDirty, embeddingDirty, routesDirty, busy };
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
+    modelDraftMemory.delete(memoryKey);
+    return () => {
+      mounted.current = false;
+      const current = drafts.current;
+      const cached: ModelDraft = { selectedId: current.selectedId, embeddingId: current.embedding.id, tab: current.tab };
+      if (current.formDirty && !discardedSections.current.has("chat")) cached.chat = { value: current.form, baseline: formBase.current };
+      if (current.embeddingDirty && !discardedSections.current.has("embedding")) cached.embedding = { value: current.embedding, baseline: embeddingBase.current };
+      if (current.routesDirty && !discardedSections.current.has("routes")) cached.routes = { value: current.routes, baseline: current.savedRoutes };
+      modelDraftMemory.write(memoryKey, cached);
+    };
+  }, [memoryKey]);
   const resetChat = (p?: ModelProfileDto) => {
+    discardedSections.current.add("chat");
     const next: Form = p ? {
       id: p.id, label: p.label, provider: p.provider === "anthropic" ? "anthropic" : "openai",
       model: p.model, base_url: p.base_url, api_format: p.api_format || "chat",
@@ -174,6 +233,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
     setDeletePreview(null);
   };
   const resetEmbedding = (p: Embedding = emptyEmbedding()) => {
+    discardedSections.current.add("embedding");
     const next = { ...p, api_key: "" };
     setEmbedding(next);
     embeddingBase.current = embeddingSnapshot(next);
@@ -182,6 +242,17 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
   const load = useCallback(async (options: LoadOptions = {}) => {
     setBusy("load");
     try {
+      // A top-level tab can remount us before an earlier save returns. Wait for
+      // that request instead of presenting a second active copy of its draft.
+      const pending = pendingModelSaves.read(memoryKey);
+      if (pending) {
+        const outcome = await pending.result;
+        if (!mounted.current) return;
+        if (outcome.saved) {
+          options = { ...options, [pending.section === "chat" ? "preserveChat" : pending.section === "embedding" ? "preserveEmbedding" : "preserveRoutes"]: false };
+          discardedSections.current.add(pending.section);
+        } else if (outcome.error) setNotice({ text: outcome.error, bad: true });
+      }
       const value = await fetchStudioApi("/model/profiles");
       if (!mounted.current) return;
       const next = parseModelProfiles(value);
@@ -202,8 +273,11 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
       setEmbeddingProfiles(embeds);
       setActiveEmbeddingId(activeId);
       const map = parseRouteMap(value);
-      setSavedRoutes(map);
-      if (!options.preserveRoutes) setRoutes(map);
+      if (!options.preserveRoutes) {
+        discardedSections.current.add("routes");
+        setSavedRoutes(map);
+        setRoutes(map);
+      }
       if (!options.preserveChat) {
         const id = options.chatId ?? drafts.current.selectedId;
         resetChat(next.find((p) => p.id === id) ?? next[0]);
@@ -227,8 +301,11 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
     } finally {
       if (mounted.current) setBusy("");
     }
-  }, [fetchStudioApi]);
-  useEffect(() => { void load(); }, [load]);
+  }, [fetchStudioApi, memoryKey]);
+  useEffect(() => {
+    const current = drafts.current;
+    void load({ preserveChat: current.formDirty, preserveEmbedding: current.embeddingDirty, preserveRoutes: current.routesDirty });
+  }, [load]);
   useEffect(() => {
     if (workbench.epochs.models > 0) {
       const current = drafts.current;
@@ -240,9 +317,37 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
     if (dirty) setPendingAction(() => action);
     else { setNotice(null); action(); }
   };
-  const refresh = () => guarded(formDirty || embeddingDirty || routesDirty, () => { void load(); });
-  const setField = (key: keyof Form, value: string | boolean) => setForm((current) => ({ ...current, [key]: value }) as Form);
-  const setEmbed = (key: keyof Embedding, value: string) => setEmbedding((current) => ({ ...current, [key]: value }));
+  useEffect(() => {
+    // Route edits may be at the bottom of the editor; reveal the confirmation
+    // instead of leaving navigation apparently unresponsive above the scroll.
+    if (pendingAction) unsavedPrompt.current?.focus();
+  }, [pendingAction]);
+  // The containing workspace uses the same confirmation flow as profile switching.
+  // Register once per callback and read live draft refs so a keystroke cannot leave
+  // the parent holding a stale "clean" navigation handler.
+  useEffect(() => {
+    if (!onNavigationGuardChange) return;
+    onNavigationGuardChange((navigate) => {
+      const current = drafts.current;
+      if (current.busy !== "" && current.busy !== "load") return;
+      if (current.formDirty || current.embeddingDirty || current.routesDirty) setPendingAction(() => () => {
+        discardedSections.current = new Set(["chat", "embedding", "routes"]);
+        modelDraftMemory.delete(memoryKey);
+        navigate();
+      });
+      else navigate();
+    });
+    return () => onNavigationGuardChange(null);
+  }, [memoryKey, onNavigationGuardChange]);
+  const refresh = () => guarded(formDirty || embeddingDirty || routesDirty, () => { discardedSections.current = new Set(["chat", "embedding", "routes"]); void load(); });
+  const setField = (key: keyof Form, value: string | boolean) => {
+    discardedSections.current.delete("chat");
+    setForm((current) => ({ ...current, [key]: value }) as Form);
+  };
+  const setEmbed = (key: keyof Embedding, value: string) => {
+    discardedSections.current.delete("embedding");
+    setEmbedding((current) => ({ ...current, [key]: value }));
+  };
   const validationError = (message: "models.validation.required" | "models.validation.positive" | "models.validation.temperature") => {
     setNotice({ text: t(message), bad: true });
   };
@@ -253,6 +358,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
     if (![form.context_tokens, form.max_output_tokens].every(positiveInteger) || !Number.isFinite(Number(form.timeout_seconds)) || Number(form.timeout_seconds) <= 0) return validationError("models.validation.positive");
     if (!form.temperature.trim() || !Number.isFinite(Number(form.temperature)) || Number(form.temperature) < 0 || Number(form.temperature) > 2) return validationError("models.validation.temperature");
     setBusy("save");
+    const finishSave = trackModelSave(memoryKey, "chat");
     try {
       const payload: JsonRecord = {
         ...form, id: form.id.trim(), label: form.label.trim(), model: form.model.trim(),
@@ -261,17 +367,22 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
       };
       if (!form.api_key) delete payload.api_key;
       await postStudioApi("/model/profiles", payload);
+      clearSavedDraft(memoryKey, "chat", snapshot(form));
+      discardedSections.current.add("chat");
+      finishSave({ saved: true });
+      if (!mounted.current) return;
       setForm((current) => ({ ...current, api_key: "" }));
       await load({ chatId: form.id.trim(), preserveEmbedding: true, preserveRoutes: drafts.current.routesDirty });
       setNotice({ text: t("models.saved"), bad: false });
-    } catch (cause) { setNotice({ text: errorText(cause), bad: true }); }
-    finally { setBusy(""); }
+    } catch (cause) { finishSave({ saved: false, error: errorText(cause) }); if (mounted.current) setNotice({ text: errorText(cause), bad: true }); }
+    finally { finishSave({ saved: false }); if (mounted.current) setBusy(""); }
   };
   const saveEmbedding = async () => {
     if (busy) return;
     if (![embedding.id, embedding.label, embedding.model].every((value) => value.trim())) return validationError("models.validation.required");
     if (![embedding.dimension, embedding.max_tokens].every(positiveInteger)) return validationError("models.validation.positive");
     setBusy("embedding-save");
+    const finishSave = trackModelSave(memoryKey, "embedding");
     try {
       const payload: JsonRecord = {
         id: embedding.id.trim(), label: embedding.label.trim(), provider: embedding.provider,
@@ -280,11 +391,15 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
       };
       if (embedding.api_key) payload.api_key = embedding.api_key;
       await postStudioApi("/model/embedding", payload);
+      clearSavedDraft(memoryKey, "embedding", snapshot(embedding));
+      discardedSections.current.add("embedding");
+      finishSave({ saved: true });
+      if (!mounted.current) return;
       setEmbedding((current) => ({ ...current, api_key: "" }));
       await load({ embeddingId: embedding.id.trim(), preserveChat: true, preserveRoutes: drafts.current.routesDirty });
       setNotice({ text: t("models.saved"), bad: false });
-    } catch (cause) { setNotice({ text: errorText(cause), bad: true }); }
-    finally { setBusy(""); }
+    } catch (cause) { finishSave({ saved: false, error: errorText(cause) }); if (mounted.current) setNotice({ text: errorText(cause), bad: true }); }
+    finally { finishSave({ saved: false }); if (mounted.current) setBusy(""); }
   };
   const test = async (kind: "chat" | "embedding") => {
     if (busy) return;
@@ -345,14 +460,19 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
   const saveRoutes = async () => {
     if (busy) return;
     setBusy("routes");
+    const finishSave = trackModelSave(memoryKey, "routes");
     try {
       const result = parseRouteImpact(await postStudioApi("/model/routes", { routes }));
+      clearSavedDraft(memoryKey, "routes", snapshot(routes));
+      discardedSections.current.add("routes");
+      finishSave({ saved: true });
+      if (!mounted.current) return;
       setRoutes(result.routes);
       setSavedRoutes(result.routes);
       setRouteImpact(result);
       setNotice({ text: t("models.routesSaved"), bad: false });
-    } catch (cause) { setNotice({ text: errorText(cause), bad: true }); }
-    finally { setBusy(""); }
+    } catch (cause) { finishSave({ saved: false, error: errorText(cause) }); if (mounted.current) setNotice({ text: errorText(cause), bad: true }); }
+    finally { finishSave({ saved: false }); if (mounted.current) setBusy(""); }
   };
   const routeLabel = (route: string) => routeOrder.includes(route as typeof routeOrder[number]) ? t(`models.route.${route}` as Parameters<Props["t"]>[0]) : route;
   if (state === "loading")
@@ -394,10 +514,10 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
       </div>
       <div className={css.body}>
         {pendingAction && (
-          <div className={css.notice} role="alert">
+          <div className={css.notice} role="alert" ref={unsavedPrompt} tabIndex={-1}>
             <span>{t("models.unsavedChanges")}</span>
-            <button type="button" className={css.button} onClick={() => setPendingAction(null)}>{t("models.unsavedKeep")}</button>
-            <button type="button" className={css.button} onClick={() => { setPendingAction(null); setNotice(null); pendingAction(); }}>{t("models.unsavedDiscard")}</button>
+            <button type="button" className={css.button} disabled={!!busy} onClick={() => setPendingAction(null)}>{t("models.unsavedKeep")}</button>
+            <button type="button" className={css.button} disabled={!!busy} onClick={() => { setPendingAction(null); setNotice(null); pendingAction(); }}>{t("models.unsavedDiscard")}</button>
           </div>
         )}
         {notice && (
@@ -464,7 +584,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                 ))}
               </section>
               <section className={css.modelEditor} aria-label={t("models.editor")}>
-                <fieldset className={css.modelGroup}>
+                <fieldset className={css.modelGroup} disabled={!!busy}>
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.basic")}
                   </legend>
@@ -503,7 +623,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                     </label>
                   </div>
                 </fieldset>
-                <fieldset className={css.modelGroup}>
+                <fieldset className={css.modelGroup} disabled={!!busy}>
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.connection")}
                   </legend>
@@ -534,7 +654,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                     </label>
                   </div>
                 </fieldset>
-                <fieldset className={css.modelGroup}>
+                <fieldset className={css.modelGroup} disabled={!!busy}>
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.generation")}
                   </legend>
@@ -572,7 +692,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                     </label>
                   </div>
                 </fieldset>
-                <fieldset className={css.modelGroup}>
+                <fieldset className={css.modelGroup} disabled={!!busy}>
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.credentials")}
                   </legend>
@@ -596,7 +716,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                     {t("models.remember")}
                   </label>
                 </fieldset>
-                <fieldset className={css.modelGroup}>
+                <fieldset className={css.modelGroup} disabled={!!busy}>
                   <legend className={css.modelGroupTitle}>{t("models.group.routeUsage")}</legend>
                   <ul>{Object.entries(savedRoutes).filter(([, id]) => id === selectedId).map(([route]) => <li key={route}>{routeLabel(route)}</li>)}</ul>
                 </fieldset>
@@ -658,9 +778,10 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                       <select
                         value={routes[route] ?? ""}
                         disabled={!!busy}
-                        onChange={(e) =>
-                          setRoutes((x) => ({ ...x, [route]: e.target.value }))
-                        }
+                        onChange={(e) => {
+                          discardedSections.current.delete("routes");
+                          setRoutes((x) => ({ ...x, [route]: e.target.value }));
+                        }}
                       >
                         {profiles.map((p) => (
                           <option key={p.id} value={p.id}>
@@ -722,7 +843,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
               <div className={css.modelActiveStatus} aria-live="polite">
                 {embedding.active ? t("models.active") : t("models.inactive")}
               </div>
-              <fieldset className={css.modelGroup}>
+              <fieldset className={css.modelGroup} disabled={!!busy}>
                 <legend className={css.modelGroupTitle}>{t('models.group.basic')}</legend>
                 <div className={css.modelFormGrid}>
                 <label>
@@ -742,7 +863,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                 </label>
                 </div>
               </fieldset>
-              <fieldset className={css.modelGroup}>
+              <fieldset className={css.modelGroup} disabled={!!busy}>
                 <legend className={css.modelGroupTitle}>{t('models.group.connection')}</legend>
                 <div className={css.modelFormGrid}>
                 <label>
@@ -768,7 +889,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                 </label>
                 </div>
               </fieldset>
-              <fieldset className={css.modelGroup}>
+              <fieldset className={css.modelGroup} disabled={!!busy}>
                 <legend className={css.modelGroupTitle}>Vector parameters</legend>
                 <div className={css.modelFormGrid}>
                 <label>
@@ -789,7 +910,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t }: Props) {
                 </label>
                 </div>
               </fieldset>
-              <fieldset className={css.modelGroup}>
+              <fieldset className={css.modelGroup} disabled={!!busy}>
                 <legend className={css.modelGroupTitle}>{t('models.group.credentials')}</legend>
                 <div className={css.modelFormGrid}>
                   <input

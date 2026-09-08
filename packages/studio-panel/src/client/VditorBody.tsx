@@ -10,14 +10,18 @@
  * compact subset plus headings/code/table (card-body scope).
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import VditorRuntime, { installVditorIcons } from 'dsh-vditor-runtime'
+import {
+  manuscriptSelectionFromRange, shouldClearManuscriptSelection, type ManuscriptSelection,
+} from './manuscript-selection.ts'
 import css from './views.module.css'
 
 /** The slice of the bundled Vditor API this editor uses. */
 interface VditorInstance {
   getValue: () => string
+  getSelection?: () => string
   setTheme: (theme: string, contentTheme?: string, codeTheme?: string, contentThemePath?: string) => void
   destroy: () => void
 }
@@ -96,13 +100,23 @@ interface VditorBodyProps {
   /** Initial markdown (the editor is the source of truth afterwards). */
   initial: string
   onChange: (value: string) => void
+  onSelectionChange?: (selection: ManuscriptSelection | null) => void
   onReady?: () => void
   onFailed: () => void
   disabled: boolean
+  /** The consumer can synchronously retain callbacks delivered during cleanup. */
+  flushOnLeave?: boolean
 }
 
 /** One Vditor IR instance bound to the shell theme; destroyed on unmount. */
-export function VditorBody({ initial, onChange, onReady = () => {}, onFailed, disabled }: VditorBodyProps) {
+function locateSelectedMarkdown(value: string, selected: string): ManuscriptSelection | null {
+  if (selected === '') return null
+  const start = value.indexOf(selected)
+  if (start < 0) return null
+  return manuscriptSelectionFromRange(value, start, start + selected.length)
+}
+
+export function VditorBody({ initial, onChange, onSelectionChange, onReady = () => {}, onFailed, disabled, flushOnLeave = false }: VditorBodyProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const instanceRef = useRef<VditorInstance | null>(null)
   // onChange identity changes every keystroke upstream; keep the latest in a
@@ -113,10 +127,43 @@ export function VditorBody({ initial, onChange, onReady = () => {}, onFailed, di
   onFailedRef.current = onFailed
   const onReadyRef = useRef(onReady)
   onReadyRef.current = onReady
+  const onSelectionChangeRef = useRef(onSelectionChange)
+  onSelectionChangeRef.current = onSelectionChange
+  const flushRef = useRef<(() => void) | null>(null)
+
+  // Read live markdown before React detaches the editor DOM. Vditor's normal
+  // input callback is debounced, so navigating immediately after typing can
+  // otherwise destroy the instance before its final change is delivered.
+  useLayoutEffect(() => () => { flushRef.current?.() }, [])
 
   useEffect(() => {
     let disposed = false
     let observer: MutationObserver | null = null
+    let emitSelection: (() => void) | null = null
+    let lastPointerTarget: EventTarget | null = null
+    const rememberPointer = (event: Event) => { lastPointerTarget = event.target }
+    document.addEventListener('mousedown', rememberPointer, true)
+    const host = hostRef.current
+    let inputObserved = false
+    let lastValue = initial
+    const emitChange = (value: string) => {
+      if (disposed || value === lastValue) return
+      lastValue = value
+      onChangeRef.current(value)
+    }
+    const rememberInput = () => { inputObserved = true }
+    const flush = () => {
+      const current = instanceRef.current
+      if (!inputObserved || current === null) return
+      let value: string
+      try { value = current.getValue() } catch { return }
+      emitChange(value)
+    }
+    flushRef.current = flushOnLeave ? flush : null
+    host?.addEventListener('input', rememberInput, true)
+    // Flush before the next button click so Save and leave guards also see
+    // the latest body, without serializing long manuscripts every keystroke.
+    if (flushOnLeave) host?.addEventListener('focusout', flush)
     void loadVditor()
       .then((Vditor) => {
         if (disposed || hostRef.current === null) return
@@ -152,19 +199,53 @@ export function VditorBody({ initial, onChange, onReady = () => {}, onFailed, di
             },
           },
           after: () => { onReadyRef.current() },
-          input: (value: string) => { onChangeRef.current(value) },
+          input: (value: string) => { inputObserved = true; emitChange(value) },
         })
         instanceRef.current = instance
+        if (disposed) return
+        emitSelection = () => {
+          const current = instanceRef.current
+          const editorHost = hostRef.current
+          const notify = onSelectionChangeRef.current
+          if (current === null || editorHost === null || notify === undefined) return
+          const native = window.getSelection()
+          const insideEditor = native !== null && native.rangeCount > 0 && editorHost.contains(native.anchorNode)
+          if (!insideEditor && !shouldClearManuscriptSelection({
+            selectionInsideEditor: false,
+            preserveNode: lastPointerTarget ?? document.activeElement,
+          })) {
+            return
+          }
+          if (!insideEditor) {
+            notify(null)
+            return
+          }
+          const selected = (typeof current.getSelection === 'function' ? current.getSelection() : native?.toString()) ?? ''
+          notify(locateSelectedMarkdown(current.getValue(), selected))
+        }
+        hostRef.current.addEventListener('mouseup', emitSelection)
+        hostRef.current.addEventListener('keyup', emitSelection)
+        document.addEventListener('selectionchange', emitSelection)
         observer = new MutationObserver(() => {
           const current = instanceRef.current
           if (current !== null) applyTheme(current, document.body.hasAttribute('data-ds-dark-theme'))
         })
         observer.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
       })
-      .catch(() => { onFailedRef.current() })
+      .catch(() => { if (!disposed) onFailedRef.current() })
     return () => {
+      if (flushOnLeave) flush()
       disposed = true
+      flushRef.current = null
+      host?.removeEventListener('input', rememberInput, true)
+      host?.removeEventListener('focusout', flush)
       observer?.disconnect()
+      document.removeEventListener('mousedown', rememberPointer, true)
+      if (emitSelection !== null) {
+        host?.removeEventListener('mouseup', emitSelection)
+        host?.removeEventListener('keyup', emitSelection)
+        document.removeEventListener('selectionchange', emitSelection)
+      }
       // Vditor builds asynchronously; destroying before `after` may throw.
       try {
         instanceRef.current?.destroy()

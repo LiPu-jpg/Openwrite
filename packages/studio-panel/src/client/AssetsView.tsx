@@ -32,7 +32,9 @@ import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { StudioApiError, type StudioApiInjected } from './api.ts'
-import { AssetEditor, NewAssetForm, type RelationDraft } from './AssetEditor.tsx'
+import { AssetEditor, NewAssetForm, type AssetEditorSource, type RelationDraft } from './AssetEditor.tsx'
+import { DiscardDraftDialog } from './DiscardDraftDialog.tsx'
+import { latestAssetDraft, readAssetDraft, removeAssetDraft, removeAssetDraftIfUnchanged, writeAssetDraft, type AssetDraftContext, type AssetDraftRecord } from './asset-drafts.ts'
 import css from './views.module.css'
 
 /** One asset summary (the fields this view reads; the payload carries more). */
@@ -329,6 +331,19 @@ function parseAssetDetail(data: unknown): AssetDetail {
   }
 }
 
+/** Update only the saved field, preserving the editor's other local drafts. */
+function withSavedField(detail: AssetDetail, field: string, value: unknown): AssetDetail {
+  if (field === 'name' || field === 'summary') return { ...detail, [field]: String(value ?? '') }
+  if (field === 'aliases' || field === 'tags') {
+    return { ...detail, [field]: Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [] }
+  }
+  if (LIST_FIELDS.has(field)) {
+    const items = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+    return { ...detail, lists: [...detail.lists.filter(item => item.key !== field), { key: field, items }] }
+  }
+  return { ...detail, scalars: [...detail.scalars.filter(item => item.key !== field), { key: field, value: String(value ?? '') }] }
+}
+
 /** Narrow the document payload (NOT enveloped). */
 function parseDocument(data: unknown): { title: string; content: string } {
   const record = (data !== null && typeof data === 'object' ? data : {}) as Record<string, unknown>
@@ -348,26 +363,31 @@ function matchesQuery(asset: AssetSummary, query: string): boolean {
 
 /** Full assets-view props: conversation-view runtime share & injected fetch & locale seat. */
 export type AssetsViewProps =
-  ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'>
+  ConvViewProps & InjectFace<StudioApiInjected> & PropsLocale<'studio-panel'> & {
+    refreshEpoch?: number
+    draftContext?: AssetDraftContext | undefined
+    onDraftStateChange?: (state: { dirty: boolean; busy: boolean; discard: () => void }) => void
+  }
 
-export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps) {
+export function AssetsView({ fetchStudioApi, postStudioApi, t, refreshEpoch = 0, draftContext, onDraftStateChange }: AssetsViewProps) {
+  const [initialRecovery] = useState(() => draftContext ? latestAssetDraft(draftContext) : null)
   const [state, setState] = useState<LoadState>('loading')
   const [assets, setAssets] = useState<AssetSummary[]>([])
   const [references, setReferences] = useState<ReferenceEntry[]>([])
   const [referenceDetails, setReferenceDetails] = useState<ReadonlyMap<string, ReferenceDetailState>>(new Map())
   const [coreDocs, setCoreDocs] = useState<CoreDoc[]>([])
   const [error, setError] = useState('')
-  const [segment, setSegment] = useState<Segment>('characters')
+  const [segment, setSegment] = useState<Segment>(initialRecovery?.kind === 'world' ? 'world' : 'characters')
   const [query, setQuery] = useState('')
   /** Selected sidebar row key: `${kind}:${id}` / `doc:${path}` / `ref:${sourceId}`. */
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(initialRecovery ? `${initialRecovery.kind}:${initialRecovery.id}` : null)
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set())
   const [details, setDetails] = useState<ReadonlyMap<string, DetailState>>(new Map())
   const [documents, setDocuments] = useState<ReadonlyMap<string, DocState>>(new Map())
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<{ message: string; conflict: boolean } | null>(null)
-  /** Optimistic-lock revision for the currently edited asset (chained across field autosaves). */
-  const revisionRef = useRef('')
+  /** Keep each asset's optimistic lock separate when cached editors are revisited. */
+  const revisionsRef = useRef(new Map<string, string>())
   /** Bumped only on conflict-refetch/cancel so the editor remounts with server truth. */
   const [draftEpoch, setDraftEpoch] = useState(0)
   /** Field key with an in-flight single-field autosave. */
@@ -375,10 +395,45 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
   const [creating, setCreating] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(initialRecovery !== null)
+  const [restoredKey, setRestoredKey] = useState('')
+  const [draftStorageFailed, setDraftStorageFailed] = useState(false)
+  const recoveries = useRef(new Map<string, AssetDraftRecord>())
+  const discardedEditor = useRef('')
+  const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null)
+  const busy = saving || fieldBusy !== null || createBusy
+  const editorState = useRef({ dirty, selected, busy })
+  editorState.current = { dirty, selected, busy }
+  const discardCurrentDraft = useCallback(() => {
+    // A live editor may flush during its layout cleanup. An explicitly
+    // discarded instance must not recreate the recovery after removal.
+    discardedEditor.current = `${selected}:${draftEpoch}`
+    setDraftEpoch(previous => previous + 1)
+    if (selected && draftContext) {
+      const [kind, ...rest] = selected.split(':')
+      removeAssetDraft({ ...draftContext, kind: kind ?? '', id: rest.join(':') })
+      recoveries.current.delete(selected)
+    }
+    setRestoredKey('')
+    setDraftStorageFailed(false)
+  }, [draftContext, draftEpoch, selected])
+  useEffect(() => { onDraftStateChange?.({ dirty, busy, discard: discardCurrentDraft }) }, [busy, dirty, discardCurrentDraft, onDraftStateChange])
+  useEffect(() => () => { onDraftStateChange?.({ dirty: false, busy: false, discard: () => {} }) }, [onDraftStateChange])
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => { window.removeEventListener('beforeunload', warn) }
+  }, [dirty])
+  const requestDiscard = (action: () => void) => {
+    if (busy) return
+    const proceed = () => { discardCurrentDraft(); action() }
+    if (dirty) setPendingDiscard(() => proceed)
+    else proceed()
+  }
   // The detail cache doubles as the in-flight guard for keyed fetches.
   const detailsRef = useRef(details)
   detailsRef.current = details
-  const initialLoadRef = useRef(false)
 
   const load = useCallback((silent = false) => {
     if (!silent) setState('loading')
@@ -390,24 +445,25 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     void Promise.all([assetsPromise, workspacePromise])
       .then(([assetList, workspace]) => {
         if (cancelled) return
-        setAssets(assetList)
+        // A background deletion must not unmount an editor with local work.
+        const current = editorState.current
+        setAssets(previous => (current.dirty || current.busy) && current.selected !== null && !assetList.some(asset => `${asset.kind}:${asset.id}` === current.selected)
+          ? [...assetList, ...previous.filter(asset => `${asset.kind}:${asset.id}` === current.selected)]
+          : assetList)
         setReferences(workspace?.references ?? [])
         setCoreDocs(workspace?.coreDocs ?? [])
+        setError('')
         setState('ready')
       })
       .catch((cause: unknown) => {
         if (cancelled) return
         setError(cause instanceof Error ? cause.message : String(cause))
-        setState('error')
+        if (!silent || (!editorState.current.dirty && !editorState.current.busy)) setState('error')
       })
     return () => { cancelled = true }
   }, [fetchStudioApi])
 
-  useEffect(() => {
-    if (initialLoadRef.current) return
-    initialLoadRef.current = true
-    return load()
-  }, [])
+  useEffect(() => load(), [load])
 
   const fetchDetail = useCallback((asset: AssetSummary, resetDraft = false) => {
     if (resetDraft) setDraftEpoch(previous => previous + 1)
@@ -416,7 +472,13 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     fetchStudioApi(`/assets/${asset.kind}/${encodeURIComponent(asset.id)}`)
       .then((data) => {
         const parsedDetail = parseAssetDetail(data)
-        if (parsedDetail.revision !== '') revisionRef.current = parsedDetail.revision
+        const recovery = draftContext ? readAssetDraft({ ...draftContext, kind: asset.kind, id: asset.id }) : null
+        if (recovery) {
+          recoveries.current.set(key, recovery)
+          revisionsRef.current.set(key, recovery.baseRevision)
+          setRestoredKey(key)
+          if (recovery.baseRevision !== parsedDetail.revision) setSaveError({ message: t('assets.draft.conflict'), conflict: true })
+        } else revisionsRef.current.set(key, parsedDetail.revision)
         setDetails(previous => new Map(previous).set(key, { status: 'ready', detail: parsedDetail }))
       })
       .catch((cause: unknown) => {
@@ -425,19 +487,50 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
           message: cause instanceof Error ? cause.message : String(cause),
         }))
       })
-  }, [fetchStudioApi])
+  }, [draftContext, fetchStudioApi, t])
+
+  useEffect(() => {
+    if (!initialRecovery) return
+    fetchDetail({ kind: initialRecovery.kind, id: initialRecovery.id } as AssetSummary)
+  }, [fetchDetail, initialRecovery])
+
+  const previousEpoch = useRef(refreshEpoch)
+  useEffect(() => {
+    if (previousEpoch.current === refreshEpoch) return
+    previousEpoch.current = refreshEpoch
+    const current = editorState.current
+    if (!current.dirty && !current.busy) {
+      setDetails(new Map())
+      const active = assets.find(asset => `${asset.kind}:${asset.id}` === current.selected)
+      if (active) fetchDetail(active)
+    }
+    return load(true)
+  }, [assets, fetchDetail, load, refreshEpoch])
 
   /** Select one sidebar row: clear transient editing state, lazy-load the detail. */
   const selectAsset = (asset: AssetSummary) => {
     const key = `${asset.kind}:${asset.id}`
-    setSelected(key)
-    // Obsidian 哲学：选中即编辑——可编辑三类直接进编辑器，不再有只读卡片门。
-    setSaveError(null)
-    setCreating(false)
-    if (!detailsRef.current.has(key)) fetchDetail(asset)
+    const select = () => {
+      setSelected(key)
+      // Obsidian 哲学：选中即编辑——可编辑三类直接进编辑器，不再有只读卡片门。
+      setSaveError(null)
+      setCreating(false)
+      if (!detailsRef.current.has(key)) fetchDetail(asset)
+    }
+    if (key !== selected || creating) requestDiscard(select)
+    else select()
   }
 
   const selectDocument = (doc: CoreDoc) => {
+    const key = `doc:${doc.path}`
+    if (key !== selected) {
+      requestDiscard(() => { openDocument(doc) })
+      return
+    }
+    openDocument(doc)
+  }
+
+  const openDocument = (doc: CoreDoc) => {
     const key = `doc:${doc.path}`
     setSelected(key)
     setCreating(false)
@@ -456,6 +549,15 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
   }
 
   const selectReference = (entry: ReferenceEntry, force = false) => {
+    const key = `ref:${entry.sourceId}`
+    if (key !== selected) {
+      requestDiscard(() => { openReference(entry, force) })
+      return
+    }
+    openReference(entry, force)
+  }
+
+  const openReference = (entry: ReferenceEntry, force = false) => {
     const key = `ref:${entry.sourceId}`
     setSelected(key)
     setCreating(false)
@@ -494,28 +596,33 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     postStudioApi('/assets/update', {
       kind: asset.kind,
       id: asset.id,
-      revision: revisionRef.current || entry.detail.revision,
+      revision: revisionsRef.current.get(key) || entry.detail.revision,
       data: { [field]: value },
     })
       .then((data) => {
         setFieldBusy(null)
         const record = (data !== null && typeof data === 'object' ? data : {}) as { asset?: { revision?: unknown } }
         const nextRevision = typeof record.asset?.revision === 'string' ? record.asset.revision : null
-        if (nextRevision !== null) revisionRef.current = nextRevision
+        if (nextRevision !== null) revisionsRef.current.set(key, nextRevision)
+        recoveries.current.delete(key)
         setDetails(previous => {
           const current = previous.get(key)
           if (current?.status !== 'ready') return previous
           return new Map(previous).set(key, {
             ...current,
-            detail: { ...current.detail, revision: nextRevision ?? current.detail.revision },
+            detail: { ...withSavedField(current.detail, field, value), revision: nextRevision ?? current.detail.revision },
           })
         })
+        if (['name', 'summary', 'aliases', 'tags'].includes(field)) {
+          setAssets(previous => previous.map(item => `${item.kind}:${item.id}` === key ? { ...item, [field]: value } : item))
+        }
       })
       .catch((cause: unknown) => {
         setFieldBusy(null)
         const conflict = cause instanceof StudioApiError && cause.status === 409
         setSaveError({ message: cause instanceof Error ? cause.message : String(cause), conflict })
-        if (conflict) fetchDetail(asset, true)
+        // Keep the local body and relation draft visible on version conflicts.
+        // Only an explicit reload/discard replaces the editor with server data.
       })
   }
 
@@ -523,17 +630,22 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
   const saveAsset = (asset: AssetSummary, data: Record<string, unknown>, bodyMarkdown: string) => {
     const key = `${asset.kind}:${asset.id}`
     const entry = details.get(key)
-    if (entry?.status !== 'ready') return
+    if (entry?.status !== 'ready' || busy) return
+    const identity = draftContext ? { ...draftContext, kind: asset.kind, id: asset.id } : null
+    const submittedDraft = identity ? readAssetDraft(identity)?.draft : undefined
     setSaving(true)
     setSaveError(null)
     postStudioApi('/assets/update', {
       kind: asset.kind,
       id: asset.id,
-      revision: revisionRef.current || entry.detail.revision,
+      revision: revisionsRef.current.get(key) || entry.detail.revision,
       data,
       body_markdown: bodyMarkdown,
     })
       .then(() => {
+        if (identity && submittedDraft) removeAssetDraftIfUnchanged(identity, submittedDraft)
+        recoveries.current.delete(key)
+        setRestoredKey('')
         setSaving(false)
         // 留在编辑态：detail.revision 变化会让编辑器以服务端真值重挂。
         fetchDetail(asset)
@@ -546,7 +658,6 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
           message: cause instanceof Error ? cause.message : String(cause),
           conflict,
         })
-        if (conflict) fetchDetail(asset, true)
       })
   }
 
@@ -732,19 +843,28 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
     const { detail } = entry
     const editableKind = asset.kind === 'character' || asset.kind === 'world' || asset.kind === 'progression'
     if (editableKind) {
+      const source: AssetEditorSource = recoveries.current.get(key)?.source ?? {
+        ...detail,
+        derivedRelations: detail.relations.filter(relation => relation.direction === 'incoming' || relation.origin === 'annotation'),
+      }
       return (
+        <>
+        {(dirty || restoredKey === key) && <div className={css.detailNotice} role="status">
+          {draftStorageFailed ? t('creation.draft.unavailable') : restoredKey === key ? t('assets.draft.restored') : t('assets.draft.unsaved')}
+        </div>}
         <AssetEditor
           // Remount only on draft-epoch change (conflict/cancel refetch):
           // field autosaves chain revisions WITHOUT resetting the other drafts.
           key={`${key}:${draftEpoch}`}
           kind={asset.kind}
-          source={{
-            ...detail,
-            // Derived relations (incoming edges / annotation origin) live in
-            // other assets' front matter — display-only in this editor.
-            derivedRelations: detail.relations.filter(
-              relation => relation.direction === 'incoming' || relation.origin === 'annotation',
-            ),
+          source={source}
+          initialDraft={recoveries.current.get(key)?.draft}
+          onDraftChange={(draft, hasChanges) => {
+            if (discardedEditor.current === `${key}:${draftEpoch}`) return
+            if (!draftContext || !['character', 'world'].includes(asset.kind)) return
+            const identity = { ...draftContext, kind: asset.kind, id: asset.id }
+            if (hasChanges) setDraftStorageFailed(!writeAssetDraft({ ...identity, baseRevision: revisionsRef.current.get(key) || detail.revision, source, draft }))
+            else removeAssetDraft(identity)
           }}
           candidates={assets.filter(candidate => candidate.kind !== 'progression' && candidate.id !== asset.id)}
           saving={saving}
@@ -753,17 +873,20 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
           onSave={(data, bodyMarkdown) => { saveAsset(asset, data, bodyMarkdown) }}
           onFieldSave={(field, value) => { saveField(asset, field, value) }}
           fieldBusy={fieldBusy}
+          onDirtyChange={setDirty}
           onCancel={() => {
-            // 取消=放弃本地草稿：epoch 重挂以服务端真值诚实重建。
-            setSaveError(null)
-            fetchDetail(asset, true)
+            requestDiscard(() => {
+              // 取消=放弃本地草稿：epoch 重挂以服务端真值诚实重建。
+              setSaveError(null)
+              fetchDetail(asset, true)
+            })
           }}
           onRefresh={() => {
-            setSaveError(null)
-            fetchDetail(asset, true)
+            requestDiscard(() => { setSaveError(null); fetchDetail(asset, true) })
           }}
           t={t}
         />
+        </>
       )
     }
     // Unreachable: details are only fetched for the three editable kinds,
@@ -782,9 +905,9 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
             busy={createBusy}
             error={createError}
             onSubmit={(payload) => { createAsset(kind, payload) }}
+            onDirtyChange={setDirty}
             onCancel={() => {
-              setCreating(false)
-              setCreateError(null)
+              requestDiscard(() => { setCreating(false); setCreateError(null) })
             }}
             t={t}
           />
@@ -883,10 +1006,10 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
               type="button"
               className={css.segmentButton}
               data-active={segment === which}
+              disabled={busy}
               onClick={() => {
-                setSegment(which)
-                setSelected(null)
-                  setCreating(false)
+                if (segment === which) return
+                requestDiscard(() => { setSegment(which); setSelected(null); setCreating(false) })
               }}
             >
               {segmentLabel(which)}
@@ -903,6 +1026,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
           onChange={event => { setQuery(event.target.value) }}
         />
         <div className={css.sidebarList}>
+          {state === 'ready' && error !== '' && <div className={css.sidebarEmpty} role="alert">{error}</div>}
           {state === 'loading' && <div className={css.sidebarEmpty}>{t('loading')}</div>}
           {state === 'error' && (
             <div className={css.sidebarEmpty}>
@@ -920,16 +1044,15 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
             <button
               type="button"
               className={css.button}
-              disabled={creating}
+              disabled={creating || busy}
               onClick={() => {
-                setCreating(true)
-                setCreateError(null)
+                requestDiscard(() => { setCreating(true); setCreateError(null) })
               }}
             >
               {t('assets.create.open')}
             </button>
           )}
-          <button type="button" className={css.button} onClick={() => { load() }}>
+          <button type="button" className={css.button} disabled={busy} onClick={() => { load(dirty) }}>
             {t('refresh')}
           </button>
         </div>
@@ -946,6 +1069,9 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t }: AssetsViewProps
             )
         )}
       </div>
+      {pendingDiscard !== null && <DiscardDraftDialog t={t}
+        onKeep={() => { setPendingDiscard(null) }}
+        onDiscard={() => { const proceed = pendingDiscard; setPendingDiscard(null); proceed() }} />}
     </div>
   )
 }

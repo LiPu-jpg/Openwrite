@@ -370,6 +370,30 @@ export function ProjectArchiveWorkspace(props: ArchiveWorkspaceProps) {
   const [referencePolicy, setReferencePolicy] = useState<'preserve_relative' | 'rewrite_novel_id'>('preserve_relative')
   const [restorePreview, setRestorePreview] = useState<ProjectRestorePreviewDto | null>(null)
   const [reload, setReload] = useState(0)
+  const restorePreviewGeneration = useRef(0)
+  const restorePreviewPending = useRef(false)
+
+  // Inputs can change while a preview is in flight. Clearing its rendered
+  // result alone does not stop the old response from becoming confirmable.
+  const invalidateRestorePreview = () => {
+    restorePreviewGeneration.current += 1
+    setRestorePreview(null)
+    if (restorePreviewPending.current) {
+      restorePreviewPending.current = false
+      setBusy(current => current === 'archive-restore-preview' ? '' : current)
+    }
+  }
+
+  useEffect(() => {
+    setRestorePreview(null)
+    return () => {
+      restorePreviewGeneration.current += 1
+      if (restorePreviewPending.current) {
+        restorePreviewPending.current = false
+        setBusy(current => current === 'archive-restore-preview' ? '' : current)
+      }
+    }
+  }, [postStudioApi, setBusy, workspaceReady])
 
   useEffect(() => {
     if (!workspaceReady) return
@@ -405,6 +429,7 @@ export function ProjectArchiveWorkspace(props: ArchiveWorkspaceProps) {
       const archive = asRecord(unwrapData(result)['archive'])
       const id = typeof archive['archive_id'] === 'string' ? archive['archive_id'] : ''
       say(t('tools.archive.created').replace('{id}', id || '—'))
+      invalidateRestorePreview()
       setSelectedPlan(null)
       setSelectedId(id)
       setReload(value => value + 1)
@@ -437,15 +462,19 @@ export function ProjectArchiveWorkspace(props: ArchiveWorkspaceProps) {
   }
 
   const pickTarget = async () => {
+    const generation = restorePreviewGeneration.current
     const picked = await workspaces.pickDirectory()
-    if (picked !== null) {
+    if (picked !== null && generation === restorePreviewGeneration.current) {
+      invalidateRestorePreview()
       setTargetRoot(picked)
-      setRestorePreview(null)
     }
   }
 
   const previewRestore = async () => {
-    if (selectedId === '' || targetRoot === '' || busy !== '') return
+    if (!workspaceReady || selectedId === '' || targetRoot.trim() === '' || busy !== '') return
+    const generation = ++restorePreviewGeneration.current
+    restorePreviewPending.current = true
+    setRestorePreview(null)
     setBusy('archive-restore-preview')
     try {
       const value = await postStudioApi('/project-archives/restore/preview', {
@@ -453,14 +482,19 @@ export function ProjectArchiveWorkspace(props: ArchiveWorkspaceProps) {
         ...(targetNovelId.trim() === '' ? {} : { target_novel_id: targetNovelId.trim() }),
         reference_policy: referencePolicy,
       })
-      setRestorePreview(parseProjectRestorePreview(value))
+      if (generation === restorePreviewGeneration.current) setRestorePreview(parseProjectRestorePreview(value))
     } catch (cause: unknown) {
-      say(`${t('tools.archive.failed')}: ${errorText(cause)}`, true)
-    } finally { setBusy('') }
+      if (generation === restorePreviewGeneration.current) say(`${t('tools.archive.failed')}: ${errorText(cause)}`, true)
+    } finally {
+      if (generation === restorePreviewGeneration.current) {
+        restorePreviewPending.current = false
+        setBusy(current => current === 'archive-restore-preview' ? '' : current)
+      }
+    }
   }
 
   const restore = async () => {
-    if (restorePreview === null || !restorePreview.can_restore || busy !== '') return
+    if (!workspaceReady || restorePreview === null || !restorePreview.can_restore || busy !== '') return
     if (!window.confirm(t('tools.archive.restoreConfirm'))) return
     setBusy('archive-restore')
     try {
@@ -470,6 +504,7 @@ export function ProjectArchiveWorkspace(props: ArchiveWorkspaceProps) {
         archive_sha256: restorePreview.archive_sha256, confirm: true,
       })
       say(t('tools.archive.restoreStarted').replace('{id}', taskId(value) || '—'))
+      invalidateRestorePreview()
       workbenchStore.invalidate('tasks')
     } catch (cause: unknown) {
       say(`${t('tools.archive.failed')}: ${errorText(cause)}`, true)
@@ -503,7 +538,7 @@ export function ProjectArchiveWorkspace(props: ArchiveWorkspaceProps) {
         <h3>{t('tools.archive.list')}</h3>
         {archives.length === 0 && <p>{t('tools.archive.empty')}</p>}
         {archives.map(archive => <div className={css.archiveListItem} key={archive.archive_id} data-active={archive.archive_id === selectedId}>
-          <button type="button" onClick={() => { setSelectedPlan(null); setSelectedId(archive.archive_id); setRestorePreview(null) }}>
+          <button type="button" onClick={() => { invalidateRestorePreview(); setSelectedPlan(null); setSelectedId(archive.archive_id) }}>
             <strong>{archive.archive_id}</strong><span>{archive.created_at || '—'}</span>
             <small>{archive.file_count} · {archive.total_size.toLocaleString()} · {archive.archive_sha256}</small>
           </button>
@@ -515,14 +550,14 @@ export function ProjectArchiveWorkspace(props: ArchiveWorkspaceProps) {
         {activePlan !== null && <ArchivePlan plan={activePlan} t={t} />}
         {selectedId !== '' && <section className={css.restoreWorkspace}>
           <h3>{t('tools.archive.restore')}</h3>
-          <label>{t('tools.archive.targetRoot')}<span><input value={targetRoot} onChange={event => { setTargetRoot(event.target.value); setRestorePreview(null) }} />
+          <label>{t('tools.archive.targetRoot')}<span><input value={targetRoot} onChange={event => { invalidateRestorePreview(); setTargetRoot(event.target.value) }} />
             <button type="button" aria-label={t('tools.archive.pickTarget')} onClick={() => void pickTarget()}><FolderOpen size={14} /></button></span></label>
-          <label>{t('tools.archive.targetNovelId')}<input value={targetNovelId} onChange={event => { setTargetNovelId(event.target.value); setRestorePreview(null) }} /></label>
-          <label>{t('tools.archive.referencePolicy')}<select value={referencePolicy} onChange={event => { setReferencePolicy(event.target.value as typeof referencePolicy); setRestorePreview(null) }}>
+          <label>{t('tools.archive.targetNovelId')}<input value={targetNovelId} onChange={event => { invalidateRestorePreview(); setTargetNovelId(event.target.value) }} /></label>
+          <label>{t('tools.archive.referencePolicy')}<select value={referencePolicy} onChange={event => { invalidateRestorePreview(); setReferencePolicy(event.target.value as typeof referencePolicy) }}>
             <option value="preserve_relative">{t('tools.archive.preserveRelative')}</option>
             <option value="rewrite_novel_id">{t('tools.archive.rewriteNovelId')}</option>
           </select></label>
-          <button type="button" className={css.actionButton} disabled={busy !== '' || targetRoot === ''} onClick={() => void previewRestore()}>{t('tools.archive.previewRestore')}</button>
+          <button type="button" className={css.actionButton} disabled={!workspaceReady || busy !== '' || targetRoot.trim() === ''} onClick={() => void previewRestore()}>{t('tools.archive.previewRestore')}</button>
           {restorePreview !== null && <div className={css.restorePreview} data-ready={restorePreview.can_restore}>
             <div><strong>{restorePreview.can_restore ? t('tools.archive.restoreReady') : t('tools.archive.restoreBlocked')}</strong><code>{restorePreview.archive_sha256}</code></div>
             <p>{restorePreview.source_novel_id} → {restorePreview.target_novel_id} · {restorePreview.file_count} · {restorePreview.total_size.toLocaleString()}</p>

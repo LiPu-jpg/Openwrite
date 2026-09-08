@@ -1,6 +1,7 @@
 ---
 name: truth-validation
 description: Use when user wants to validate story consistency, check for plot holes, or verify state changes. Triggers include "验证", "一致性", "检查逻辑", "状态冲突".
+user-invocable: false
 ---
 
 # 真相文件验证系统

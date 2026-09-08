@@ -26,22 +26,37 @@ export function HeaderProjectStatus({ t }: HeaderProps) {
 export function HeaderUtilities({ postStudioApi, t }: UtilityProps) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
     const dismiss = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
     }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        rootRef.current?.querySelector('button')?.focus()
+      }
+    }
     document.addEventListener('pointerdown', dismiss)
-    return () => document.removeEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
   }, [open])
 
   const sync = async () => {
+    if (busy) return
     setBusy(true)
+    setError('')
     try {
       await postStudioApi('/sync', {})
       workbenchStore.invalidate('workspace')
       setOpen(false)
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : String(cause))
     } finally { setBusy(false) }
   }
 
@@ -57,10 +72,11 @@ export function HeaderUtilities({ postStudioApi, t }: UtilityProps) {
   }
 
   return <div className={css.headerUtilities} ref={rootRef}>
-    <button type="button" className={css.headerIconButton} title={t('tools.title')} aria-expanded={open} onClick={() => setOpen(value => !value)}>
+    <button type="button" className={css.headerIconButton} title={t('tools.title')} aria-label={t('tools.title')} aria-expanded={open} onClick={() => setOpen(value => !value)}>
       <MoreHorizontal size={18} />
     </button>
     {open && <div className={css.headerMenu}>
+      {error !== '' && <span className={css.contextChipError} role="alert">{error}</span>}
       <button type="button" disabled={busy} onClick={() => void sync()}><RefreshCw size={15} />{t('tools.sync')}</button>
       <button type="button" onClick={() => void openStudio()}><ExternalLink size={15} />{t('openExternal')}</button>
     </div>}

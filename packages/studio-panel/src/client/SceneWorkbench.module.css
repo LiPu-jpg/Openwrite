@@ -1,14 +1,14 @@
 .root {
   margin: 18px 16px 28px;
   padding: 16px;
-  border: 1px solid var(--dsw-alias-divider-primary, rgba(127, 127, 127, .28));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .28));
   border-radius: 12px;
   background: var(--dsw-alias-bg-layer-1, rgba(127, 127, 127, .035));
   color: var(--dsw-alias-label-primary, inherit);
 }
 
 .root :where(button, input, select):focus-visible {
-  outline: 2px solid var(--dsw-alias-interactive-primary, #5b7cfa);
+  outline: 2px solid var(--dsw-alias-state-business-primary, #5b7cfa);
   outline-offset: 2px;
 }
 
@@ -49,7 +49,7 @@
 .button,
 .primaryButton,
 .orderToolbar button {
-  border: 1px solid var(--dsw-alias-divider-primary, rgba(127, 127, 127, .32));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .32));
   border-radius: 7px;
   padding: 6px 10px;
   background: var(--dsw-alias-bg-layer-2, transparent);
@@ -60,8 +60,8 @@
 
 .primaryButton,
 .orderToolbar button[data-active='true'] {
-  border-color: var(--dsw-alias-interactive-primary, #5b7cfa);
-  background: var(--dsw-alias-interactive-primary, #4263eb);
+  border-color: var(--dsw-alias-state-business-primary, #5b7cfa);
+  background: var(--dsw-alias-state-business-primary, #4263eb);
   color: #fff;
 }
 
@@ -137,13 +137,13 @@
 
 .sceneCard {
   padding: 13px 14px;
-  border: 1px solid var(--dsw-alias-divider-primary, rgba(127, 127, 127, .25));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .25));
   border-radius: 9px;
   background: var(--dsw-alias-bg-layer-2, rgba(127, 127, 127, .025));
 }
 
 .sceneHeading > div { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
-.sceneId { font-weight: 700; color: var(--dsw-alias-interactive-primary, #4263eb); }
+.sceneId { font-weight: 700; color: var(--dsw-alias-state-business-primary, #4263eb); }
 .chapter { color: var(--dsw-alias-label-secondary, #6b7280); font-size: 12px; }
 .sceneCard h3 { margin-top: 9px; font-size: 16px; }
 
@@ -161,7 +161,7 @@
 .editor {
   margin-top: 13px;
   padding-top: 13px;
-  border-top: 1px solid var(--dsw-alias-divider-primary, rgba(127, 127, 127, .25));
+  border-top: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .25));
 }
 
 .formGrid {
@@ -182,7 +182,7 @@
 .moveRow input,
 .moveRow select {
   min-width: 0;
-  border: 1px solid var(--dsw-alias-divider-primary, rgba(127, 127, 127, .34));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .34));
   border-radius: 6px;
   padding: 7px 8px;
   background: var(--dsw-alias-bg-layer-1, transparent);
@@ -198,7 +198,7 @@
 .migration {
   margin-top: 18px;
   padding-top: 16px;
-  border-top: 1px solid var(--dsw-alias-divider-primary, rgba(127, 127, 127, .3));
+  border-top: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, .3));
 }
 
 .previewList {
@@ -219,7 +219,7 @@
 .previewList li::before { content: counter(preview) '. '; color: var(--dsw-alias-label-secondary, #6b7280); }
 .confirmRow, .rollbackRow { margin-top: 12px; flex-wrap: wrap; }
 .confirmRow label { flex: 1 1 300px; display: flex; align-items: center; gap: 7px; font-size: 13px; }
-.rollbackRow { padding: 9px 0 0; border-top: 1px dashed var(--dsw-alias-divider-primary, rgba(127, 127, 127, .3)); }
+.rollbackRow { padding: 9px 0 0; border-top: 1px dashed var(--dsw-alias-border-l2, rgba(127, 127, 127, .3)); }
 
 @media (max-width: 720px) {
   .root { margin: 12px 8px 20px; padding: 12px; }

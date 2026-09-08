@@ -1,6 +1,7 @@
 ---
 name: oh-story-long-scan
 description: 研究长篇网文平台与榜单样本，分析读者契约、题材组合、主角机制、开篇兑现、更新阶段、升级空间和作者适配度。用于长篇扫榜、市场趋势观察、选题比较或开书前验证方向。
+user-invocable: false
 license: MIT
 metadata:
   openwrite:

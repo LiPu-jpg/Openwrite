@@ -1,6 +1,7 @@
 ---
 name: oh-story-long-analyze
 description: 证据化拆解用户合法提供的长篇小说，分析开篇契约、逐章推进、剧情单元、人物关系、世界设定、情绪节奏、伏笔和表达技法。用于拆书、分析黄金开篇、建立对标报告或提炼可迁移模块。
+user-invocable: false
 license: MIT
 metadata:
   openwrite:

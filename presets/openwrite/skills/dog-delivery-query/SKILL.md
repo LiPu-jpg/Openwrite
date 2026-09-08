@@ -1,6 +1,7 @@
 ---
 name: dog-delivery-query
 description: Query a chapter delivery DoG graph across manuscript, review, revision application, and re-review closure. Use after writing or reviewing a chapter, after revision actions, or when the user asks whether a chapter is truly ready to deliver.
+user-invocable: false
 ---
 
 # 章节交付 DoG 查询

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download, ExternalLink, FileUp, FlaskConical, Gauge, ListTodo, RefreshCw, Cpu } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -6,7 +6,8 @@ import { API_PROXY_BASE, studioContextHeaders } from './api.ts'
 import { parseExportPreflight, type ExportFormatDto, type ExportPreflightDto, type ExportPurposeDto } from './dto.ts'
 import { ResearchView } from './ResearchView.tsx'
 import { BenchmarkView } from './BenchmarkView.tsx'
-import { ModelView } from './ModelView.tsx'
+import { ModelView, type ModelNavigationGuard } from './ModelView.tsx'
+import { modelMemoryContextKey, WorkspaceViewMemory } from './model-view-memory.ts'
 import { TasksView, type NavigationRequest } from './TasksView.tsx'
 import { ManuscriptImportWorkspace, ProjectArchiveWorkspace } from './TransferWorkspaces.tsx'
 import { useWorkbench, workbenchStore } from './WorkbenchStore.ts'
@@ -14,6 +15,7 @@ import { createNovelWorkspace, initWorkspaceProject, useBindStudioContext, type 
 import css from './Workbench.module.css'
 
 type OperationsMode = 'tasks' | 'benchmark' | 'models' | 'research' | 'transfer'
+const operationsModeMemory = new WorkspaceViewMemory<OperationsMode>()
 
 export type OperationsViewProps = ConvViewProps & InjectFace<StudioPanelInjected> & PropsLocale<'studio-panel'>
 
@@ -116,10 +118,30 @@ function ExportPreflightCard({ preflight, t }: { preflight: ExportPreflightDto; 
 
 /** Background jobs plus the less frequent transfer/maintenance commands. */
 export function OperationsView(props: OperationsViewProps) {
-  const [mode, setMode] = useState<OperationsMode>('tasks')
-  const [resultTarget, setResultTarget] = useState<NavigationRequest | null>(null)
   const workbench = useWorkbench()
   useBindStudioContext({ sessionId: props.sessionId, useWorkspaces: props.useWorkspaces })
+  return <OperationsWorkspace key={workbench.contextEpoch} {...props} />
+}
+
+function OperationsWorkspace(props: OperationsViewProps) {
+  const workbench = useWorkbench()
+  const [memoryKey] = useState(() => modelMemoryContextKey(workbench.context))
+  const [mode, setMode] = useState<OperationsMode>(() => operationsModeMemory.read(memoryKey) ?? 'tasks')
+  const [resultTarget, setResultTarget] = useState<NavigationRequest | null>(null)
+  useEffect(() => {
+    operationsModeMemory.write(memoryKey, mode)
+    return () => operationsModeMemory.write(memoryKey, mode)
+  }, [memoryKey, mode])
+  const modelNavigationGuard = useRef<ModelNavigationGuard | null>(null)
+  const registerModelNavigationGuard = useCallback((guard: ModelNavigationGuard | null) => {
+    modelNavigationGuard.current = guard
+  }, [])
+  const navigateToMode = (next: OperationsMode) => {
+    if (next === mode) return
+    const navigate = () => setMode(next)
+    if (mode === 'models' && modelNavigationGuard.current) modelNavigationGuard.current(navigate)
+    else navigate()
+  }
   const items = [
     { id: 'tasks' as const, icon: ListTodo, label: props.t('view.tasks') },
     { id: 'benchmark' as const, icon: Gauge, label: props.t('view.benchmark') },
@@ -129,15 +151,15 @@ export function OperationsView(props: OperationsViewProps) {
   ]
   return <div className={css.workspaceRoot}>
     <nav className={css.workspaceNav} aria-label={props.t('view.operations')}>
-      {items.map(item => <button key={item.id} type="button" data-active={mode === item.id} onClick={() => setMode(item.id)}>
+      {items.map(item => <button key={item.id} type="button" data-active={mode === item.id} aria-current={mode === item.id ? 'page' : undefined} onClick={() => navigateToMode(item.id)}>
         <item.icon size={16} /><span>{item.label}</span>
         {item.id === 'tasks' && workbench.activeTasks > 0 && <b>{workbench.activeTasks}</b>}
       </button>)}
     </nav>
     <section className={css.workspaceContent}>
-      {mode === 'tasks' && <TasksView key={workbench.epochs.tasks} {...props} onNavigate={target => { setResultTarget(target); setMode(target.view) }} />}
-      {mode === 'benchmark' && <BenchmarkView key={workbench.epochs.benchmark} {...props} initialRunId={resultTarget?.view === 'benchmark' ? resultTarget.id : ''} />}
-      {mode === 'models' && <ModelView {...props} />}
+      {mode === 'tasks' && <TasksView key={workbench.contextEpoch} {...props} onNavigate={target => { setResultTarget(target); setMode(target.view) }} />}
+      {mode === 'benchmark' && <BenchmarkView key={workbench.contextEpoch} {...props} refreshEpoch={workbench.epochs.benchmark} initialRunId={resultTarget?.view === 'benchmark' ? resultTarget.id : ''} />}
+      {mode === 'models' && <ModelView key={workbench.contextEpoch} {...props} onNavigationGuardChange={registerModelNavigationGuard} />}
       {mode === 'research' && <ResearchView key={workbench.epochs.research} {...props} initialReportId={resultTarget?.view === 'research' ? resultTarget.id : ''} />}
       {mode === 'transfer' && <TransferPanel {...props} />}
     </section>

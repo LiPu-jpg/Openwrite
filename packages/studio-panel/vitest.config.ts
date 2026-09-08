@@ -17,6 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       'dsh-react-flow-style': fileURLToPath(new URL('./scripts/components/stubs/empty.ts', import.meta.url)),
+      'dsh-vditor-runtime': fileURLToPath(new URL('./scripts/components/stubs/vditor-runtime.ts', import.meta.url)),
     },
   },
   test: {
