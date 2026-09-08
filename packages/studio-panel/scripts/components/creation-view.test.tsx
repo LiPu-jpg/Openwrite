@@ -1411,7 +1411,7 @@ describe('CreationView manuscript mentions', () => {
     },
   }
 
-  function mentionFetch() {
+  function mentionFetch(payload = assetPayload) {
     return vi.fn(async (url: string) => {
       if (url.startsWith('/document')) {
         const path = decodeURIComponent(url.split('path=')[1] ?? '')
@@ -1420,7 +1420,7 @@ describe('CreationView manuscript mentions', () => {
         }
         return { path: chapter().path, title: '第一章', content: body, version: 'v1', revision: 'r1' }
       }
-      if (url === '/assets' || url.startsWith('/assets?')) return assetPayload
+      if (url === '/assets' || url.startsWith('/assets?')) return payload
       if (url.startsWith('/chapters/') && url.includes('/work-brief')) return chapterWorkBrief({
         path: url.includes('ch_002') ? 'data/novels/demo/data/manuscript/ch_002.md' : chapter().path,
       })
@@ -1448,6 +1448,46 @@ describe('CreationView manuscript mentions', () => {
     expect(screen.queryByText('view.library')).toBeNull()
     expect(screen.queryByText('view.assets')).toBeNull()
     expect(postStudioApi.mock.calls.some(call => String(call[0]).includes('/assets'))).toBe(false)
+  })
+
+  it('offers distinct same-name candidates and opens only the chosen read-only card', async () => {
+    const payload = { data: { assets: [
+      ...assetPayload.data.assets,
+      { kind: 'character', id: 'ferryman', name: '林舟', summary: '渡船船主', aliases: ['小舟'] },
+    ] } }
+    const postStudioApi = vi.fn(async () => ({}))
+    render(<CreationView {...(viewProps({ fetchStudioApi: mentionFetch(payload), putStudioApi: vi.fn(), postStudioApi }) as never)} />)
+    const chip = await screen.findByRole('button', { name: 'creation.mentions.mention: 林舟' })
+    expect(chip.textContent).toContain('creation.mentions.ambiguous (2)')
+    expect(screen.getAllByRole('button', { name: 'creation.mentions.mention: 林舟' })).toHaveLength(1)
+    fireEvent.click(chip)
+    expect(screen.queryByRole('region', { name: 'creation.mentions.card' })).toBeNull()
+    expect(await screen.findByRole('region', { name: 'creation.mentions.choose' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: /林舟 钟楼守夜人 character · linzhou/ })).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /林舟 渡船船主 character · ferryman/ }))
+    expect(screen.getByRole('region', { name: 'creation.mentions.card' }).getAttribute('data-asset')).toBe('character:ferryman')
+    expect(screen.queryByRole('region', { name: 'creation.mentions.choose' })).toBeNull()
+    expect(postStudioApi).not.toHaveBeenCalled()
+  })
+
+  it('clears unresolved candidates when changing Workspace and chapter', async () => {
+    const second = { ...chapter('data/novels/demo/data/manuscript/ch_002.md'), title: '第二章' }
+    harness.snapshot = { ...harness.snapshot, chapters: [chapter(), second] }
+    const payload = { data: { assets: [
+      ...assetPayload.data.assets,
+      { kind: 'character', id: 'ferryman', name: '船主', summary: '渡船船主', aliases: ['小舟'] },
+    ] } }
+    const props = viewProps({ fetchStudioApi: mentionFetch(payload), putStudioApi: vi.fn(), postStudioApi: vi.fn() })
+    const view = render(<CreationView {...(props as never)} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'creation.mentions.mention: 小舟' }))
+    expect(await screen.findByRole('region', { name: 'creation.mentions.choose' })).not.toBeNull()
+    setSnapshot('ws-b', second.path, 2)
+    await act(async () => {
+      view.rerender(<CreationView {...({ ...props, sessionId: 'session-ws-b' } as never)} />)
+    })
+    expect(await screen.findByDisplayValue('雨停了。')).not.toBeNull()
+    expect(screen.queryByRole('region', { name: 'creation.mentions.choose' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'creation.mentions.card' })).toBeNull()
   })
 
   it('clears the open card when the chapter or Workspace changes and never POSTs asset updates', async () => {

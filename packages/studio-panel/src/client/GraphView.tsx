@@ -301,11 +301,17 @@ function RelationshipFlow({ nodes: relationNodes, edges: relationEdges, t }: Rel
   const [layoutNonce, setLayoutNonce] = useState(0)
   const edgeById = useMemo(() => new Map(relationEdges.map(edge => [edge.id, edge])), [relationEdges])
   const selectedEdge = selectedEdgeId !== '' ? edgeById.get(selectedEdgeId) : undefined
-  const neighbors = selected === undefined ? [] : relationEdges.flatMap(edge => {
-    if (edge.source === selected.id) return relationById.get(edge.target) ? [relationById.get(edge.target)!] : []
-    if (edge.target === selected.id) return relationById.get(edge.source) ? [relationById.get(edge.source)!] : []
-    return []
-  })
+  const neighbors = useMemo(() => {
+    const unique = new Map<string, RelationNode>()
+    if (selected === undefined) return []
+    for (const edge of relationEdges) {
+      const id = edge.source === selected.id ? edge.target : edge.target === selected.id ? edge.source : undefined
+      if (id === undefined || id === selected.id) continue
+      const neighbor = relationById.get(id)
+      if (neighbor !== undefined && !unique.has(id)) unique.set(id, neighbor)
+    }
+    return [...unique.values()]
+  }, [selected, relationEdges, relationById])
 
   useEffect(() => {
     const container = containerRef.current

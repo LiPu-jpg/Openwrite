@@ -204,6 +204,10 @@ export type StudioPanelKey =
   | 'creation.mentions.card'
   | 'creation.mentions.aliases'
   | 'creation.mentions.close'
+  | 'creation.mentions.ambiguous'
+  | 'creation.mentions.choose'
+  | 'creation.mentions.conflict'
+  | 'creation.mentions.noSummary'
   | 'creation.issues'
   | 'creation.changedElsewhere'
   | 'creation.conflict'
@@ -1225,6 +1229,10 @@ export const zh: Record<StudioPanelKey, string> = {
   'creation.mentions.card': '资料卡',
   'creation.mentions.aliases': '别名',
   'creation.mentions.close': '关闭资料卡',
+  'creation.mentions.ambiguous': '待区分',
+  'creation.mentions.choose': '选择对应资料',
+  'creation.mentions.conflict': '这个名称对应多份资料，请根据简介选择。',
+  'creation.mentions.noSummary': '暂无简介',
   'creation.issues': '个问题',
   'creation.changedElsewhere': '正文已在其他位置变化；当前草稿未被覆盖。',
   'creation.conflict': '保存冲突：服务端正文已变化，当前草稿仍保留。',
@@ -2237,6 +2245,10 @@ export const en: Record<StudioPanelKey, string> = {
   'creation.mentions.card': '资料卡',
   'creation.mentions.aliases': 'Aliases',
   'creation.mentions.close': 'Close asset card',
+  'creation.mentions.ambiguous': 'Ambiguous',
+  'creation.mentions.choose': 'Choose matching asset',
+  'creation.mentions.conflict': 'This name matches multiple assets. Choose using their descriptions.',
+  'creation.mentions.noSummary': 'No description',
   'creation.issues': 'issues',
   'creation.changedElsewhere': 'The manuscript changed elsewhere; your draft was preserved.',
   'creation.conflict': 'Save conflict: the server manuscript changed and your draft is preserved.',

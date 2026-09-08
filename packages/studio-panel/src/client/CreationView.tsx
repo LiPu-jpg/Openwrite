@@ -24,7 +24,7 @@ import {
 } from './manuscript-selection.ts'
 import {
   findManuscriptMentions, parseMentionAssets, uniqueMentionAssets,
-  type MentionAsset, type MentionSpan,
+  type MentionAsset,
 } from './manuscript-mentions.ts'
 import { useWorkbench, workbenchStore, type ChapterSummary } from './WorkbenchStore.ts'
 import { ContinuousReader } from './ContinuousReader.tsx'
@@ -604,6 +604,12 @@ export function CreationView(props: CreationViewProps) {
   const preserveManuscriptSelectionRef = useRef(false)
   const releasePreserveListenerRef = useRef<(() => void) | null>(null)
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([])
+  const [mentionChoices, setMentionChoices] = useState<{
+    workspaceId: string
+    chapterPath: string
+    text: string
+    candidates: MentionAsset[]
+  } | null>(null)
   const [mentionCard, setMentionCard] = useState<{
     workspaceId: string
     chapterPath: string
@@ -709,6 +715,9 @@ export function CreationView(props: CreationViewProps) {
       { bucket: 'to_plant', label: 'creation.foreshadow.toPlant', items: workBrief.foreshadowing.to_plant },
     ]
   const mentions = useMemo(() => uniqueMentionAssets(findManuscriptMentions(draft, mentionAssets)), [draft, mentionAssets])
+  const visibleMentionChoices = mentionChoices !== null
+    && mentionChoices.workspaceId === (workspaceId ?? '')
+    && mentionChoices.chapterPath === path ? mentionChoices : null
   const visibleMentionCard = mentionCard !== null
     && mentionCard.workspaceId === (workspaceId ?? '')
     && mentionCard.chapterPath === path
@@ -740,6 +749,7 @@ export function CreationView(props: CreationViewProps) {
 
   useEffect(() => {
     setMentionCard(null)
+    setMentionChoices(null)
   }, [workspaceId, path])
 
   useEffect(() => {
@@ -1545,7 +1555,8 @@ export function CreationView(props: CreationViewProps) {
     window.addEventListener('mouseup', release)
   }
 
-  const openMention = (span: MentionSpan) => {
+  const openMention = (span: MentionAsset) => {
+    setMentionChoices(null)
     setMentionCard({
       workspaceId: workspaceId ?? '',
       chapterPath: path,
@@ -1824,13 +1835,40 @@ export function CreationView(props: CreationViewProps) {
           <div className={css.mentionHits} aria-label={t('creation.mentions.title')}>
             <small>{t('creation.mentions.title')}</small>
             {mentions.map(span => (
-              <button key={`${span.kind}:${span.id}`} type="button"
-                aria-label={`${t('creation.mentions.mention')}: ${span.name}`}
-                onClick={() => openMention(span)}>
-                {span.name}
+              <button key={`${span.start}:${span.text}`} type="button"
+                aria-label={`${t('creation.mentions.mention')}: ${span.candidates.length === 1 ? span.candidates[0]?.name : span.text}`}
+                onClick={() => {
+                  if (span.candidates.length === 1 && span.candidates[0] !== undefined) openMention(span.candidates[0])
+                  else {
+                    setMentionCard(null)
+                    setMentionChoices({ workspaceId: workspaceId ?? '', chapterPath: path, text: span.text, candidates: span.candidates })
+                  }
+                }}>
+                {span.candidates.length === 1 ? span.candidates[0]?.name : `${span.text} · ${t('creation.mentions.ambiguous')} (${span.candidates.length})`}
               </button>
             ))}
           </div>
+        )}
+        {!readerMode && visibleMentionChoices !== null && (
+          <section className={css.mentionCard} aria-label={t('creation.mentions.choose')}>
+            <header>
+              <strong>{visibleMentionChoices.text} · {t('creation.mentions.choose')}</strong>
+              <button type="button" aria-label={t('creation.mentions.close')}
+                onClick={() => setMentionChoices(null)}><X size={14} /></button>
+            </header>
+            <p>{t('creation.mentions.conflict')}</p>
+            <div className={css.mentionCandidates}>
+              {visibleMentionChoices.candidates.map(asset => (
+                <button key={JSON.stringify([asset.kind, asset.id])} type="button"
+                  aria-label={`${asset.name} ${asset.summary || t('creation.mentions.noSummary')} ${asset.kind} · ${asset.id}`}
+                  onClick={() => openMention(asset)}>
+                  <strong>{asset.name}</strong>
+                  <span>{asset.summary || t('creation.mentions.noSummary')}</span>
+                  <small>{asset.kind} · {asset.id}</small>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
         {!readerMode && visibleMentionCard !== null && (
           <section className={css.mentionCard} aria-label={t('creation.mentions.card')}
