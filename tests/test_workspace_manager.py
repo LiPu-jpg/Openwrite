@@ -691,9 +691,7 @@ def test_legacy_open_cannot_rebind_launch_root_context(tmp_path: Path, opener):
         context_headers = _context_headers(launch_root, workspace_id="ws-launch")
 
         # Materialize the context app while launch_root still points at A.
-        status, payload = _request(
-            opener, base, "GET", "/api/workspace", headers=context_headers
-        )
+        status, payload = _request(opener, base, "GET", "/api/workspace", headers=context_headers)
         assert status == 200, payload
         assert payload["project"]["root"] == str(launch_root)
         manager = server.workspace_manager
@@ -714,9 +712,7 @@ def test_legacy_open_cannot_rebind_launch_root_context(tmp_path: Path, opener):
 
         # The dsh context rooted at launch must remain on launch, not follow
         # the mutable legacy app's project switch.
-        status, payload = _request(
-            opener, base, "GET", "/api/workspace", headers=context_headers
-        )
+        status, payload = _request(opener, base, "GET", "/api/workspace", headers=context_headers)
         assert status == 200, payload
         assert payload["project"]["root"] == str(launch_root)
         assert manager._context_apps[launch_root] is context_app
@@ -888,9 +884,7 @@ def test_author_workbench_routes_are_canonical_root_isolated(tmp_path: Path):
     root_b = tmp_path / "workspaces" / "b"
     _author_workbench_project(root_a, "ONLY-A")
     _author_workbench_project(root_b, "ONLY-B")
-    server, thread, base, _ = _start_server(
-        tmp_path / "launch", tmp_path / "state"
-    )
+    server, thread, base, _ = _start_server(tmp_path / "launch", tmp_path / "state")
     opener = build_opener(ProxyHandler({}))
     try:
         status_a, envelope_a = _request(
@@ -913,20 +907,15 @@ def test_author_workbench_routes_are_canonical_root_isolated(tmp_path: Path):
         assert order_a["novel_id"] == order_b["novel_id"] == "demo"
         # Restored/copy workspaces intentionally preserve logical identity;
         # their content revisions and mutations remain root-local.
-        assert order_a["documents"][0]["document_id"] == order_b["documents"][0][
-            "document_id"
-        ]
-        assert order_a["documents"][0]["revision"] != order_b["documents"][0][
-            "revision"
-        ]
+        assert order_a["documents"][0]["document_id"] == order_b["documents"][0]["document_id"]
+        assert order_a["documents"][0]["revision"] != order_b["documents"][0]["revision"]
 
         document_a = order_a["documents"][0]
         brief_status, brief_envelope = _request(
             opener,
             base,
             "GET",
-            "/api/chapters/ch_001/work-brief?document_id="
-            + document_a["document_id"],
+            "/api/chapters/ch_001/work-brief?document_id=" + document_a["document_id"],
             headers=_context_headers(root_a, workspace_id="ws-a"),
         )
         assert brief_status == 200
@@ -953,21 +942,14 @@ def test_author_workbench_routes_are_canonical_root_isolated(tmp_path: Path):
         assert move_status == 200
         moved = move_envelope["data"]["reading_order"]
         moved_a = next(
-            item
-            for item in moved["documents"]
-            if item["document_id"] == document_a["document_id"]
+            item for item in moved["documents"] if item["document_id"] == document_a["document_id"]
         )
         assert moved_a["path"] == "data/manuscript/arc_002/ch_001.md"
         assert (
-            root_b
-            / "data"
-            / "novels"
-            / "demo"
-            / "data"
-            / "manuscript"
-            / "arc_001"
-            / "ch_001.md"
-        ).read_text(encoding="utf-8").endswith("ONLY-B-ch_001\n")
+            (root_b / "data" / "novels" / "demo" / "data" / "manuscript" / "arc_001" / "ch_001.md")
+            .read_text(encoding="utf-8")
+            .endswith("ONLY-B-ch_001\n")
+        )
 
         conflict_status, conflict = _request(
             opener,
@@ -997,29 +979,14 @@ def test_scene_routes_are_revision_bound_and_canonical_root_isolated(tmp_path: P
     _author_workbench_project(root_a, "ONLY-A")
     _author_workbench_project(root_b, "ONLY-B")
     chapter_a = (
-        root_a
-        / "data"
-        / "novels"
-        / "demo"
-        / "data"
-        / "manuscript"
-        / "arc_001"
-        / "ch_001.md"
+        root_a / "data" / "novels" / "demo" / "data" / "manuscript" / "arc_001" / "ch_001.md"
     )
     chapter_a.write_text(
-        "# ch_001\n\n## 场景一：出发\n\nONLY-A-ONE\n\n"
-        "## 场景二：转折\n\nONLY-A-TWO\n",
+        "# ch_001\n\n## 场景一：出发\n\nONLY-A-ONE\n\n## 场景二：转折\n\nONLY-A-TWO\n",
         encoding="utf-8",
     )
     chapter_b_before = (
-        root_b
-        / "data"
-        / "novels"
-        / "demo"
-        / "data"
-        / "manuscript"
-        / "arc_001"
-        / "ch_001.md"
+        root_b / "data" / "novels" / "demo" / "data" / "manuscript" / "arc_001" / "ch_001.md"
     ).read_bytes()
     server, thread, base, _ = _start_server(tmp_path / "launch", tmp_path / "state")
     opener = build_opener(ProxyHandler({}))
@@ -1067,14 +1034,7 @@ def test_scene_routes_are_revision_bound_and_canonical_root_isolated(tmp_path: P
         assert b_status == 200
         assert b_surface["data"]["status"] == "absent"
         assert (
-            root_b
-            / "data"
-            / "novels"
-            / "demo"
-            / "data"
-            / "manuscript"
-            / "arc_001"
-            / "ch_001.md"
+            root_b / "data" / "novels" / "demo" / "data" / "manuscript" / "arc_001" / "ch_001.md"
         ).read_bytes() == chapter_b_before
 
         scene = surface["scenes"][0]
@@ -1133,9 +1093,12 @@ def test_scene_routes_are_revision_bound_and_canonical_root_isolated(tmp_path: P
         )
         assert move_status == 200
         moved = move_envelope["data"]["scene_structure"]
-        assert next(
-            item for item in moved["scenes"] if item["scene_id"] == moving["scene_id"]
-        )["chapter"]["chapter_id"] == "ch_002"
+        assert (
+            next(item for item in moved["scenes"] if item["scene_id"] == moving["scene_id"])[
+                "chapter"
+            ]["chapter_id"]
+            == "ch_002"
+        )
 
         conflict_status, conflict = _request(
             opener,
@@ -1184,3 +1147,45 @@ def test_scene_routes_are_revision_bound_and_canonical_root_isolated(tmp_path: P
         assert rollback_envelope["data"]["scene_structure"]["status"] == "absent"
     finally:
         _stop_server(server, thread)
+
+
+def test_encoded_unicode_workspace_over_real_http(tmp_path: Path) -> None:
+    from urllib.parse import quote
+
+    project = tmp_path / "中文作品-100%"
+    project.mkdir()
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    server, thread, base, _ = _start_server(launch, tmp_path / "state")
+    headers = {
+        **WRITE_HEADERS,
+        "X-OpenWrite-Workspace-Root": quote(str(project), safe=""),
+        "X-OpenWrite-Workspace-Root-Encoding": "uri",
+    }
+    try:
+        opener = build_opener(ProxyHandler({}))
+        status, _ = _request(
+            opener,
+            base,
+            "POST",
+            "/api/project/init",
+            {"novel_id": "unicode-test", "title": "中文书名"},
+            headers,
+        )
+        assert status == 200
+        assert (project / "novel_config.yaml").is_file()
+        status, _ = _request(opener, base, "GET", "/api/workspace", headers=headers)
+        assert status == 200
+    finally:
+        _stop_server(server, thread)
+
+
+@pytest.mark.parametrize("value", ["%FF", "%oops", "%00", "%2Ftmp%2F..%2Fetc"])
+def test_invalid_encoded_workspace_fails_closed(tmp_path: Path, value: str) -> None:
+    from tools.studio_contracts import StudioError
+
+    manager = WorkspaceManager(tmp_path)
+    with pytest.raises(StudioError):
+        manager.parse_context(
+            {"X-OpenWrite-Workspace-Root": value, "X-OpenWrite-Workspace-Root-Encoding": "uri"}
+        )
