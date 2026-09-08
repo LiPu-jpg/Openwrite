@@ -22,7 +22,7 @@ export async function acceptBrowser(loginUrl, temporary) {
     console.log('Browser: host onboarding complete')
     await page.getByRole('button', { name: '打开 OpenWrite', exact: true }).click()
     await page.getByText('写作环境已就绪', { exact: true }).first().waitFor()
-    const workspace = join(temporary, 'browser-novel')
+    const workspace = join(temporary, '中文作品-100%')
     await mkdir(workspace, { recursive: true })
     await page.getByLabel('作品目录', { exact: true }).fill(workspace)
     await page.getByRole('button', { name: '进入作品', exact: true }).click()
@@ -31,7 +31,7 @@ export async function acceptBrowser(loginUrl, temporary) {
     // The blank workbench and its initialization form must work without a model turn.
     await page.locator('button[data-actionable="true"]').click()
     await page.getByPlaceholder('my-novel', { exact: true }).fill('release-test')
-    await page.getByLabel(/^(书名|Title)$/).fill('Release acceptance')
+    await page.getByLabel(/^(书名|Title)$/).fill('中文作品验收')
     await page.getByRole('button', { name: /^(初始化项目|Initialize project)$/ }).click()
     await page.getByRole('button', { name: /^(初始化项目|Initialize project)$/ }).waitFor({ state: 'hidden' })
     for (const label of [/^(资料|Library)$/, /^(任务|Tasks)$/]) await page.getByRole('tab', { name: label }).click()

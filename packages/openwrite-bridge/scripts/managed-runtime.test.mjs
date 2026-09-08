@@ -74,3 +74,14 @@ test('owned process stops and diagnostics conceal credential-bearing errors', as
   const message = sanitizeDiagnostic('https://user:password@example.test/a?token=abc&key=def authorization: Bearer-secret api_key=xyz')
   for (const secret of ['user:password', 'abc', 'def', 'Bearer-secret', 'xyz']) assert.equal(message.includes(secret), false)
 })
+
+test('Unicode workspace headers survive HTTP byte restrictions without changing ASCII identities', async () => {
+  const { workspaceRootHeaders } = await import('../lib/client.js')
+  for (const path of ['/tmp/中文作品-100%', 'C:\\作者\\中文作品']) {
+    const headers = new Headers(workspaceRootHeaders(path))
+    assert.equal(headers.get('x-openwrite-workspace-root-encoding'), 'uri')
+    assert.equal(decodeURIComponent(headers.get('x-openwrite-workspace-root')), path)
+    assert.equal(new Headers(workspaceRootHeaders(path, true)).get('x-openwrite-workspace-root'), headers.get('x-openwrite-workspace-root'))
+  }
+  assert.deepEqual(workspaceRootHeaders('/tmp/book%20literal'), { 'X-OpenWrite-Workspace-Root': '/tmp/book%20literal' })
+})

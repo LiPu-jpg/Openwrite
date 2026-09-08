@@ -19,6 +19,15 @@ export type JsonObject = { [key: string]: JsonValue }
 /** Header OpenWrite requires on every write request (POST/PUT). */
 const WRITE_HEADER = 'X-OpenWrite-Studio'
 
+/** HTTP header values are bytes, so Unicode paths need explicit wire encoding.
+ * Plain ASCII retains the old contract, including literal percent characters. */
+export function workspaceRootHeaders(root: string, lowercase = false): Record<string, string> {
+  const name = lowercase ? 'x-openwrite-workspace-root' : 'X-OpenWrite-Workspace-Root'
+  return /[^\x20-\x7e]/.test(root)
+    ? { [name]: encodeURIComponent(root), [name + (lowercase ? '-encoding' : '-Encoding')]: 'uri' }
+    : { [name]: root }
+}
+
 /**
  * Request-scoped Workspace identity, per docs/WORKSPACE_CONTEXT_CONTRACT.md §3.
  * `workspaceRoot` is the canonical (realpath'd) absolute path — the only root
@@ -133,7 +142,7 @@ export class StudioClient {
   private contextHeaders(): Record<string, string> {
     const context = this.context
     if (context === undefined) return {}
-    const headers: Record<string, string> = { 'X-OpenWrite-Workspace-Root': context.workspaceRoot }
+    const headers = workspaceRootHeaders(context.workspaceRoot)
     if (context.workspaceId !== undefined) headers['X-OpenWrite-Workspace-Id'] = context.workspaceId
     if (context.sessionId !== undefined) headers['X-OpenWrite-Session-Id'] = context.sessionId
     if (context.contextEpoch !== undefined) headers['X-OpenWrite-Context-Epoch'] = String(context.contextEpoch)

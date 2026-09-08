@@ -2,7 +2,7 @@ import type { BackendConnection } from './managed-runtime.js'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { StudioClient, type WorkspaceContext } from './client.js'
+import { StudioClient, workspaceRootHeaders, type WorkspaceContext } from './client.js'
 import { workspaceContextFromExec } from './tools.js'
 
 export const CONFIG_ROUTE = '/studio-panel/config.json'
@@ -487,7 +487,7 @@ export class NovelDomainService extends Service {
       try {
         const headers: Record<string, string> = {
           accept: 'application/json',
-          'x-openwrite-workspace-root': resolved.root,
+          ...workspaceRootHeaders(resolved.root, true),
           'x-openwrite-workspace-id': resolved.id,
         }
         const sessionId = headerValue(req, 'x-dsh-session-id')
