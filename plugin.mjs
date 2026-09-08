@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { lock } from 'proper-lockfile'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -46,12 +46,15 @@ export async function apply(ctx) {
       throw new Error(`OpenWrite preset ${id} was modified; copy it to a custom preset before reinstalling this version`)
     }
     if (!existing) {
+      if (await lstat(destination).then(() => true).catch(error => { if (error.code === 'ENOENT') return false; throw error })) {
+        throw new Error(`OpenWrite preset ${id} already exists without an ownership marker; preserve it under a custom preset name first`)
+      }
       const staging = join(managedRoot, 'preset-' + randomUUID())
       await mkdir(staging, { recursive: true })
       try {
         await cp(source, staging, { recursive: true })
         await writeFile(join(staging, '.openwrite-managed.json'), JSON.stringify({ source: expected, tree: expected, version }))
-        await cp(staging, destination, { recursive: true, force: false, errorOnExist: true })
+        await rename(staging, destination)
       } finally { await rm(staging, { recursive: true, force: true }) }
     }
     await writeFile(lease, JSON.stringify({ pid: process.pid }), { mode: 0o600 })

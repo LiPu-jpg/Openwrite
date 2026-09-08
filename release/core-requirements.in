@@ -1,0 +1,12 @@
+# From the pinned Core wheel METADATA; regenerate when that wheel changes.
+pydantic<3.0,>=2.0
+pyyaml>=6.0
+openai>=1.0
+anthropic>=0.18
+litellm<1.83,>=1.82.6
+httpx[socks]<1.0,>=0.27
+markdown-it-py>=3.0
+prompt_toolkit>=3.0
+lightrag-hku<2.0,>=1.5.5
+fastembed<1.0,>=0.7.0
+tomli>=2.0; python_version < "3.11"

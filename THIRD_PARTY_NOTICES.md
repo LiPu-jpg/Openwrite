@@ -17,3 +17,17 @@ Python dependency versions and distribution hashes are in release/requirements.l
 JavaScript dependency versions, resolved origins and integrity values are in the
 repository lockfiles. Host React, Cordis and dsh services are provided by dsh;
 they are not inlined into the plugin's browser code.
+
+The release includes an OpenWrite-built cryptography 50.0.1 wheel for macOS
+x86_64 because upstream discontinued Intel Mac wheels. It is built from the
+SHA-256 pinned upstream source with statically linked OpenSSL 3.6.3. The wheel
+retains upstream licenses; OpenSSL's full license is in release/wheels/licenses.
+Source hash, toolchain, linkage inspection and the native CI build URL are in
+release/wheels/provenance.json. No cryptography source code was modified.
+
+Intel Macs use the last official ONNX Runtime Intel wheel, 1.23.2; other
+platforms use 1.29.0. Platform markers and distribution hashes are recorded in
+release/requirements.lock and release/platform-overrides.in.
+
+JavaScript runtime dependency license texts are retained in release/licenses,
+with names, versions and upstream repositories in release/source.json.

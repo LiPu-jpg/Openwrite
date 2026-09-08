@@ -15,6 +15,7 @@ export interface RuntimeManifest {
   platforms: Record<string, { uv: Download; python: Download }>
   wheel: { file: string; sha256: string }
   requirements: { file: string; sha256: string }
+  dependency_wheels?: Array<{ file: string; sha256: string }>
 }
 export interface RuntimeStatus {
   phase: 'idle' | 'waiting' | 'downloading' | 'installing' | 'starting' | 'ready' | 'cancelled' | 'error' | 'stopped'
@@ -191,6 +192,9 @@ export class ManagedRuntime {
     if (await sha256(wheel) !== manifest.wheel.sha256 || await sha256(requirements) !== manifest.requirements.sha256) {
       throw new Error('发布包校验失败，请重新安装')
     }
+    for (const artifact of manifest.dependency_wheels ?? []) {
+      if (await sha256(join(this.artifacts, artifact.file)) !== artifact.sha256) throw new Error('平台依赖校验失败，请重新安装')
+    }
     await mkdir(this.root, { recursive: true, mode: 0o700 })
     const unlock = await this.lock(signal)
     let python: string
@@ -205,7 +209,8 @@ export class ManagedRuntime {
         await rm(destination, { recursive: true, force: true })
         try {
           await this.command(uv, ['venv', '--python', basePython, destination], signal)
-          await this.command(uv, ['pip', 'sync', '--python', python, '--require-hashes', '--only-binary', ':all:', requirements], signal)
+          await this.command(uv, ['pip', 'sync', '--python', python, '--require-hashes', '--only-binary', ':all:',
+            ...(manifest.dependency_wheels?.length ? ['--find-links', join(this.artifacts, 'wheels')] : []), requirements], signal)
           await this.command(uv, ['pip', 'install', '--python', python, '--no-deps', wheel], signal)
           await this.command(python, ['-I', '-c', 'from tools.studio_http import health_payload; from tools.studio import create_server; assert health_payload()["contract_version"] == 1'], signal)
           await writeFile(join(destination, '.complete'), generation)

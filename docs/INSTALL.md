@@ -21,6 +21,10 @@ dsh 对话模型在宿主中配置。小说生成、评审与测试模型在「�
 
 ## 安装影响
 
+本轮原生验收覆盖 macOS 15、Ubuntu 和 Windows GitHub 原生运行器。
+依赖包要求 Apple Silicon Mac 至少 macOS 14，Intel Mac 至少 macOS 13；
+其他系统小版本的覆盖范围以 Release 报告为准。
+
 - 插件装在指定 profile。bridge、panel、DoG、技能、编辑器资源和 Core wheel 位于同一包。
 - `$DSH_HOME/openwrite/` 保存下载缓存、Python 环境、管理记录、隔离配置与凭据；未指定 DSH_HOME 时使用 dsh 默认目录。
 - 作品保存在作者选定目录。受管理 Core 仅监听回环地址，端口自动分配，实例认证只在宿主与 Core 之间传递。

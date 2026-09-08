@@ -79,7 +79,9 @@
     "scripts/maintenance.mjs",
     "packages/openwrite-bridge/LICENSE",
     "packages/studio-panel/LICENSE",
-    "release/licenses"
+    "release/licenses",
+    "release/wheels",
+    "release/*.in"
   ],
   "dependencies": {
     "@deepseek-ai/schemastery": "3.18.2",

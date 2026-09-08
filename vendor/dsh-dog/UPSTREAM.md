@@ -12,6 +12,11 @@ OpenWrite compatibility changes:
 - The debugger opens from OpenWrite tasks on `openwrite:dog-open`. No default
   dock, host margin mutation, or idle polling is enabled in this integration.
 - Upstream browser capture directories are excluded from the vendored source.
+- Browser and host type checking are separate; shared RPC records live in a
+  browser-safe contract module. Pending interaction state uses uiSession.
+- Programmatic verifier scripts run asynchronously with owned process cleanup
+  on cancellation or unload, including Windows process trees. Artifact archiving
+  uses the portable tar library instead of a required system tar executable.
 
 The verification engine, graph schema, evidence records and storage keys remain
 upstream-compatible. This is a maintained integration, not an upstream release.

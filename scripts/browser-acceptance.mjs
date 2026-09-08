@@ -14,6 +14,10 @@ export async function acceptBrowser(loginUrl, temporary) {
   page.on('pageerror', error => errors.push(error.message))
   try {
     await page.goto(loginUrl)
+    // Complete the host's normal first-use notice and defer model credentials;
+    // neither step changes permission presets or makes a paid model request.
+    await page.getByRole('button', { name: /^(继续|Continue)$/ }).click()
+    await page.getByRole('button', { name: /^(稍后配置|Configure later)$/ }).click()
     await page.getByRole('button', { name: '打开 OpenWrite', exact: true }).click()
     await page.getByText('写作环境已就绪', { exact: true }).first().waitFor()
     const workspace = join(temporary, 'browser-novel')

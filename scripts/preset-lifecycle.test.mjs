@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply } from '../plugin.mjs'
@@ -21,6 +21,11 @@ test('versioned preset supports two hosts and removes only unmodified package fi
   await readFile(join(dir, 'agent.cordis.yml'))
   await disposers.shift()()
   assert.deepEqual(await readdir(join(home, '.agent-presets')), [])
+  await mkdir(dir)
+  await writeFile(join(dir, 'author.txt'), 'unmanaged custom preset')
+  await assert.rejects(apply(ctx), /ownership marker/)
+  assert.deepEqual(await readdir(dir), ['author.txt'])
+  await rm(dir, { recursive: true })
   await apply(ctx)
   await writeFile(join(dir, 'author-note.txt'), 'keep my modifications')
   await disposers.shift()()

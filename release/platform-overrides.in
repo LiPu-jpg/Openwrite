@@ -1,0 +1,5 @@
+# ONNX Runtime 1.23.2 is the last official macOS Intel Python wheel.
+# Other platforms retain the current locked runtime. Local embedding APIs are
+# tested with this split; no source compiler is required on users' machines.
+onnxruntime==1.23.2; sys_platform == 'darwin' and platform_machine == 'x86_64'
+onnxruntime==1.29.0; sys_platform != 'darwin' or platform_machine != 'x86_64'

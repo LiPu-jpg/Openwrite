@@ -1,0 +1,15 @@
+{
+  "package": "cryptography",
+  "version": "50.0.1",
+  "source_url": "https://files.pythonhosted.org/packages/bb/ad/5d6702db60b1e40b41ef513b6967ff5848f307d50f8449baf1634f5908f1/cryptography-50.0.1.tar.gz",
+  "source_sha256": "5dd9bda1c12b4162f6ff568eeb5e0ff956c28d14406e875cfe8a63a2d414ff20",
+  "wheel": "cryptography-50.0.1-cp312-abi3-macosx_13_0_x86_64.whl",
+  "sha256": "5ab2d3209217de6b4ffddb2a30f6566ca61915fbe257af9324327c7b766f09b5",
+  "platform": "macOS-15.7.9-x86_64-i386-64bit",
+  "python": "3.12.10 (v3.12.10:0cc81280367, Apr  8 2025, 08:47:00) [Clang 13.0.0 (clang-1300.0.29.30)]",
+  "openssl": "OpenSSL 3.6.3 9 Jun 2026 (Library: OpenSSL 3.6.3 9 Jun 2026)",
+  "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "linkage": "/Users/runner/work/Openwrite/Openwrite/.tmp-intel-wheel/inspect/cryptography/hazmat/bindings/_rust.abi3.so:\n\t@rpath/cryptography.hazmat.bindings._rust.abi3.so (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)\n",
+  "build_commit": "51ae02c0be1517df1ce3fd95b01bf087b41897cb",
+  "run_url": "https://github.com/LiPu-jpg/Openwrite/actions/runs/34267117629"
+}
