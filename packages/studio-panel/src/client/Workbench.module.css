@@ -331,6 +331,32 @@
 
 .mentionCard p { margin: 0; overflow-wrap: anywhere; }
 
+.mentionCandidates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.mentionCandidates > button {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-module-platform);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mentionCandidates strong { color: var(--dsw-alias-label-primary); }
+.mentionCandidates small { color: var(--dsw-alias-label-tertiary); }
+.mentionCandidates > button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: -2px; }
+
 .acceptanceCard {
   display: grid;
   flex: none;

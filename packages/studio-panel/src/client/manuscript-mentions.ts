@@ -11,11 +11,7 @@ export type MentionSpan = {
   start: number
   end: number
   text: string
-  kind: string
-  id: string
-  name: string
-  summary: string
-  aliases: string[]
+  candidates: MentionAsset[]
 }
 
 const PERSON_OR_PLACE = new Set(['character', 'world', 'location', 'place'])
@@ -63,48 +59,51 @@ export function parseMentionAssets(value: unknown): MentionAsset[] {
   return assets
 }
 
-type Needle = { label: string; asset: MentionAsset }
+type Needle = { label: string; candidates: MentionAsset[] }
 
-/** One navigation chip per registered asset, including all name/alias hits. */
+function assetKey(asset: MentionAsset): string {
+  return JSON.stringify([asset.kind, asset.id])
+}
+
+/** One chip per unambiguous asset, or per conflicting label/candidate set. */
 export function uniqueMentionAssets(spans: readonly MentionSpan[]): MentionSpan[] {
   const unique = new Map<string, MentionSpan>()
   for (const span of spans) {
-    const key = JSON.stringify([span.kind, span.id])
+    const identities = span.candidates.map(assetKey).sort()
+    const key = JSON.stringify([identities.length === 1 ? '' : span.text, identities])
     if (!unique.has(key)) unique.set(key, span)
   }
   return [...unique.values()]
 }
 
 function needlesFor(assets: readonly MentionAsset[]): Needle[] {
-  const needles: Needle[] = []
+  const labels = new Map<string, Map<string, MentionAsset>>()
   for (const asset of assets) {
-    const labels = [asset.name, ...asset.aliases]
-    const seen = new Set<string>()
-    for (const label of labels) {
-      if (label === '' || seen.has(label)) continue
-      seen.add(label)
-      needles.push({ label, asset })
+    for (const label of [asset.name, ...asset.aliases]) {
+      if (label === '') continue
+      let candidates = labels.get(label)
+      if (candidates === undefined) {
+        candidates = new Map()
+        labels.set(label, candidates)
+      }
+      if (!candidates.has(assetKey(asset))) candidates.set(assetKey(asset), asset)
     }
   }
-  needles.sort((left, right) => {
-    const length = right.label.length - left.label.length
-    if (length !== 0) return length
-    const name = left.asset.id.localeCompare(right.asset.id)
-    if (name !== 0) return name
-    return left.label.localeCompare(right.label)
-  })
-  return needles
+  return [...labels].map(([label, candidates]) => ({
+    label,
+    candidates: [...candidates.values()].sort((a, b) => assetKey(a).localeCompare(assetKey(b))),
+  })).sort((a, b) => b.label.length - a.label.length || a.label.localeCompare(b.label))
 }
 
 /**
  * Non-overlapping name/alias hits in manuscript order.
- * Longer labels win; unregistered text is never a mention.
+ * Longer labels win; identical labels retain every candidate without guessing identity.
  */
 export function findManuscriptMentions(text: string, assets: readonly MentionAsset[]): MentionSpan[] {
   if (text === '' || assets.length === 0) return []
   const occupied = new Array<boolean>(text.length).fill(false)
   const spans: MentionSpan[] = []
-  for (const { label, asset } of needlesFor(assets)) {
+  for (const { label, candidates } of needlesFor(assets)) {
     let from = 0
     while (from <= text.length - label.length) {
       const start = text.indexOf(label, from)
@@ -123,11 +122,7 @@ export function findManuscriptMentions(text: string, assets: readonly MentionAss
           start,
           end,
           text: label,
-          kind: asset.kind,
-          id: asset.id,
-          name: asset.name,
-          summary: asset.summary,
-          aliases: asset.aliases,
+          candidates,
         })
       }
       from = start + 1

@@ -10,7 +10,7 @@
  *   - `fetchStudioApi` counted per path.
  */
 import { useState } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GraphView } from '../../src/client/GraphView.tsx'
 
@@ -158,5 +158,37 @@ describe('GraphView DAG epoch refresh', () => {
     await screen.findByText(/graph\.reviewDag/)
     const continuityCalls = api.fetchStudioApi.mock.calls.filter(([path]) => path === '/continuity')
     expect(continuityCalls.length).toBe(1)
+  })
+})
+
+
+describe('GraphView related people', () => {
+  it('deduplicates neighbors by ID while retaining distinct same-name people and all edges', async () => {
+    const api = makeApi()
+    const edges = [
+      { id: 'friend', source: 'a', target: 'b', label: '朋友' },
+      { id: 'partner', source: 'a', target: 'b', label: '搭档' },
+      { id: 'reverse', source: 'b', target: 'a', label: '信任' },
+      { id: 'same-name', source: 'a', target: 'c', label: '认识' },
+      { id: 'self', source: 'a', target: 'a', label: '自省' },
+    ]
+    api.fetchStudioApi.mockImplementation(async () => ({ ...CONTINUITY, relationship_graph: {
+      nodes: [
+        { id: 'a', label: '沈烬', kind: 'character' },
+        { id: 'b', label: '顾衡', kind: 'character', description: '医师' },
+        { id: 'c', label: '顾衡', kind: 'character', description: '守卫' },
+      ], edges, truncated: false,
+    } }))
+    const view = renderView(api)
+    fireEvent.click(await screen.findByRole('button', { name: /graph.relationships/ }))
+    await waitFor(() => expect(view.container.querySelector('[data-node-id="a"]')).not.toBeNull())
+    fireEvent.click(view.container.querySelector('[data-node-id="a"]')!)
+    const detail = screen.getByRole('complementary')
+    expect(within(detail).getAllByRole('button', { name: '顾衡' })).toHaveLength(2)
+    expect(within(detail).queryByRole('button', { name: '沈烬' })).toBeNull()
+    expect(view.container.querySelectorAll('[data-edge-id]')).toHaveLength(5)
+    fireEvent.click(within(detail).getAllByRole('button', { name: '顾衡' })[1]!)
+    expect(await screen.findByText('守卫')).not.toBeNull()
+    expect(within(screen.getByRole('complementary')).getAllByRole('button', { name: '沈烬' })).toHaveLength(1)
   })
 })
