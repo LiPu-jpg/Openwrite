@@ -1,6 +1,6 @@
 // Exercise process lifecycle against the installed wheel, using only isolated state.
 import assert from 'node:assert/strict'
-import { readFile, writeFile, cp, mkdir, rm } from 'node:fs/promises'
+import { readFile, writeFile, cp, mkdir, rm, readdir } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -20,6 +20,29 @@ export async function acceptRuntime(installed, home, temporary) {
     assert.equal((await fetch(a.baseUrl + '/api/project/init', { method: 'POST', headers: { 'X-OpenWrite-Studio': '1' } })).status, 401)
     const health = await fetch(a.baseUrl + '/api/health', { headers: { Authorization: 'Bearer ' + a.token } })
     assert.equal((await health.json()).contract_version, 1)
+    const novel = join(temporary, 'backend-中文作品-100%')
+    await mkdir(novel)
+    const initializedAt = Date.now()
+    console.log('Backend: initializing empty Unicode workspace; stdout paused:', second.child.stdout.isPaused())
+    try {
+      const initialized = await fetch(b.baseUrl + '/api/project/init', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + b.token, 'Content-Type': 'application/json', 'X-OpenWrite-Studio': '1', 'X-OpenWrite-Workspace-Root': encodeURIComponent(novel), 'X-OpenWrite-Workspace-Root-Encoding': 'uri' },
+        body: JSON.stringify({ novel_id: 'backend-test', title: '后端初始化验收', project_path: novel }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      assert.equal(initialized.status, 200)
+      const payload = await initialized.json()
+      assert.equal((payload.data ?? payload).initialized, true)
+      console.log('Backend: Unicode initialization complete', Date.now() - initializedAt, 'ms')
+    } catch (error) {
+      console.error('Backend initialization diagnostics:', { elapsed: Date.now() - initializedAt, stdoutPaused: second.child.stdout.isPaused(), files: await readdir(novel, { recursive: true }) })
+      if (process.platform === 'win32') {
+        const stacks = spawnSync('py-spy', ['dump', '--pid', String(second.child.pid)], { encoding: 'utf8', timeout: 10_000 })
+        console.error('Backend stacks:', stacks.stdout, stacks.stderr, stacks.error?.message)
+      }
+      throw error
+    }
     await stopOwnedProcess(first.child)
     assert.equal(first.status().phase, 'error')
     const recovered = await first.ensure()
@@ -42,6 +65,6 @@ export async function acceptRuntime(installed, home, temporary) {
     const rollback = new ManagedRuntime(root, artifacts)
     try { await rollback.ensure(); assert.equal(rollback.status().phase, 'ready') }
     finally { await rollback.dispose() }
-    return ['native-dependency-load', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
+    return ['native-dependency-load', 'native-backend-project-init', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
   } finally { await first.dispose(); await second.dispose() }
 }
