@@ -9,11 +9,13 @@ legacy single-project behavior driven by the launch application.
 from __future__ import annotations
 
 import os
+import re
 import threading
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from tools.project_registry import is_framework_root
 from tools.studio_contracts import StudioError
@@ -120,6 +122,16 @@ class WorkspaceManager:
         raw_root = headers.get(WORKSPACE_ROOT_HEADER)
         if raw_root is None or not str(raw_root).strip():
             return None
+        encoding = headers.get("X-OpenWrite-Workspace-Root-Encoding")
+        if encoding:
+            if encoding != "uri" or re.search(r"%(?![0-9a-fA-F]{2})", raw_root):
+                raise StudioError("工作区路径编码无效", code="WORKSPACE_ROOT_INVALID")
+            try:
+                raw_root = unquote(raw_root, encoding="utf-8", errors="strict")
+            except UnicodeError as exc:
+                raise StudioError("工作区路径编码无效", code="WORKSPACE_ROOT_INVALID") from exc
+            if any(ord(char) < 32 for char in raw_root):
+                raise StudioError("工作区路径编码无效", code="WORKSPACE_ROOT_INVALID")
         root = canonicalize_workspace_root(str(raw_root))
         raw_epoch = headers.get(CONTEXT_EPOCH_HEADER)
         epoch: int | None = None
