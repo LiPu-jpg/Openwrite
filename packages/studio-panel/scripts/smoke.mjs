@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, mkdtemp, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { apply as installReleasePreset } from '../../../plugin.mjs'
 import * as React from 'react'
 import * as JsxRuntime from 'react/jsx-runtime'
 
@@ -133,5 +136,45 @@ for (const key of ['novel_review_chapter', 'novel_status', 'novel_context_previe
   assert.ok(toolKeys.includes(key), `${key} has a native tool card`)
 }
 assert.ok(toolKeys.length >= 30, 'common novel tools use family cards')
+
+// Exercise the built launcher against the preset actually installed by the root
+// package. A hardcoded older ID must fail here before a version can be released.
+const presetHome = await mkdtemp(join(tmpdir(), 'openwrite-launch-smoke-'))
+const previousHome = process.env.DSH_HOME
+const presetDisposers = []
+process.env.DSH_HOME = presetHome
+try {
+  await installReleasePreset({ effect: factory => presetDisposers.push(factory()) })
+  const calls = []
+  fakeClientCtx.workspaces.create = async input => {
+    calls.push(['workspace', input.path])
+    return { workspaceId: 'launch-workspace' }
+  }
+  fakeClientCtx.sessions.create = async input => {
+    assert.equal(input.workspaceId, 'launch-workspace')
+    return 'launch-session'
+  }
+  fakeClientCtx.remote.agentPresets.select = async (sessionId, presetId) => {
+    assert.equal(sessionId, 'launch-session')
+    const marker = JSON.parse(await readFile(join(presetHome, '.agent-presets', presetId, '.openwrite-managed.json')))
+    const installedVersion = JSON.parse(await readFile(new URL('../../../package.json', import.meta.url))).version
+    assert.equal(marker.version, installedVersion)
+    calls.push(['preset', presetId])
+    return { ok: true }
+  }
+  fakeClientCtx.sessions.open = id => calls.push(['open', id])
+  fakeClientCtx.uiConversation.binding = id => ({ activate: target => calls.push(['activate', id, target]) })
+  const launcher = registrations.find(entry => entry.options.id === 'openwrite.launch')
+  assert.ok(launcher)
+  assert.equal(await launcher.options.inject().openWorkspace('  /isolated-writing-workspace  '), true)
+  assert.deepEqual(calls.map(call => call[0]), ['workspace', 'preset', 'open', 'activate'])
+  assert.deepEqual(calls[0], ['workspace', '/isolated-writing-workspace'])
+  assert.deepEqual(calls[3], ['activate', 'launch-session', 'openwrite.creation'])
+} finally {
+  for (const dispose of presetDisposers) await dispose()
+  if (previousHome === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = previousHome
+  await rm(presetHome, { recursive: true, force: true })
+}
 
 console.log('studio-panel smoke ok:', { views: views.length, toolCards: toolKeys.length, native: true })
