@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ManuscriptImportWorkspace, ProjectArchiveWorkspace } from '../../src/client/TransferWorkspaces.tsx'
 import { setStudioContext } from '../../src/client/api.ts'
@@ -73,6 +74,20 @@ function sharedProps(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (cause: Error) => void
+  const promise = new Promise<T>((accept, fail) => { resolve = accept; reject = fail })
+  return { promise, resolve, reject }
+}
+
+function restorePreviewResult(targetRoot = '/restore/original') {
+  return { ok: true, data: {
+    archive_id: archiveId, archive_sha256: 'sha256:archive', target_root: targetRoot,
+    source_novel_id: 'demo', target_novel_id: 'demo', reference_policy: 'preserve_relative', can_restore: true,
+  } }
+}
+
 beforeEach(() => {
   setStudioContext({ workspaceId: 'ws-a', sessionId: 's1' })
   harness.invalidate.mockClear()
@@ -139,6 +154,110 @@ describe('resumable manuscript import workspace', () => {
 })
 
 describe('project archive workspace', () => {
+  it.each(['targetRoot', 'targetNovelId', 'referencePolicy', 'archive'] as const)(
+    'discards a pending restore preview when %s changes', async field => {
+      const otherArchiveId = 'owa_abcdef0123456789abcdef01'
+      const fetchStudioApi = vi.fn(async path => {
+        const result = archiveFetch(path)
+        if (path !== '/project-archives') return result
+        return { ok: true, data: { ...result.data, archives: [
+          { archive_id: archiveId }, { archive_id: otherArchiveId },
+        ] } }
+      })
+      let resolvePreview!: (value: unknown) => void
+      const postStudioApi = vi.fn(() => new Promise(resolve => { resolvePreview = resolve }))
+      const say = vi.fn()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      render(<ProjectArchiveWorkspace {...(sharedProps({ fetchStudioApi, postStudioApi, say, workspaces: { pickDirectory: vi.fn() } }) as any)} />)
+      fireEvent.click(await screen.findByText(archiveId))
+      fireEvent.change(screen.getByLabelText('tools.archive.targetRoot'), { target: { value: '/restore/original' } })
+      fireEvent.click(screen.getByText('tools.archive.previewRestore'))
+      expect(postStudioApi).toHaveBeenCalledTimes(1)
+
+      if (field === 'archive') fireEvent.click(screen.getByText(otherArchiveId))
+      else fireEvent.change(screen.getByLabelText(`tools.archive.${field}`), {
+        target: { value: field === 'targetRoot' ? '/restore/changed' : field === 'targetNovelId' ? 'changed_novel' : 'rewrite_novel_id' },
+      })
+      await act(async () => resolvePreview({ ok: true, data: {
+        archive_id: archiveId, archive_sha256: 'sha256:old-preview', target_root: '/restore/original',
+        source_novel_id: 'demo', target_novel_id: 'demo', reference_policy: 'preserve_relative', can_restore: true,
+      } }))
+      expect(screen.queryByText('tools.archive.confirmRestore')).toBeNull()
+      expect(screen.queryByText('sha256:old-preview')).toBeNull()
+      expect(say).not.toHaveBeenCalled()
+    },
+  )
+
+  it('allows a replacement preview and keeps it busy until its own response returns', async () => {
+    const oldPreview = deferred<unknown>()
+    const currentPreview = deferred<unknown>()
+    const postStudioApi = vi.fn()
+      .mockReturnValueOnce(oldPreview.promise)
+      .mockReturnValueOnce(currentPreview.promise)
+      .mockResolvedValue({ ok: true, data: { task_id: 'tsk_restore_current' } })
+    const props = sharedProps({ fetchStudioApi: vi.fn(async path => archiveFetch(path)), postStudioApi, workspaces: { pickDirectory: vi.fn() } })
+    function StatefulArchive() {
+      const [busy, setBusy] = useState('')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return <ProjectArchiveWorkspace {...(props as any)} busy={busy} setBusy={setBusy} />
+    }
+    render(<StatefulArchive />)
+    fireEvent.click(await screen.findByText(archiveId))
+    fireEvent.change(screen.getByLabelText('tools.archive.targetRoot'), { target: { value: '/restore/original' } })
+    const previewButton = screen.getByText('tools.archive.previewRestore') as HTMLButtonElement
+    fireEvent.click(previewButton)
+    expect(previewButton.disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('tools.archive.targetRoot'), { target: { value: '/restore/current' } })
+    expect(previewButton.disabled).toBe(false)
+    fireEvent.click(previewButton)
+
+    await act(async () => oldPreview.resolve(restorePreviewResult()))
+    expect(previewButton.disabled).toBe(true)
+    expect(screen.queryByText('tools.archive.confirmRestore')).toBeNull()
+    await act(async () => currentPreview.resolve(restorePreviewResult('/restore/current')))
+    expect(previewButton.disabled).toBe(false)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(screen.getByText('tools.archive.confirmRestore'))
+    await waitFor(() => expect(postStudioApi).toHaveBeenLastCalledWith('/project-archives/restore', expect.objectContaining({ target_root: '/restore/current' })))
+    await waitFor(() => expect(screen.queryByText('tools.archive.confirmRestore')).toBeNull())
+  })
+
+  it('ignores an obsolete preview failure and clears a previous preview before retrying', async () => {
+    const obsolete = deferred<unknown>()
+    const retry = deferred<unknown>()
+    const postStudioApi = vi.fn()
+      .mockReturnValueOnce(obsolete.promise)
+      .mockResolvedValueOnce(restorePreviewResult('/restore/current'))
+      .mockReturnValueOnce(retry.promise)
+    const say = vi.fn()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    render(<ProjectArchiveWorkspace {...(sharedProps({ fetchStudioApi: vi.fn(async path => archiveFetch(path)), postStudioApi, say, workspaces: { pickDirectory: vi.fn() } }) as any)} />)
+    fireEvent.click(await screen.findByText(archiveId))
+    fireEvent.change(screen.getByLabelText('tools.archive.targetRoot'), { target: { value: '/restore/original' } })
+    fireEvent.click(screen.getByText('tools.archive.previewRestore'))
+    fireEvent.change(screen.getByLabelText('tools.archive.targetRoot'), { target: { value: '/restore/current' } })
+    await act(async () => obsolete.reject(new Error('obsolete failure')))
+    expect(say).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('tools.archive.previewRestore'))
+    await screen.findByText('tools.archive.confirmRestore')
+    fireEvent.click(screen.getByText('tools.archive.previewRestore'))
+    expect(screen.queryByText('tools.archive.confirmRestore')).toBeNull()
+    await act(async () => retry.reject(new Error('current preview failed')))
+    expect(screen.queryByText('tools.archive.confirmRestore')).toBeNull()
+    expect(say).toHaveBeenCalledWith('tools.archive.failed: current preview failed', true)
+  })
+
+  it('does not let a delayed directory picker overwrite a newer manually entered target', async () => {
+    const picked = deferred<string | null>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    render(<ProjectArchiveWorkspace {...(sharedProps({ fetchStudioApi: vi.fn(async path => archiveFetch(path)), workspaces: { pickDirectory: vi.fn(() => picked.promise) } }) as any)} />)
+    fireEvent.click(await screen.findByText(archiveId))
+    fireEvent.click(screen.getByLabelText('tools.archive.pickTarget'))
+    fireEvent.change(screen.getByLabelText('tools.archive.targetRoot'), { target: { value: '/restore/manual' } })
+    await act(async () => picked.resolve('/restore/older-picked'))
+    expect((screen.getByLabelText('tools.archive.targetRoot') as HTMLInputElement).value).toBe('/restore/manual')
+  })
+
   it('shows archive scope/checksums and performs a confirmed restore with archived tasks', async () => {
     const fetchStudioApi = vi.fn(async path => archiveFetch(path))
     const restorePreview = {

@@ -34,6 +34,46 @@ afterEach(() => {
 })
 
 describe('SearchView revision-bound preview', () => {
+  it('rejects a late replacement preview after switching to another document', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<unknown>()
+    const revision = `sha256:${'a'.repeat(64)}`
+    const firstPath = 'data/manuscript/arc_001/ch_001.md'
+    const secondPath = 'data/manuscript/arc_001/ch_002.md'
+    const fetchStudioApi = vi.fn(async (url: string) => {
+      if (url.startsWith('/search')) return { query: '章', indexed: 2, results: [
+        { document_id: 'doc-one', revision, path: firstPath, title: '第一章', line: 1, snippet: '第一章正文' },
+        { document_id: 'doc-two', revision, path: secondPath, title: '第二章', line: 1, snippet: '第二章正文' },
+      ] }
+      return url.includes('ch_001')
+        ? { document_id: 'doc-one', revision, path: firstPath, content: '第一章正文' }
+        : { document_id: 'doc-two', revision, path: secondPath, content: '第二章正文' }
+    })
+    const postStudioApi = vi.fn(async (_url: string, body: Record<string, unknown>) =>
+      body['action'] === 'preview' ? pending.promise : { data: { status: 'rejected' } })
+    render(<SearchView {...({ fetchStudioApi, postStudioApi, putStudioApi: vi.fn(), sessionId: 'session-a', useWorkspaces: vi.fn(), t } as never)} />)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '章' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(350) })
+    fireEvent.click(screen.getByText('第一章').closest('button')!)
+    await act(async () => { await Promise.resolve() })
+    fireEvent.change(screen.getByRole('textbox', { name: 'search.change.replacement' }), { target: { value: '第一章新正文' } })
+    fireEvent.click(screen.getByRole('button', { name: 'search.change.preview' }))
+    fireEvent.click(screen.getByRole('button', { name: 'search.preview.back' }))
+    fireEvent.click(screen.getByText('第二章').closest('button')!)
+    await act(async () => { await Promise.resolve() })
+    await act(async () => {
+      pending.resolve({ data: {
+        applied: false, changed: true, path: firstPath, preview_token: 'abandoned-token', diff: 'first document changes',
+        mutation_summary: { execution_status: 'proposed', source_revision: revision, result_revision: `sha256:${'b'.repeat(64)}` },
+      } })
+      await pending.promise
+    })
+    expect(postStudioApi).toHaveBeenLastCalledWith('/document/change-plan', { action: 'reject', preview_token: 'abandoned-token' })
+    expect(screen.queryByText('first document changes')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'search.change.confirmApply' })).toBeNull()
+    expect((screen.getByRole('textbox', { name: 'search.change.replacement' }) as HTMLTextAreaElement).value).toBe('第二章正文')
+  })
+
   it('retains document identity, reports a stale locator, and selects the chapter for editing', async () => {
     vi.useFakeTimers()
     const chapterPath = 'data/manuscript/arc_001/ch_001.md'

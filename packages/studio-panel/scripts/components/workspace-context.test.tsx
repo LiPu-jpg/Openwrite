@@ -166,7 +166,7 @@ describe('OperationsView workspace block', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     render(<OperationsView {...(props as any)} />)
 
-    fireEvent.click(screen.getByText('operations.transfer'))
+    fireEvent.click(screen.getByRole('button', { name: 'operations.transfer' }))
     await screen.findByText('operations.init.hint')
     // Read-only workspace state: title and canonical path, no project list.
     expect(screen.getByText('我的小说')).toBeTruthy()
@@ -190,7 +190,7 @@ describe('OperationsView workspace block', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     render(<OperationsView {...(props as any)} />)
 
-    fireEvent.click(screen.getByText('operations.transfer'))
+    fireEvent.click(screen.getByRole('button', { name: 'operations.transfer' }))
     await screen.findByText('我的小说')
     expect(screen.queryByText('operations.init.hint')).toBeNull()
   })

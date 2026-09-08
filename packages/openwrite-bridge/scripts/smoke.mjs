@@ -142,11 +142,29 @@ const execNoAgent = { signal: new AbortController().signal }
 
 const benchmarkTool = registered.find(tool => tool.name === 'novel_model_benchmark')
 assert.ok(benchmarkTool, 'benchmark tool is registered')
+const benchmarkOptions = {
+  chapters: [
+    { chapter_id: 'ch_001', title: 'The letter', status: 'written', has_manuscript: true, availability: 'unavailable', reason: 'Historical baseline unavailable' },
+    { chapter_id: 'ch_003', title: 'At the harbor', status: 'planned', has_manuscript: false, availability: 'available', reason: '' },
+  ],
+  next_chapter_id: 'ch_003',
+  default_outline_start_chapter: 4,
+  limits: { outline_chapter_count: { min: 1, max: 20, default: 3 } },
+  tasks: [{
+    task_type: 'outline', execution_modes: ['framework'],
+    pipelines: [{
+      execution_mode: 'framework', id: 'outline-framework-v1',
+      nodes: [{ id: 'context', label: 'Gather context', depends_on: [] }, { id: 'generate', label: 'Draft outline', depends_on: ['context'] }],
+      review_domains: [{ id: 'continuity', label: 'Outline continuity' }],
+    }],
+  }],
+}
 const benchmarkRequests = []
 const benchmarkFetch = globalThis.fetch
 globalThis.fetch = async (input, init = {}) => {
   benchmarkRequests.push({ url: String(input), init })
-  return new Response(JSON.stringify({ ok: true, data: { accepted: true } }), {
+  const data = new URL(String(input)).pathname === '/api/benchmarks/options' ? benchmarkOptions : { accepted: true }
+  return new Response(JSON.stringify({ ok: true, data }), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   })
@@ -159,18 +177,52 @@ try {
     reviewer_profile_ids: ['critic'], execution_mode: 'framework', repeats: 2,
     target_words: 2400, concurrency: 2,
   }, exec), { accepted: true })
+  assert.deepEqual(await benchmarkTool.execute({ action: 'options' }, exec), benchmarkOptions, 'options preserve the server-owned pipeline DAG and review domains')
   await assert.rejects(() => benchmarkTool.execute({ action: 'get' }, exec), /run_id is required/)
   await assert.rejects(() => benchmarkTool.execute({ action: 'run', reviewer_profile_ids: ['critic'] }, exec), /writer_profile_ids is required/)
   await assert.rejects(() => benchmarkTool.execute({ action: 'run', writer_profile_ids: ['writer-a'] }, exec), /reviewer_profile_ids is required/)
   // Fail closed: without a session context no tool call may reach Studio at all.
   const benchmarkRequestCount = benchmarkRequests.length
-  await assert.rejects(
-    () => benchmarkTool.execute({ action: 'list' }, execNoAgent),
-    error => error?.code === 'WORKSPACE_CONTEXT_MISSING' && error?.status === 400,
-  )
+  for (const action of ['list', 'options']) {
+    await assert.rejects(
+      () => benchmarkTool.execute({ action }, execNoAgent),
+      error => error?.code === 'WORKSPACE_CONTEXT_MISSING' && error?.status === 400,
+    )
+  }
   assert.equal(benchmarkRequests.length, benchmarkRequestCount, 'no HTTP request without Workspace context')
 } finally {
   globalThis.fetch = benchmarkFetch
+}
+
+const learnReadTool = registered.find(tool => tool.name === 'novel_source_action')
+const learnWriteTool = registered.find(tool => tool.name === 'novel_structured_change_plan')
+const learnAssetsTool = registered.find(tool => tool.name === 'novel_assets_list')
+assert.ok(learnReadTool && learnWriteTool && learnAssetsTool, 'learn path tools are registered')
+const learnRequests = []
+const learnFetch = globalThis.fetch
+globalThis.fetch = async (input, init = {}) => {
+  learnRequests.push({ url: String(input), init })
+  return new Response(JSON.stringify({ ok: true, data: {} }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+try {
+  await assert.rejects(
+    () => learnReadTool.execute({ action: 'status_v2', source_id: 'learn-style' }, execNoAgent),
+    error => error?.code === 'WORKSPACE_CONTEXT_MISSING' && error?.status === 400,
+  )
+  await assert.rejects(
+    () => learnWriteTool.execute({ action: 'preview', change_kind: 'focus', change: { goal: 'keep the hook' } }, execNoAgent),
+    error => error?.code === 'WORKSPACE_CONTEXT_MISSING' && error?.status === 400,
+  )
+  await assert.rejects(
+    () => learnAssetsTool.execute({}, execNoAgent),
+    error => error?.code === 'WORKSPACE_CONTEXT_MISSING' && error?.status === 400,
+  )
+  assert.equal(learnRequests.length, 0, 'learn path must not reach Studio without Workspace context')
+} finally {
+  globalThis.fetch = learnFetch
 }
 assert.equal(new URL(benchmarkRequests[0].url).pathname, '/api/benchmarks')
 assert.equal(new URL(benchmarkRequests[0].url).searchParams.get('limit'), '7')
@@ -193,6 +245,9 @@ assert.deepEqual(JSON.parse(benchmarkRequests[2].init.body), {
   chapter_id: 'ch_003', execution_mode: 'framework', repeats: 2,
   target_words: 2400, concurrency: 2,
 })
+assert.equal(new URL(benchmarkRequests[3].url).pathname, '/api/benchmarks/options')
+assert.equal(benchmarkRequests[3].init.method, 'GET')
+assert.equal(benchmarkRequests[3].init.body, undefined, 'DAG options must be read-only and need no writer/reviewer selections')
 
 const exportPreflightTool = registered.find(tool => tool.name === 'novel_export_preflight')
 assert.ok(exportPreflightTool, 'export preflight tool is registered')
@@ -1035,6 +1090,44 @@ assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
     archive_id: archiveId, target_root: '/tmp/restored', reference_policy: 'rewrite_novel_id',
     target_novel_id: 'restored', archive_sha256: 'sha256:archive', confirm: true,
   })
+}
+
+// Additional run mapping belongs after the shared invalidation counters above.
+// Every HTTP response here is local, so no model or live Studio is invoked.
+{
+  const outlineBenchmarkRequests = []
+  const savedFetch = globalThis.fetch
+  globalThis.fetch = async (input, init = {}) => {
+    outlineBenchmarkRequests.push({ url: String(input), init })
+    return new Response(JSON.stringify({ ok: true, data: { accepted: true } }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    assert.deepEqual(await benchmarkTool.execute({
+      action: 'run', task_type: 'outline', outline_start_chapter: 4, outline_chapter_count: 3,
+      writer_profile_ids: ['planner'], reviewer_profile_ids: ['critic'], execution_mode: 'framework', repeats: 1, concurrency: 1,
+    }, exec), { accepted: true })
+    assert.deepEqual(await benchmarkTool.execute({
+      action: 'run', task_type: 'outline', writer_profile_ids: ['planner'], reviewer_profile_ids: ['critic'],
+    }, exec), { accepted: true })
+  } finally {
+    globalThis.fetch = savedFetch
+  }
+  for (const request of outlineBenchmarkRequests) {
+    assert.equal(new URL(request.url).pathname, '/api/benchmarks')
+    assert.equal(request.init.method, 'POST')
+    assert.equal(request.init.headers['X-OpenWrite-Workspace-Root'], wsRootA)
+    assert.equal(request.init.headers['X-OpenWrite-Session-Id'], 'ses_test')
+    assert.equal(request.init.headers['X-OpenWrite-Tool-Name'], 'novel_model_benchmark')
+  }
+  assert.deepEqual(JSON.parse(outlineBenchmarkRequests[0].init.body), {
+    writer_profile_ids: ['planner'], reviewer_profile_ids: ['critic'], task_type: 'outline',
+    outline_start_chapter: 4, outline_chapter_count: 3, execution_mode: 'framework', repeats: 1, concurrency: 1,
+  }, 'outline start is inclusive and the bridge must preserve the requested count unchanged')
+  assert.deepEqual(JSON.parse(outlineBenchmarkRequests[1].init.body), {
+    writer_profile_ids: ['planner'], reviewer_profile_ids: ['critic'], task_type: 'outline',
+  }, 'omitted outline range and execution mode keep the backend defaults authoritative')
 }
 
 await root.fiber.dispose()

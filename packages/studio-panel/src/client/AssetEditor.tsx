@@ -19,7 +19,7 @@
  *   reputation/curse/custom.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { VditorBody } from './VditorBody.tsx'
 import css from './views.module.css'
@@ -142,31 +142,73 @@ interface AssetEditorProps {
   fieldBusy: string | null
   onCancel: () => void
   onRefresh: () => void
+  onDirtyChange?: (dirty: boolean) => void
+  initialDraft?: AssetEditorDraft | undefined
+  onDraftChange?: (draft: AssetEditorDraft, dirty: boolean) => void
   t: TFunc
 }
 
+export interface AssetEditorDraft {
+  name: string
+  summary: string
+  aliasesText: string
+  tagsText: string
+  scalars: Record<string, string>
+  related: RelationDraft[]
+  listsText: Record<string, string>
+  newTarget: string
+  newNote: string
+  bodyDraft: string
+}
+
 /** Read-write editor over one asset's allowed front-matter fields. */
-export function AssetEditor({ kind, source, candidates, saving, saveError, conflict, onSave, onFieldSave, fieldBusy, onCancel, onRefresh, t }: AssetEditorProps) {
-  const [name, setName] = useState(source.name)
-  const [summary, setSummary] = useState(source.summary)
-  const [aliasesText, setAliasesText] = useState(source.aliases.join('、'))
-  const [tagsText, setTagsText] = useState(source.tags.join('、'))
+export function AssetEditor({ kind, source, candidates, saving, saveError, conflict, onSave, onFieldSave, fieldBusy, onCancel, onRefresh, onDirtyChange, initialDraft, onDraftChange, t }: AssetEditorProps) {
+  const [name, setName] = useState(initialDraft?.name ?? source.name)
+  const [summary, setSummary] = useState(initialDraft?.summary ?? source.summary)
+  const [aliasesText, setAliasesText] = useState(initialDraft?.aliasesText ?? source.aliases.join('、'))
+  const [tagsText, setTagsText] = useState(initialDraft?.tagsText ?? source.tags.join('、'))
   const [scalars, setScalars] = useState<Record<string, string>>(() => {
+    if (initialDraft) return initialDraft.scalars
     const initial: Record<string, string> = {}
     for (const { key, value } of source.scalars) initial[key] = value
     for (const key of ALWAYS_SCALARS[kind] ?? []) initial[key] ??= ''
     return initial
   })
-  const [related, setRelated] = useState<RelationDraft[]>(source.related.map(row => ({ ...row })))
+  const [related, setRelated] = useState<RelationDraft[]>(initialDraft?.related ?? source.related.map(row => ({ ...row })))
   const [listsText, setListsText] = useState<Record<string, string>>(() =>
-    Object.fromEntries(source.lists.map(list => [list.key, list.items.join('\n')])))
-  const [newTarget, setNewTarget] = useState('')
-  const [newNote, setNewNote] = useState('')
-  const [bodyDraft, setBodyDraft] = useState(source.body)
+    initialDraft?.listsText ?? Object.fromEntries(source.lists.map(list => [list.key, list.items.join('\n')])))
+  const [newTarget, setNewTarget] = useState(initialDraft?.newTarget ?? '')
+  const [newNote, setNewNote] = useState(initialDraft?.newNote ?? '')
+  const [bodyDraft, setBodyDraft] = useState(initialDraft?.bodyDraft ?? source.body)
   /** True after the Vditor script failed — the body falls back to a textarea with a notice. */
   const [liveFailed, setLiveFailed] = useState(false)
 
   const scalarKeys = Object.keys(scalars)
+  const otherFieldsDirty = name !== source.name || summary !== source.summary ||
+    JSON.stringify(splitList(aliasesText)) !== JSON.stringify(source.aliases) ||
+    JSON.stringify(splitList(tagsText)) !== JSON.stringify(source.tags) ||
+    JSON.stringify(related) !== JSON.stringify(source.related) ||
+    scalarKeys.some(key => (scalars[key] ?? '') !== (source.scalars.find(item => item.key === key)?.value ?? '')) ||
+    Object.keys(listsText).some(key => JSON.stringify(splitLines(listsText[key] ?? '')) !== JSON.stringify(source.lists.find(item => item.key === key)?.items ?? [])) ||
+    newTarget !== '' || newNote !== ''
+  const dirty = otherFieldsDirty || bodyDraft !== source.body
+  const draftRef = useRef<AssetEditorDraft>({ name, summary, aliasesText, tagsText, scalars, related, listsText, newTarget, newNote, bodyDraft })
+  draftRef.current = { name, summary, aliasesText, tagsText, scalars, related, listsText, newTarget, newNote, bodyDraft }
+  const updateBody = (value: string) => {
+    const draft = { ...draftRef.current, bodyDraft: value }
+    draftRef.current = draft
+    setBodyDraft(value)
+    // Vditor can flush during unmount, when no further React render/effect
+    // will run. Recovery must receive the latest body synchronously.
+    const changed = otherFieldsDirty || value !== source.body
+    onDraftChange?.(draft, changed)
+    onDirtyChange?.(changed)
+  }
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  useEffect(() => () => { onDirtyChange?.(false) }, [onDirtyChange])
+  useEffect(() => {
+    onDraftChange?.({ name, summary, aliasesText, tagsText, scalars, related, listsText, newTarget, newNote, bodyDraft }, dirty)
+  }, [aliasesText, bodyDraft, dirty, listsText, name, newNote, newTarget, onDraftChange, related, scalars, summary, tagsText])
 
   /**
    * Blur-commit one field when it drifted from the loaded detail. Single-key
@@ -200,7 +242,7 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
           ? row.target.trim()
           : { target: row.target.trim(), kind: row.kind.trim() || 'related', note: row.note.trim() })
     }
-    onSave(data, bodyDraft)
+    onSave(data, draftRef.current.bodyDraft)
   }
 
   return (
@@ -366,10 +408,11 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
             <>
               <div className={css.detailNotice}>{t('assets.edit.liveFailed')}</div>
               <textarea
+                aria-label={t('assets.edit.body')}
                 className={css.textarea}
                 rows={10}
                 value={bodyDraft}
-                onChange={event => { setBodyDraft(event.target.value) }}
+                onChange={event => { updateBody(event.target.value) }}
                 disabled={saving}
               />
             </>
@@ -378,7 +421,8 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
             <VditorBody
               initial={bodyDraft}
               disabled={saving}
-              onChange={setBodyDraft}
+              flushOnLeave
+              onChange={updateBody}
               onFailed={() => { setLiveFailed(true) }}
             />
           )}
@@ -394,7 +438,7 @@ export function AssetEditor({ kind, source, candidates, saving, saveError, confl
       )}
       {!conflict && saveError !== null && <div className={css.errorText}>{saveError}</div>}
       <div className={css.editorActions}>
-        <button type="button" className={css.primaryButton} onClick={save} disabled={saving || name.trim() === ''}>
+        <button type="button" className={css.primaryButton} onClick={save} disabled={saving || fieldBusy !== null || name.trim() === ''}>
           {saving ? t('assets.edit.saving') : t('assets.edit.save')}
         </button>
         <button type="button" className={css.button} onClick={onCancel} disabled={saving}>
@@ -411,18 +455,22 @@ interface NewAssetFormProps {
   error: string | null
   onSubmit: (payload: { id: string; data: Record<string, unknown> }) => void
   onCancel: () => void
+  onDirtyChange?: (dirty: boolean) => void
   t: TFunc
 }
 
 const PROGRESSION_KINDS = ['ability', 'rank', 'cultivation', 'career', 'reputation', 'curse', 'custom'] as const
 
 /** Inline create form for one asset kind (minimal required fields per the server contract). */
-export function NewAssetForm({ kind, busy, error, onSubmit, onCancel, t }: NewAssetFormProps) {
+export function NewAssetForm({ kind, busy, error, onSubmit, onCancel, onDirtyChange, t }: NewAssetFormProps) {
   const [id, setId] = useState('')
   const [name, setName] = useState('')
   const [summary, setSummary] = useState('')
   const [extra, setExtra] = useState('')
   const [stages, setStages] = useState<{ id: string; name: string }[]>([{ id: '', name: '' }])
+  const dirty = id !== '' || name !== '' || summary !== '' || extra !== '' || stages.some(stage => stage.id !== '' || stage.name !== '')
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  useEffect(() => () => { onDirtyChange?.(false) }, [onDirtyChange])
 
   const extraLabel = kind === 'character' ? t('assets.create.tier') : kind === 'world' ? t('assets.create.type') : ''
   const validId = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(id) && !id.includes('..')

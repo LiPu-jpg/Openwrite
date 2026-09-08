@@ -17,7 +17,10 @@ todo/plan/compaction/委派能力），叠加：
 - host profile 统一挂载的 `openwrite-bridge`（`@dsh-novel/openwrite-bridge`，注册
   `novel_*` 工具）；它不再重复写入每个 preset，否则会触发 `novelDomain` 服务冲突；
 - `skill-filesystem` 的 `customSkillDirs` 指向预设自带的 `skills/` 目录
-  （`!!js new URL('skills/', baseUrl)` 写法，预设被复制后仍能解析）。
+  （`!!js new URL('skills/', baseUrl)` 写法，预设被复制后仍能解析）；
+  斜杠菜单只保留作者入口（`progress` 看进度、`write-next` 写下一章、
+  `review-chapter` 审这一章、`revise-span` 改这段、`foreshadow` 查伏笔、
+  `canon` 查设定、`learn` 写法记忆、`export-book` 导出），其余技能 `user-invocable: false`。
 
 ## 安装与修改
 

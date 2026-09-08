@@ -1,6 +1,7 @@
 ---
 name: foreshadowing-system
 description: Use when user wants to manage foreshadowing (伏笔), track story hooks, or check pending reveals. Triggers include "伏笔", "埋伏笔", "待回收", "伏笔状态".
+user-invocable: false
 ---
 
 # 伏笔管理系统

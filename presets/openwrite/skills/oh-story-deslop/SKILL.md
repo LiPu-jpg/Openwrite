@@ -1,6 +1,7 @@
 ---
 name: oh-story-deslop
 description: 诊断并精修网络小说中的机械 AI 读感，包括重复解释、句式过度齐整、对话同声、抽象判断、万能身体反应、空泛氛围和无功能金句。用于去 AI 味、自然化润色或在保留作者声音的前提下压缩文本。
+user-invocable: false
 license: MIT
 metadata:
   openwrite:

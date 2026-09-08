@@ -2,7 +2,7 @@
 
 > Canonical project record for the cross-repository review-v2 work.
 >
-> Last updated: 2026-09-05 (S1-S6 accepted; native framework implementation complete)
+> Last updated: 2026-09-06 (writing-sprint stats as UX over word targets)
 >
 > Repositories: `/Users/jiaoziang/dsh-novel` and `/Users/jiaoziang/OpenWrite`
 
@@ -56,6 +56,99 @@ The current release is published and installed into the real user profile. The
 installation and verification do not call models or modify manuscript/production
 gates. The historical acceptance checklist below applies to its dated review-v2
 milestones; it is not fresh proof for every current change.
+
+## Current request: post-S1-S6 learning + skill alignment + chapter foreshadowing (2026-09-06)
+
+Continue from the seven-project contrast without recreating S1–S6 and without a
+sample book. Track planned / in-progress / done in `docs/LEARNING.md`.
+
+| Deliverable | Status | Evidence / remaining validation |
+|---|---|---|
+| 学习文档 with 计划做的 / 正在做的 / 做完的 | done | `docs/LEARNING.md` names the seven GitHub URLs, marks S1–S6 done, lists 示例书 as out of scope |
+| OpenWrite write/review/workflow skills drive `novel_*` | done | `novel-creator` / `novel-reviewer` / `workflow-manager` no longer mention `get_outline_structure`, `get_workflow_status`, `advance_workflow`, `WriterAgent`, or `ReviewerAgent`; preset smoke requires `novel_outline_read` / `novel_write_chapter` / `novel_review_chapter` |
+| Current-chapter due / overdue / to-plant 伏笔 actions | done | Creation inspector maps work-brief `must_resolve`/`overdue`/`to_plant` onto openable actions; no second foreshadow store. Component suite 146/146 including the three-bucket author-action case |
+
+Next unfinished item: none for this cycle. Remaining ideas stay in `docs/LEARNING.md` 计划做的 (示例书 is excluded). Do not add an 示例书.
+
+## Current request: mention highlights + read-only asset cards (2026-09-06)
+
+Registered character/location names and aliases in the open chapter are clickable 提及. Clicking opens a read-only 资料卡 in the creation view.
+
+| Deliverable | Status | Evidence / remaining validation |
+|---|---|---|
+| Name/alias 提及 in creation edit mode | done | Longest-match spans from GET `/assets`; unregistered text is not a mention |
+| Read-only 资料卡 stays in creation | done | Card uses list payload id/name/aliases/summary; no Library navigation; no `/assets/update` |
+| Card bound to Workspace + chapter | done | Open card clears when chapter or Workspace identity changes |
+
+## Current request: author slash-command entries (2026-09-06)
+
+Recap the 90 `novel_*` tools into seven author-speakable dsh skill/slash entries.
+No new domain store.
+
+| Deliverable | Status | Evidence / remaining validation |
+|---|---|---|
+| Seven kebab-case author entries | done | `/progress` 看进度, `/write-next` 写下一章, `/review-chapter` 审这一章, `/revise-span` 改这段, `/foreshadow` 查伏笔, `/canon` 查设定, `/export-book` 导出 |
+| Wired to existing `novel_*` | done | Each entry skill names the OpenWrite bridge tools; persona default workflow is 看进度 → 写下一章 → 审这一章 → 改这段 |
+| Slash menu recap + smoke | done | Specialist skills set `user-invocable: false`; `npm run test:preset` exit 0: 27 preset rows, 23 skills, seven author entries; still forbids old Python command names; `/export-book` stays off the host `/export` session-log command |
+
+## Current request: writing-sprint stats (2026-09-06)
+
+Sprint UX over existing chapter word targets and work-brief edit deltas.
+No new domain ledger.
+
+| Deliverable | Status | Evidence / remaining validation |
+|---|---|---|
+| Word targets remain source of truth | done | `chapterSprintStats` copies `target.writing_units` / `actual_units` / `remaining_units` from the work brief |
+| Added / deleted / net from known deltas | done | Sums `recent_edits.writing_units_delta`; null deltas increment `unknownDeltaEvents` and are not guessed |
+| AI vs human only with event evidence | done | `aiNet` only from `revision_applied`; `humanNet` only from `manuscript_saved`/`manuscript_save`; missing deltas stay null |
+| Tests | done | dto 18/18 including two sprint cases; CreationView activity shows sprint added/net/save and hides revision net without applied revisions |
+
+## Current request: 50-chapter rolling-plan windows (2026-09-06)
+
+Attach ainovel-cli-style 50-chapter planning windows to existing
+`novel_rolling_plan_action`. Planned outline state stays distinct from
+accepted manuscript facts.
+
+| Deliverable | Status | Evidence / remaining validation |
+|---|---|---|
+| 50-chapter window | done | Default and max `window_size` is 50 (`PLANNING_WINDOW_MAX`); values above 50 clamp |
+| Planned ≠ accepted facts | done | `accepted_window`/`current_window` from manuscript-acceptance `current` SHA; `planned_window`/`next_window` from outline chapters without accepted facts; create does not write outline or manuscript |
+| Shipped action | done | `rolling_plan_action` / `novel_rolling_plan_action` create payload exposes both windows and a Goethe brief that labels 计划 as 非事实 |
+| Tests | done | `test_rolling_plan_50_chapter_window_keeps_plans_off_accepted_facts` plus existing stage/stale and acceptance-stale cases: 3 focused passed |
+
+## Current request: optional web-novel review criteria (2026-09-06)
+
+钩子 / 黄金三章 / 追读力 attach to the existing six-domain review for
+`form: web_novel` projects only. They do not score and do not add legacy checks.
+
+| Deliverable | Status | Evidence / remaining validation |
+|---|---|---|
+| Optional criteria, not a second scorer | done | `OPTIONAL_REVIEW_CRITERIA` have `max=0` and empty `legacy_check_ids`; DAG invariants stay 47 nodes / 20 scoring criteria / 37 checks |
+| Web-novel projects only | done | `attach_optional_criteria` no-ops without `form: web_novel`/`网文`; 黄金三章 only for `ch_001`–`ch_003` |
+| Shipped review path | done | `ReviewerAgent.review` attaches via `review_form`; `execute_review_chapter` copies `novel_config.yaml` `form`/`review_form` into context |
+| Tests + docs | done | OpenWrite focused 14 passed (`test_review_rubric`, DAG, HTTP framework, reviewer v2); `npm run test:preset` still 24 skills / 8 author entries |
+
+## Current request: project-level /learn writing memory (2026-09-06)
+
+Record and recall style, successful hooks, and author preferences as
+Workspace-scoped OpenWrite assets. No second RAG, lorebook, or prose store.
+
+| Deliverable | Status | Evidence / remaining validation |
+|---|---|---|
+| User-invocable `/learn` 写法记忆 | done | `presets/openwrite/skills/learn/SKILL.md`; persona lists `/learn`; slash menu keeps it user-invocable |
+| Persist via existing `novel_*` | done | Read `novel_source_action` / `novel_assets_list`; write `novel_structured_change_plan` (focus/asset) and gated `novel_source_action` promote |
+| Fail closed without Workspace | done | Skill names `WORKSPACE_CONTEXT_MISSING`; bridge smoke drives `novel_source_action`, `novel_structured_change_plan`, and `novel_assets_list` with no session cwd — 400, zero HTTP |
+| Docs + smoke | done | `npm run test:preset` exit 0: 27 rows, 24 skills, 8 author entries including `learn`; bridge smoke 90 tools |
+
+## Current request: selection polish (2026-09-06)
+
+Author can polish a non-empty manuscript selection through revision-gated hunks.
+
+| Deliverable | Status | Evidence / remaining validation |
+|---|---|---|
+| Four labeled selection actions | done | Creation workbench exposes 扩写 / 缩写 / 去 AI 味 / 按审稿改这段 when a span is selected |
+| Stage before/after hunks; accept/reject via apply | done | expand/compress/naturalize POST `/revisions/selection`; review-fix POST `/revisions/from-review` with original_text + expected review/document revisions; apply uses `selected_hunk_ids` and does not PUT `/document` |
+| Stale source cannot overwrite | done | Apply is refused when proposal `source_revision` ≠ loaded manuscript revision; editor is not marked saved from that apply; no-review review-fix fails closed |
 
 ## Maintenance protocol
 
@@ -596,6 +689,11 @@ a full-suite result.
 | 2026-09-05 | S1-S6 live final acceptance and hygiene | Current launchd Studio plus current dsh web were exercised only against `/Users/jiaoziang/my_novel`. `scripts/verify.sh` passed all 19 proxy/context/SSE/static checks after its cold-read deadline was raised for the 861 KB Workspace snapshot. Read-only APIs returned a 20-chapter packet, a revision-bound chapter brief, absent scene surface and an applicable six-chapter/six-scene migration preview with no blockers. A headless visual pass opened Library→Outline→native SceneWorkbench, showed absent state and the read-only preview with zero scene writes or horizontal overflow. Full Playwright passed 16/16 across 1440×1000 and 390×844 after the browser read deadline was aligned with measured large-project cold reads. | All six canonical manuscript files remained byte-identical; no `scenes.json` sidecar was created. Non-outputting OpenRouter-signature scans and both `git diff --check` commands passed. The only remaining required action is external: delete the temporary OpenRouter key; human calibration is still required before enabling the production gate. |
 | 2026-09-05 | Public release gate and dsh-Openwrite rebrand | Product-facing repository, README, root npm package, conductor metadata and doctor output use `dsh-Openwrite`; stable `@dsh-novel/*` package scopes, Schema versions and browser storage keys remain unchanged for compatibility. OpenWrite README links the paired plugin repository. | dsh `npm run check` exited 0 with 90 bridge tools, 24 maintenance tests, 14 epoch tests, 144 component tests and shared contract parity. OpenWrite `.venv/bin/pytest -q` completed with **1235 passed, 31 skipped** in 148.77s. JSON parsing, both `git diff --check` runs and a high-confidence secret scan passed; reported scan candidates were dependency identifiers or explicit test fixtures. User authorized publication to the GitHub repositories. |
 | 2026-09-05 | Automatic DoG installation and live profile activation | `scripts/install.sh` now bootstraps the pinned `Fun10165/dsh-dog v1.2.0` (`ac64806d97872ce4c58b6d22ce96f74a29477b9f`) into `$DSH_HOME/extensions/dsh-dog`, validates its package identity, builds and mounts it only in web, reuses valid installs, supports an explicit worktree/opt-out, cleans partial clones and retries without Git HTTP(S) proxy after a proxy failure. Session Workspace is the dynamic graph root; the written `dog.workspaceRoot` remains a fallback. | Ten isolated lifecycle tests pass, including failed-proxy retry and idempotent reuse; the full gate passes with 25 maintenance tests, 90 bridge tools, 144 components, 14 epochs and canonical/DoG contract parity. A real isolated upstream-tag installation and profile doctor passed. The real user profile doctor also passed: web has bridge/panel/DoG and headless has bridge only. Restarted dsh web serves the DoG and Studio panel client assets with HTTP 200. No model or manuscript mutation was used. |
+| 2026-09-06 | Author slash-command entries | Seven user-invocable skills recap the author surface onto existing `novel_*` tools; specialist skills are `user-invocable: false`; persona default workflow is 看进度 → 写下一章 → 审这一章 → 改这段. | `npm run test:preset` exit 0 with `{"preset":"openwrite","rows":27,"skills":23,"authorEntries":["progress","write-next","review-chapter","revise-span","foreshadow","canon","export-book"]}`. No new domain store. Live slash menu requires reinstalling the preset copy into `~/.dsh/.agent-presets/`. |
+| 2026-09-06 | Project-level /learn writing memory | `/learn` skill records style, hooks, and preferences through existing `novel_source_action` and `novel_structured_change_plan`; no second memory store. Missing session cwd fails closed with `WORKSPACE_CONTEXT_MISSING` on the shipped learn tools (zero HTTP). | `npm run test:preset` exit 0: 27 rows, 24 skills, author entries include `learn`. Bridge smoke 90 tools, including learn-path Workspace-missing cases. Scratch: `preset-smoke.json`, `bridge-smoke.txt`. Live preset copy still needs `scripts/install.sh`. |
+| 2026-09-06 | Optional web-novel review criteria | `form: web_novel` attaches 钩子/黄金三章/追读力 as `max=0` criteria on plot/pacing. Quality score, 20 scoring criteria, 37 legacy checks and 47 DAG nodes unchanged. Non-web-novel projects are unmodified. | OpenWrite `.venv/bin/pytest -q` focused 14 passed. `npm run test:preset` exit 0. Scratch: `web-novel-criteria.txt`. |
+| 2026-09-06 | 50-chapter rolling-plan windows | `rolling_plan_action` create default/max 50. Accepted SHA chapters fill `accepted_window`; unaccepted outline chapters fill `planned_window` (50 of 51 remaining in the 52-chapter fixture). Create leaves outline and manuscript bytes unchanged. | Focused pytest 3 passed (`test_rolling_plan_50_chapter_window_keeps_plans_off_accepted_facts` and two existing rolling/acceptance cases). Scratch: `rolling-plan-window.txt`. |
+| 2026-09-06 | Writing-sprint stats UX | Creation activity derives added/deleted/net from work-brief targets and known `writing_units_delta`. Revision vs save splits only when those event kinds carry a delta. No sprint store. | `npm --prefix packages/studio-panel run test:components -- --run scripts/components/dto.test.ts scripts/components/creation-view.test.tsx` 57 passed (dto 18, CreationView 39). Scratch: `sprint-stats.txt`. |
 
 ## Residual risks and external limits
 

@@ -1,6 +1,7 @@
 ---
 name: world-query
 description: Use when querying or maintaining novel world entities, character relationships, or the Studio relationship topology. Triggers include "世界观", "实体", "人物关系", "关系图", "拓扑", and "查询世界".
+user-invocable: false
 ---
 
 # 世界查询系统

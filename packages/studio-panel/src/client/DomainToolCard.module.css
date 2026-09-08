@@ -1,12 +1,12 @@
 .card {
   overflow: hidden;
-  border: 1px solid var(--dsw-alias-border-l);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 6px;
   background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-primary);
 }
 
-.card[data-state='error'] { border-color: var(--dsw-alias-state-error-tertiary); }
+.card[data-state='error'] { border-color: var(--dsw-alias-state-error-secondary); }
 .head {
   display: grid;
   grid-template-columns: 16px auto minmax(80px, auto) minmax(0, 1fr) 14px 14px;
@@ -34,7 +34,7 @@
   display: grid;
   gap: 1px;
   padding: 7px 9px 9px 32px;
-  border-top: 1px solid var(--dsw-alias-border-l);
+  border-top: 1px solid var(--dsw-alias-border-l2);
 }
 .row {
   display: grid;
@@ -54,7 +54,7 @@
   gap: 6px;
   margin-top: 6px;
   padding: 3px 8px;
-  border: 1px solid var(--dsw-alias-border-l);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 6px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
@@ -64,7 +64,7 @@
 .action:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .head:focus-visible,
 .action:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-info-primary);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 2px;
 }
 

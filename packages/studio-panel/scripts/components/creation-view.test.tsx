@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreationView } from '../../src/client/CreationView.tsx'
@@ -58,14 +58,25 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 
 vi.mock('../../src/client/VditorBody.tsx', () => ({
   loadVditor: () => Promise.resolve(),
-  VditorBody: ({ initial, onChange, onReady }: {
+  VditorBody: ({ initial, onChange, onReady, onSelectionChange }: {
     initial: string
     onChange: (value: string) => void
     onReady: () => void
+    onSelectionChange?: (selection: { start: number; end: number; text: string } | null) => void
   }) => {
     useEffect(() => { onReady() }, [onReady])
+    const emitSelection = (event: { currentTarget: HTMLTextAreaElement }) => {
+      const start = event.currentTarget.selectionStart
+      const end = event.currentTarget.selectionEnd
+      onSelectionChange?.(end > start
+        ? { start, end, text: event.currentTarget.value.slice(start, end) }
+        : null)
+    }
     return <textarea aria-label="manuscript-editor" defaultValue={initial}
-      onChange={event => onChange(event.target.value)} />
+      onChange={event => onChange(event.target.value)}
+      onSelect={emitSelection}
+      onMouseUp={emitSelection}
+      onKeyUp={emitSelection} />
   },
 }))
 
@@ -87,6 +98,7 @@ function chapterWorkBrief(options: {
   stale?: boolean
   recentEdits?: Record<string, unknown>[]
   latestClosure?: Record<string, unknown> | null
+  foreshadowing?: Record<string, unknown>
 } = {}) {
   const path = options.path ?? chapter().path
   const manuscriptRevision = options.manuscriptRevision ?? 'revision-current'
@@ -105,6 +117,10 @@ function chapterWorkBrief(options: {
     },
     target: { writing_units: 2500, source: 'project.chapter_target', actual_units: 1200, remaining_units: 1300, progress: 0.48 },
     recent_edits: options.recentEdits ?? [],
+    foreshadowing: options.foreshadowing ?? {
+      must_resolve: [], overdue: [], to_plant: [], upcoming: [], prohibited_early: [],
+      source_revision: '', counts: { must_resolve: 0, overdue: 0, to_plant: 0 },
+    },
   } }
 }
 
@@ -400,7 +416,7 @@ describe('CreationView author history and revisions', () => {
       if (path.startsWith('/revisions')) return { proposals: [{
         proposal_id: 'rev_example1234', status: 'proposed', kind: 'selection_rewrite',
         rationale: '修正节奏', review_issue_ids: ['issue_pacing'], replacement_text: '新一\n新二',
-        review_revision: 'review-revision-one', source_revision: 'source-revision-one',
+        review_revision: 'review-revision-one', source_revision: 'sha256:current',
         issue_hunk_provenance: [{ issue_id: 'issue_pacing', hunk_ids: ['hunk_0', 'hunk_1'] }],
         selection: { start: 0, end: 5, original_text: '旧一\n旧二' },
         diff: { hunks: [
@@ -713,6 +729,84 @@ describe('CreationView chapter activity', () => {
     expect(screen.getAllByText('revision-current').length).toBeGreaterThan(0)
     expect(screen.getByText('manuscript_save')).not.toBeNull()
     expect(screen.getByText('+42 creation.history.units')).not.toBeNull()
+    expect(screen.getByLabelText('creation.activity.sprint')).not.toBeNull()
+    expect(screen.getByText(/creation\.activity\.sprintAdded 42/)).not.toBeNull()
+    expect(screen.getByText(/creation\.activity\.sprintDeleted 0/)).not.toBeNull()
+    expect(screen.getByText(/creation\.activity\.sprintNet \+42/)).not.toBeNull()
+    expect(screen.getByText(/creation\.activity\.sprintSaved \+42/)).not.toBeNull()
+    expect(screen.queryByText(/creation\.activity\.sprintRevision/)).toBeNull()
+  })
+
+  it('attributes revision sprint net only from applied revision events', async () => {
+    const fetchStudioApi = vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) return { path: chapter().path, title: '第一章', content: '正文', version: 'v1', revision: 'revision-current' }
+      if (url.startsWith('/chapters/ch_001/work-brief?')) return chapterWorkBrief({
+        recentEdits: [
+          {
+            kind: 'revision_applied', id: 'rev-one', status: 'applied', document_id: '', path: chapter().path,
+            chapter_id: 'ch_001', revision: 'revision-applied', updated_at: '2026-09-05T01:10:00+08:00',
+            writing_units_delta: 18, reason: 'from-review',
+          },
+          {
+            kind: 'reviewed', id: 'review-one', status: 'current', document_id: '', path: chapter().path,
+            chapter_id: 'ch_001', revision: 'review-revision-current', updated_at: '2026-09-05T01:11:00+08:00',
+            writing_units_delta: null, reason: '',
+          },
+        ],
+      })
+      return {}
+    })
+    render(<CreationView {...(viewProps({ fetchStudioApi, putStudioApi: vi.fn() }) as never)} />)
+    await screen.findByText(/1,200 \/ 2,500/)
+    fireEvent.click(screen.getByRole('button', { name: 'creation.showInspector' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'creation.activity' }))
+    expect(screen.getByText(/creation\.activity\.sprintNet \+18/)).not.toBeNull()
+    expect(screen.getByText(/creation\.activity\.sprintRevision \+18/)).not.toBeNull()
+    expect(screen.queryByText(/creation\.activity\.sprintSaved/)).toBeNull()
+  })
+
+  it('lists due, overdue, and to-plant foreshadowing as openable actions for the current chapter', async () => {
+    const fetchStudioApi = vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) return { path: chapter().path, title: '第一章', content: '正文', version: 'v1', revision: 'revision-current' }
+      if (url.startsWith('/chapters/ch_001/work-brief?')) return chapterWorkBrief({
+        foreshadowing: {
+          must_resolve: [{
+            id: 'f_due', content: '钟楼密信必须在本章揭开', status: 'pending', weight: 8,
+            reveal_anchor: { chapter_id: 'ch_001' }, source_revision: 'sha256:due',
+          }],
+          overdue: [{
+            id: 'f_overdue', content: '旧伤未交代却已开打', status: 'pending', weight: 6,
+            reveal_anchor: { chapter_id: 'ch_000' }, source_revision: 'sha256:overdue',
+          }],
+          to_plant: [{
+            id: 'f_plant', content: '在本章埋下档案馆令牌', status: 'planned', planned: true, weight: 5,
+            plant_anchor: { chapter_id: 'ch_001', line: 12 }, source_revision: 'sha256:plant',
+          }],
+          source_revision: 'sha256:dag',
+          counts: { must_resolve: 1, overdue: 1, to_plant: 1 },
+        },
+      })
+      return {}
+    })
+    render(<CreationView {...(viewProps({ fetchStudioApi, putStudioApi: vi.fn() }) as never)} />)
+    await screen.findByText(/1,200 \/ 2,500/)
+    fireEvent.click(screen.getByRole('button', { name: 'creation.showInspector' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'creation.activity 3' }))
+
+    expect(screen.getByText('creation.foreshadow.due')).not.toBeNull()
+    expect(screen.getByText('creation.foreshadow.overdue')).not.toBeNull()
+    expect(screen.getByText('creation.foreshadow.toPlant')).not.toBeNull()
+    const due = screen.getByRole('button', { name: 'creation.foreshadow.due: 钟楼密信必须在本章揭开' })
+    const overdue = screen.getByRole('button', { name: 'creation.foreshadow.overdue: 旧伤未交代却已开打' })
+    const toPlant = screen.getByRole('button', { name: 'creation.foreshadow.toPlant: 在本章埋下档案馆令牌' })
+    expect(due.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(due)
+    expect(due.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('creation.foreshadow.reveal')).not.toBeNull()
+    expect(screen.getByText('sha256:due')).not.toBeNull()
+    expect(overdue.getAttribute('aria-expanded')).toBe('false')
+    expect(toPlant.getAttribute('aria-expanded')).toBe('false')
   })
 })
 
@@ -1108,5 +1202,271 @@ describe('CreationView recovery drafts', () => {
       await Promise.resolve()
     })
     expect(stored).toBeNull()
+  })
+})
+
+describe('CreationView selection polish', () => {
+  const manuscript = '密信还在桌上。夜雨未停。'
+
+  async function selectSpan(start: number, end: number) {
+    const editor = await waitFor(() => {
+      const node = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'manuscript-editor' })
+      expect(node.value.slice(start, end).length).toBe(end - start)
+      return node
+    })
+    await act(async () => {
+      editor.focus()
+      editor.setSelectionRange(start, end)
+      fireEvent.mouseUp(editor)
+      fireEvent.select(editor)
+    })
+    expect(editor.selectionStart).toBe(start)
+    expect(editor.selectionEnd).toBe(end)
+    await screen.findByRole('button', { name: 'creation.selection.expand' })
+    return editor
+  }
+
+  it('posts expand, compress, naturalize, and review-fix through the revision-create routes', async () => {
+    const reviewed = {
+      ...chapter(),
+      review: {
+        ...chapter().review,
+        issues: 1,
+        issueDetails: [{
+          id: 'issue-letter', severity: 'warning', category: '情节', description: '密信未揭开',
+          quote: '密信还在',
+        }],
+      },
+    }
+    harness.snapshot = { ...harness.snapshot, chapters: [reviewed] }
+    const fetchStudioApi = vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) {
+        return { path: reviewed.path, title: reviewed.title, content: manuscript, version: 'v1', revision: 'revision-current' }
+      }
+      if (url.startsWith('/chapters/ch_001/work-brief?')) return chapterWorkBrief()
+      if (url.startsWith('/revisions')) return { proposals: [] }
+      if (url.startsWith('/manuscript/versions')) return { versions: [] }
+      return {}
+    })
+    const postStudioApi = vi.fn(async () => ({ proposal_id: 'rev_selection' }))
+    const putStudioApi = vi.fn()
+    render(<CreationView {...(viewProps({ fetchStudioApi, putStudioApi, postStudioApi }) as never)} />)
+    await screen.findByText(/1,200 \/ 2,500/)
+    await selectSpan(0, 4)
+
+    fireEvent.click(screen.getByRole('button', { name: 'creation.selection.expand' }))
+    await act(async () => { await Promise.resolve() })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.selection.compress' }))
+    await act(async () => { await Promise.resolve() })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.selection.naturalize' }))
+    await act(async () => { await Promise.resolve() })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.selection.reviewFix' }))
+    await act(async () => { await Promise.resolve() })
+
+    expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
+      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'expand',
+    })
+    expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
+      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'compress',
+    })
+    expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
+      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'naturalize',
+    })
+    expect(postStudioApi).toHaveBeenCalledWith('/revisions/from-review', {
+      chapter_id: 'ch_001',
+      issue_ids: ['issue-letter'],
+      original_text: '密信还在',
+      expected_review_revision: 'review-revision-current',
+      expected_document_revision: 'revision-current',
+    })
+    expect(putStudioApi).not.toHaveBeenCalled()
+  })
+
+  it('still POSTs when selectionchange fires outside the editor during the polish button press', async () => {
+    const fetchStudioApi = vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) {
+        return { path: chapter().path, title: '第一章', content: manuscript, version: 'v1', revision: 'revision-current' }
+      }
+      if (url.startsWith('/chapters/ch_001/work-brief?')) return chapterWorkBrief()
+      if (url.startsWith('/revisions')) return { proposals: [] }
+      if (url.startsWith('/manuscript/versions')) return { versions: [] }
+      return {}
+    })
+    const postStudioApi = vi.fn(async () => ({ proposal_id: 'rev_selection' }))
+    render(<CreationView {...(viewProps({ fetchStudioApi, putStudioApi: vi.fn(), postStudioApi }) as never)} />)
+    await screen.findByText(/1,200 \/ 2,500/)
+    const editor = await selectSpan(0, 4)
+    const expand = screen.getByRole('button', { name: 'creation.selection.expand' })
+    fireEvent.mouseDown(expand)
+    editor.setSelectionRange(0, 0)
+    fireEvent.select(editor)
+    document.dispatchEvent(new Event('selectionchange'))
+    expect(screen.getByRole('button', { name: 'creation.selection.expand' })).not.toBeNull()
+    fireEvent.click(expand)
+    await act(async () => { await Promise.resolve() })
+    expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
+      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'expand',
+    })
+  })
+
+  it('applies selected hunks through the revision apply route and never PUTs the document', async () => {
+    const fetchStudioApi = vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) {
+        return { path: chapter().path, title: '第一章', content: manuscript, version: 'v1', revision: 'revision-current' }
+      }
+      if (url.startsWith('/chapters/ch_001/work-brief?')) return chapterWorkBrief()
+      if (url.startsWith('/revisions')) return { proposals: [{
+        proposal_id: 'rev_selection1', status: 'proposed', kind: 'selection_rewrite',
+        rationale: '扩写密信', replacement_text: '密信还压在桌上',
+        source_revision: 'revision-current',
+        selection: { start: 0, end: 4, original_text: '密信还在' },
+        diff: { hunks: [
+          { id: 'hunk_0', tag: 'replace', before: '密信还在', after: '密信还压在' },
+          { id: 'hunk_1', tag: 'replace', before: '桌上', after: '桌上' },
+        ] },
+      }] }
+      if (url.startsWith('/manuscript/versions')) return { versions: [] }
+      return {}
+    })
+    const postStudioApi = vi.fn(async () => ({}))
+    const putStudioApi = vi.fn()
+    render(<CreationView {...(viewProps({ fetchStudioApi, putStudioApi, postStudioApi }) as never)} />)
+    await screen.findByRole('textbox', { name: 'manuscript-editor' })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.showInspector' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'creation.revisions' }))
+    expect(await screen.findByText('扩写密信')).not.toBeNull()
+
+    const hunks = screen.getAllByRole('checkbox')
+    fireEvent.click(hunks[1]!)
+    fireEvent.click(screen.getByRole('button', { name: 'creation.proposals.applySelected' }))
+    await act(async () => { await Promise.resolve() })
+    expect(postStudioApi).toHaveBeenCalledWith('/revisions/rev_selection1/apply', {
+      selected_hunk_ids: ['hunk_0'],
+    })
+    expect(putStudioApi).not.toHaveBeenCalled()
+  })
+
+  it('refuses apply when the proposal source revision is not the loaded manuscript', async () => {
+    const fetchStudioApi = vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) {
+        return { path: chapter().path, title: '第一章', content: manuscript, version: 'v1', revision: 'revision-current' }
+      }
+      if (url.startsWith('/chapters/ch_001/work-brief?')) return chapterWorkBrief()
+      if (url.startsWith('/revisions')) return { proposals: [{
+        proposal_id: 'rev_stale', status: 'proposed', kind: 'selection_rewrite',
+        rationale: '旧选区', replacement_text: '密信已经不在',
+        source_revision: 'revision-old',
+        selection: { start: 0, end: 4, original_text: '密信还在' },
+        diff: { hunks: [{ id: 'hunk_0', tag: 'replace', before: '密信还在', after: '密信已经不在' }] },
+      }] }
+      if (url.startsWith('/manuscript/versions')) return { versions: [] }
+      return {}
+    })
+    const postStudioApi = vi.fn(async () => ({}))
+    const putStudioApi = vi.fn()
+    render(<CreationView {...(viewProps({ fetchStudioApi, putStudioApi, postStudioApi }) as never)} />)
+    await screen.findByRole('textbox', { name: 'manuscript-editor' })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.showInspector' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'creation.revisions' }))
+    expect(await screen.findByText('旧选区')).not.toBeNull()
+    harness.setEditorStatus.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'creation.proposals.applySelected' }))
+    await act(async () => { await Promise.resolve() })
+
+    expect(postStudioApi).not.toHaveBeenCalled()
+    expect(putStudioApi).not.toHaveBeenCalled()
+    expect(screen.getByText('creation.proposals.sourceConflict')).not.toBeNull()
+    expect(harness.setEditorStatus).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when 按审稿改这段 has no current review', async () => {
+    const fetchStudioApi = vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) {
+        return { path: chapter().path, title: '第一章', content: manuscript, version: 'v1', revision: 'revision-current' }
+      }
+      if (url.startsWith('/chapters/ch_001/work-brief?')) return chapterWorkBrief({
+        reviewRevision: '', stale: true,
+      })
+      return { proposals: [], versions: [] }
+    })
+    const postStudioApi = vi.fn(async () => ({}))
+    render(<CreationView {...(viewProps({ fetchStudioApi, putStudioApi: vi.fn(), postStudioApi }) as never)} />)
+    await screen.findByText(/1,200 \/ 2,500/)
+    await selectSpan(0, 4)
+    fireEvent.click(screen.getByRole('button', { name: 'creation.selection.reviewFix' }))
+    await act(async () => { await Promise.resolve() })
+    expect(postStudioApi).not.toHaveBeenCalled()
+    expect(screen.getByText('creation.selection.reviewRequired')).not.toBeNull()
+  })
+})
+
+describe('CreationView manuscript mentions', () => {
+  const body = '林舟走进钟楼。小舟看见密信。'
+  const assetPayload = {
+    data: {
+      assets: [
+        { kind: 'character', id: 'linzhou', name: '林舟', summary: '钟楼守夜人', aliases: ['小舟'] },
+        { kind: 'world', id: 'bell-tower', name: '钟楼', summary: '旧城制高点', aliases: [] },
+      ],
+    },
+  }
+
+  function mentionFetch() {
+    return vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) {
+        const path = decodeURIComponent(url.split('path=')[1] ?? '')
+        if (path.includes('ch_002')) {
+          return { path, title: '第二章', content: '雨停了。', version: 'v1', revision: 'r2' }
+        }
+        return { path: chapter().path, title: '第一章', content: body, version: 'v1', revision: 'r1' }
+      }
+      if (url === '/assets' || url.startsWith('/assets?')) return assetPayload
+      if (url.startsWith('/chapters/') && url.includes('/work-brief')) return chapterWorkBrief({
+        path: url.includes('ch_002') ? 'data/novels/demo/data/manuscript/ch_002.md' : chapter().path,
+      })
+      return { proposals: [], versions: [] }
+    })
+  }
+
+  it('exposes clickable registered names and aliases and opens a read-only card in creation', async () => {
+    const postStudioApi = vi.fn(async () => ({}))
+    render(<CreationView {...(viewProps({
+      fetchStudioApi: mentionFetch(), putStudioApi: vi.fn(), postStudioApi,
+    }) as never)} />)
+    expect(await screen.findByRole('button', { name: 'creation.mentions.mention: 林舟' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'creation.mentions.mention: 小舟' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'creation.mentions.mention: 钟楼' })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'creation.mentions.mention: 密信' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'creation.mentions.mention: 小舟' }))
+    const card = await screen.findByRole('region', { name: 'creation.mentions.card' })
+    expect(card.getAttribute('data-asset')).toBe('character:linzhou')
+    expect(card.textContent).toContain('林舟')
+    expect(card.textContent).toContain('钟楼守夜人')
+    expect(card.textContent).toContain('小舟')
+    expect(screen.queryByText('view.library')).toBeNull()
+    expect(screen.queryByText('view.assets')).toBeNull()
+    expect(postStudioApi.mock.calls.some(call => String(call[0]).includes('/assets'))).toBe(false)
+  })
+
+  it('clears the open card when the chapter or Workspace changes and never POSTs asset updates', async () => {
+    const second = { ...chapter('data/novels/demo/data/manuscript/ch_002.md'), title: '第二章' }
+    harness.snapshot = { ...harness.snapshot, chapters: [chapter(), second] }
+    const postStudioApi = vi.fn(async () => ({}))
+    const props = viewProps({ fetchStudioApi: mentionFetch(), putStudioApi: vi.fn(), postStudioApi })
+    const view = render(<CreationView {...(props as never)} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'creation.mentions.mention: 小舟' }))
+    expect(await screen.findByText('钟楼守夜人')).not.toBeNull()
+
+    setSnapshot('ws-b', second.path, 2)
+    await act(async () => {
+      view.rerender(<CreationView {...({ ...props, sessionId: 'session-ws-b' } as never)} />)
+      await Promise.resolve()
+    })
+    expect(await screen.findByDisplayValue('雨停了。')).not.toBeNull()
+    expect(screen.queryByRole('region', { name: 'creation.mentions.card' })).toBeNull()
+    expect(screen.queryByText('钟楼守夜人')).toBeNull()
+    expect(postStudioApi).not.toHaveBeenCalled()
+    expect(postStudioApi.mock.calls.some(call => String(call[0]) === '/assets/update')).toBe(false)
   })
 })

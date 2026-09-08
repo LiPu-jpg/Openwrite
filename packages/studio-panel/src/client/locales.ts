@@ -96,9 +96,28 @@ export type StudioPanelKey =
   | 'creation.activity.invalid'
   | 'creation.activity.target'
   | 'creation.activity.remaining'
+  | 'creation.activity.sprint'
+  | 'creation.activity.sprintAdded'
+  | 'creation.activity.sprintDeleted'
+  | 'creation.activity.sprintNet'
+  | 'creation.activity.sprintRevision'
+  | 'creation.activity.sprintSaved'
   | 'creation.activity.identity'
   | 'creation.activity.recent'
   | 'creation.activity.empty'
+  | 'creation.foreshadow.title'
+  | 'creation.foreshadow.empty'
+  | 'creation.foreshadow.due'
+  | 'creation.foreshadow.overdue'
+  | 'creation.foreshadow.toPlant'
+  | 'creation.foreshadow.open'
+  | 'creation.foreshadow.close'
+  | 'creation.foreshadow.plant'
+  | 'creation.foreshadow.reveal'
+  | 'creation.foreshadow.status'
+  | 'creation.foreshadow.weight'
+  | 'creation.foreshadow.layer'
+  | 'creation.foreshadow.source'
   | 'creation.contextEmpty'
   | 'creation.context.packet'
   | 'creation.context.current'
@@ -168,6 +187,23 @@ export type StudioPanelKey =
   | 'creation.proposals.regenerate'
   | 'creation.proposals.applySelected'
   | 'creation.proposals.appliedNeedsReview'
+  | 'creation.proposals.sourceConflict'
+  | 'creation.selection.title'
+  | 'creation.selection.expand'
+  | 'creation.selection.compress'
+  | 'creation.selection.naturalize'
+  | 'creation.selection.reviewFix'
+  | 'creation.selection.working'
+  | 'creation.selection.staged'
+  | 'creation.selection.empty'
+  | 'creation.selection.saveRequired'
+  | 'creation.selection.reviewRequired'
+  | 'creation.selection.noIssues'
+  | 'creation.mentions.title'
+  | 'creation.mentions.mention'
+  | 'creation.mentions.card'
+  | 'creation.mentions.aliases'
+  | 'creation.mentions.close'
   | 'creation.issues'
   | 'creation.changedElsewhere'
   | 'creation.conflict'
@@ -530,6 +566,9 @@ export type StudioPanelKey =
   | 'assets.references.empty'
   | 'assets.core.empty'
   | 'assets.detail.loading'
+  | 'assets.draft.restored'
+  | 'assets.draft.unsaved'
+  | 'assets.draft.conflict'
   | 'assets.detail.relations'
   | 'assets.detail.index'
   | 'assets.list.detail_refs'
@@ -669,6 +708,68 @@ export type StudioPanelKey =
   | 'graph.collapseChecks'
   | 'graph.empty.dag'
   | 'benchmark.title'
+  | 'benchmark.taskType'
+  | 'benchmark.executionEvidence'
+  | 'benchmark.evidence'
+  | 'benchmark.status.skipped'
+  | 'benchmark.status.stale'
+  | 'benchmark.task.chapter'
+  | 'benchmark.task.outline'
+  | 'benchmark.task.chapterHint'
+  | 'benchmark.task.outlineHint'
+  | 'benchmark.planner'
+  | 'benchmark.nextChapter'
+  | 'benchmark.chapterWritten'
+  | 'benchmark.chapterPlanned'
+  | 'benchmark.chapterUnavailable'
+  | 'benchmark.customChapter'
+  | 'benchmark.chapterId'
+  | 'benchmark.outlineOrigin'
+  | 'benchmark.continueOutline'
+  | 'benchmark.customOutlineStart'
+  | 'benchmark.outlineStart'
+  | 'benchmark.outlineCount'
+  | 'benchmark.rangeFrom'
+  | 'benchmark.rangeTo'
+  | 'benchmark.chapterUnit'
+  | 'benchmark.invalidRange'
+  | 'benchmark.outlineRangeHint'
+  | 'benchmark.earliestOutlineStart'
+  | 'benchmark.invalidChapter'
+  | 'benchmark.historicalChapterHint'
+  | 'benchmark.autoDag'
+  | 'benchmark.executedDag'
+  | 'benchmark.dagAutomatic'
+  | 'benchmark.afterStage'
+  | 'benchmark.reviewScope'
+  | 'benchmark.isolatedHint'
+  | 'benchmark.pipelineUnavailable'
+  | 'benchmark.actualChapters'
+  | 'benchmark.pipelineFinished'
+  | 'benchmark.pipelineStatus'
+  | 'benchmark.reviewIncomplete'
+  | 'benchmark.partialScore'
+  | 'benchmark.reviewIncompleteHint'
+  | 'benchmark.completeReviews'
+  | 'benchmark.reportedCoverage'
+  | 'benchmark.coveragePending'
+  | 'benchmark.factsPendingTitle'
+  | 'benchmark.factsPendingHint'
+  | 'benchmark.selectModels'
+  | 'benchmark.description'
+  | 'benchmark.configure'
+  | 'benchmark.modelHint'
+  | 'benchmark.advanced'
+  | 'benchmark.history'
+  | 'benchmark.results'
+  | 'benchmark.noProfiles'
+  | 'benchmark.chooseModels'
+  | 'benchmark.workload'
+  | 'benchmark.submitting'
+  | 'benchmark.noCandidates'
+  | 'benchmark.noEvaluations'
+  | 'benchmark.plannedCandidates'
+  | 'benchmark.plannedEvaluations'
   | 'benchmark.task'
   | 'benchmark.mode'
   | 'benchmark.mode.framework'
@@ -922,6 +1023,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh: Record<StudioPanelKey, string> = {
+  'assets.draft.restored': '已恢复未保存的资料草稿',
+  'assets.draft.unsaved': '资料草稿尚未保存',
+  'assets.draft.conflict': '资料已在其他位置更新。已保留本地草稿，请先核对再决定是否放弃并载入最新内容。',
   'view.overview': '总览',
   'view.writing': '写作',
   'view.studio': '正文',
@@ -1013,9 +1117,28 @@ export const zh: Record<StudioPanelKey, string> = {
   'creation.activity.invalid': '本章工作摘要身份或版本不匹配，请刷新。',
   'creation.activity.target': '本章字数目标',
   'creation.activity.remaining': '尚余',
+  'creation.activity.sprint': '本章冲刺',
+  'creation.activity.sprintAdded': '新增',
+  'creation.activity.sprintDeleted': '删减',
+  'creation.activity.sprintNet': '净增',
+  'creation.activity.sprintRevision': '修订净增',
+  'creation.activity.sprintSaved': '正文保存净增',
   'creation.activity.identity': '当前身份与版本',
   'creation.activity.recent': '最近修改',
   'creation.activity.empty': '本章还没有修改记录。',
+  'creation.foreshadow.title': '本章伏笔',
+  'creation.foreshadow.empty': '本章没有到期、超期或待埋入的伏笔。',
+  'creation.foreshadow.due': '本章到期',
+  'creation.foreshadow.overdue': '超期',
+  'creation.foreshadow.toPlant': '待埋入',
+  'creation.foreshadow.open': '打开伏笔',
+  'creation.foreshadow.close': '收起伏笔',
+  'creation.foreshadow.plant': '埋设章节',
+  'creation.foreshadow.reveal': '回收章节',
+  'creation.foreshadow.status': '状态',
+  'creation.foreshadow.weight': '权重',
+  'creation.foreshadow.layer': '层级',
+  'creation.foreshadow.source': '来源 revision',
   'creation.contextEmpty': '本章暂无可用上下文。',
   'creation.context.packet': '实际写章包 revision',
   'creation.context.current': '当前',
@@ -1085,6 +1208,23 @@ export const zh: Record<StudioPanelKey, string> = {
   'creation.proposals.regenerate': '重新生成',
   'creation.proposals.applySelected': '应用所选差异',
   'creation.proposals.appliedNeedsReview': '所选差异已应用；请启动复评确认问题是否闭环。',
+  'creation.proposals.sourceConflict': '提案所依据的正文已变化，不能覆盖当前稿。请重新选区生成。',
+  'creation.selection.title': '选区润色',
+  'creation.selection.expand': '扩写',
+  'creation.selection.compress': '缩写',
+  'creation.selection.naturalize': '去 AI 味',
+  'creation.selection.reviewFix': '按审稿改这段',
+  'creation.selection.working': '正在生成修订提案…',
+  'creation.selection.staged': '修订提案已生成，请在「修订」中核对差异后再应用。',
+  'creation.selection.empty': '请先选中要修改的正文。',
+  'creation.selection.saveRequired': '请先保存当前草稿，再对选区生成修订。',
+  'creation.selection.reviewRequired': '本章没有可校验的当前审稿，不能按审稿改选区。',
+  'creation.selection.noIssues': '选区没有可定位的审稿问题。',
+  'creation.mentions.title': '提及',
+  'creation.mentions.mention': '提及',
+  'creation.mentions.card': '资料卡',
+  'creation.mentions.aliases': '别名',
+  'creation.mentions.close': '关闭资料卡',
   'creation.issues': '个问题',
   'creation.changedElsewhere': '正文已在其他位置变化；当前草稿未被覆盖。',
   'creation.conflict': '保存冲突：服务端正文已变化，当前草稿仍保留。',
@@ -1620,6 +1760,68 @@ export const zh: Record<StudioPanelKey, string> = {
   'graph.collapseChecks': '折叠 37 项',
   'graph.empty.dag': '当前章节暂无已物化的 DAG。',
   'benchmark.title': '框架内模型测试台',
+  'benchmark.taskType': '测试任务',
+  'benchmark.executionEvidence': 'DAG 执行与证据',
+  'benchmark.evidence': '证据：',
+  'benchmark.status.skipped': '已跳过',
+  'benchmark.status.stale': '已过期',
+  'benchmark.task.chapter': '章节写作',
+  'benchmark.task.outline': '大纲设计',
+  'benchmark.task.chapterHint': '选择章节，比较正文生成与评审',
+  'benchmark.task.outlineHint': '指定起点和数量，比较连续章纲设计',
+  'benchmark.planner': '设计模型',
+  'benchmark.nextChapter': '推荐下一章',
+  'benchmark.chapterWritten': '已有正文',
+  'benchmark.chapterPlanned': '待写章节',
+  'benchmark.chapterUnavailable': '当前不可测试',
+  'benchmark.customChapter': '输入章节 ID',
+  'benchmark.chapterId': '章节 ID',
+  'benchmark.outlineOrigin': '设计起点',
+  'benchmark.continueOutline': '接续现有大纲',
+  'benchmark.customOutlineStart': '指定起始章',
+  'benchmark.outlineStart': '起始章号（包含本章）',
+  'benchmark.outlineCount': '设计章数',
+  'benchmark.rangeFrom': '第',
+  'benchmark.rangeTo': '至',
+  'benchmark.chapterUnit': '章',
+  'benchmark.invalidRange': '请填写有效的起点和设计数量',
+  'benchmark.outlineRangeHint': '范围包含起始章；只生成测试候选。',
+  'benchmark.earliestOutlineStart': '最早可从第几章开始：',
+  'benchmark.invalidChapter': '请选择大纲中可用的章节，或输入其准确 ID。',
+  'benchmark.historicalChapterHint': '历史章节暂不可测试：当前事实已推进，不能用未来状态评测过去章节。',
+  'benchmark.autoDag': '智能 DAG 配置',
+  'benchmark.executedDag': '本次 DAG 配置',
+  'benchmark.dagAutomatic': '随任务自动适配',
+  'benchmark.afterStage': '依赖：',
+  'benchmark.reviewScope': '评审范围：',
+  'benchmark.isolatedHint': '每个候选在独立副本执行；测试不会覆盖正式大纲或正文。',
+  'benchmark.pipelineUnavailable': '暂时无法读取此任务的执行流程，请刷新后重试。',
+  'benchmark.actualChapters': '实际设计章数',
+  'benchmark.pipelineFinished': '流程已结束',
+  'benchmark.pipelineStatus': '运行记录状态',
+  'benchmark.reviewIncomplete': '评审未完整',
+  'benchmark.partialScore': '部分评审均分',
+  'benchmark.reviewIncompleteHint': '评分仅反映已完成的评审内容，不代表完整评审。请先查看未完成的评审域，再比较模型质量。',
+  'benchmark.completeReviews': '完整评审',
+  'benchmark.reportedCoverage': '已报告覆盖率',
+  'benchmark.coveragePending': '评审覆盖率待查看',
+  'benchmark.factsPendingTitle': '请先完成正文事实更新',
+  'benchmark.factsPendingHint': '前往「创作」→「正文接纳状态」，点击「继续未完成操作」，完成事实更新后再测试。',
+  'benchmark.selectModels': '选择模型',
+  'benchmark.description': '在一致的任务范围与上下文下，比较章节写作和大纲设计的质量、可靠性与费用。',
+  'benchmark.configure': '配置测试',
+  'benchmark.modelHint': '可选择多个模型，分别生成候选并交叉评审。',
+  'benchmark.advanced': '高级配置',
+  'benchmark.history': '测试记录',
+  'benchmark.results': '测试结果',
+  'benchmark.noProfiles': '暂无已配置的模型，请先在模型设置中完成配置。',
+  'benchmark.chooseModels': '至少选择一个写作模型和一个评审模型。',
+  'benchmark.workload': '本次测试',
+  'benchmark.submitting': '正在创建测试…',
+  'benchmark.noCandidates': '本次测试尚无写作候选。',
+  'benchmark.noEvaluations': '本次测试尚无评审结果。',
+  'benchmark.plannedCandidates': '篇候选',
+  'benchmark.plannedEvaluations': '次评审',
   'benchmark.task': '后台任务',
   'benchmark.mode': '执行模式',
   'benchmark.mode.framework': '真实写作框架',
@@ -1833,6 +2035,9 @@ export const zh: Record<StudioPanelKey, string> = {
 
 /** English dictionary. */
 export const en: Record<StudioPanelKey, string> = {
+  'assets.draft.restored': 'Unsaved asset draft restored',
+  'assets.draft.unsaved': 'Asset draft has unsaved changes',
+  'assets.draft.conflict': 'This asset changed elsewhere. Your local draft is preserved; review it before discarding it and loading the latest content.',
   'view.overview': 'Overview',
   'view.writing': 'Writing',
   'view.studio': 'Manuscript',
@@ -1924,9 +2129,28 @@ export const en: Record<StudioPanelKey, string> = {
   'creation.activity.invalid': 'The chapter work brief identity or version does not match. Refresh it.',
   'creation.activity.target': 'Chapter writing target',
   'creation.activity.remaining': 'remaining',
+  'creation.activity.sprint': 'Chapter sprint',
+  'creation.activity.sprintAdded': 'added',
+  'creation.activity.sprintDeleted': 'deleted',
+  'creation.activity.sprintNet': 'net',
+  'creation.activity.sprintRevision': 'revision net',
+  'creation.activity.sprintSaved': 'save net',
   'creation.activity.identity': 'Current identity and revisions',
   'creation.activity.recent': 'Recent edits',
   'creation.activity.empty': 'This chapter has no edit activity yet.',
+  'creation.foreshadow.title': 'Chapter foreshadowing',
+  'creation.foreshadow.empty': 'No due, overdue, or to-plant foreshadowing for this chapter.',
+  'creation.foreshadow.due': 'Due this chapter',
+  'creation.foreshadow.overdue': 'Overdue',
+  'creation.foreshadow.toPlant': 'To plant',
+  'creation.foreshadow.open': 'Open foreshadowing',
+  'creation.foreshadow.close': 'Hide foreshadowing',
+  'creation.foreshadow.plant': 'Plant chapter',
+  'creation.foreshadow.reveal': 'Payoff chapter',
+  'creation.foreshadow.status': 'Status',
+  'creation.foreshadow.weight': 'Weight',
+  'creation.foreshadow.layer': 'Layer',
+  'creation.foreshadow.source': 'Source revision',
   'creation.contextEmpty': 'No context is available for this chapter.',
   'creation.context.packet': 'Actual writing packet revision',
   'creation.context.current': 'Current',
@@ -1996,6 +2220,23 @@ export const en: Record<StudioPanelKey, string> = {
   'creation.proposals.regenerate': 'Regenerate',
   'creation.proposals.applySelected': 'Apply selected changes',
   'creation.proposals.appliedNeedsReview': 'Selected changes were applied. Run review again to verify issue closure.',
+  'creation.proposals.sourceConflict': 'This proposal targets an older manuscript revision and cannot overwrite the current text. Create a new selection proposal.',
+  'creation.selection.title': 'Selection polish',
+  'creation.selection.expand': '扩写',
+  'creation.selection.compress': '缩写',
+  'creation.selection.naturalize': '去 AI 味',
+  'creation.selection.reviewFix': '按审稿改这段',
+  'creation.selection.working': 'Creating a revision proposal…',
+  'creation.selection.staged': 'A revision proposal is ready. Inspect the diff in Revisions before applying.',
+  'creation.selection.empty': 'Select the manuscript span to change first.',
+  'creation.selection.saveRequired': 'Save the current draft before polishing a selection.',
+  'creation.selection.reviewRequired': 'This chapter has no verified current review, so the selection cannot be revised from review.',
+  'creation.selection.noIssues': 'The selection has no locatable review issues.',
+  'creation.mentions.title': 'Mentions',
+  'creation.mentions.mention': '提及',
+  'creation.mentions.card': '资料卡',
+  'creation.mentions.aliases': 'Aliases',
+  'creation.mentions.close': 'Close asset card',
   'creation.issues': 'issues',
   'creation.changedElsewhere': 'The manuscript changed elsewhere; your draft was preserved.',
   'creation.conflict': 'Save conflict: the server manuscript changed and your draft is preserved.',
@@ -2531,6 +2772,68 @@ export const en: Record<StudioPanelKey, string> = {
   'graph.collapseChecks': 'Collapse 37 checks',
   'graph.empty.dag': 'No materialized DAG for this chapter.',
   'benchmark.title': 'In-framework model benchmark',
+  'benchmark.taskType': 'Benchmark task',
+  'benchmark.executionEvidence': 'DAG execution and evidence',
+  'benchmark.evidence': 'Evidence:',
+  'benchmark.status.skipped': 'Skipped',
+  'benchmark.status.stale': 'Stale',
+  'benchmark.task.chapter': 'Chapter writing',
+  'benchmark.task.outline': 'Outline planning',
+  'benchmark.task.chapterHint': 'Compare chapter writing and reviews',
+  'benchmark.task.outlineHint': 'Compare outline windows with a chosen start and length',
+  'benchmark.planner': 'Planning models',
+  'benchmark.nextChapter': 'Recommended next chapter',
+  'benchmark.chapterWritten': 'Manuscript exists',
+  'benchmark.chapterPlanned': 'Planned chapter',
+  'benchmark.chapterUnavailable': 'Currently unavailable',
+  'benchmark.customChapter': 'Enter chapter ID',
+  'benchmark.chapterId': 'Chapter ID',
+  'benchmark.outlineOrigin': 'Planning origin',
+  'benchmark.continueOutline': 'Continue the outline',
+  'benchmark.customOutlineStart': 'Choose starting chapter',
+  'benchmark.outlineStart': 'Starting chapter (inclusive)',
+  'benchmark.outlineCount': 'Chapters to plan',
+  'benchmark.rangeFrom': 'Chapters',
+  'benchmark.rangeTo': 'to',
+  'benchmark.chapterUnit': '',
+  'benchmark.invalidRange': 'Enter a valid starting chapter and chapter count',
+  'benchmark.outlineRangeHint': 'The range includes the starting chapter and produces a benchmark candidate.',
+  'benchmark.earliestOutlineStart': 'Earliest supported starting chapter:',
+  'benchmark.invalidChapter': 'Select an available outline chapter or enter its exact ID.',
+  'benchmark.historicalChapterHint': 'Historical chapters are unavailable because current facts would leak future state into their test context.',
+  'benchmark.autoDag': 'Automatic DAG configuration',
+  'benchmark.executedDag': 'Run DAG configuration',
+  'benchmark.dagAutomatic': 'Adapted to this task',
+  'benchmark.afterStage': 'Requires:',
+  'benchmark.reviewScope': 'Review scope:',
+  'benchmark.isolatedHint': 'Each candidate runs in an isolated copy and leaves the canonical outline and manuscript unchanged.',
+  'benchmark.pipelineUnavailable': 'The execution pipeline is unavailable. Refresh to retry.',
+  'benchmark.actualChapters': 'Actual planned chapters',
+  'benchmark.pipelineFinished': 'Pipeline finished',
+  'benchmark.pipelineStatus': 'Recorded pipeline status',
+  'benchmark.reviewIncomplete': 'Review incomplete',
+  'benchmark.partialScore': 'Partial-review average',
+  'benchmark.reviewIncompleteHint': 'Scores reflect only the reviewed material, not a complete assessment. Check incomplete domains before comparing model quality.',
+  'benchmark.completeReviews': 'Complete reviews',
+  'benchmark.reportedCoverage': 'Reported coverage',
+  'benchmark.coveragePending': 'Review coverage not yet inspected',
+  'benchmark.factsPendingTitle': 'Complete manuscript fact updates first',
+  'benchmark.factsPendingHint': 'Go to Creation → Manuscript acceptance and choose Resume incomplete operation. Run the benchmark again after fact updates finish.',
+  'benchmark.selectModels': 'Select models',
+  'benchmark.description': 'Compare chapter writing and outline planning with consistent scope and context.',
+  'benchmark.configure': 'Configure benchmark',
+  'benchmark.modelHint': 'Select one or more models for writing and cross-review.',
+  'benchmark.advanced': 'Advanced settings',
+  'benchmark.history': 'Run history',
+  'benchmark.results': 'Benchmark results',
+  'benchmark.noProfiles': 'Configure a model in model settings before running a benchmark.',
+  'benchmark.chooseModels': 'Select at least one writer and one reviewer.',
+  'benchmark.workload': 'This benchmark',
+  'benchmark.submitting': 'Creating benchmark…',
+  'benchmark.noCandidates': 'No writing candidates in this run yet.',
+  'benchmark.noEvaluations': 'No review results in this run yet.',
+  'benchmark.plannedCandidates': 'candidates',
+  'benchmark.plannedEvaluations': 'reviews',
   'benchmark.task': 'Background task',
   'benchmark.mode': 'Execution mode',
   'benchmark.mode.framework': 'Production framework',

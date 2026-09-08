@@ -1870,15 +1870,16 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     name: 'novel_rolling_plan_action',
     description:
       'Manage rolling plan candidates (mid-range plot planning windows). Actions: "list" (limit?), "create" ' +
-      '(current_arc?, window_size? default 5), "get" (candidate_id), "stage" (candidate_id + proposal + revision — ' +
-      'stages a plan proposal against the candidate; revision-gated), "delete" (candidate_id + revision), ' +
-      '"apply" (candidate_id + revision — appends the staged draft chapters that do not collide with the ' +
-      'canonical outline into src/outline.md; returns added/skipped). Human + AI both use the same endpoints.',
+      '(current_arc?, window_size? default 50, max 50). current_window/accepted_window is accepted manuscript ' +
+      'facts only; next_window/planned_window is outline plan, not facts. "get" (candidate_id), "stage" ' +
+      '(candidate_id + proposal + revision — stages a plan proposal against the candidate; revision-gated), ' +
+      '"delete" (candidate_id + revision), "apply" (candidate_id + revision — appends staged draft chapters ' +
+      'that do not collide with the canonical outline into src/outline.md; never writes accepted facts).',
     parameters: {
       action: { type: 'string', required: true, enum: ['list', 'create', 'get', 'stage', 'delete', 'apply'], description: 'The rolling-plan operation.' },
       limit: { type: 'integer', description: 'List limit (default 20).' },
       current_arc: { type: 'string', description: 'Current arc id (create).' },
-      window_size: { type: 'integer', description: 'Planning window size in chapters (create, default 5).' },
+      window_size: { type: 'integer', description: 'Planning window size in chapters (create, default 50, max 50).' },
       candidate_id: { type: 'string', description: 'Candidate id (get/stage/delete/apply).' },
       proposal: { type: 'string', description: 'Plan proposal text (stage).' },
       revision: { type: 'string', description: 'Candidate revision (stage/delete/apply, revision-gated).' },
@@ -2196,17 +2197,22 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
   ctx.tools.register(defineTool({
     name: 'novel_model_benchmark',
     description:
-      'Run or inspect an isolated chapter-model benchmark through OpenWrite profiles and LiteLLM. ' +
-      'The run action creates a background task and never changes model routes or canonical manuscript files.',
+      'Run or inspect isolated chapter or outline model benchmarks through OpenWrite profiles and LiteLLM. ' +
+      'Use options first to read chapter choices, task limits, supported execution modes and the authoritative ' +
+      'pipeline DAG/review domains without invoking a model. The run action creates a background task and never ' +
+      'changes model routes, canonical manuscript or canonical outline files.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['list', 'get', 'run'], description: 'Benchmark operation.' },
+      action: { type: 'string', required: true, enum: ['list', 'get', 'options', 'run'], description: 'Benchmark operation; options previews task choices and pipeline DAGs without starting a run.' },
       run_id: { type: 'string', description: 'Benchmark run id for get.' },
-      chapter_id: { type: 'string', description: 'Chapter context anchor for run (default next).' },
+      task_type: { type: 'string', enum: ['chapter', 'outline'], description: 'Run target: chapter (default) or outline. Outline supports framework mode only.' },
+      chapter_id: { type: 'string', description: 'Chapter task target: next (default) or an available canonical chapter_id from options, e.g. ch_003. Unavailable targets are rejected without fallback; inspect availability/reason first.' },
+      outline_start_chapter: { type: 'integer', description: 'Outline task first chapter number, inclusive, 1-100000. Omit to continue after the last outline chapter.' },
+      outline_chapter_count: { type: 'integer', description: 'Outline task range length including its starting chapter, 1-20 (default 3).' },
       writer_profile_ids: { type: 'array', items: { type: 'string' }, description: 'Writing profiles to compare (run).' },
       reviewer_profile_ids: { type: 'array', items: { type: 'string' }, description: 'Independent blind-review profiles (run).' },
-      execution_mode: { type: 'string', enum: ['framework', 'creative'], description: 'Execution path: full production framework (default) or creative-only diagnostic.' },
+      execution_mode: { type: 'string', enum: ['framework', 'creative'], description: 'Execution path: full framework (default); creative diagnostic is available only for chapter tasks. Read task pipelines with options.' },
       repeats: { type: 'integer', description: 'Repeats per writing profile, 1-5.' },
-      target_words: { type: 'integer', description: 'Candidate target length, 200-12000.' },
+      target_words: { type: 'integer', description: 'Chapter candidate target length, 200-12000; use outline_chapter_count for outline range.' },
       concurrency: { type: 'integer', description: 'Concurrent model jobs, 1-4.' },
       limit: { type: 'integer', description: 'List limit, default 20.' },
     },
@@ -2217,6 +2223,9 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       const client = clientFor(exec)
       if (args.action === 'list') {
         return await client.getJson('/api/benchmarks', args.limit === undefined ? {} : { limit: String(args.limit) }, exec.signal)
+      }
+      if (args.action === 'options') {
+        return await client.getJson('/api/benchmarks/options', {}, exec.signal)
       }
       if (args.action === 'get') {
         if (!args.run_id?.trim()) throw new Error('run_id is required for get')
@@ -2232,7 +2241,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
         writer_profile_ids: args.writer_profile_ids,
         reviewer_profile_ids: args.reviewer_profile_ids,
       }
-      for (const key of ['chapter_id', 'execution_mode', 'repeats', 'target_words', 'concurrency'] as const) {
+      for (const key of ['task_type', 'chapter_id', 'outline_start_chapter', 'outline_chapter_count', 'execution_mode', 'repeats', 'target_words', 'concurrency'] as const) {
         const value = args[key]
         if (value !== undefined) body[key] = value
       }

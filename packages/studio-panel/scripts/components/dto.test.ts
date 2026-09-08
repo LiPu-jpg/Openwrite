@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   parseConnectionTestResult, parseDeletePreview, parseModelProfiles,
-  parseChapterWorkBrief, parseDocumentChangePlan, parseReadingOrder, parseReadingPacket,
+  chapterForeshadowActions, chapterSprintStats, parseChapterWorkBrief, parseDocumentChangePlan, parseReadingOrder, parseReadingPacket,
   parseResultRef, parseRouteImpact, parseRouteMap, parseTaskProgress,
 } from '../../src/client/dto.ts'
 
@@ -243,6 +243,66 @@ describe('author workbench DTOs', () => {
       { issue_id: 'issue-a', outcome: 'resolved' }, { issue_id: 'issue-b', outcome: 'retained' },
     ])
     expect(brief.review.latest_closure?.regressions[0]).toMatchObject({ issue_id: 'issue-c', outcome: 'regressed' })
+  })
+
+  it('maps work-brief must_resolve/overdue/to_plant onto author due/overdue/to-plant actions', () => {
+    const brief = parseChapterWorkBrief(envelope({
+      schema_version: 'openwrite.chapter-work-brief.v1', novel_id: 'demo', chapter_id: 'ch_005',
+      manuscript: { path: readingDocument.path, current_revision: 'rev' },
+      review: {}, target: {}, recent_edits: [],
+      foreshadowing: {
+        must_resolve: [{ id: 'f_due', content: '到期', reveal_anchor: { chapter_id: 'ch_005' } }],
+        overdue: [{ id: 'f_overdue', content: '超期', target_chapter: 'ch_004' }],
+        to_plant: [{ id: 'f_plant', content: '待埋', planned: true, plant_anchor: { chapter_id: 'ch_005' } }],
+        upcoming: [{ id: 'f_later', content: '未到' }],
+        source_revision: 'sha256:dag',
+        counts: { must_resolve: 1, overdue: 1, to_plant: 1, upcoming: 1 },
+      },
+    }))
+    expect(brief.foreshadowing.due.map(item => item.id)).toEqual(['f_due'])
+    expect(brief.foreshadowing.overdue.map(item => item.id)).toEqual(['f_overdue'])
+    expect(brief.foreshadowing.to_plant.map(item => item.id)).toEqual(['f_plant'])
+    expect(brief.foreshadowing.due[0]?.reveal_chapter_id).toBe('ch_005')
+    expect(brief.foreshadowing.overdue[0]?.reveal_chapter_id).toBe('ch_004')
+    expect(brief.foreshadowing.to_plant[0]?.plant_chapter_id).toBe('ch_005')
+    expect(chapterForeshadowActions(brief).map(entry => entry.bucket)).toEqual(['due', 'overdue', 'to_plant'])
+  })
+
+  it('derives sprint stats from the work-brief target and known deltas without guessing missing ones', () => {
+    const brief = parseChapterWorkBrief(envelope({
+      schema_version: 'openwrite.chapter-work-brief.v1', novel_id: 'demo', chapter_id: 'ch_001',
+      manuscript: { path: readingDocument.path, current_revision: 'rev', writing_units: 1200 },
+      review: {},
+      target: { writing_units: 2500, source: 'project.chapter_target', actual_units: 1200, remaining_units: 1300, progress: 0.48 },
+      recent_edits: [
+        { kind: 'manuscript_saved', id: 'save-one', status: 'saved', updated_at: '2026-09-06T01:00:00Z', writing_units_delta: 80 },
+        { kind: 'revision_applied', id: 'rev-one', status: 'applied', updated_at: '2026-09-06T01:05:00Z', writing_units_delta: 40 },
+        { kind: 'revision_applied', id: 'rev-two', status: 'applied', updated_at: '2026-09-06T01:06:00Z', writing_units_delta: -10 },
+        { kind: 'reviewed', id: 'review-one', status: 'current', updated_at: '2026-09-06T01:07:00Z', writing_units_delta: null },
+      ],
+    }))
+    expect(chapterSprintStats(brief)).toEqual({
+      targetUnits: 2500, actualUnits: 1200, remainingUnits: 1300, progress: 0.48,
+      added: 120, deleted: 10, net: 110, knownDeltaEvents: 3, unknownDeltaEvents: 1,
+      aiNet: 30, humanNet: 80,
+    })
+  })
+
+  it('does not invent AI or human sprint splits when events lack a writing-units delta', () => {
+    const brief = parseChapterWorkBrief(envelope({
+      schema_version: 'openwrite.chapter-work-brief.v1', novel_id: 'demo', chapter_id: 'ch_001',
+      manuscript: { path: readingDocument.path, current_revision: 'rev' },
+      review: {},
+      target: { writing_units: 3000, actual_units: 900, remaining_units: 2100, progress: 0.3 },
+      recent_edits: [
+        { kind: 'manuscript_saved', id: 'save-one', status: 'saved', updated_at: '2026-09-06T01:00:00Z' },
+        { kind: 'task_updated', id: 'task-one', status: 'running', updated_at: '2026-09-06T01:01:00Z' },
+      ],
+    }))
+    expect(chapterSprintStats(brief)).toMatchObject({
+      targetUnits: 3000, added: 0, deleted: 0, net: 0,
+      knownDeltaEvents: 0, unknownDeltaEvents: 2, aiNet: null, humanNet: null,
+    })
   })
 
   it('parses the immutable document change preview revisions', () => {
