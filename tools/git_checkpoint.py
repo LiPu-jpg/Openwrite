@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import subprocess
 from typing import Any
 
 from tools.project_registry import load_project_metadata
-
 
 ALLOWED_PREFIXES = {"outline", "character", "world", "chapter", "checkpoint"}
 
@@ -74,7 +73,12 @@ class GitCheckpointManager:
             return False, "项目未标记为独立作品仓库"
         if metadata.get("repository_visibility") != "private":
             return False, "自动 checkpoint 仅允许显式标记的私密仓库"
-        result = self._git("rev-parse", "--show-toplevel", check=False)
+        try:
+            result = self._git("rev-parse", "--show-toplevel", check=False)
+        except subprocess.TimeoutExpired:
+            return False, "Git 检查超时，自动 checkpoint 已禁用"
+        except (OSError, subprocess.SubprocessError):
+            return False, "Git 不可用，自动 checkpoint 已禁用"
         if result.returncode != 0:
             return False, "当前作品目录不是 Git 仓库"
         try:
@@ -104,7 +108,11 @@ class GitCheckpointManager:
         return subprocess.run(
             ["git", *args],
             cwd=self.project_root,
+            stdin=subprocess.DEVNULL,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=check,
+            timeout=10,
         )
