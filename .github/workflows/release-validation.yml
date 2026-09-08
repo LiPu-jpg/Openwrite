@@ -117,4 +117,5 @@ jobs:
         with:
           name: validated-release
           path: .tmp-release-final/*
+          include-hidden-files: true
           if-no-files-found: error
