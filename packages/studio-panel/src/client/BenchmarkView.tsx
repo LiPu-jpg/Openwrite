@@ -644,7 +644,7 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
           setCancelling(true)
           void postStudioApi(`/tasks/${encodeURIComponent(activeTask)}/cancel`, {}).catch(cause => { setCancelling(false); setError(String(cause)) })
         }}>{cancelling ? '取消中…' : '取消测试'}</button>}
-        {cancelling && <p>已停止后续调度。已发送的请求仍可能产生费用；返回后会保存结果和实际用量。</p>}
+        {cancelling && <p>正在取消后续任务。已发送的请求仍可能产生费用；返回后会保存结果和实际用量。</p>}
         {taskFailure !== '' && <p className={css.taskFailure} role="alert">{taskFailure}</p>}
         {taskProgress !== null && taskProgress.total_units > 0 && <progress max={taskProgress.total_units} value={taskProgress.completed_units} aria-label={t('benchmark.task')} />}
       </div>}

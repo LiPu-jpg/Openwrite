@@ -36,7 +36,7 @@ test('real dsh tool registry isolates 90 tools by preset and disposes them', asy
   const preset = await import('../lib/preset-tools.js')
   const root = new Context()
   root.provide('systemPrompt', { tools: () => () => {}, section: () => () => {}, getSectionOrder: () => 0 })
-  root.provide('novelDomain', { clientFactory: () => () => { throw new Error('No backend calls in catalog inspection') } })
+  root.provide('novelDomain', { toolOptions: { timeoutMs: 600_000 }, clientFactory: () => () => { throw new Error('No backend calls in catalog inspection') } })
   await root.plugin(ToolRuntime)
   const writing = {}, normal = {}
   const scope = createScope(root, writing)
