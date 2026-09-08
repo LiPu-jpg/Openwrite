@@ -1253,6 +1253,10 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                 _packet_payload(packet),
                 context=generation_context,
             )
+            review_context["chapter_id"] = chapter_id
+            review_form = config.get("form") or config.get("review_form")
+            if review_form:
+                review_context["review_form"] = review_form
             if run_manifest is not None and run_manifest.effective_target_words > 0:
                 review_context["target_words"] = run_manifest.effective_target_words
             prewrite = TruthFilesManager(project_root, novel_id).load_snapshot_before(

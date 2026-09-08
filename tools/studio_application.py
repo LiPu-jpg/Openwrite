@@ -83,6 +83,7 @@ from tools.reference_library import (
     default_reference_library_root,
 )
 from tools.research_service import ResearchService, ResearchServiceError
+from tools.review_dag_framework import review_dag_framework
 from tools.review_store import (
     ReviewStore,
     canonical_review_decision,
@@ -92,7 +93,6 @@ from tools.review_store import (
     review_gate_status,
     review_quality_score,
 )
-from tools.review_dag_framework import review_dag_framework
 from tools.revision_service import RevisionError, RevisionService
 from tools.structured_assets import StructuredAssetError, StructuredAssetService
 from tools.structured_change_plan import (
@@ -4625,6 +4625,9 @@ class StudioApplication:
     def benchmark_surface(self, limit: int = 20) -> dict[str, Any]:
         return self._benchmarks().surface(limit)
 
+    def benchmark_options(self) -> dict[str, Any]:
+        return self._benchmarks().options()
+
     def benchmark_run(self, run_id: str) -> dict[str, Any]:
         result = self._benchmarks().store.load(run_id)
         if result is None:
@@ -4807,6 +4810,13 @@ class StudioApplication:
         task_input = payload.get("input")
         if not isinstance(task_input, dict):
             raise StudioError("任务 input 必须是 JSON 对象", code="INVALID_REQUEST_BODY")
+        if task_type == "model_benchmark" and task_input.get("task_type") == "outline":
+            from tools.benchmark_tasks import BenchmarkInputError
+
+            try:
+                task_input = {**task_input, **self._benchmarks().target(task_input)}
+            except BenchmarkInputError as exc:
+                raise StudioError(str(exc), code=exc.code) from exc
         ai_tasks = {
             "chapter_write",
             "chapter_review",
@@ -5064,17 +5074,42 @@ class StudioApplication:
     def _task_model_benchmark(
         self, payload: dict[str, Any], context: TaskContext
     ) -> dict[str, Any]:
-        chapter_id = str(payload.get("chapter_id") or "next")
-        context.phase("preparing", "冻结章节上下文快照")
+        from tools.benchmark_tasks import outline_context_preview
+        from tools.manuscript_acceptance import ManuscriptAcceptanceService
+        from tools.write_guard import validate_chapter_writable
+
+        benchmark = self._benchmarks()
+        target = benchmark.target(payload)
+        chapter_id = target["chapter_id"]
+        context.phase(
+            "preparing",
+            "冻结大纲规划上下文" if target["task_type"] == "outline" else "冻结章节上下文快照",
+        )
         context.checkpoint()
-        profile = self._operation_profile("chapter_write")
-        with self._model_context(profile):
-            snapshot = self._service().context_preview(chapter_id)
-        packet = snapshot.get("packet")
-        if isinstance(packet, dict):
-            snapshot["manifest"] = build_context_manifest(self.novel_root, packet)
-        return self._benchmarks().run(
-            payload,
+        if target["task_type"] == "outline":
+            snapshot = outline_context_preview(self.project_root, self.novel_id, target)
+        else:
+            ManuscriptAcceptanceService(self.project_root, self.novel_id).require_current(
+                chapter_id
+            )
+            guard = validate_chapter_writable(self.project_root, self.novel_id, chapter_id)
+            if not guard.get("ok"):
+                raise StudioError(
+                    str(guard.get("message") or "目标章节尚未就绪"),
+                    code=str(guard.get("code") or "PROJECT_NOT_READY"),
+                )
+            writer_ids = payload.get("writer_profile_ids") or []
+            profile = (
+                self._model_profile_store.resolve_profile(
+                    str(writer_ids[0]), operation="chapter_write"
+                )
+                if writer_ids
+                else self._operation_profile("chapter_write")
+            )
+            with self._model_context(profile):
+                snapshot = self._service().context_preview(chapter_id)
+        return benchmark.run(
+            {**payload, **target},
             snapshot,
             progress=context.progress_callback,
             cancelled=context.cancellation_requested,
@@ -5567,6 +5602,10 @@ class StudioApplication:
 
     @staticmethod
     def _task_input_summary(task_type: str, payload: dict[str, Any]) -> str:
+        if task_type == "model_benchmark" and payload.get("task_type") == "outline":
+            start = int(payload["outline_start_chapter"])
+            count = int(payload.get("outline_chapter_count", 3))
+            return f"模型横评 · 大纲设计第{start}-{start + count - 1}章"
         chapter = str(
             payload.get("chapter_id")
             or StudioApplication._chapter_id_from_document(str(payload.get("path") or ""))

@@ -5,7 +5,12 @@ import pytest
 
 from tools.foreshadowing_manager import ForeshadowingDAGManager
 from tools.init_project import init_project
-from tools.rolling_planning import RollingPlanningError, RollingPlanningService
+from tools.rolling_planning import (
+    PLANNING_WINDOW_MAX,
+    RollingPlanningError,
+    RollingPlanningService,
+    rolling_plan_action,
+)
 from tools.runtime_diagnostics import RuntimeDiagnosticsService
 from tools.task_store import TaskStore
 from tools.truth_manager import TruthFilesManager
@@ -131,3 +136,58 @@ def test_rolling_candidate_stages_only_draft_and_rejects_stale_facts(
     assert error.value.code == "STALE_CANDIDATE_INPUT"
     loaded = service.load(stale.candidate_id)
     assert loaded is not None and loaded.state == "stale"
+
+
+def _planning_outline(count: int) -> str:
+    parts = ["# 第一卷\n", "## 第一幕\n", "### 第一节\n"]
+    for number in range(1, count + 1):
+        parts.append(f"#### 第{number}章：窗口{number}\n\n计划推进。\n")
+    return "\n".join(parts)
+
+
+def test_rolling_plan_50_chapter_window_keeps_plans_off_accepted_facts(
+    tmp_path: Path,
+) -> None:
+    from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+    init_project(tmp_path, "demo")
+    novel_root = tmp_path / "data" / "novels" / "demo"
+    outline_path = novel_root / "src" / "outline.md"
+    outline_path.write_text(_planning_outline(52), encoding="utf-8")
+    manuscript = novel_root / "data" / "manuscript" / "arc_001"
+    manuscript.mkdir(parents=True, exist_ok=True)
+    chapter_path = manuscript / "ch_001.md"
+    chapter_path.write_text("# ch_001\n\n已发生事实。\n", encoding="utf-8")
+    acceptance = ManuscriptAcceptanceService(tmp_path, "demo")
+    operation = acceptance.establish_baseline(confirm=True)
+    acceptance.resume(
+        operation["operation_id"],
+        analyzer=lambda chapter_id, title, content, prior: {
+            "chapter_summary": "摘要",
+            "observations": "已发生事实",
+            "legacy_updates": {"current_state": "已发生事实"},
+            "state_delta": {},
+        },
+    )
+    outline_before = outline_path.read_bytes()
+    manuscript_before = chapter_path.read_bytes()
+
+    created = rolling_plan_action(tmp_path, "demo", {"action": "create"})
+    assert created["window_size"] == PLANNING_WINDOW_MAX == 50
+    assert created["accepted_window"] == ["ch_001"]
+    assert created["current_window"] == ["ch_001"]
+    assert created["planned_window"][0] == "ch_002"
+    assert created["planned_window"][-1] == "ch_051"
+    assert len(created["planned_window"]) == 50
+    assert "ch_001" not in created["planned_window"]
+    assert "ch_052" not in created["planned_window"]
+    assert set(created["accepted_window"]).isdisjoint(set(created["planned_window"]))
+    assert "非事实" in created["goethe_brief"]
+    assert outline_path.read_bytes() == outline_before
+    assert chapter_path.read_bytes() == manuscript_before
+
+    clamped = rolling_plan_action(
+        tmp_path, "demo", {"action": "create", "window_size": 80}
+    )
+    assert clamped["window_size"] == 50
+    assert len(clamped["planned_window"]) == 50

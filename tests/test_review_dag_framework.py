@@ -33,6 +33,9 @@ def test_standard_review_framework_is_complete_versioned_and_stable() -> None:
         "quality_weight_total": 100.0,
         "gate_check_ids": [27],
     }
+    optional = first["optional_review_criteria"]
+    assert optional["scoring"] is False
+    assert {item["name"] for item in optional["criteria"]} == {"钩子", "黄金三章", "追读力"}
 
     first["topology"]["nodes"].clear()
     assert len(review_dag_framework()["topology"]["nodes"]) == 47

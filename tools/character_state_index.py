@@ -27,6 +27,7 @@ CHAPTER_TOKEN_RE = re.compile(
 )
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*$")
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)$")
 ANNOTATION_RE = re.compile(
     rf"^\s*//\*\*\s*"
     rf"(?P<name>[^\[\]@:：\r\n]+?)\s*"
@@ -224,21 +225,40 @@ def parse_character_state_annotations(
     return records, diagnostics
 
 
+def normalize_character_state_annotation_fences(text: str) -> str:
+    """Unwrap complete, metadata-only plain-text fences in generated manuscripts.
+
+    Apply before saving writer output, never while indexing reference examples.
+    Language, mixed-content, invalid, and unclosed blocks remain byte-for-byte intact.
+    """
+    lines = str(text or "").splitlines(keepends=True)
+    delimiters: set[int] = set()
+    for start, end, metadata_only in _fenced_blocks(lines):
+        if not metadata_only:
+            continue
+        delimiters.update((start, end - 1))
+        for index in range(start + 1, end - 1):
+            # Metadata must stay an inline annotation after removing its wrapper,
+            # rather than becoming a reader-visible indented code block.
+            lines[index] = lines[index].lstrip(" \t")
+    return "".join(line for index, line in enumerate(lines) if index not in delimiters)
+
+
 def strip_character_state_annotations(text: str) -> str:
-    """Remove valid inline state and relation metadata from reader-facing prose."""
-    return "".join(
-        line
-        for line in str(text or "").splitlines(keepends=True)
-        if not _is_inline_metadata(line.rstrip("\r\n"))
-    )
+    """Remove valid metadata, including its plain-text wrapper, from reader prose."""
+    lines = str(text or "").splitlines(keepends=True)
+    hidden = _reader_metadata_lines(lines)
+    return "".join(line for index, line in enumerate(lines) if index not in hidden)
 
 
 def mask_character_state_annotations(text: str) -> str:
     """Hide valid annotations while preserving source line coordinates."""
+    lines = str(text or "").splitlines(keepends=True)
+    hidden = _reader_metadata_lines(lines)
     masked: list[str] = []
-    for line in str(text or "").splitlines(keepends=True):
+    for index, line in enumerate(lines):
         content = line.rstrip("\r\n")
-        if not _is_inline_metadata(content):
+        if index not in hidden:
             masked.append(line)
             continue
         ending = line[len(content) :]
@@ -247,7 +267,66 @@ def mask_character_state_annotations(text: str) -> str:
 
 
 def _is_inline_metadata(line: str) -> bool:
-    return bool(ANNOTATION_RE.match(line) or RELATION_ANNOTATION_RE.match(line))
+    if "//**" not in line:
+        return False
+    # Reuse the index's complete-field checks; a regex match alone also accepts
+    # empty old/new states. Chapter scope is supplied later by the manuscript.
+    states, state_issues = parse_character_state_annotations(
+        line, source_path="", source_kind="actual", default_chapter_id="ch_001"
+    )
+    relations, relation_issues = parse_relation_annotations(line, source_path="")
+    return bool(states or relations) and not (state_issues or relation_issues)
+
+
+def _fenced_blocks(lines: list[str]) -> Iterable[tuple[int, int, bool]]:
+    """Yield complete fence spans (end exclusive) and safe metadata classification."""
+    index = 0
+    while index < len(lines):
+        opening = FENCE_OPEN_RE.fullmatch(lines[index].rstrip("\r\n"))
+        if not opening:
+            index += 1
+            continue
+        marker, info = opening.groups()
+        closing = re.compile(rf"^ {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}[ \t]*$")
+        end = index + 1
+        while end < len(lines) and not closing.fullmatch(lines[end].rstrip("\r\n")):
+            end += 1
+        closed = end < len(lines)
+        body = [line.rstrip("\r\n") for line in lines[index + 1 : end] if line.strip()]
+        metadata_only = (
+            closed
+            and info.strip().lower() in {"", "text", "plaintext"}
+            and bool(body)
+            and all(_is_inline_metadata(line) for line in body)
+        )
+        stop = end + 1 if closed else end
+        yield index, stop, metadata_only
+        index = stop
+
+
+def _reader_metadata_lines(lines: list[str]) -> set[int]:
+    def unfenced_metadata(line: str) -> bool:
+        # Four columns of indentation denote reader-visible Markdown code,
+        # including code on the first line and space/tab combinations.
+        return not re.match(r"^(?: {4}| {0,3}\t)", line) and _is_inline_metadata(line)
+
+    hidden: set[int] = set()
+    previous_end = 0
+    for start, end, metadata_only in _fenced_blocks(lines):
+        hidden.update(
+            index
+            for index in range(previous_end, start)
+            if unfenced_metadata(lines[index].rstrip("\r\n"))
+        )
+        if metadata_only:
+            hidden.update(range(start, end))
+        previous_end = end
+    hidden.update(
+        index
+        for index in range(previous_end, len(lines))
+        if unfenced_metadata(lines[index].rstrip("\r\n"))
+    )
+    return hidden
 
 
 class CharacterStateIndex:

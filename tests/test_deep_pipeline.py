@@ -24,9 +24,7 @@ def test_chapter_memory_is_bounded_and_enters_next_chapter_context(tmp_path: Pat
     init_project(tmp_path, "demo")
     from tools.manuscript_acceptance import ManuscriptAcceptanceService
 
-    manuscript = (
-        tmp_path / "data" / "novels" / "demo" / "data" / "manuscript" / "arc_001"
-    )
+    manuscript = tmp_path / "data" / "novels" / "demo" / "data" / "manuscript" / "arc_001"
     (manuscript / "ch_001.md").write_text("# 雨夜\n\n正文一。\n", encoding="utf-8")
     (manuscript / "ch_002.md").write_text("# 地下室\n\n正文二。\n", encoding="utf-8")
     acceptance = ManuscriptAcceptanceService(tmp_path, "demo")
@@ -344,7 +342,9 @@ def test_reviewer_context_keeps_author_compass_and_quality_constraints():
 def test_reviewer_v2_reviews_six_domains_and_one_gate():
     reviewer = ReviewerAgent.__new__(ReviewerAgent)
     reviewer.ctx = SimpleNamespace(
-        client=SimpleNamespace(config=SimpleNamespace(model="fake", max_tokens=12_000, context_tokens=64_000))
+        client=SimpleNamespace(
+            config=SimpleNamespace(model="fake", max_tokens=12_000, context_tokens=64_000)
+        )
     )
     reviewer._rule_based_check = lambda content, target_words=0: []
     reviewer._detect_ai_tells = lambda content: []
@@ -355,8 +355,10 @@ def test_reviewer_v2_reviews_six_domains_and_one_gate():
         prompt = kwargs["messages"][0].content
         calls.append(prompt)
         if "硬门禁评审员" in prompt:
-            return SimpleNamespace(content='{"id":"safety","status":"pass","findings":[]}', usage={})
-        domain = next(domain for domain in QUALITY_DOMAINS if f'“{domain.name}”' in prompt)
+            return SimpleNamespace(
+                content='{"id":"safety","status":"pass","findings":[]}', usage={}
+            )
+        domain = next(domain for domain in QUALITY_DOMAINS if f"“{domain.name}”" in prompt)
         return SimpleNamespace(
             content=json.dumps(
                 {
@@ -392,6 +394,74 @@ def test_reviewer_v2_reviews_six_domains_and_one_gate():
     assert result.review_v2["provenance"]["audit_calls"] == 7
 
 
+def test_reviewer_v2_attaches_web_novel_optional_criteria_without_changing_score():
+    reviewer = ReviewerAgent.__new__(ReviewerAgent)
+    reviewer.ctx = SimpleNamespace(
+        client=SimpleNamespace(
+            config=SimpleNamespace(model="fake", max_tokens=12_000, context_tokens=64_000)
+        )
+    )
+    reviewer._rule_based_check = lambda content, target_words=0: []
+    reviewer._detect_ai_tells = lambda content: []
+    reviewer._check_sensitive_words = lambda content: []
+    plot_prompts: list[str] = []
+    optional_ids = {"web_hook", "golden_opening", "retention"}
+
+    def fake_chat(**kwargs):
+        prompt = kwargs["messages"][0].content
+        if "硬门禁评审员" in prompt:
+            return SimpleNamespace(
+                content='{"id":"safety","status":"pass","findings":[]}',
+                usage={},
+            )
+        domain = next(domain for domain in QUALITY_DOMAINS if f"“{domain.name}”" in prompt)
+        requested = [
+            line.split(":", 1)[0].removeprefix("- ").strip()
+            for line in prompt.splitlines()
+            if line.startswith("- ") and "max=" in line
+        ]
+        if domain.id == "plot":
+            plot_prompts.append(prompt)
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "id": domain.id,
+                    "criteria": [
+                        {
+                            "id": criterion_id,
+                            "status": "evaluated",
+                            "earned": 0 if criterion_id in optional_ids else 5,
+                            "evidence": ["正文"],
+                            "rationale": "证据充分",
+                            "issues": [],
+                        }
+                        for criterion_id in requested
+                    ],
+                    "issues": [],
+                },
+                ensure_ascii=False,
+            ),
+            usage={},
+        )
+
+    reviewer.chat = fake_chat
+    result = asyncio.run(
+        reviewer.review("正文", {"review_form": "web_novel", "chapter_id": "ch_001"})
+    )
+
+    assert result.score == 100
+    assert result.review_v2["quality_score"] == 100
+    assert any("web_hook: 钩子, max=0" in prompt for prompt in plot_prompts)
+    plot = next(domain for domain in result.review_v2["domains"] if domain["id"] == "plot")
+    pacing = next(domain for domain in result.review_v2["domains"] if domain["id"] == "pacing")
+    assert {item["id"] for item in plot["criteria"]} >= {"web_hook", "retention"}
+    assert any(item["id"] == "golden_opening" for item in pacing["criteria"])
+    assert all(
+        item["max"] == 0 for item in plot["criteria"] if item["id"] in {"web_hook", "retention"}
+    )
+    assert result.review_v2["legacy_check_ids"] == list(range(1, 38))
+
+
 def test_reviewer_bisects_a_domain_after_output_truncation():
     reviewer = ReviewerAgent.__new__(ReviewerAgent)
     reviewer.ctx = SimpleNamespace(
@@ -401,7 +471,11 @@ def test_reviewer_bisects_a_domain_after_output_truncation():
 
     def fake_chat(**kwargs):
         system_prompt = kwargs["messages"][0].content
-        requested = [criterion.id for criterion in QUALITY_DOMAINS[0].criteria if f"- {criterion.id}:" in system_prompt]
+        requested = [
+            criterion.id
+            for criterion in QUALITY_DOMAINS[0].criteria
+            if f"- {criterion.id}:" in system_prompt
+        ]
         calls.append(requested)
         if len(requested) > 2:
             raise ProviderResponseError(
@@ -413,7 +487,12 @@ def test_reviewer_bisects_a_domain_after_output_truncation():
                 {
                     "id": "coherence",
                     "criteria": [
-                        {"id": criterion_id, "status": "evaluated", "earned": 5, "evidence": ["正文"]}
+                        {
+                            "id": criterion_id,
+                            "status": "evaluated",
+                            "earned": 5,
+                            "evidence": ["正文"],
+                        }
                         for criterion_id in requested
                     ],
                     "issues": [],
@@ -435,7 +514,12 @@ def test_reviewer_bisects_a_domain_after_output_truncation():
         "causality_motivation",
     ]
     assert calls == [
-        ["temporal_continuity", "rules_power_numbers", "knowledge_boundary", "causality_motivation"],
+        [
+            "temporal_continuity",
+            "rules_power_numbers",
+            "knowledge_boundary",
+            "causality_motivation",
+        ],
         ["temporal_continuity", "rules_power_numbers"],
         ["knowledge_boundary", "causality_motivation"],
     ]
@@ -458,7 +542,12 @@ def test_reviewer_uses_profile_budget_and_structured_context_compression():
                 {
                     "id": domain.id,
                     "criteria": [
-                        {"id": item.id, "status": "evaluated", "earned": 5, "evidence": ["章节正文"]}
+                        {
+                            "id": item.id,
+                            "status": "evaluated",
+                            "earned": 5,
+                            "evidence": ["章节正文"],
+                        }
                         for item in domain.criteria
                     ],
                     "issues": [],
@@ -544,15 +633,7 @@ def test_write_commit_rolls_back_truth_and_draft_when_memory_fails(
     assert "memory disk full" in result["error"]
     assert cli_module._load_chapter(tmp_path, "demo", "ch_001") is None
     assert TruthFilesManager(tmp_path, "demo").load_truth_files().current_state == "写前状态"
-    lock_path = (
-        tmp_path
-        / "data"
-        / "novels"
-        / "demo"
-        / "data"
-        / "workflows"
-        / "project.lock"
-    )
+    lock_path = tmp_path / "data" / "novels" / "demo" / "data" / "workflows" / "project.lock"
     assert not lock_path.exists()
 
 
@@ -560,15 +641,7 @@ def test_write_commit_handles_null_current_chapter_in_book_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     init_project(tmp_path, "demo")
-    state_path = (
-        tmp_path
-        / "data"
-        / "novels"
-        / "demo"
-        / "data"
-        / "workflows"
-        / "book_state.yaml"
-    )
+    state_path = tmp_path / "data" / "novels" / "demo" / "data" / "workflows" / "book_state.yaml"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(
         "novel_id: demo\n"

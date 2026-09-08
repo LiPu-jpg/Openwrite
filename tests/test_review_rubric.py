@@ -5,7 +5,9 @@ from tools.review_rubric import (
     GATE_CHECK_IDS,
     QUALITY_DOMAINS,
     aggregate_review,
+    attach_optional_criteria,
     legacy_adapter,
+    optional_criteria_payload,
     rubric_payload,
     selected_domains,
 )
@@ -118,4 +120,55 @@ def test_partial_dimension_selection_keeps_only_relevant_criteria():
         "character_fidelity",
         "dialogue_behavior",
     ]
-    assert domains[0].legacy_check_ids == (1, 16)
+
+
+def test_web_novel_optional_criteria_do_not_score_or_consume_legacy_checks():
+    catalog = optional_criteria_payload()
+    assert catalog["scoring"] is False
+    assert catalog["forms"] == ["web_novel"]
+    names = {item["name"] for item in catalog["criteria"]}
+    assert names == {"钩子", "黄金三章", "追读力"}
+    assert all(item["max"] == 0 for item in catalog["criteria"])
+    assert all(item["legacy_check_ids"] == [] for item in catalog["criteria"])
+
+    payload = rubric_payload()
+    mapped = [
+        check
+        for domain in payload["domains"]
+        for criterion in domain["criteria"]
+        for check in criterion["legacy_check_ids"]
+    ] + list(GATE_CHECK_IDS)
+    assert sorted(mapped) == list(DIMENSION_NAMES)
+    assert sum(len(domain["criteria"]) for domain in payload["domains"]) == 20
+
+    plain = attach_optional_criteria(QUALITY_DOMAINS, form=None)
+    assert plain == QUALITY_DOMAINS
+    literary = attach_optional_criteria(QUALITY_DOMAINS, form="literary")
+    assert literary == QUALITY_DOMAINS
+
+    opening = attach_optional_criteria(QUALITY_DOMAINS, form="网文", chapter_id="ch_001")
+    plot = next(domain for domain in opening if domain.id == "plot")
+    pacing = next(domain for domain in opening if domain.id == "pacing")
+    assert [item.id for item in plot.criteria][-2:] == ["web_hook", "retention"]
+    assert pacing.criteria[-1].id == "golden_opening"
+    assert plot.weight == 20
+    assert pacing.weight == 15
+    assert all(
+        item.max_points == 0
+        for item in plot.criteria
+        if item.id in {"web_hook", "retention"}
+    )
+
+    later = attach_optional_criteria(QUALITY_DOMAINS, form="web_novel", chapter_id="ch_010")
+    later_pacing = next(domain for domain in later if domain.id == "pacing")
+    assert "golden_opening" not in {item.id for item in later_pacing.criteria}
+    later_plot = next(domain for domain in later if domain.id == "plot")
+    assert {item.id for item in later_plot.criteria} >= {"web_hook", "retention"}
+
+    baseline = [evaluated_domain(domain) for domain in QUALITY_DOMAINS]
+    with_optional = [evaluated_domain(domain) for domain in opening]
+    assert aggregate_review(baseline, [])["quality_score"] == 100
+    optional_result = aggregate_review(with_optional, [], domains=opening)
+    assert optional_result["quality_score"] == 100
+    assert optional_result["coverage"] == 1
+    assert optional_result["legacy_check_ids"] == list(DIMENSION_NAMES)

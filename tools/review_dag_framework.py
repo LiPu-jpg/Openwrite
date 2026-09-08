@@ -10,19 +10,20 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import PurePosixPath
-from typing import Any, Mapping
+from typing import Any
 
 from tools.review_rubric import (
     DIMENSION_NAMES,
     GATE_CHECK_IDS,
     QUALITY_DOMAINS,
     RUBRIC_VERSION,
+    optional_criteria_payload,
     rubric_payload,
 )
-
 
 FRAMEWORK_SCHEMA_VERSION = "openwrite.review-dag-framework.v1"
 FRAMEWORK_ID = "openwrite.standard-chapter-review"
@@ -138,9 +139,7 @@ def _build_framework() -> dict[str, Any]:
             "artifact": f"dim_{check_id:02d}.json",
             "verifier": {"mode": "programmatic", "script": "review-dimension"},
         }
-        contains.append(
-            {"parent": "gate", "child": node_id, "required": True, "failure": "fatal"}
-        )
+        contains.append({"parent": "gate", "child": node_id, "required": True, "failure": "fatal"})
 
     depends_on = [
         {"source": domain_id, "target": "context", "data": ["review-context"]}
@@ -168,6 +167,7 @@ def _build_framework() -> dict[str, Any]:
             "description": "局部审稿保留全部节点，未请求检查写为 inconclusive。",
         },
         "rubric": rubric_payload(),
+        "optional_review_criteria": optional_criteria_payload(),
         "topology": {
             "nodes": nodes,
             "contains": contains,
@@ -225,7 +225,10 @@ def validate_review_dag_framework(framework: Mapping[str, Any]) -> None:
     """Reject incomplete, cyclic, or rubric-divergent review blueprints."""
     if framework.get("schema_version") != FRAMEWORK_SCHEMA_VERSION:
         raise ValueError("unsupported review DAG framework schema")
-    if framework.get("rubric_version") != RUBRIC_VERSION or framework.get("rubric") != rubric_payload():
+    if (
+        framework.get("rubric_version") != RUBRIC_VERSION
+        or framework.get("rubric") != rubric_payload()
+    ):
         raise ValueError("review DAG framework rubric diverges from the canonical rubric")
     topology = framework.get("topology")
     if not isinstance(topology, Mapping):
@@ -271,7 +274,8 @@ def validate_review_dag_framework(framework: Mapping[str, Any]) -> None:
     if mapped_checks != expected_checks:
         raise ValueError("review DAG framework must map all legacy checks exactly once")
     check_nodes = [
-        node for node in nodes.values()
+        node
+        for node in nodes.values()
         if isinstance(node, Mapping) and node.get("legacy_check_id") is not None
     ]
     if len(check_nodes) != len(expected_checks):

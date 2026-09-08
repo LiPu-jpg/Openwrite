@@ -20,6 +20,9 @@ current_chapter: ch_001
 # 目标提取风格源（可选，用于风格合成）
 # 示例: style_id: office_excerpt
 
+# 作品形态（可选）。web_novel 只给网文项目附加钩子/黄金三章/追读力准则，不计分。
+# form: web_novel
+
 # 章节默认字数（可选）
 # default_word_count: 4000
 

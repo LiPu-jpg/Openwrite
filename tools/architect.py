@@ -6,6 +6,7 @@ AI 辅助创建大纲、世界观、角色设定。
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,9 @@ class ArchitectAgent:
         """
         self.ctx = agent_ctx
         self.log = logger.getChild("architect")
+        self.last_response_metadata: dict[str, Any] = {}
+        self.response_metadata_history: list[dict[str, Any]] = []
+        self.response_attempt_count = 0
 
     def generate_foundation(
         self,
@@ -164,6 +168,9 @@ class ArchitectAgent:
         genre: str,
         story_bible: str,
         target_chapters: int = 100,
+        *,
+        start_chapter: int = 1,
+        planning_context: str = "",
     ) -> list[ChapterOutline]:
         """生成章节大纲
 
@@ -172,12 +179,21 @@ class ArchitectAgent:
             genre: 题材
             story_bible: 世界观设定
             target_chapters: 目标章节数
+            start_chapter: 全书起始章号，从 1 开始，包含该章
+            planning_context: 上游已完成预算控制的完整规划上下文；非空时替代世界观摘要
 
         Returns:
             章节大纲列表
         """
         from tools.llm import Message
 
+        self.last_response_metadata = {}
+        self.response_metadata_history = []
+        self.response_attempt_count = 0
+        if type(start_chapter) is not int or start_chapter < 1:
+            raise ValueError("start_chapter must be a positive integer")
+        end_chapter = start_chapter + target_chapters - 1
+        context = planning_context if planning_context else story_bible[:2000]
         targets = self._writing_targets()
 
         system_prompt = (
@@ -189,7 +205,7 @@ class ArchitectAgent:
 ```json
 [
   {{
-    "number": 1,
+    "number": {start_chapter},
     "title": "章节标题",
     "summary": "章节内容概要（约{targets['outline_chapter_words']}字）",
     "dramatic_position": "起/承/转/合/过渡",
@@ -207,26 +223,37 @@ class ArchitectAgent:
 
 每5章为一个"节"，节内有起承转合。每章正文目标为 {targets['chapter_words']} 字，
 每个章纲说明约 {targets['outline_chapter_words']} 字。确保剧情有起伏。
+章节编号使用全书编号：从第 {start_chapter} 章开始（包含该章），
+到第 {end_chapter} 章结束（包含该章）。
+必须恰好返回 {target_chapters} 章，连续编号，不得遗漏、重复或加入范围外章节。
 只返回 JSON。"""
         )
 
         user_prompt = f"""书名：{title}
 题材：{genre}
 目标章节数：{target_chapters}
+起始章节（含）：第{start_chapter}章
+结束章节（含）：第{end_chapter}章
 
-世界观设定：
-{story_bible[:2000]}
+{'规划上下文' if planning_context else '世界观设定'}：
+{context}
 
-请生成{target_chapters}章的大纲。"""
+请从第{start_chapter}章开始，生成恰好{target_chapters}章的大纲。"""
 
         try:
+            output_budget = 8192
+            if planning_context:
+                output_budget = max(8192, min(32768, target_chapters * 1536))
+                configured = getattr(getattr(self.ctx.client, "config", None), "max_tokens", None)
+                if isinstance(configured, int) and configured > 0:
+                    output_budget = min(output_budget, configured)
             content = self._chat_required(
                 messages=[
                     Message("system", system_prompt),
                     Message("user", user_prompt),
                 ],
                 temperature=0.5,
-                max_tokens=8192,
+                max_tokens=output_budget,
                 label="chapter outline",
             )
 
@@ -537,14 +564,29 @@ status 使用“埋伏/待收/已收/废弃”；章节 ID 使用 ch_001 格式�
     ) -> str:
         """Retry one transient empty/error response before failing the draft."""
 
+        self.last_response_metadata = {}
+        self.response_metadata_history = []
+        self.response_attempt_count = 0
         last_error: Exception | None = None
         for attempt in range(2):
             try:
+                self.response_attempt_count += 1
                 response = self.ctx.client.chat(
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
+                # Keep metering/provenance, not prose, reasoning or credentials.
+                # Include an empty first response when a retry consumes tokens.
+                usage = getattr(response, "usage", {})
+                metadata = {
+                    "usage": deepcopy(usage) if isinstance(usage, dict) else {},
+                    "finish_reason": str(getattr(response, "finish_reason", "") or ""),
+                    "model": str(getattr(response, "model", "") or ""),
+                    "provider": str(getattr(response, "provider", "") or ""),
+                }
+                self.last_response_metadata = metadata
+                self.response_metadata_history.append(deepcopy(metadata))
                 content = str(getattr(response, "content", "") or "").strip()
                 if content:
                     return content

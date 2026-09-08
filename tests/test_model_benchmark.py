@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from tools.model_profiles import (
     active_model_profile,
     active_search_model_profile,
 )
+from tools.novel_workspace import count_writing_units
 
 
 def profile(profile_id: str, model: str) -> dict:
@@ -28,6 +30,32 @@ def profile(profile_id: str, model: str) -> dict:
         "temperature": 0.7,
         "timeout_seconds": 120,
     }
+
+
+@pytest.mark.parametrize("execution_mode", ["creative", "framework"])
+def test_benchmark_counts_committed_reader_prose_instead_of_executor_length(
+    tmp_path: Path, monkeypatch, execution_mode: str,
+):
+    content = (
+        "# 第四章：灯塔\n\n雨落下。Hello, world.\n"
+        "```text\n//**林霁[位置]：旧港 -> 灯塔**\n```\n"
+    )
+    generated = {"title": "灯塔", "content": content, "word_count": 313}
+    service = ModelBenchmarkService(
+        tmp_path, "book", ModelProfileStore(tmp_path / "profiles"),
+        generation_executor=lambda *_args: generated,
+    )
+    monkeypatch.setattr(service, "_prepare_framework_workspace", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "_generate_framework", lambda *_args: generated)
+
+    candidate = service._run_generation(
+        profile("writer", "writer-model"), {}, "ch_004", 4, 300,
+        "bench_metadata_fixture", 1, execution_mode, None,
+    )
+
+    assert candidate["reliability_status"] == "completed"
+    assert candidate["content"] == content
+    assert candidate["word_count"] == count_writing_units(content) == 5
 
 
 def test_benchmark_uses_fixed_context_and_run_scoped_profiles(tmp_path: Path):
@@ -118,6 +146,7 @@ def test_benchmark_uses_fixed_context_and_run_scoped_profiles(tmp_path: Path):
         store,
         generation_executor=generate,
         review_executor=review,
+        readiness_gate=False,
     )
     result = service.run(
         {
@@ -129,7 +158,7 @@ def test_benchmark_uses_fixed_context_and_run_scoped_profiles(tmp_path: Path):
             "execution_mode": "creative",
         },
         {
-            "chapter_id": "ch_001",
+            "chapter_id": "ch_002",
             "target_words": 1000,
             "characters": ["甲"],
             "manifest": {"included": ["outline"]},
@@ -315,6 +344,7 @@ def test_framework_mode_runs_public_pipeline_in_per_candidate_workspace(
     store.save_profile(profile("writer-a", "model-a"), api_key="secret-a")
     store.save_profile(profile("writer-b", "model-b"), api_key="secret-b")
     store.save_profile(profile("critic", "review-model"), api_key="secret-review")
+    store.save_profile(profile("critic-two", "review-model-two"), api_key="secret-review-two")
     store.save_profile(profile("search", "search-model"), api_key="secret-search")
     store.save_routes({"chapter_write": "critic", "review": "critic", "search": "search"})
     routes_before = dict(store.load()["routes"])
@@ -370,15 +400,19 @@ def test_framework_mode_runs_public_pipeline_in_per_candidate_workspace(
         active = active_model_profile() or {}
         active_search = active_search_model_profile() or {}
         root = Path(project_root).resolve()
-        assert str(active.get("id") or "") == "critic"
+        reviewer_id = str(active.get("id") or "")
+        assert reviewer_id in {"critic", "critic-two"}
         assert active_search.get("id") == "search"
         assert args["run_id_v2"].startswith("runv2_")
         assert (root / "data" / "novels" / "book").is_dir()
         run_store = ChapterRunV2Store(root, "book")
         manifest = run_store.load(args["run_id_v2"])
         assert manifest is not None
+        assert manifest.stages["review"].status == "pending"
         run_store.start_stage(manifest, "review")
-        run_store.complete_stage(manifest, "review", output={"score": 86})
+        payload = {"score": 86, "reviewer": reviewer_id}
+        artifact = run_store.write_artifact(manifest, "review", payload)
+        run_store.complete_stage(manifest, "review", output=payload, artifact=artifact)
         review_calls.append((str(active.get("id") or ""), root))
         return {
             "ok": True,
@@ -404,7 +438,7 @@ def test_framework_mode_runs_public_pipeline_in_per_candidate_workspace(
     result = service.run(
         {
             "writer_profile_ids": ["writer-a", "writer-b"],
-            "reviewer_profile_ids": ["critic"],
+            "reviewer_profile_ids": ["critic", "critic-two"],
             "repeats": 1,
             "target_words": 1000,
             "concurrency": 2,
@@ -419,7 +453,22 @@ def test_framework_mode_runs_public_pipeline_in_per_candidate_workspace(
     assert result["status"] == "completed", result
     assert {item[0] for item in write_calls} == {"writer-a", "writer-b"}
     assert len({item[1] for item in write_calls}) == 2
-    assert len(review_calls) == 2
+    assert len(review_calls) == 4
+    assert len({root for _, root in review_calls}) == 4
+    assert not {root for _, root in review_calls} & {root for _, root in write_calls}
+    for candidate in result["candidates"]:
+        review_node = next(
+            node for node in candidate["framework"]["pipeline_execution"]["nodes"]
+            if node["id"] == "review"
+        )
+        assert len(review_node["evidence"]) == 2
+        for evidence in review_node["evidence"]:
+            path = Path(evidence["path"])
+            assert path.is_absolute()
+            data = path.read_bytes()
+            assert evidence["sha256"] == hashlib.sha256(data).hexdigest()
+            assert evidence["bytes"] == len(data)
+            assert json.loads(data)["reviewer"] == evidence["reviewer_profile_id"]
     assert all(item["execution_mode"] == "framework" for item in result["candidates"])
     assert all(
         item["framework"]["write_entrypoint"] == "execute_write_chapter"
@@ -760,6 +809,10 @@ def test_benchmark_store_derives_stable_comparison_groups_without_rewriting_hist
     assert first_group == {
         "key": first_group["key"],
         "basis_complete": True,
+        "task_type": "chapter",
+        "chapter_id": "ch_001",
+        "outline_start_chapter": None,
+        "outline_chapter_count": None,
         "context_hash": "sha256:fixed-context",
         "prompt_version": "writer-v1",
         "rubric_version": "review-v2",
