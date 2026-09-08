@@ -11,7 +11,7 @@ const manifest = JSON.parse(await readFile(join(directory, artifact + '.manifest
 assert.equal(createHash('sha256').update(await readFile(join(directory, artifact))).digest('hex'), manifest.sha256)
 assert.equal(manifest.source.plugin.dirty, false, 'Release source must be clean')
 const reports = await Promise.all(files.filter(file => /^release-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
-const required = ['install', 'repeat-install', 'existing-plugin-coexistence', 'native-dependency-load', 'backend-auth', 'failed-upgrade-preserves-active', 'rollback', 'uninstall', 'retain-data']
+const required = ['install', 'repeat-install', 'existing-plugin-coexistence', 'native-dependency-load', 'native-backend-project-init', 'backend-auth', 'failed-upgrade-preserves-active', 'rollback', 'uninstall', 'retain-data']
 for (const [platform, arch, major] of [['linux', 'x64', 24], ['darwin', 'arm64', 24], ['darwin', 'x64', 24], ['win32', 'x64', 24], ['linux', 'x64', 22], ['linux', 'x64', 26]]) {
   const report = reports.find(r => r.installSource === 'release' && r.platform === platform && r.arch === arch && Number(r.node.match(/^v(\d+)/)?.[1]) === major)
   assert.ok(report, `Missing ${platform}/${arch}/Node ${major}`)

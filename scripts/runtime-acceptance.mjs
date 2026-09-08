@@ -38,8 +38,6 @@ export async function acceptRuntime(installed, home, temporary) {
     } catch (error) {
       console.error('Backend initialization diagnostics:', { elapsed: Date.now() - initializedAt, stdoutPaused: second.child.stdout.isPaused(), files: await readdir(novel, { recursive: true }) })
       if (process.platform === 'win32') {
-        const stacks = spawnSync('py-spy', ['dump', '--pid', String(second.child.pid)], { encoding: 'utf8', timeout: 10_000 })
-        console.error('Backend stacks:', stacks.stdout, stacks.stderr, stacks.error?.message)
         const { diagnoseInitialization } = await import('./windows-runtime-diagnostic.mjs')
         await diagnoseInitialization(second.child.spawnfile, temporary, stopOwnedProcess)
       }

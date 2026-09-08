@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
-import { spawnSync } from 'node:child_process'
 const require = createRequire(new URL('../packages/studio-panel/package.json', import.meta.url))
 
 export async function acceptBrowser(loginUrl, temporary) {
@@ -46,11 +45,6 @@ export async function acceptBrowser(loginUrl, temporary) {
   } catch (error) {
     await page.screenshot({ path: `release-browser-${process.platform}-${process.arch}.png`, fullPage: true }).catch(() => {})
     console.error('Browser errors:', errors)
-    if (process.platform === 'win32') {
-      // CI-only, read-only stack sampling. No process locals or credentials.
-      const stacks = spawnSync('powershell.exe', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'tools.managed_runtime' } | ForEach-Object { & py-spy dump --pid $_.ProcessId }"], { encoding: 'utf8', timeout: 20_000 })
-      console.error('Managed backend diagnostic stacks:', stacks.stdout, stacks.stderr)
-    }
     throw error
   } finally { await browser.close() }
 }
