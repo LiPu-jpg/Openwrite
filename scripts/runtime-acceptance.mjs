@@ -13,7 +13,7 @@ export async function acceptRuntime(installed, home, temporary) {
   const second = new ManagedRuntime(root, artifacts)
   try {
     const [a, b] = await Promise.all([first.ensure(), second.ensure()])
-    const native = spawnSync(first.child.spawnfile, ['-I', '-c', 'import onnxruntime, fastembed; from cryptography.hazmat.backends.openssl.backend import backend; assert "CPUExecutionProvider" in onnxruntime.get_available_providers(); assert backend.openssl_version_text()'], { cwd: root, encoding: 'utf8', timeout: 60_000 })
+    const native = spawnSync(first.child.spawnfile, ['-I', '-X', 'utf8', '-c', 'import sys, onnxruntime, fastembed; from cryptography.hazmat.backends.openssl.backend import backend; assert sys.flags.utf8_mode; print("\\u2713"); assert "CPUExecutionProvider" in onnxruntime.get_available_providers(); assert backend.openssl_version_text()'], { cwd: root, encoding: 'utf8', timeout: 60_000 })
     assert.equal(native.status, 0, `Native dependency import failed: ${native.stderr}`)
     assert.notEqual(a.baseUrl, b.baseUrl, 'instances choose separate free ports')
     assert.equal((await fetch(a.baseUrl + '/api/health')).status, 401)

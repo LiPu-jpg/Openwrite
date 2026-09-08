@@ -235,9 +235,12 @@ export class ManagedRuntime {
   private async start(python: string, manifest: RuntimeManifest, signal: AbortSignal): Promise<BackendConnection> {
     signal.throwIfAborted()
     const token = randomBytes(32).toString('hex')
-    const child = spawn(python, ['-I', '-u', '-m', 'tools.managed_runtime'], {
+    // Windows defaults redirected stdout to its legacy locale encoding. Core
+    // initialization logs and manuscript paths are Unicode; -I ignores Python
+    // environment options, so set UTF-8 explicitly on the interpreter as well.
+    const child = spawn(python, ['-I', '-X', 'utf8', '-u', '-m', 'tools.managed_runtime'], {
       cwd: this.root, detached: process.platform !== 'win32', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PYTHONNOUSERSITE: '1' },
+      env: { ...process.env, PYTHONNOUSERSITE: '1', PYTHONUTF8: '1' },
     })
     this.child = child
     // Drain stderr but never forward model/provider secrets to browser diagnostics.
