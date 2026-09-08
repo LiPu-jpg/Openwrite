@@ -8,6 +8,9 @@ import os
 import re
 from dataclasses import dataclass
 from http import HTTPStatus
+import hmac
+from importlib.metadata import version, PackageNotFoundError
+
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
@@ -232,6 +235,7 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         try:
+            self._require_instance_auth()
             self._resolve_context(allow_uninitialized=True)
             if self._context is not None and not self.app.initialized:
                 allowed_uninitialized = {
@@ -250,7 +254,7 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                         code="WORKSPACE_NOT_INITIALIZED",
                     )
             if parsed.path == "/api/health":
-                self._json({"ok": True})
+                self._json(health_payload())
                 return
             if parsed.path == "/api/workspace/context":
                 manager = self.workspace_manager
@@ -880,10 +884,18 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
             raise StudioError("请求必须是 JSON 对象", code="INVALID_JSON_OBJECT")
         return payload
 
+    def _require_instance_auth(self) -> None:
+        token = getattr(self.server, "instance_token", None)
+        if token and not hmac.compare_digest(
+            self.headers.get("Authorization", ""), f"Bearer {token}"
+        ):
+            raise StudioError("实例认证失败", HTTPStatus.UNAUTHORIZED, code="INSTANCE_AUTH_REQUIRED")
+
     def _require_write_header(self) -> None:
+        self._require_instance_auth()
         if self.headers.get(WRITE_HEADER) != "1":
             raise StudioError(
-                "缺少 Studio 写入凭证",
+                "缺少 Studio 写入协议标记",
                 HTTPStatus.FORBIDDEN,
                 code="WRITE_CREDENTIAL_REQUIRED",
             )
@@ -905,3 +917,12 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
 class OpenWriteStudioServer(ThreadingHTTPServer):
     app: Any
     workspace_manager: Any
+
+
+def health_payload() -> dict[str, Any]:
+    """Versioned, model-free handshake used by managed hosts."""
+    try:
+        core_version = version("openwrite")
+    except PackageNotFoundError:
+        core_version = "5.8.0"
+    return {"ok": True, "core_version": core_version, "contract_version": 1}

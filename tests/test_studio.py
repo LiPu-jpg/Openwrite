@@ -1682,7 +1682,9 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
     opener = build_opener(ProxyHandler({}))
     try:
         health = _read_json(f"{base}/api/health")
-        assert health == {"ok": True}
+        assert health["ok"] is True
+        assert health["contract_version"] == 1
+        assert isinstance(health["core_version"], str)
 
         versions = _read_json(f"{base}/api/manuscript/versions?chapter=ch_001")
         assert versions["data"]["versions"][0]["label"] == "HTTP 历史"
@@ -1766,7 +1768,7 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
             opener.open(request)
         assert denied.value.code == HTTPStatus.FORBIDDEN
         denied_payload = json.loads(denied.value.read())
-        assert denied_payload["error"] == "缺少 Studio 写入凭证"
+        assert denied_payload["error"] == "缺少 Studio 写入协议标记"
         assert denied_payload["code"] == "WRITE_CREDENTIAL_REQUIRED"
         assert denied_payload["request_id"].startswith("req_")
         assert denied.value.headers["X-Request-ID"] == denied_payload["request_id"]

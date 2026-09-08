@@ -5115,6 +5115,7 @@ class StudioApplication:
             cancelled=context.cancellation_requested,
             report=context.report_progress,
             task_id=context.task_id,
+            partial=context.persist_progress,
         )
 
     def _task_revision_selection(
@@ -6610,7 +6611,10 @@ def create_server(
     model_profile_store: ModelProfileStore | None = None,
     reference_library_root: Path | None = None,
     debug: bool = False,
+    instance_token: str | None = None,
 ) -> ModularOpenWriteStudioServer:
+    if instance_token is not None and (host != "127.0.0.1" or len(instance_token) < 32):
+        raise ValueError("Managed server requires loopback and a strong instance token")
     if not STATIC_ROOT.is_dir():
         raise StudioError(f"Studio 静态资源缺失: {STATIC_ROOT}")
     missing_assets = missing_required_static_assets()
@@ -6635,6 +6639,7 @@ def create_server(
         debug=debug,
     )
     app_kwargs = {
+        "project_registry": project_registry,
         "writer_executor": writer_executor,
         "review_executor": review_executor,
         "chat_executor": chat_executor,
@@ -6648,6 +6653,7 @@ def create_server(
     manager.adopt_default_app(app)
     handler = partial(ModularStudioRequestHandler, directory=str(STATIC_ROOT))
     server = ModularOpenWriteStudioServer((host, port), handler)
+    server.instance_token = instance_token
     server.app = app
     server.workspace_manager = manager
     return server

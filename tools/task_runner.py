@@ -262,6 +262,10 @@ class PersistentTaskRunner:
             context.checkpoint()
             payload = self.store.materialize_input(task)
             result = handler(payload, context)
+            if task.get("type") == "model_benchmark" and isinstance(result, dict) and result.get("status") == "cancelled":
+                self.store.transition(task_id, status="cancelled", phase="complete",
+                                      updates={"result": result, "error": None}, event="task_cancelled")
+                return
             context.checkpoint()
             self.store.transition(
                 task_id,

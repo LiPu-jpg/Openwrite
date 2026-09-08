@@ -570,6 +570,11 @@ class LLMClient:
         return extra
 
     def _call(self, operation: Callable[..., Any], params: dict[str, Any]) -> Any:
+        from tools.llm.cancellation import cancellation_bound, check_model_cancellation
+
+        check_model_cancellation()
+        if cancellation_bound():
+            params = {**params, "max_retries": 0}
         try:
             return operation(**params)
         except Exception as exc:
