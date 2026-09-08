@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
 import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
+import { acceptRuntime } from './runtime-acceptance.mjs'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const version = JSON.parse(await readFile(join(root, 'package.json'))).version
 const artifact = resolve(process.argv.find(arg => arg.endsWith('.tgz')) ?? join(root, `dsh-openwrite-${version}.tgz`))
@@ -92,6 +93,7 @@ try {
   }
   assert.equal(status.phase, 'ready')
   report.checks.push('authenticated-runtime', 'isolated-python', 'core-handshake', 'editor-assets')
+  report.checks.push(...await acceptRuntime(join(env.DSH_HOME, 'profiles/web/node_modules/dsh-openwrite'), env.DSH_HOME, temporary))
   console.log(JSON.stringify({ platform: process.platform, arch: process.arch, node: process.version, artifact, installed: true, backend: 'ready', editorAssets: true, modelCalls: 0 }))
   if (process.argv.includes('--keep')) {
     await writeFile(join(root, '.tmp-release-smoke.json'), JSON.stringify({ temporary, base, loginUrl, pid: host.pid, artifact }), { mode: 0o600 })
