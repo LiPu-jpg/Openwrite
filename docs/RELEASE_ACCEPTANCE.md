@@ -14,11 +14,11 @@
 
 ## 原生平台与发布门禁
 
-`Release artifact validation` 工作流只构建一次包，Node 24 的 Linux x64、Windows x64、macOS arm64/x64，以及 Linux Node 22.19 / 26 六个原生任务下载同一个产物。Windows 不使用 WSL。真实模型检查单列，本轮尚未执行，不计为通过。
+`Release artifact validation` 工作流只构建一次包，Node 24 的 Linux x64、Windows x64、macOS arm64/x64，以及 Linux Node 22.19 / 26 六个原生任务下载同一个产物。Windows 不使用 WSL。真实模型检查单列：本轮人工验证了 DeepSeek 官方的只读 novel_status 调用；真实正文生成和多模型测试尚未执行，不计为通过。完整范围及用量见 Release 附件 manual-functional-check.json。
 
 安装任务覆盖标准与重复安装、其他插件共存、后端认证、隔离 Python、Core 契约、编辑器静态资源、原生依赖加载、动态端口、多实例、崩溃恢复、进程清理、失败升级保留活动环境、回退与卸载保留数据。浏览器实际完成首次引导、打开 OpenWrite、创建测试作品和切换工作台。GitHub 源码安装另起任务，从不带 `.git` 的源码压缩包自行构建。
 
-构建门禁另外执行权限和计划模式、90 工具预设隔离、安装锁与下载取消、旧安装迁移备份、官方预设并发与自定义内容保护、前端组件和 DoG 回归。Core 回归使用模型替身验证生成、评审、取消、部分结果与费用；真实模型调用数为 0。
+构建门禁另外执行权限和计划模式、90 工具预设隔离、安装锁与下载取消、旧安装迁移备份、官方预设并发与自定义内容保护、前端组件和 DoG 回归。Core 回归使用模型替身验证生成、评审、取消、部分结果与费用；这些自动化检查的真实模型调用数为 0。
 
 macOS arm64 依赖要求至少 macOS 14，Intel 至少 macOS 13；运行器之外的系统小版本未计为通过。Intel 使用官方 ONNX Runtime 1.23.2 wheel，其他平台使用 1.29.0。cryptography 50.0.1 的 Intel wheel 从同版本源码原生构建，来源、编译工具链、OpenSSL 静态链接检查和校验值见包内清单。
 
