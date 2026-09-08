@@ -3,7 +3,7 @@ import {
   BookOpen, ChevronLeft, ChevronRight, History, PanelLeft, PanelLeftClose, PanelLeftOpen, PanelRight,
   PanelRightClose, PanelRightOpen, RefreshCw, Save, Search, ShieldAlert, X,
 } from 'lucide-react'
-import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText } from './MarkdownText.tsx'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { StudioApiError, type StudioApiInjected, type StudioContext } from './api.ts'

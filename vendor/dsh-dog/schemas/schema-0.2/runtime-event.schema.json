@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dsh-external/dsh-dog/schemas/schema-0.2/runtime-event.schema.json",
+  "title": "DoG v0.2 runtime event (runtime-events/<run-id>-<goal-id>.jsonl)",
+  "description": "Append-only bounded diagnostic activity; one JSON object per line. Never verifier evidence. Machine-readable counterpart of SPEC §8 + §11.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runId",
+    "goalId",
+    "phase",
+    "state",
+    "at"
+  ],
+  "properties": {
+    "runId": {
+      "$ref": "#/$defs/uuid"
+    },
+    "goalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase": {
+      "description": "Operational stage of the goal in this run.",
+      "enum": [
+        "goal_started",
+        "dependency_blocked",
+        "grounding_extracted",
+        "workspace_allocated",
+        "verifier_started",
+        "verifier_passed",
+        "verifier_failed",
+        "verifier_inconclusive",
+        "composite_evaluated",
+        "result_inherited",
+        "structured_error",
+        "goal_settled",
+        "run_warning",
+        "verifier_released",
+        "verifier_bind_failed"
+      ]
+    },
+    "state": {
+      "description": "Goal state at the moment of the event.",
+      "enum": [
+        "pending",
+        "running",
+        "success",
+        "failure",
+        "blocked",
+        "needs_human",
+        "cancelled",
+        "invalidated",
+        "partial",
+        "inherited"
+      ]
+    },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "programmatic",
+            "agentic"
+          ]
+        }
+      }
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reason": {
+      "type": "string"
+    },
+    "errorCategory": {
+      "type": "string"
+    },
+    "gmDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{64}|sha256:[0-9a-f]{64})$"
+    }
+  }
+}

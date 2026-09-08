@@ -29,13 +29,16 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/schemastery": "3.18.2",
+    "fflate": "0.8.2",
+    "proper-lockfile": "4.1.2",
+    "tar": "7.5.7"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-workspace": "0.1.0-rc.7"
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-workspace": "0.1.2-rc.1"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-host-webserver": {
@@ -46,35 +49,19 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-workspace": "0.1.0-rc.7",
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-client-connection": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-plan-mode": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-sandbox-policy": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-workspace": "0.1.2-rc.1",
     "@types/node": "^24.0.0",
+    "@types/proper-lockfile": "4.1.4",
     "typescript": "^5.9.0"
   },
   "engines": {
     "node": ">=22.19.0"
   },
-  "overrides": {
-    "@deepseek-ai/dsh-agent": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-attachment": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-brand": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-code-runtime": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-invariants": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-llm": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-scope": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-session": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-session-persistence": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-storage": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-timeout": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-user-approval": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-workspace": "0.1.0-rc.7",
-    "@deepseek-ai/cordis": "4.0.1"
-  }
+  "license": "Apache-2.0"
 }

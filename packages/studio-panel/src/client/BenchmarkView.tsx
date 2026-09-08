@@ -160,6 +160,7 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
   const [reviewOutcomes, setReviewOutcomes] = useState<Record<string, { status: string; incomplete: boolean }>>({})
   const [activeTask, setActiveTask] = useState('')
   const [taskStatus, setTaskStatus] = useState('')
+  const [cancelling, setCancelling] = useState(false)
   const [taskPhase, setTaskPhase] = useState('')
   const [taskProgress, setTaskProgress] = useState<TaskProgressDto | null>(null)
   const [taskFailure, setTaskFailure] = useState('')
@@ -257,6 +258,7 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
     if (activeTask === '') return
     let active = true
     let polling = false
+    let lastPartial = ''
     const poll = async () => {
       if (polling) return
       polling = true
@@ -265,7 +267,16 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
         const task = record(response['task'])
         if (!active) return
         const status = text(task['status'])
-        setTaskStatus(status)
+        const cancelRequested = task['cancel_requested'] === true && status === 'running'
+        setCancelling(cancelRequested)
+        setTaskStatus(cancelRequested ? 'cancelling' : status)
+        const partialRef = parseResultRef(task['result_ref'])
+        const progressKey = JSON.stringify([task['progress'], cancelRequested, partialRef])
+        if (status === 'running' && partialRef?.type === 'benchmark_run' && lastPartial !== progressKey) {
+          lastPartial = progressKey
+          await openRun(partialRef.id)
+          if (!active) return
+        }
         setTaskPhase(text(task['phase']))
         setTaskProgress(parseTaskProgress(task['progress']))
         if (['completed', 'failed', 'cancelled', 'interrupted'].includes(status)) {
@@ -479,6 +490,7 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
       case 'finished': return t('benchmark.pipelineFinished')
       case 'failed': return t('tasks.status.failed')
       case 'partial': return t('review.status.partial')
+      case 'cancelling': return '取消中'
       case 'cancelled': return t('tasks.status.cancelled')
       case 'interrupted': return t('tasks.status.interrupted')
       case 'skipped': return t('benchmark.status.skipped')
@@ -615,6 +627,8 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
           <div className={css.workload}>
             <strong>{t('benchmark.workload')}</strong>
             <span>{plannedCandidates} {t('benchmark.plannedCandidates')} <span aria-hidden="true">·</span> {plannedEvaluations} {t('benchmark.plannedEvaluations')}</span>
+            <small>每次请求的输出 token 上限：{profiles.filter(profile => writers.has(profile.id) || reviewers.has(profile.id)).map(profile => `${profile.label || profile.id} ${profile.max_output_tokens || '未配置'}`).join(' · ') || '请先选择模型'}</small>
+            <small>评审数为上限；实际调用取决于候选完成情况。费用由服务商返回，未返回时标记为未知。</small>
             {!loading && (writers.size === 0 || reviewers.size === 0) && <small>{t('benchmark.chooseModels')}</small>}
           </div>
           <button type="submit" className={css.primaryButton} disabled={loading || !validConfig || writers.size === 0 || reviewers.size === 0 || busy}>
@@ -626,6 +640,11 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
       {taskStatus !== '' && <div className={css.taskProgress} data-status={taskStatus} role="status" aria-live="polite">
         {activeTask !== '' && <LoaderCircle size={16} className={css.spinning} aria-hidden="true" />}
         <strong>{t('benchmark.task')}</strong><span>{taskMeta}</span>
+        {activeTask !== '' && <button type="button" disabled={cancelling} onClick={() => {
+          setCancelling(true)
+          void postStudioApi(`/tasks/${encodeURIComponent(activeTask)}/cancel`, {}).catch(cause => { setCancelling(false); setError(String(cause)) })
+        }}>{cancelling ? '取消中…' : '取消测试'}</button>}
+        {cancelling && <p>已停止后续调度。已发送的请求仍可能产生费用；返回后会保存结果和实际用量。</p>}
         {taskFailure !== '' && <p className={css.taskFailure} role="alert">{taskFailure}</p>}
         {taskProgress !== null && taskProgress.total_units > 0 && <progress max={taskProgress.total_units} value={taskProgress.completed_units} aria-label={t('benchmark.task')} />}
       </div>}
@@ -666,6 +685,7 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
                 : text(selected['chapter_id'])}</span></h2><small>{text(selected['run_id'])}</small></div>
               <span data-testid="benchmark-selected-mode">{modeLabel(selectedMode)} <span className={css.benchmarkStatus} data-status={selectedStatus}>{statusLabel(selectedStatus)}</span></span>
             </div>
+            {selectedStatus === 'cancelling' && <div role="status" className={css.reviewWarning}>取消中：还有 {number(selected['in_flight'])} 个请求在途。以下为已保存的部分结果，费用尚未结算完整。</div>}
             {factsPending && <div className={css.reviewWarning} role="note" aria-label={t('benchmark.factsPendingTitle')}>
               <strong>{t('benchmark.factsPendingTitle')}</strong><p>{t('benchmark.factsPendingHint')}</p>
             </div>}

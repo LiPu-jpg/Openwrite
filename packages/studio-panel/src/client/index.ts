@@ -1,3 +1,11 @@
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import { watchWritingScope } from './writing-scope.ts'
+import { LaunchOpenWrite } from './LaunchOpenWrite.tsx'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 /** Browser half: three native writing workbenches plus dsh-native chrome/tool views. */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -14,7 +22,7 @@ import { NovelReviewCard } from './ReviewCard.tsx'
 import { novelMutationDefinition, TurnMutationSummaryView } from './TurnMutationSummary.tsx'
 import type { StudioPanelInjected } from './workspace-context.ts'
 
-export const inject = ['slots', 'locale', 'conversationEvents', 'workspaces', 'sessions']
+export const inject = ['slots', 'locale', 'uiConversation', 'workspaces', 'sessions', 'uiWorkspace', 'remote', 'remote.agentPresets']
 
 const FAMILY_TOOLS: Readonly<Record<ToolFamily, readonly string[]>> = {
   status: ['novel_status', 'novel_focus', 'novel_writing_targets', 'novel_continuity', 'novel_diagnostics'],
@@ -41,40 +49,84 @@ const FAMILY_CARDS: Readonly<Record<ToolFamily, ReturnType<typeof createDomainTo
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'studio-panel: dictionaries')
   const t = ctx.locale.bind(NS)
-  ctx.effect(() => ctx.conversationEvents.register(novelMutationDefinition), 'studio-panel: novel mutation turn data')
+  ctx.effect(() => ctx.uiConversation.events.register(novelMutationDefinition), 'studio-panel: novel mutation turn data')
+
+  const workspaceServices: StudioPanelInjected['workspaces'] = {
+    list: ctx.workspaces.list,
+    create: input => ctx.workspaces.create(input),
+    rename: (id, title) => ctx.workspaces.rename(id, title),
+    delete: id => ctx.workspaces.delete(id),
+    insertBefore: (id, before) => ctx.workspaces.insertBefore(id, before),
+    archiveSession: id => ctx.workspaces.archiveSession(id),
+    insertSessionBefore: (id, session, before) => ctx.workspaces.insertSessionBefore(id, session, before),
+    pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
+    connectWorkspace: id => ctx.uiWorkspace.connectWorkspace(id),
+  }
+
+  // A workbench is visible activity even before the first chat turn. Its
+  // snapshot is independent of generated messages and preserves an empty log.
+  ctx.effect(() => ctx.uiConversation.views.register({
+    target: 'openwrite.creation',
+    create: () => ({ empty: true, replace: () => true, apply: () => true }),
+    isActive: () => true,
+  }), 'openwrite: empty-session workbench')
 
   // Studio API trio plus the dsh workspace/session services the new-work flow drives.
   const studioPanel: StudioPanelInjected = {
     fetchStudioApi, postStudioApi, putStudioApi,
-    workspaces: ctx.workspaces, sessions: ctx.sessions,
+    workspaces: workspaceServices, sessions: ctx.sessions,
   }
 
-  ctx.slots.inject('conversation.view', function* () {
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action', id: 'openwrite.launch', order: 10,
+    inject: () => ({ openWorkspace: async (path?: string) => {
+      const selected = path?.trim() || await ctx.uiWorkspace.pickDirectory()
+      if (selected === null) return false
+      const workspace = await ctx.workspaces.create({ path: selected })
+      const sessionId = await ctx.sessions.create({ workspaceId: workspace.workspaceId })
+      const result = await ctx.remote.agentPresets.select(sessionId, 'openwrite-0-2-0')
+      if (!result.ok) throw new Error(result.error.message)
+      ctx.sessions.open(sessionId)
+      // Activate a UI target to leave the blank Hero without manufacturing a user turn.
+      ctx.uiConversation.binding(sessionId).activate('openwrite.creation')
+      return true
+    } }),
+  }, LaunchOpenWrite))
+
+  const writingSlots = (name: Parameters<typeof ctx.slots.inject>[0], mount: () => (() => void) | Generator<() => void>) => {
+    ctx.slots.inject(name, () => watchWritingScope(ctx.sessions.list, () => {
+      const result = mount()
+      if (typeof result === 'function') return result
+      const disposers = [...result]
+      return () => { for (const dispose of disposers.reverse()) dispose() }
+    }))
+  }
+  writingSlots('conversation.view' , function* () {
     yield ctx.slots.register({
-      name: 'conversation.view', id: 'creation', order: 22, locale: NS,
+      name: 'conversation.view', id: 'openwrite.creation', order: 22, locale: NS,
       label: () => t('view.creation'), inject: (): StudioPanelInjected => studioPanel,
     }, CreationView)
     yield ctx.slots.register({
-      name: 'conversation.view', id: 'library', order: 23, locale: NS,
+      name: 'conversation.view', id: 'openwrite.library', order: 23, locale: NS,
       label: () => t('view.library'), inject: (): StudioPanelInjected => studioPanel,
     }, LibraryView)
     yield ctx.slots.register({
-      name: 'conversation.view', id: 'tasks', order: 24, locale: NS,
+      name: 'conversation.view', id: 'openwrite.tasks', order: 24, locale: NS,
       label: () => t('view.operations'), inject: (): StudioPanelInjected => studioPanel,
     }, OperationsView)
   })
 
-  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+  writingSlots('conversation.session.header.actions', () => ctx.slots.register({
     name: 'conversation.session.header.actions', id: 'novel-project-status', order: -20, locale: NS,
   }, HeaderProjectStatus))
-  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+  writingSlots('conversation.session.header.utilities', () => ctx.slots.register({
     name: 'conversation.session.header.utilities', id: 'novel-utilities', order: 20, locale: NS,
     inject: () => ({ postStudioApi }),
   }, HeaderUtilities))
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+  writingSlots('conversation.input.left', () => ctx.slots.register({
     name: 'conversation.input.left', id: 'novel-workspace-context', order: 20, locale: NS,
     inject: (): Pick<StudioPanelInjected, 'postStudioApi' | 'workspaces' | 'sessions'> => ({
-      postStudioApi, workspaces: ctx.workspaces, sessions: ctx.sessions,
+      postStudioApi, workspaces: workspaceServices, sessions: ctx.sessions,
     }),
   }, WorkspaceContextChip))
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({

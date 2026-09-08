@@ -15,3 +15,12 @@ packages/studio-panel/.pw-browsers/
 .pw-browsers/
 packages/studio-panel/test-results/
 packages/studio-panel/playwright-report/
+
+*.tgz
+.tmp-*.json
+
+release-report-*.json
+*.tgz.manifest.json
+
+/release/source.json
+/release/licenses/

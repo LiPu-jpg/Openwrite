@@ -1,0 +1,136 @@
+{
+  "schemaVersion": "0.9",
+  "id": "team-sync-report",
+  "root": "root",
+  "nodes": {
+    "root": {
+      "kind": "composite",
+      "title": "组员视角:让队友准确理解我的工作与接口",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "g-work" },
+          { "op": "ref", "id": "g-collab" },
+          { "op": "ref", "id": "g-next" }
+        ]
+      },
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "把这份汇报整体读一遍:一个只听过这次汇报的队友,会后能否准确复述三件事——我的成果与限制、我的结果如何影响他、他需要我怎么配合?若他只能记住'他做了很多',即为没有协作价值的汇报。给结论与证据。"
+      }
+    },
+    "g-work": {
+      "kind": "composite",
+      "title": "我的工作",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "w-true" },
+          { "op": "ref", "id": "w-boundary" }
+        ]
+      }
+    },
+    "w-true": {
+      "kind": "leaf",
+      "title": "成果真实可查验",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查我的模块结果是否有据可查(数字/图表/样例可以指向来源),而非自我评价或模糊'变好了';夸大或无法回验即 fail。给证据。"
+      }
+    },
+    "w-boundary": {
+      "kind": "leaf",
+      "title": "成果的边界讲清",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "判断汇报是否讲清了我这部分的真实边界:哪里成熟、哪里勉强、离它的目标还差什么。只报喜不报忧即 fail。给证据。"
+      }
+    },
+    "g-collab": {
+      "kind": "composite",
+      "title": "我与他人的接口",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "c-affect" },
+          { "op": "ref", "id": "c-open" }
+        ]
+      }
+    },
+    "c-affect": {
+      "kind": "leaf",
+      "title": "我的改动对他人的影响讲明",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查:我的成果若改变了接口/格式/路径/参数,是否说明了影响谁、对方需要适配什么;若未改变也一句带过'无变更'。不知影响何人即 fail。给证据。"
+      }
+    },
+    "c-open": {
+      "kind": "leaf",
+      "title": "我在等什么/谁在等我,讲明",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查汇报是否说清:我继续推进需要谁先给什么、谁的结果在等我、哪些对齐点还没有结论(不需要列所有细节,但要指出'哪里是打开的')。只字不提即 fail。给证据。"
+      }
+    },
+    "g-next": {
+      "kind": "composite",
+      "title": "下一步",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "n-plan" },
+          { "op": "ref", "id": "n-ask" }
+        ]
+      }
+    },
+    "n-plan": {
+      "kind": "leaf",
+      "title": "我的下一步有截止与完成判据",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查我下一步的工作是否给了预计完成时间与'做到什么算完成'(而不是'继续推进')。缺失即 fail。给证据。"
+      }
+    },
+    "n-ask": {
+      "kind": "leaf",
+      "title": "需要的配合与待定决策讲明",
+      "constraint": "hard",
+      "target": "report-outline.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查是否讲清:需要谁配合什么(资源/输入/确认)、哪些点需要今天定而哪些可以会后;需要拍板的项是否给了我的建议与需要谁定。只抛问题即 fail。给证据。"
+      }
+    }
+  },
+  "contains": [
+    { "parent": "root", "child": "g-work", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "g-collab", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "g-next", "required": true, "failure": "fatal" },
+    { "parent": "g-work", "child": "w-true", "required": true, "failure": "fatal" },
+    { "parent": "g-work", "child": "w-boundary", "required": true, "failure": "fatal" },
+    { "parent": "g-collab", "child": "c-affect", "required": true, "failure": "fatal" },
+    { "parent": "g-collab", "child": "c-open", "required": true, "failure": "fatal" },
+    { "parent": "g-next", "child": "n-plan", "required": true, "failure": "fatal" },
+    { "parent": "g-next", "child": "n-ask", "required": true, "failure": "fatal" }
+  ],
+  "dependsOn": []
+}

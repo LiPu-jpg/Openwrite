@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dsh-external/dsh-dog/schemas/schema-0.9/verification.schema.json",
+  "title": "DoG v0.9 trusted verification record",
+  "description": "One judgment outcome. Machine-readable counterpart of SPEC §6 + §8.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "graphId", "graphDigest", "goalId", "judgment", "passed", "at"],
+  "properties": {
+    "schemaVersion": { "const": "0.1" },
+    "runId": { "$ref": "#/$defs/uuid" },
+    "graphId": { "type": "string", "minLength": 1 },
+    "graphDigest": { "$ref": "#/$defs/sha256" },
+    "goalId": { "type": "string", "minLength": 1 },
+    "judgment": {
+      "description": "Identity of the judgment source (script+digest, or instruction hash).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["programmatic", "agentic"] },
+        "script": { "type": "string" },
+        "scriptDigest": { "type": "string" },
+        "instructionHash": { "type": "string" }
+      }
+    },
+    "gmDigest": { "type": "string" },
+    "passed": { "type": ["boolean", "null"] },
+    "evidence": {
+      "description": "Free-form JSON evidence; shape is decided by the judge.",
+      "type": ["object", "array", "string", "number", "boolean", "null"]
+    },
+    "at": { "$ref": "#/$defs/iso8601" }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "iso8601": { "type": "string", "format": "date-time" }
+  }
+}

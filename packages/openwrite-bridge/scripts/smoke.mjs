@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import * as mod from '../lib/index.js'
+import * as presetTools from '../lib/preset-tools.js'
 import { StudioClient } from '../lib/client.js'
 import { materializeChapterDelivery } from '../lib/dog-delivery.js'
 import {
@@ -15,7 +16,7 @@ import {
 } from '../lib/dog-review.js'
 
 assert.equal(mod.name, '@dsh-novel/openwrite-bridge', 'name export')
-assert.deepEqual(mod.inject, ['tools'], 'inject export')
+assert.deepEqual(mod.inject, [], 'inject export')
 assert.equal(typeof mod.apply, 'function', 'apply export')
 assert.ok(mod.Config, 'Config schema export')
 
@@ -34,6 +35,7 @@ const routes = []
 class ToolsService extends Service {
   constructor(ctx) { super(ctx, 'tools') }
   register(tool) { registered.push(tool) }
+  guard() { return () => {} }
 }
 class WebServerService extends Service {
   constructor(ctx) { super(ctx, 'webServer') }
@@ -49,10 +51,13 @@ class WorkspaceRegistryService extends Service {
   }
 }
 const root = new Context()
+  root.provide('connection', { requestRejection: () => undefined })
 await root.plugin(ToolsService)
 await root.plugin(WebServerService)
 await root.plugin(WorkspaceRegistryService)
 await root.plugin(mod, resolved)
+assert.equal(registered.length, 0, 'host contributes no novel tools')
+await root.plugin(presetTools)
 const expected = [
   // reads, then writes — the registration order in src/tools.ts
   'novel_embedding_profiles', 'novel_embedding_profile_save', 'novel_embedding_profile_select', 'novel_embedding_profile_delete',
@@ -361,6 +366,7 @@ assert.equal(exportPreflightRequests[0].init.method, 'GET')
 }
 
 assert.deepEqual(routes.map(route => [route.kind, route.path]), [
+  ['exact', '/studio-panel/runtime'],
   ['exact', '/studio-panel/config.json'],
   ['prefix', '/studio-panel/api'],
   ['exact', '/studio-panel/invalidation.json'],
@@ -848,6 +854,7 @@ assert.match(eventResponseA.chunks.join(''), /event: invalidate/)
     register(route) { routes2.push(route); return () => {} }
   }
   const root2 = new Context()
+  root2.provide('connection', { requestRejection: () => undefined })
   await root2.plugin(ToolsService2)
   await root2.plugin(WebServerService2)
   await root2.plugin(mod, resolved)

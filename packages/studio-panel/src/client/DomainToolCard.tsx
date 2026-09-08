@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { BookMarked, BookOpen, Boxes, Check, ChevronDown, CircleAlert, Clock3, FilePenLine, ListTodo, Search } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { ToolResultNode } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ToolResultNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { workbenchStore, type ResourceKey } from './WorkbenchStore.ts'

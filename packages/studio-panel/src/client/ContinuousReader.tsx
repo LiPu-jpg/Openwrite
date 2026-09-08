@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText } from './MarkdownText.tsx'
 import type { StudioApiInjected } from './api.ts'
 import { parseReadingPacket } from './dto.ts'
 import type { ChapterSummary } from './WorkbenchStore.ts'
