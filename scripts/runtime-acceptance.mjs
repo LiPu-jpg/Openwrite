@@ -40,6 +40,8 @@ export async function acceptRuntime(installed, home, temporary) {
       if (process.platform === 'win32') {
         const stacks = spawnSync('py-spy', ['dump', '--pid', String(second.child.pid)], { encoding: 'utf8', timeout: 10_000 })
         console.error('Backend stacks:', stacks.stdout, stacks.stderr, stacks.error?.message)
+        const { diagnoseInitialization } = await import('./windows-runtime-diagnostic.mjs')
+        await diagnoseInitialization(second.child.spawnfile, temporary, stopOwnedProcess)
       }
       throw error
     }
