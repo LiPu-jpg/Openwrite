@@ -7,13 +7,13 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { load } from 'js-yaml'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const packageDirs = ['.', 'packages/openwrite-bridge', 'packages/studio-panel']
+const packageDirs = ['.', 'packages/openwrite-bridge', 'packages/studio-panel', 'vendor/dsh-dog']
 const isDsh = name => /^@deepseek-ai\/dsh(?:-|$)/.test(name)
 const lockName = path => path.match(/(?:^|\/)node_modules\/(@deepseek-ai\/[^/]+)$/)?.[1]
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'))
 const exactVersion = value => /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(value ?? '')
 
-export function auditVersions(manifest, lock, baseline) {
+export function auditVersions(manifest, lock, baseline, graph = {}) {
   const errors = []
   if (!exactVersion(baseline)) errors.push('DSH baseline must be an exact version')
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
@@ -21,7 +21,7 @@ export function auditVersions(manifest, lock, baseline) {
     const locked = lock.packages?.['']?.[field] ?? {}
     for (const name of new Set([...Object.keys(declared), ...Object.keys(locked)])) {
       if (declared[name] !== locked[name]) errors.push(`lock metadata differs: ${field}.${name}`)
-      if (isDsh(name) && declared[name] !== undefined && declared[name] !== baseline) {
+      if (isDsh(name) && declared[name] !== undefined && declared[name] !== (graph[name] ?? baseline)) {
         errors.push(`unpinned DSH dependency: ${name}=${declared[name]}`)
       }
       if (isDsh(name) && declared[name] !== undefined
@@ -33,14 +33,11 @@ export function auditVersions(manifest, lock, baseline) {
   }
   for (const [path, entry] of Object.entries(lock.packages ?? {})) {
     const name = lockName(path)
-    if (name && isDsh(name) && entry.version !== baseline) {
+    if (name && isDsh(name) && entry.version !== (graph[name] ?? baseline)) {
       errors.push(`DSH lock drift: ${name}=${entry.version}, expected ${baseline}`)
     }
-    if (name && isDsh(name) && manifest.overrides?.[name] !== baseline) {
-      errors.push(`missing DSH override: ${name}`)
-    }
-    if (name === '@deepseek-ai/cordis' && entry.version !== '4.0.1') {
-      errors.push(`Cordis lock drift: ${entry.version}, expected 4.0.1`)
+    if (name === '@deepseek-ai/cordis' && entry.version !== (graph[name] ?? '4.0.2')) {
+      errors.push(`Cordis lock drift: ${entry.version}, expected ${graph[name] ?? '4.0.2'}`)
     }
   }
   if (!lock.packages?.['']) errors.push('missing lockfile root metadata')
@@ -91,16 +88,13 @@ async function checkProfiles(report) {
     const dir = join(home, 'profiles', profile)
     await report(`profile ${profile}`, async () => {
       const manifest = await readJson(join(dir, 'package.json'))
-      const names = ['@dsh-novel/openwrite-bridge', ...(profile === 'web' ? ['@dsh-novel/studio-panel'] : [])]
-      for (const name of names) {
-        if (!manifest.dependencies?.[name]) throw new Error(`missing dependency ${name}; run scripts/install.sh`)
-        if (manifest.dsh?.profile?.bundles?.filter(n => n === name).length !== 1) {
-          throw new Error(`missing/duplicate bundle ${name}; rerun scripts/install.sh`)
-        }
-        const installed = await realpath(join(dir, 'node_modules', name))
-        const source = await realpath(join(root, 'packages', name.split('/')[1]))
-        if (installed !== source) throw new Error(`${name} is not linked to this checkout; rerun scripts/install.sh`)
-      }
+      const name = 'dsh-openwrite'
+      if (manifest.dsh?.profile?.bundles?.filter(n => n === name).length !== 1) throw new Error('standard bundle not installed exactly once')
+      const installed = await realpath(join(dir, 'node_modules', name))
+      const pkg = await readJson(join(installed, 'package.json'))
+      if (pkg.name !== name || !pkg.dsh?.bundle?.patch) throw new Error('invalid installed bundle')
+      await readFile(join(installed, 'release/runtime-manifest.json'))
+      if (manifest.dsh.profile.bundles.some(n => ['@dsh-novel/openwrite-bridge', '@dsh-novel/studio-panel', '@dsh-external/dsh-dog'].includes(n))) throw new Error('legacy bundle still mounted; run openwrite-maintenance migrate with dsh stopped')
     })
   }
 }
@@ -113,8 +107,9 @@ export async function doctor({ profiles = false } = {}) {
   }
   const assertClean = errors => { if (errors.length) throw new Error(errors.slice(0, 8).join('; ') + (errors.length > 8 ? `; +${errors.length - 8} more` : '')) }
   const rootManifest = await readJson(join(root, 'package.json'))
+  const compatibility = await readJson(join(root, 'release/sdk-compatibility.json'))
   const baseline = rootManifest.devDependencies?.['@deepseek-ai/dsh']
-  console.log(`dsh-Openwrite doctor — DSH ${baseline}, Cordis 4.0.1 (offline)`)
+  console.log(`dsh-Openwrite doctor — DSH ${baseline}, Cordis 4.0.2 (offline)`)
   await report('Node >= 22.19.0', () => {
     const [major, minor] = process.versions.node.split('.').map(Number)
     if (major < 22 || (major === 22 && minor < 19)) throw new Error(`found ${process.versions.node}`)
@@ -123,7 +118,7 @@ export async function doctor({ profiles = false } = {}) {
     const dir = resolve(root, relative)
     const manifest = await readJson(join(dir, 'package.json'))
     const lock = await readJson(join(dir, 'package-lock.json'))
-    await report(`${relative}: manifest + lock compatibility`, () => assertClean(auditVersions(manifest, lock, baseline)))
+    await report(`${relative}: manifest + lock compatibility`, () => assertClean(auditVersions(manifest, lock, baseline, compatibility.packages)))
     await report(`${relative}: installed SDK matches lock`, async () => {
       const errors = []
       for (const [path, entry] of Object.entries(lock.packages ?? {})) {
@@ -136,7 +131,7 @@ export async function doctor({ profiles = false } = {}) {
       }
       assertClean(errors)
     })
-    if (relative === '.') continue
+    if (relative === '.' || relative === 'vendor/dsh-dog') continue
     await report(`${manifest.name}: packed entries + patch + assets`, async () => {
       const packed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'],
         { cwd: dir, encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }))

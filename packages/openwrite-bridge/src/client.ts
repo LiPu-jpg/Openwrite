@@ -1,8 +1,9 @@
+import type { BackendConnection } from './managed-runtime.js'
 /**
  * Shared HTTP client for the OpenWrite Studio action surface.
  *
  * Contract (verified against OpenWrite `tools/studio_http.py` and
- * `tools/studio_contracts.py`): GETs are unauthenticated; every POST/PUT must
+ * `tools/studio_contracts.py`): managed requests carry instance authentication; every POST/PUT must
  * carry `X-OpenWrite-Studio: 1` or the server answers 403. Error responses are
  * JSON `{error, code, recoverable, details, request_id}` with a non-2xx
  * status; some routes wrap success in `{ok: true, data, ...}` which this
@@ -17,6 +18,15 @@ export type JsonObject = { [key: string]: JsonValue }
 
 /** Header OpenWrite requires on every write request (POST/PUT). */
 const WRITE_HEADER = 'X-OpenWrite-Studio'
+
+/** HTTP header values are bytes, so Unicode paths need explicit wire encoding.
+ * Plain ASCII retains the old contract, including literal percent characters. */
+export function workspaceRootHeaders(root: string, lowercase = false): Record<string, string> {
+  const name = lowercase ? 'x-openwrite-workspace-root' : 'X-OpenWrite-Workspace-Root'
+  return /[^\x20-\x7e]/.test(root)
+    ? { [name]: encodeURIComponent(root), [name + (lowercase ? '-encoding' : '-Encoding')]: 'uri' }
+    : { [name]: root }
+}
 
 /**
  * Request-scoped Workspace identity, per docs/WORKSPACE_CONTEXT_CONTRACT.md §3.
@@ -49,6 +59,7 @@ export class StudioError extends Error {
 }
 
 export interface StudioClientOptions {
+  connect?: () => Promise<BackendConnection>
   /** Studio base URL, e.g. `http://127.0.0.1:4567`. */
   baseUrl: string
   /** Per-request timeout in milliseconds (backstop; the dsh timeout policy owns the budget). */
@@ -103,6 +114,7 @@ function applyParams(url: URL, params: QueryParams): void {
 }
 
 export class StudioClient {
+  private readonly connect: (() => Promise<BackendConnection>) | undefined
   private readonly baseUrl: string
   private readonly timeoutMs: number
   private readonly onMutation: ((path: string, context?: WorkspaceContext) => void) | undefined
@@ -110,6 +122,7 @@ export class StudioClient {
   readonly context: WorkspaceContext | undefined
 
   constructor(options: StudioClientOptions) {
+    this.connect = options.connect
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
     this.timeoutMs = options.timeoutMs
     this.onMutation = options.onMutation
@@ -122,14 +135,14 @@ export class StudioClient {
    * notifications report this context so invalidation stays per-root.
    */
   scoped(context: WorkspaceContext): StudioClient {
-    return new StudioClient({ baseUrl: this.baseUrl, timeoutMs: this.timeoutMs, onMutation: this.onMutation, context })
+    return new StudioClient({ connect: this.connect, baseUrl: this.baseUrl, timeoutMs: this.timeoutMs, onMutation: this.onMutation, context })
   }
 
   /** §3 context headers; empty for a legacy (unscoped) client. */
   private contextHeaders(): Record<string, string> {
     const context = this.context
     if (context === undefined) return {}
-    const headers: Record<string, string> = { 'X-OpenWrite-Workspace-Root': context.workspaceRoot }
+    const headers = workspaceRootHeaders(context.workspaceRoot)
     if (context.workspaceId !== undefined) headers['X-OpenWrite-Workspace-Id'] = context.workspaceId
     if (context.sessionId !== undefined) headers['X-OpenWrite-Session-Id'] = context.sessionId
     if (context.contextEpoch !== undefined) headers['X-OpenWrite-Context-Epoch'] = String(context.contextEpoch)
@@ -147,7 +160,7 @@ export class StudioClient {
     return this.readJson(response)
   }
 
-  /** POST a JSON object with the Studio write credential header. */
+  /** POST a JSON object with the Studio write protocol header. */
   async postJson(path: string, body: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
     const response = await this.request(
       new URL(`${this.baseUrl}${path}`),
@@ -163,7 +176,7 @@ export class StudioClient {
     return result
   }
 
-  /** PUT a JSON object with the Studio write credential header. */
+  /** PUT a JSON object with the Studio write protocol header. */
   async putJson(path: string, body: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
     const response = await this.request(
       new URL(`${this.baseUrl}${path}`),
@@ -201,7 +214,10 @@ export class StudioClient {
     const signals = [AbortSignal.timeout(this.timeoutMs)]
     if (signal !== undefined) signals.push(signal)
     try {
-      return await fetch(url, { ...init, signal: AbortSignal.any(signals) })
+      const connection = await this.connect?.()
+      const target = connection ? new URL(url.pathname + url.search, connection.baseUrl) : url
+      const headers = connection?.token ? { ...(init.headers as Record<string, string>), Authorization: `Bearer ${connection.token}` } : init.headers
+      return await fetch(target, { ...init, headers, signal: AbortSignal.any(signals) })
     } catch (error: unknown) {
       if (signal?.aborted) throw error
       throw new StudioError(`Studio request failed: ${error instanceof Error ? error.message : String(error)}`, 0, 'NETWORK_ERROR')

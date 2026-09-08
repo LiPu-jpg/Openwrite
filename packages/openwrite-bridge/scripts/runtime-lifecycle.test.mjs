@@ -50,6 +50,7 @@ async function mountHost() {
     get(id) { return id === 'a' || id === 'b' ? { path: `/novels/${id}` } : undefined }
   }
   const root = new Context()
+  root.provide('connection', { requestRejection: () => undefined })
   await root.plugin(Tools)
   const webFork = await root.plugin(WebServer)
   await root.plugin(Registry)
@@ -115,7 +116,7 @@ test('Cordis unload ends all SSE responses; reload restores isolated streams', a
   assert.equal(a.chunks.length, 2, 'disposed streams cannot receive later mutations')
 
   await host.root.plugin(plugin, plugin.Config({}))
-  assert.equal(host.routes.size, 4)
+  assert.equal(host.routes.size, 5)
   const fresh = new ResponseCapture()
   await host.routes.get('/studio-panel/events').handler({ method: 'GET', url: '/studio-panel/events?workspace=a' }, fresh)
   host.root.novelDomain.notifyMutation('/api/document', { workspaceRoot: '/novels/a' })
@@ -135,7 +136,7 @@ test('webServer dependency replacement also closes the old injection scope', asy
   assert.equal(domain.streams.size, 0)
   assert.equal(host.routes.size, 0)
   await host.root.plugin(host.WebServer)
-  assert.equal(host.routes.size, 4)
+  assert.equal(host.routes.size, 5)
   const fresh = new ResponseCapture()
   await host.routes.get('/studio-panel/events').handler({ method: 'GET', url: '/studio-panel/events?workspace=a' }, fresh)
   assert.equal(fresh.chunks.length, 1)
@@ -158,6 +159,7 @@ test('dispose aborts pending epoch reads and prevents late ready/snapshot respon
     events.handler({ method: 'GET', url: '/studio-panel/events?workspace=a' }, streamResponse),
     snapshot.handler({ method: 'GET', url: '/studio-panel/invalidation.json?workspace=a' }, snapshotResponse),
   ]
+  await new Promise(resolve => setImmediate(resolve))
   assert.equal(pending.length, 2)
   await host.fork.dispose()
   assert.equal(domain.streams.size, 0)

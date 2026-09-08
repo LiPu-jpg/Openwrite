@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dsh-external/dsh-dog/schemas/schema-0.2/report.schema.json",
+  "title": "DoG v0.2 CI report (dog_status full response)",
+  "description": "Machine-readable report consumed by the development agent and external CI. Machine-readable counterpart of SPEC §10 report stage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "graphId", "rootState", "goals"],
+  "properties": {
+    "runId": { "$ref": "#/$defs/uuid" },
+    "graphId": { "type": "string", "minLength": 1 },
+    "graphDigest": { "$ref": "#/$defs/sha256" },
+    "rootState": {
+      "enum": ["success", "partial_success", "failure", "infeasible", "needs_replan", "cancelled", "running"]
+    },
+    "goals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/goalReport" }
+    },
+    "revalidated": {
+      "description": "Goal IDs re-run in this run (GM changed or non-programmatic).",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "inherited": {
+      "description": "Goal IDs whose prior verification record was reused unchanged.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["goalId", "fromRunId", "state"],
+        "properties": {
+          "goalId": { "type": "string", "minLength": 1 },
+          "fromRunId": { "$ref": "#/$defs/uuid" },
+          "state": { "const": "inherited" }
+        }
+      }
+    },
+    "warning": {
+      "type": "string",
+      "description": "Threshold warning when the submission re-triggered more leaves than revalidateThreshold (SPEC §9.2)."
+    },
+    "generatedAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{64}|sha256:[0-9a-f]{64})$"
+    },
+    "goalReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goalId", "state"],
+      "properties": {
+        "goalId": { "type": "string", "minLength": 1 },
+        "state": {
+          "enum": [
+            "pending", "running", "success", "failure", "blocked",
+            "needs_human", "cancelled", "invalidated", "partial", "inherited"
+          ]
+        },
+        "verifier": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "enum": ["programmatic", "agentic"] }
+          }
+        },
+        "evidence": {
+          "description": "Proof satisfying the contract's evidence schema. References resolve into the sandbox store; never raw artifact bytes.",
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "defect": {
+          "description": "Bounded human-readable reason when state=failure or needs_human.",
+          "type": "string"
+        },
+        "settledAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# Mount DoG in a DSH profile. Artifact bindings are intentionally supplied
+# by the profile owner, never by a model-authored graph.
+- insert:
+    - id: dsh-dog
+      name: '@dsh-external/dsh-dog'
+      config:
+        artifactRoots: []
+        artifactBindings: []
+        storageDirectory: dog
+        maxGraphNodes: 256
+        maxExpressionNodes: 512
+        maxExpressionDepth: 64
+        maxSnapshotBytes: 67108864
+        allowPartialRoot: false

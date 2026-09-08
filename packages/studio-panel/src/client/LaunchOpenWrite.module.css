@@ -1,0 +1,19 @@
+.entry { display:flex; align-items:center; gap:8px; border:0; background:transparent; color:inherit; padding:10px; cursor:pointer; border-radius:8px; }
+.entry:hover { background:color-mix(in srgb, currentColor 8%, transparent); }
+.dialog { box-sizing:border-box; width:min(540px, calc(100vw - 32px)); max-height:calc(100vh - 48px); overflow:auto; padding:28px; border:1px solid var(--dsw-alias-border-l2); border-radius:16px; color:var(--dsw-alias-label-primary); background:var(--dsw-alias-bg-base); box-shadow:0 24px 80px #0005;  }
+.dialog::backdrop { background:#0006; }
+.dialog header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+.dialog h2 { margin:6px 0 0; font-size:24px; }
+.dialog small, .dialog p { color:var(--dsw-alias-label-secondary); }
+.dialog p { font-size:14px; line-height:1.65; }
+.dialog section { padding:18px 0; border-top:1px solid var(--dsw-alias-border-l2); }
+.dialog button { cursor:pointer; font:inherit; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; padding:8px 14px; color:inherit; background:transparent; }
+.dialog button:disabled { opacity:.5; cursor:wait; }
+.dialog .primary { color:white; background:#416743; border-color:#416743; }
+.dialog progress { display:block; width:100%; margin:12px 0; accent-color:#608654; }
+.dialog details { margin-top:18px; font-size:13px; }
+.dialog summary { cursor:pointer; }
+.dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+
+.path { display:flex; flex-direction:column; gap:6px; font-size:13px; margin:12px 0; }
+.path input { min-width:0; padding:10px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; color:inherit; background:var(--dsw-alias-bg-base); font:inherit; }

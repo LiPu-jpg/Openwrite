@@ -265,13 +265,25 @@
 .mentionHits {
   display: flex;
   flex: none;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
   gap: 6px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--dsw-alias-border-l2);
 }
 
+.mentionHits > small {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .mentionHits button {
+  flex: none;
+  white-space: nowrap;
   min-height: 28px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 999px;

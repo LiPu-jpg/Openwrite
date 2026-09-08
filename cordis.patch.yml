@@ -1,0 +1,11 @@
+- insert:
+    - id: openwrite-bundle
+      name: dsh-openwrite
+    - id: openwrite-bridge
+      name: dsh-openwrite/bridge
+      config:
+        mode: managed
+    - id: studio-panel
+      name: ./packages/studio-panel/lib/index.js
+    - id: openwrite-dog
+      name: ./vendor/dsh-dog/lib/index.js

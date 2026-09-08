@@ -55,7 +55,7 @@ const PLATFORM_MODULES = new Set([
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-attachment',
-  '@deepseek-ai/dsh-client-schema-form', '@deepseek-ai/dsh-client-runtime/client',
+  '@deepseek-ai/dsh-client-schema-form',
 ])
 for (const match of bundle.matchAll(/(?<!\.)\brequire\("([^"]+)"\)/g)) {
   assert.ok(PLATFORM_MODULES.has(match[1]), `non-platform external: ${match[1]}`)
@@ -77,16 +77,18 @@ try {
 } finally {
   delete globalThis.window
 }
-assert.deepEqual(exports_.inject, ['slots', 'locale', 'conversationEvents', 'workspaces', 'sessions'])
+assert.deepEqual(exports_.inject, ['slots', 'locale', 'uiConversation', 'workspaces', 'sessions', 'uiWorkspace', 'remote', 'remote.agentPresets'])
 
 const registrations = []
 const dictionaries = []
 let definition = null
 const fakeClientCtx = {
   effect(run) { run() },
-  conversationEvents: { register(value) { definition = value; return () => {} } },
+  uiConversation: { views: { register: () => () => {} }, events: { register(value) { definition = value; return () => {} } } },
+  uiWorkspace: {},
+  remote: { agentPresets: {} },
   workspaces: { marker: 'workspaces' },
-  sessions: { marker: 'sessions' },
+  sessions: { marker: 'sessions', list: { subscribe: () => () => {}, getSnapshot: () => ({ current: 'writing', byId: { writing: { projectionValues: { agentPreset: 'openwrite-0.2.0' } } } }) } },
   locale: {
     register(ns, dicts) { dictionaries.push({ ns, dicts }); return () => {} },
     bind: () => key => key,
@@ -110,14 +112,14 @@ assert.equal(definition.kind, 'dsh-novel-mutations')
 
 const views = registrations.filter(entry => entry.options.name === 'conversation.view')
 assert.deepEqual(views.map(entry => [entry.options.id, entry.options.order]), [
-  ['creation', 22], ['library', 23], ['tasks', 24],
+  ['openwrite.creation', 22], ['openwrite.library', 23], ['openwrite.tasks', 24],
 ])
 for (const view of views) {
   const injected = view.options.inject()
   assert.equal(typeof injected.fetchStudioApi, 'function')
   assert.equal(typeof injected.postStudioApi, 'function')
   assert.equal(typeof injected.putStudioApi, 'function')
-  assert.equal(injected.workspaces?.marker, 'workspaces')
+  assert.equal(typeof injected.workspaces?.create, 'function')
   assert.equal(injected.sessions?.marker, 'sessions')
 }
 

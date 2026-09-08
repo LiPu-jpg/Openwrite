@@ -1,7 +1,8 @@
+import type { BackendConnection } from './managed-runtime.js'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { StudioClient, type WorkspaceContext } from './client.js'
+import { StudioClient, workspaceRootHeaders, type WorkspaceContext } from './client.js'
 import { workspaceContextFromExec } from './tools.js'
 
 export const CONFIG_ROUTE = '/studio-panel/config.json'
@@ -205,6 +206,9 @@ function compactTaskList(bytes: Buffer, pathPart: string, method: string): Buffe
 }
 
 export interface NovelDomainOptions {
+  outputDir?: string
+  authorizeRequest?: (headers: Record<string, string | string[] | undefined>) => number | undefined
+  connect?: () => Promise<BackendConnection>
   baseUrl: string
   timeoutMs: number
   /**
@@ -242,7 +246,10 @@ function workspaceParam(req: ProxyRequest): string | undefined {
 
 /** Single host-side boundary shared by agent tools, browser proxy and live invalidation. */
 export class NovelDomainService extends Service {
+  readonly toolOptions: { timeoutMs: number; outputDir?: string }
   readonly client: StudioClient
+  private readonly authorizeRequest: NovelDomainOptions['authorizeRequest']
+  private readonly connect: (() => Promise<BackendConnection>) | undefined
   readonly baseUrl: string
   private readonly resolveWorkspace: ((workspaceId: string) => string | undefined | null) | undefined
   /** Per-root invalidation state, keyed by canonical workspace root ('' = legacy). */
@@ -252,9 +259,13 @@ export class NovelDomainService extends Service {
 
   constructor(ctx: Context, options: NovelDomainOptions) {
     super(ctx, 'novelDomain')
+    this.toolOptions = { timeoutMs: options.timeoutMs, ...(options.outputDir ? { outputDir: options.outputDir } : {}) }
+    this.connect = options.connect
+    this.authorizeRequest = options.authorizeRequest
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
     this.resolveWorkspace = options.resolveWorkspace
     this.client = new StudioClient({
+      connect: options.connect,
       baseUrl: this.baseUrl,
       timeoutMs: options.timeoutMs,
       onMutation: (path, context) => this.notifyMutation(path, context),
@@ -335,6 +346,12 @@ export class NovelDomainService extends Service {
   }
 
   registerWebRoutes(ctx: Context): void {
+    const register: typeof ctx.webServer.register = route => ctx.webServer.register({ ...route, handler: (req, res) => {
+      const rejection = this.authorizeRequest?.(req.headers)
+      if (rejection !== undefined) { sendJson(res, rejection, { error: 'dsh browser authentication required' }); return }
+      return route.handler(req, res)
+    } })
+
     // These responses belong to this webServer injection scope. Removing a
     // route does not close requests already handled by it; end them explicitly
     // so EventSource reconnects to the newly mounted plugin after a reload.
@@ -351,7 +368,7 @@ export class NovelDomainService extends Service {
       responses.clear()
     }, 'novel-domain: close live invalidation responses')
 
-    ctx.effect(() => ctx.webServer.register({
+    ctx.effect(() => register({
       kind: 'exact',
       path: CONFIG_ROUTE,
       handler: (req, res) => {
@@ -364,12 +381,12 @@ export class NovelDomainService extends Service {
         res.end(JSON.stringify({ studioUrl: this.baseUrl }))
       },
     }), 'novel-domain: config route')
-    ctx.effect(() => ctx.webServer.register({
+    ctx.effect(() => register({
       kind: 'prefix',
       path: API_PROXY_ROUTE,
-      handler: this.createProxyHandler(),
+      handler: this.createProxyHandler(lifetime.signal, responses),
     }), 'novel-domain: API proxy')
-    ctx.effect(() => ctx.webServer.register({
+    ctx.effect(() => register({
       kind: 'exact',
       path: INVALIDATION_ROUTE,
       handler: async (req, res) => {
@@ -398,7 +415,7 @@ export class NovelDomainService extends Service {
         sendJson(res, 200, contextEpoch === null ? snapshot : { ...snapshot, context_epoch: contextEpoch })
       },
     }), 'novel-domain: invalidation snapshot')
-    ctx.effect(() => ctx.webServer.register({
+    ctx.effect(() => register({
       kind: 'exact',
       path: EVENTS_ROUTE,
       handler: async (req, res) => {
@@ -440,8 +457,9 @@ export class NovelDomainService extends Service {
     }), 'novel-domain: invalidation stream')
   }
 
-  private createProxyHandler(): WebRouteHandler {
+  private createProxyHandler(lifetime: AbortSignal, responses: Set<ProxyResponse>): WebRouteHandler {
     return async (req, res) => {
+      if (lifetime.aborted) { sendJson(res, 503, { error: 'OpenWrite 已停止' }); return }
       const sub = (req.url ?? '').slice(API_PROXY_ROUTE.length)
       if (sub === '' || !sub.startsWith('/')) {
         sendJson(res, 404, { error: 'novel-domain proxy: missing API path' })
@@ -465,10 +483,11 @@ export class NovelDomainService extends Service {
         sendJson(res, 405, { error: `novel-domain proxy: write path "${pathPart}" is not allowlisted` })
         return
       }
+      responses.add(res)
       try {
         const headers: Record<string, string> = {
           accept: 'application/json',
-          'x-openwrite-workspace-root': resolved.root,
+          ...workspaceRootHeaders(resolved.root, true),
           'x-openwrite-workspace-id': resolved.id,
         }
         const sessionId = headerValue(req, 'x-dsh-session-id')
@@ -479,12 +498,15 @@ export class NovelDomainService extends Service {
           headers['content-type'] = 'application/json'
           headers['x-openwrite-studio'] = '1'
         }
-        const upstream = await fetch(new URL(`/api${sub}`, this.baseUrl), {
+        const connection = await this.connect?.()
+        if (connection?.token) headers['authorization'] = `Bearer ${connection.token}`
+        const upstream = await fetch(new URL(`/api${sub}`, connection?.baseUrl ?? this.baseUrl), {
           method,
           headers,
           ...(body !== undefined ? { body: new Uint8Array(body) } : {}),
-          signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+          signal: AbortSignal.any([lifetime, AbortSignal.timeout(PROXY_TIMEOUT_MS)]),
         })
+        if (lifetime.aborted) return
         const upstreamBytes = Buffer.from(await upstream.arrayBuffer())
         const bytes = compactTaskList(upstreamBytes, pathPart, method)
         const responseHeaders: Record<string, string> = {
@@ -500,9 +522,9 @@ export class NovelDomainService extends Service {
           this.notifyMutation(`/api/${pathPart}`, { workspaceRoot: resolved.root, workspaceId: resolved.id })
         }
       } catch (error) {
-        sendJson(res, 502, {
-          error: `OpenWrite Studio unreachable at ${this.baseUrl}: ${error instanceof Error ? error.message : String(error)}`,
-        })
+        if (!lifetime.aborted) sendJson(res, 502, { error: '写作环境暂不可用，请打开环境与诊断重试' })
+      } finally {
+        responses.delete(res)
       }
     }
   }

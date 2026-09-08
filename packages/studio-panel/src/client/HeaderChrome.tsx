@@ -61,13 +61,7 @@ export function HeaderUtilities({ postStudioApi, t }: UtilityProps) {
   }
 
   const openStudio = async () => {
-    let url = 'http://127.0.0.1:4567'
-    try {
-      const response = await fetch('/studio-panel/config.json')
-      const data = await response.json() as { studioUrl?: unknown }
-      if (typeof data.studioUrl === 'string') url = data.studioUrl
-    } catch { /* use local default */ }
-    window.open(url, '_blank', 'noopener,noreferrer')
+    window.dispatchEvent(new CustomEvent('openwrite:launch'))
     setOpen(false)
   }
 
@@ -78,7 +72,7 @@ export function HeaderUtilities({ postStudioApi, t }: UtilityProps) {
     {open && <div className={css.headerMenu}>
       {error !== '' && <span className={css.contextChipError} role="alert">{error}</span>}
       <button type="button" disabled={busy} onClick={() => void sync()}><RefreshCw size={15} />{t('tools.sync')}</button>
-      <button type="button" onClick={() => void openStudio()}><ExternalLink size={15} />{t('openExternal')}</button>
+      <button type="button" onClick={() => void openStudio()}><ExternalLink size={15} />环境与诊断</button>
     </div>}
   </div>
 }

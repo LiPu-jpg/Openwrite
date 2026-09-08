@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 1020" font-family="ui-sans-serif, system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#4b5563" />
+    </marker>
+  </defs>
+  <rect width="1460" height="1020" fill="#f8fafc" />
+
+  <text x="24" y="36" font-size="21" font-weight="700" fill="#111827">DoG v0.2 — 模块结构</text>
+  <text x="24" y="58" font-size="13" fill="#6b7280">颜色:绿=人、紫=LLM Agent、蓝=程序、橙=开发 Agent(外部)、青=现有 CI(外部)、灰=存储</text>
+
+  <g font-size="12">
+    <rect x="24" y="72" width="14" height="14" rx="3" fill="#2f9e63" /><text x="44" y="84" fill="#374151">人</text>
+    <rect x="84" y="72" width="14" height="14" rx="3" fill="#7c6ce8" /><text x="104" y="84" fill="#374151">LLM Agent</text>
+    <rect x="204" y="72" width="14" height="14" rx="3" fill="#3f7fd1" /><text x="224" y="84" fill="#374151">程序</text>
+    <rect x="284" y="72" width="14" height="14" rx="3" fill="#d97706" /><text x="304" y="84" fill="#374151">开发 Agent(抽象)</text>
+    <rect x="444" y="72" width="14" height="14" rx="3" fill="#0d9488" /><text x="464" y="84" fill="#374151">现有 CI</text>
+    <rect x="544" y="72" width="14" height="14" rx="3" fill="#6b7280" /><text x="564" y="84" fill="#374151">存储</text>
+  </g>
+
+  <!-- ================= Zone A: 验收侧 ================= -->
+  <rect x="24" y="100" width="330" height="330" rx="12" fill="none" stroke="#e5e7eb" stroke-width="1.5" stroke-dasharray="5 4" />
+  <text x="40" y="122" font-size="13" font-weight="600" fill="#6b7280">验收侧(建图期)</text>
+
+  <rect x="60" y="140" width="260" height="52" rx="9" fill="#2f9e63" />
+  <text x="190" y="162" font-size="14" font-weight="600" fill="#ffffff" text-anchor="middle">项目负责人</text>
+  <text x="190" y="180" font-size="11" fill="#e8f5ee" text-anchor="middle">提出目标 · 确认图</text>
+
+  <rect x="60" y="222" width="260" height="52" rx="9" fill="#7c6ce8" />
+  <text x="190" y="244" font-size="14" font-weight="600" fill="#ffffff" text-anchor="middle">规划 Agent</text>
+  <text x="190" y="262" font-size="11" fill="#efeaff" text-anchor="middle">目标分解为图(LLM)</text>
+
+  <rect x="60" y="304" width="260" height="52" rx="9" fill="#7c6ce8" />
+  <text x="190" y="326" font-size="14" font-weight="600" fill="#ffffff" text-anchor="middle">覆盖率评审</text>
+  <text x="190" y="344" font-size="11" fill="#efeaff" text-anchor="middle">隔离审图(LLM)</text>
+
+  <line x1="190" y1="192" x2="190" y2="222" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <line x1="190" y1="274" x2="190" y2="304" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- ================= Zone B: DoG core ================= -->
+  <rect x="390" y="100" width="600" height="760" rx="12" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.5" />
+  <text x="406" y="122" font-size="13" font-weight="600" fill="#334155">DoG 核心 — DSH 插件(Agentic CI)</text>
+
+  <rect x="420" y="140" width="540" height="44" rx="9" fill="#3f7fd1" />
+  <text x="690" y="160" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">工具面(程序)</text>
+  <text x="690" y="176" font-size="10" fill="#dbe9f8" text-anchor="middle">dog_validate · dog_create · dog_run · dog_status · dog_bind_agent · dog_delegate_agent</text>
+
+  <rect x="420" y="204" width="540" height="44" rx="9" fill="#3f7fd1" />
+  <text x="690" y="224" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">Schema 层(程序)</text>
+  <text x="690" y="240" font-size="11" fill="#dbe9f8" text-anchor="middle">schemas/schema-0.2/*.json — 载荷校验,失败即拒</text>
+
+  <rect x="420" y="268" width="540" height="44" rx="9" fill="#3f7fd1" />
+  <text x="690" y="288" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">编译器(程序)</text>
+  <text x="690" y="304" font-size="11" fill="#dbe9f8" text-anchor="middle">图解析 · 纯程序化子树规则 · 验收计划 · 契约解析</text>
+
+  <line x1="320" y1="248" x2="420" y2="290" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <text x="296" y="272" font-size="10" fill="#6b7280">图 JSON</text>
+
+  <rect x="420" y="332" width="540" height="44" rx="9" fill="#3f7fd1" />
+  <text x="690" y="352" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">调度器(程序)</text>
+  <text x="690" y="368" font-size="11" fill="#dbe9f8" text-anchor="middle">依赖门禁 · 增量选择 · 工作区池 · 并发上限</text>
+
+  <rect x="420" y="396" width="540" height="40" rx="9" fill="#3f7fd1" />
+  <text x="690" y="414" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">隔离工作区管理(程序)</text>
+  <text x="690" y="429" font-size="11" fill="#dbe9f8" text-anchor="middle">每个验证一个互斥工作区</text>
+
+  <line x1="690" y1="312" x2="690" y2="332" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <line x1="690" y1="376" x2="690" y2="396" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <rect x="420" y="456" width="540" height="150" rx="12" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+  <text x="436" y="478" font-size="12" font-weight="600" fill="#475569">验证执行(工作区内)</text>
+
+  <rect x="440" y="492" width="240" height="56" rx="9" fill="#3f7fd1" />
+  <text x="560" y="512" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">确定性契约</text>
+  <text x="560" y="530" font-size="11" fill="#dbe9f8" text-anchor="middle">file.exists · file.sha256 …(程序)</text>
+
+  <rect x="700" y="492" width="240" height="56" rx="9" fill="#7c6ce8" />
+  <text x="820" y="512" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">Agentic 契约</text>
+  <text x="820" y="530" font-size="11" fill="#efeaff" text-anchor="middle">vision.* — 验证 Agent(LLM)</text>
+
+  <line x1="690" y1="436" x2="560" y2="492" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <line x1="690" y1="436" x2="820" y2="492" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <rect x="420" y="626" width="540" height="44" rx="9" fill="#3f7fd1" />
+  <text x="690" y="646" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">Grounding 提取器(程序,宿主注册)</text>
+  <text x="690" y="662" font-size="11" fill="#dbe9f8" text-anchor="middle">快照 → GM → gmDigest · 决定重跑/继承</text>
+
+  <line x1="690" y1="606" x2="690" y2="626" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <rect x="420" y="690" width="540" height="44" rx="9" fill="#3f7fd1" />
+  <text x="690" y="710" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">报告(程序)</text>
+  <text x="690" y="726" font-size="11" fill="#dbe9f8" text-anchor="middle">机器可读摘要 + 证据 + 重跑/继承 + 警告</text>
+
+  <line x1="690" y1="670" x2="690" y2="690" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <rect x="420" y="754" width="540" height="52" rx="9" fill="#6b7280" />
+  <text x="690" y="774" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">存储(程序)</text>
+  <text x="690" y="792" font-size="11" fill="#e5e7eb" text-anchor="middle">graphs · runs · verifications · artifacts · runtime-events(追加写,内容寻址)</text>
+
+  <line x1="690" y1="734" x2="690" y2="754" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- ================= Zone C: 开发侧 ================= -->
+  <rect x="1030" y="100" width="330" height="330" rx="12" fill="none" stroke="#e5e7eb" stroke-width="1.5" stroke-dasharray="5 4" />
+  <text x="1046" y="122" font-size="13" font-weight="600" fill="#6b7280">开发侧(DoG 之外)</text>
+
+  <rect x="1066" y="140" width="260" height="52" rx="9" fill="#d97706" />
+  <text x="1196" y="162" font-size="14" font-weight="600" fill="#ffffff" text-anchor="middle">开发 Agent</text>
+  <text x="1196" y="180" font-size="11" fill="#fde8d0" text-anchor="middle">产出产物 · 消费报告</text>
+
+  <rect x="1066" y="222" width="260" height="52" rx="9" fill="#0d9488" />
+  <text x="1196" y="244" font-size="14" font-weight="600" fill="#ffffff" text-anchor="middle">现有 CI 流水线</text>
+  <text x="1196" y="262" font-size="11" fill="#d7f2ef" text-anchor="middle">程序化检查(构建 · 测试 · lint)</text>
+
+  <rect x="1066" y="304" width="260" height="52" rx="9" fill="#6b7280" />
+  <text x="1196" y="326" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">产物绑定路径</text>
+  <text x="1196" y="344" font-size="11" fill="#e5e7eb" text-anchor="middle">deck.pptx · ci-report.json(宿主批准)</text>
+
+  <text x="1046" y="386" font-size="12" fill="#374151">出:dog_run 摘要 / dog_status 报告(JSON,report.schema.json)</text>
+  <text x="1046" y="404" font-size="12" fill="#374151">入:产物字节经绑定路径 → capture(内容寻址)</text>
+  <text x="1046" y="422" font-size="12" fill="#374151">入:CI 结果经 ci-report.json → 确定性验证器</text>
+
+  <!-- ================= WebUI ================= -->
+  <rect x="420" y="830" width="540" height="48" rx="9" fill="#3f7fd1" />
+  <text x="690" y="850" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">WebUI 调试器(只读程序)</text>
+  <text x="690" y="866" font-size="11" fill="#dbe9f8" text-anchor="middle">快照 RPC · 目标轨迹 · 会话跳转</text>
+  <line x1="690" y1="806" x2="690" y2="830" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+</svg>

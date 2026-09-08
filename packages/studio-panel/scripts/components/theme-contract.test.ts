@@ -6,11 +6,8 @@ import { describe, expect, it } from 'vitest'
 
 const require = createRequire(import.meta.url)
 const themeRoot = dirname(require.resolve('@deepseek-ai/dsh-client-ui-theme/package.json'))
-const themeDirectory = join(themeRoot, 'lib/styles')
-const theme = readdirSync(themeDirectory)
-  .filter(file => file.endsWith('.css'))
-  .map(file => readFileSync(join(themeDirectory, file), 'utf8'))
-  .join('\n')
+// rc.1 embeds the token stylesheet into the public bootstrap entry.
+const theme = readFileSync(join(themeRoot, 'lib/index.js'), 'utf8') + readFileSync(join(themeRoot, 'lib/client.js'), 'utf8')
 const provided = new Set([...theme.matchAll(/(--dsw-alias-[\w-]+)\s*:/g)].map(match => match[1]))
 const clientDirectory = join(dirname(fileURLToPath(import.meta.url)), '../../src/client')
 

@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "0.9",
+  "id": "article-quality",
+  "root": "root",
+  "nodes": {
+    "root": {
+      "kind": "composite",
+      "title": "文章质量门禁",
+      "constraint": "hard",
+      "target": "harness-article.md",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "no-slop" },
+          { "op": "ref", "id": "dense-fun" },
+          { "op": "ref", "id": "readable" },
+          { "op": "ref", "id": "human-qual" }
+        ]
+      },
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "把整篇作为整体读一遍:即使每个维度都单独通过,作为一篇完整文章它是否成立(通顺、有立意、结尾收得住)?给结论与证据。"
+      }
+    },
+    "no-slop": {
+      "kind": "leaf",
+      "title": "AI-slop 味",
+      "constraint": "hard",
+      "target": "harness-article.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查是否有 AI 味儿:模板腔('在…的今天''值得一提的是''总而言之')、'不是X,而是Y'式转折、空口号、模糊词(很多/显著)、空洞句(删掉不改变意思)。逐句判定,给证据。"
+      }
+    },
+    "dense-fun": {
+      "kind": "leaf",
+      "title": "信息密度与趣味",
+      "constraint": "hard",
+      "target": "harness-article.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查信息密度与趣味:每段是否有独立思想(主张+证据/实例),是否只是复述堆字;是否旁征博引;有没有'删掉整段也不损失'的废话段。逐段判定,给证据。"
+      }
+    },
+    "readable": {
+      "kind": "leaf",
+      "title": "易懂、符合认知规律",
+      "constraint": "hard",
+      "target": "harness-article.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "以只懂基础概念的读者视角检查:生僻概念/缩写是否先定义后使用;段与段之间是否有'桥'(承接/转折),有无硬跳;是否先提到已有成果/常识、再自然引申到新东西;有无跳跃或含糊。给证据。"
+      }
+    },
+    "human-qual": {
+      "kind": "leaf",
+      "title": "人类质感",
+      "constraint": "hard",
+      "target": "harness-article.md",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查是否像人类作者的高质量文本:句式长短交替、每段开头不同构、有立场有判断、具体细节而非抽象套话。给证据。"
+      }
+    },
+    "phrase-hint": {
+      "kind": "leaf",
+      "title": "模板词提示(辅助)",
+      "constraint": "soft",
+      "target": "harness-article.md",
+      "verifier": {
+        "mode": "programmatic",
+        "script": "slop-phrases"
+      }
+    }
+  },
+  "contains": [
+    { "parent": "root", "child": "no-slop", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "dense-fun", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "readable", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "human-qual", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "phrase-hint", "required": false, "failure": "tolerable" }
+  ],
+  "dependsOn": []
+}

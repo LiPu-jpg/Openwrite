@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dsh-external/dsh-dog/schemas/schema-0.9/graph.schema.json",
+  "title": "DoG v0.9 graph input (dog_validate / dog_create payload)",
+  "description": "Verification graph authored by the planning agent. Machine-readable counterpart of SPEC §4 / §1. Graph-level semantic rules (reference resolution, acyclicity, leaf-requires-verifier) are enforced by the compiler, not expressible here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "root", "nodes", "contains", "dependsOn"],
+  "properties": {
+    "schemaVersion": { "const": "0.9" },
+    "id": { "$ref": "#/$defs/asciiId" },
+    "root": { "$ref": "#/$defs/goalId" },
+    "nodes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/goalId" },
+      "additionalProperties": { "$ref": "#/$defs/node" }
+    },
+    "contains": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/containment" }
+    },
+    "dependsOn": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/dependency" }
+    }
+  },
+  "$defs": {
+    "asciiId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+    },
+    "goalId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "title", "constraint", "target"],
+      "properties": {
+        "kind": { "enum": ["leaf", "composite"] },
+        "title": { "type": "string", "minLength": 1 },
+        "constraint": { "enum": ["hard", "soft"] },
+        "target": {
+          "description": "Single file, or a directory/collection packed into .tar by the engine.",
+          "type": "string",
+          "minLength": 1
+        },
+        "verifier": {
+          "description": "Leaf: required. Composite: optional whole-object assertion (runs after the subtree settles).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "enum": ["programmatic", "agentic"] },
+            "script": { "type": "string", "minLength": 1 },
+            "instruction": { "type": "string", "minLength": 1 }
+          }
+        },
+        "completion": {
+          "description": "Required when kind=composite; forbidden when kind=leaf.",
+          "$ref": "#/$defs/expr"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "leaf" } }, "required": ["kind"] },
+          "then": {
+            "required": ["verifier"],
+            "not": { "required": ["completion"] }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "composite" } }, "required": ["kind"] },
+          "then": { "required": ["completion"] }
+        }
+      ]
+    },
+    "expr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "op": { "enum": ["ref", "all", "any", "not", "atLeast"] },
+        "id": { "$ref": "#/$defs/goalId" },
+        "count": { "type": "integer", "minimum": 1 },
+        "item": { "$ref": "#/$defs/expr" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/expr" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "const": "ref" } }, "required": ["op"] },
+          "then": { "required": ["id"], "not": { "anyOf": [{ "required": ["items"] }, { "required": ["item"] }, { "required": ["count"] }] } }
+        },
+        {
+          "if": { "properties": { "op": { "const": "not" } }, "required": ["op"] },
+          "then": { "required": ["item"], "not": { "anyOf": [{ "required": ["items"] }, { "required": ["id"] }, { "required": ["count"] }] } }
+        },
+        {
+          "if": { "properties": { "op": { "const": "atLeast" } }, "required": ["op"] },
+          "then": { "required": ["count", "items"], "not": { "anyOf": [{ "required": ["id"] }, { "required": ["item"] }] } }
+        },
+        {
+          "if": { "properties": { "op": { "enum": ["all", "any"] } }, "required": ["op"] },
+          "then": { "required": ["items"], "not": { "anyOf": [{ "required": ["id"] }, { "required": ["item"] }, { "required": ["count"] }] } }
+        }
+      ]
+    },
+    "containment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent", "child", "required", "failure"],
+      "properties": {
+        "parent": { "$ref": "#/$defs/goalId" },
+        "child": { "$ref": "#/$defs/goalId" },
+        "required": { "type": "boolean" },
+        "failure": { "enum": ["fatal", "tolerable", "degrade"] },
+        "degradeTo": { "$ref": "#/$defs/goalId" }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "target"],
+      "properties": {
+        "source": { "$ref": "#/$defs/goalId" },
+        "target": { "$ref": "#/$defs/goalId" },
+        "data": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
