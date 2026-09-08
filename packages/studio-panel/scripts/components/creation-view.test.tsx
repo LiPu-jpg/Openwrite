@@ -1401,7 +1401,7 @@ describe('CreationView selection polish', () => {
 })
 
 describe('CreationView manuscript mentions', () => {
-  const body = '林舟走进钟楼。小舟看见密信。'
+  const body = '林舟走进钟楼。小舟看见密信。' + '林舟转身。小舟停下。'.repeat(30)
   const assetPayload = {
     data: {
       assets: [
@@ -1428,17 +1428,18 @@ describe('CreationView manuscript mentions', () => {
     })
   }
 
-  it('exposes clickable registered names and aliases and opens a read-only card in creation', async () => {
+  it('groups repeated names and aliases into one asset entry and opens its read-only card', async () => {
     const postStudioApi = vi.fn(async () => ({}))
     render(<CreationView {...(viewProps({
       fetchStudioApi: mentionFetch(), putStudioApi: vi.fn(), postStudioApi,
     }) as never)} />)
     expect(await screen.findByRole('button', { name: 'creation.mentions.mention: 林舟' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'creation.mentions.mention: 小舟' })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'creation.mentions.mention: 小舟' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'creation.mentions.mention: 林舟' })).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'creation.mentions.mention: 钟楼' })).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'creation.mentions.mention: 密信' })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'creation.mentions.mention: 小舟' }))
+    fireEvent.click(screen.getByRole('button', { name: 'creation.mentions.mention: 林舟' }))
     const card = await screen.findByRole('region', { name: 'creation.mentions.card' })
     expect(card.getAttribute('data-asset')).toBe('character:linzhou')
     expect(card.textContent).toContain('林舟')
@@ -1455,7 +1456,7 @@ describe('CreationView manuscript mentions', () => {
     const postStudioApi = vi.fn(async () => ({}))
     const props = viewProps({ fetchStudioApi: mentionFetch(), putStudioApi: vi.fn(), postStudioApi })
     const view = render(<CreationView {...(props as never)} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'creation.mentions.mention: 小舟' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'creation.mentions.mention: 林舟' }))
     expect(await screen.findByText('钟楼守夜人')).not.toBeNull()
 
     setSnapshot('ws-b', second.path, 2)

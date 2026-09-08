@@ -23,7 +23,7 @@ import {
   type ManuscriptSelection, type SelectionPolishKind,
 } from './manuscript-selection.ts'
 import {
-  findManuscriptMentions, parseMentionAssets,
+  findManuscriptMentions, parseMentionAssets, uniqueMentionAssets,
   type MentionAsset, type MentionSpan,
 } from './manuscript-mentions.ts'
 import { useWorkbench, workbenchStore, type ChapterSummary } from './WorkbenchStore.ts'
@@ -708,7 +708,7 @@ export function CreationView(props: CreationViewProps) {
       { bucket: 'overdue', label: 'creation.foreshadow.overdue', items: workBrief.foreshadowing.overdue },
       { bucket: 'to_plant', label: 'creation.foreshadow.toPlant', items: workBrief.foreshadowing.to_plant },
     ]
-  const mentions = useMemo(() => findManuscriptMentions(draft, mentionAssets), [draft, mentionAssets])
+  const mentions = useMemo(() => uniqueMentionAssets(findManuscriptMentions(draft, mentionAssets)), [draft, mentionAssets])
   const visibleMentionCard = mentionCard !== null
     && mentionCard.workspaceId === (workspaceId ?? '')
     && mentionCard.chapterPath === path
@@ -1822,11 +1822,12 @@ export function CreationView(props: CreationViewProps) {
         )}
         {!readerMode && mentions.length > 0 && (
           <div className={css.mentionHits} aria-label={t('creation.mentions.title')}>
+            <small>{t('creation.mentions.title')}</small>
             {mentions.map(span => (
-              <button key={`${String(span.start)}:${span.kind}:${span.id}:${span.text}`} type="button"
-                aria-label={`${t('creation.mentions.mention')}: ${span.text}`}
+              <button key={`${span.kind}:${span.id}`} type="button"
+                aria-label={`${t('creation.mentions.mention')}: ${span.name}`}
                 onClick={() => openMention(span)}>
-                {span.text}
+                {span.name}
               </button>
             ))}
           </div>
