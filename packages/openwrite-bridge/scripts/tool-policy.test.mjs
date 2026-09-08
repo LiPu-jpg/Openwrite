@@ -35,7 +35,9 @@ test('real dsh tool registry isolates 90 tools by preset and disposes them', asy
   const { createScope } = await import('@deepseek-ai/dsh-scope')
   const preset = await import('../lib/preset-tools.js')
   const root = new Context()
-  root.provide('systemPrompt', { tools: () => () => {}, section: () => () => {}, getSectionOrder: () => 0 })
+  let wireSchemas
+  const sections = []
+  root.provide('systemPrompt', { tools: provider => { wireSchemas = provider; return () => {} }, section: value => { sections.push(value); return () => {} }, getSectionOrder: () => 0 })
   root.provide('novelDomain', { toolOptions: { timeoutMs: 600_000 }, clientFactory: () => () => { throw new Error('No backend calls in catalog inspection') } })
   await root.plugin(ToolRuntime)
   const writing = {}, normal = {}
@@ -51,6 +53,17 @@ test('real dsh tool registry isolates 90 tools by preset and disposes them', asy
     const tools = root.tools.schemas(writing)
     assert.equal(tools.filter(tool => tool.name.startsWith('novel_')).length, 90)
     console.log(JSON.stringify({ measurement: 'native-tool-schema', tools: tools.length, utf8Bytes: Buffer.byteLength(JSON.stringify(tools)), tokenizer: 'not-measured' }))
+    root.provide('codeRuntime', { language: 'typescript' })
+    const ptcAgent = {}
+    const ptcScope = createScope(root, ptcAgent)
+    try {
+      await ptcScope.ctx.plugin(preset, { presentation: 'ptc' })
+      assert.deepEqual(wireSchemas({ scope: ptcAgent }).schemas.map(tool => tool.name), ['run_code'])
+      assert.equal(root.tools.schemas(writing).length, 90, 'PTC must not change another preset')
+      const sdk = sections.find(value => value.name === 'tools:sdk').text({ scope: ptcAgent })
+      assert.ok(sdk.includes('novel_doc_read'))
+      console.log(JSON.stringify({ measurement: 'ptc-presentation', schemaBytes: Buffer.byteLength(JSON.stringify(wireSchemas({ scope: ptcAgent }).schemas)), sdkBytes: Buffer.byteLength(sdk), tokenizer: 'not-measured' }))
+    } finally { await ptcScope.dispose() }
     await scope.dispose()
     assert.equal(root.tools.schemas(writing).length, 0)
   } finally { await root.fiber.dispose() }
