@@ -61,6 +61,7 @@ class RollingPlanCandidateV1(BaseModel):
     facts_revision: str
     current_window: tuple[str, ...]
     next_window: tuple[str, ...]
+    window_size: int = 50
     direction: str
     arc_summary: str
     character_state: tuple[str, ...] = ()

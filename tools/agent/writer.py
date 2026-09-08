@@ -23,7 +23,9 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from ..character_state_index import normalize_character_state_annotation_fences
 from ..llm import Message
+from ..novel_workspace import count_writing_units
 from ..outline_contract import INLINE_ANNOTATION_CONTRACT
 from ..runtime_state_contract import RUNTIME_DELTA_PROMPT_CONTRACT
 from .base import BaseAgent
@@ -202,25 +204,27 @@ class WriterAgent(BaseAgent):
         all_usage = [first_usage]
 
         for attempt in range(3):
-            chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", current_content))
-            if minimum_words <= chinese_chars <= maximum_words:
+            word_count = self._parse_creative_output(
+                current_content, chapter_number, {}
+            )["word_count"]
+            if minimum_words <= word_count <= maximum_words:
                 break
-            comparison = "低于" if chinese_chars < minimum_words else "超过"
-            action = "扩充" if chinese_chars < minimum_words else "精简"
+            comparison = "低于" if word_count < minimum_words else "超过"
+            action = "扩充" if word_count < minimum_words else "精简"
             detail = (
                 "补充场景描写、人物互动和心理活动"
-                if chinese_chars < minimum_words
+                if word_count < minimum_words
                 else "删除重复和冗余描写"
             )
             hint = (
-                f"长度不合格：你上一版正文约 {chinese_chars} 个中文字符，{comparison}"
+                f"长度不合格：你上一版正文约 {word_count} 字（不含标题和内联批注），{comparison}"
                 f"目标区间 {minimum_words}-{maximum_words}。请{action}"
                 f"正文至 {target_words} 字左右：保留既定情节与章末悬念，"
                 f"{detail}。"
                 "只输出章节标题和完整正文，不要解释。"
             )
             getattr(self, "log", logger).info(
-                f"Length retry #{attempt + 1}: {chinese_chars} chars "
+                f"Length retry #{attempt + 1}: {word_count} writing units "
                 f"(target {minimum_words}-{maximum_words})"
             )
             retry_response = self.chat(
@@ -303,7 +307,8 @@ class WriterAgent(BaseAgent):
         maximum_words = max(minimum_words, int(target_words * 1.2))
         parts.append(
             f"目标字数：约{target_words}字；正文必须控制在"
-            f"{minimum_words}-{maximum_words}个中文字符内。达到上限时优先收束情节，"
+            f"{minimum_words}-{maximum_words}字内（中文字符与外文单词，"
+            "不含标题和内联批注）。达到上限时优先收束情节，"
             "不要用额外支线扩写。\n"
         )
 
@@ -420,9 +425,8 @@ class WriterAgent(BaseAgent):
             title = f"第{chapter_number}章"
             body = content.strip()
 
-        # 计算字数（中文字符数）
-        chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", body))
-        word_count = chinese_chars
+        body = normalize_character_state_annotation_fences(body).strip()
+        word_count = count_writing_units(body)
         if target_words > 0:
             minimum_words = max(1, int(target_words * 0.8))
             maximum_words = max(minimum_words, int(target_words * 1.2))
@@ -431,7 +435,7 @@ class WriterAgent(BaseAgent):
 
                 raise ProviderResponseError(
                     "CHAPTER_LENGTH_OUT_OF_RANGE",
-                    f"正文约 {word_count} 个中文字符，不在目标区间 "
+                    f"正文约 {word_count} 字（不含标题和内联批注），不在目标区间 "
                     f"{minimum_words}-{maximum_words} 内",
                 )
 

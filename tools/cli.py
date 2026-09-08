@@ -535,7 +535,7 @@ def _add_planning_command(subparsers):
     listing.add_argument("--limit", type=int, default=20)
     create = sub.add_parser("create")
     create.add_argument("--current-arc", default="")
-    create.add_argument("--window-size", type=int, default=5)
+    create.add_argument("--window-size", type=int, default=50)
     show = sub.add_parser("show")
     show.add_argument("candidate_id")
     stage = sub.add_parser("stage")

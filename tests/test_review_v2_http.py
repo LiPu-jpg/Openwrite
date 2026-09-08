@@ -186,7 +186,14 @@ def test_review_framework_http_is_project_independent_and_versioned(tmp_path: Pa
         assert framework["revision"].startswith("sha256:")
         assert framework["invariants"]["node_count"] == 47
         assert framework["invariants"]["legacy_check_count"] == 37
+        assert framework["invariants"]["criterion_count"] == 20
         assert framework["topology_locked"] is True
+        assert framework["optional_review_criteria"]["scoring"] is False
+        assert {item["name"] for item in framework["optional_review_criteria"]["criteria"]} == {
+            "钩子",
+            "黄金三章",
+            "追读力",
+        }
     finally:
         _stop_server(server, thread)
 

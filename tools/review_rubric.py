@@ -7,9 +7,10 @@ chapter score to zero.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
-
+from typing import Any
 
 RUBRIC_VERSION = "openwrite.review-rubric.v2"
 REVIEW_SCHEMA_VERSION = "openwrite.review.v2"
@@ -147,6 +148,37 @@ QUALITY_DOMAINS: tuple[DomainSpec, ...] = (
 GATE_CHECK_IDS: tuple[int, ...] = (27,)
 CRITERION_STATUSES = frozenset({"evaluated", "not_applicable", "inconclusive"})
 HARD_SEVERITIES = frozenset({"critical", "blocker"})
+WEB_NOVEL_FORM = "web_novel"
+
+
+@dataclass(frozen=True)
+class OptionalCriterionBinding:
+    """Non-scoring criterion attached to an existing quality domain for one form."""
+
+    form: str
+    domain_id: str
+    criterion: CriterionSpec
+    chapter_range: tuple[int, int] | None = None
+
+
+OPTIONAL_REVIEW_CRITERIA: tuple[OptionalCriterionBinding, ...] = (
+    OptionalCriterionBinding(
+        WEB_NOVEL_FORM,
+        "plot",
+        CriterionSpec("web_hook", "钩子", 0.0, ()),
+    ),
+    OptionalCriterionBinding(
+        WEB_NOVEL_FORM,
+        "pacing",
+        CriterionSpec("golden_opening", "黄金三章", 0.0, ()),
+        (1, 3),
+    ),
+    OptionalCriterionBinding(
+        WEB_NOVEL_FORM,
+        "plot",
+        CriterionSpec("retention", "追读力", 0.0, ()),
+    ),
+)
 
 
 def _validate_rubric() -> None:
@@ -161,6 +193,19 @@ def _validate_rubric() -> None:
     for domain in QUALITY_DOMAINS:
         if sum(criterion.max_points for criterion in domain.criteria) != domain.weight:
             raise RuntimeError(f"criteria for {domain.id} do not sum to its domain weight")
+    scoring_ids = {criterion.id for domain in QUALITY_DOMAINS for criterion in domain.criteria}
+    optional_ids: set[str] = set()
+    domain_ids = {domain.id for domain in QUALITY_DOMAINS}
+    for binding in OPTIONAL_REVIEW_CRITERIA:
+        if binding.criterion.max_points != 0.0:
+            raise RuntimeError("optional review criteria must not score")
+        if binding.criterion.legacy_check_ids:
+            raise RuntimeError("optional review criteria must not consume legacy check ids")
+        if binding.domain_id not in domain_ids:
+            raise RuntimeError(f"optional criterion binds unknown domain {binding.domain_id}")
+        if binding.criterion.id in scoring_ids or binding.criterion.id in optional_ids:
+            raise RuntimeError(f"optional criterion id collides: {binding.criterion.id}")
+        optional_ids.add(binding.criterion.id)
 
 
 _validate_rubric()
@@ -173,7 +218,9 @@ def domain_for_check(check_id: int) -> DomainSpec | None:
 def selected_domains(dimensions: Sequence[int] | None) -> tuple[DomainSpec, ...]:
     if dimensions is None:
         return QUALITY_DOMAINS
-    selected = {value for value in dimensions if value in DIMENSION_NAMES and value not in GATE_CHECK_IDS}
+    selected = {
+        value for value in dimensions if value in DIMENSION_NAMES and value not in GATE_CHECK_IDS
+    }
     domains: list[DomainSpec] = []
     for domain in QUALITY_DOMAINS:
         criteria = tuple(
@@ -187,8 +234,83 @@ def selected_domains(dimensions: Sequence[int] | None) -> tuple[DomainSpec, ...]
             if selected.intersection(criterion.legacy_check_ids)
         )
         if criteria:
-            domains.append(DomainSpec(domain.id, domain.name, sum(item.max_points for item in criteria), criteria))
+            domains.append(
+                DomainSpec(
+                    domain.id, domain.name, sum(item.max_points for item in criteria), criteria
+                )
+            )
     return tuple(domains)
+
+
+def normalize_review_form(value: Any) -> str | None:
+    text = str(value or "").strip().lower().replace("_", "-")
+    if text in {"web-novel", "webnovel", "网文"}:
+        return WEB_NOVEL_FORM
+    return None
+
+
+def _chapter_number(chapter_id: Any) -> int | None:
+    match = re.fullmatch(r"ch_(\d+)", str(chapter_id or "").strip())
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def optional_criteria_payload() -> dict[str, Any]:
+    return {
+        "scoring": False,
+        "forms": [WEB_NOVEL_FORM],
+        "criteria": [
+            {
+                "id": item.criterion.id,
+                "name": item.criterion.name,
+                "domain_id": item.domain_id,
+                "form": item.form,
+                "max": item.criterion.max_points,
+                "legacy_check_ids": list(item.criterion.legacy_check_ids),
+                "chapter_range": list(item.chapter_range) if item.chapter_range else None,
+            }
+            for item in OPTIONAL_REVIEW_CRITERIA
+        ],
+    }
+
+
+def attach_optional_criteria(
+    domains: Sequence[DomainSpec],
+    *,
+    form: Any = None,
+    chapter_id: Any = None,
+) -> tuple[DomainSpec, ...]:
+    """Append 0-point web-novel criteria to existing domains. Never changes weights or 37 checks."""
+    if normalize_review_form(form) != WEB_NOVEL_FORM:
+        return tuple(domains)
+    chapter_number = _chapter_number(chapter_id)
+    extras: dict[str, list[CriterionSpec]] = {}
+    for binding in OPTIONAL_REVIEW_CRITERIA:
+        if binding.chapter_range is not None and (
+            chapter_number is None
+            or chapter_number < binding.chapter_range[0]
+            or chapter_number > binding.chapter_range[1]
+        ):
+            continue
+        extras.setdefault(binding.domain_id, []).append(binding.criterion)
+    if not extras:
+        return tuple(domains)
+    attached: list[DomainSpec] = []
+    for domain in domains:
+        extra = extras.get(domain.id)
+        if extra:
+            attached.append(
+                DomainSpec(
+                    domain.id,
+                    domain.name,
+                    domain.weight,
+                    domain.criteria + tuple(extra),
+                )
+            )
+        else:
+            attached.append(domain)
+    return tuple(attached)
 
 
 def rubric_payload(domains: Sequence[DomainSpec] | None = None) -> dict[str, Any]:
@@ -215,6 +337,7 @@ def rubric_payload(domains: Sequence[DomainSpec] | None = None) -> dict[str, Any
             for domain in chosen
         ],
         "gate_check_ids": list(GATE_CHECK_IDS),
+        "optional_criteria": optional_criteria_payload(),
     }
 
 
@@ -231,7 +354,9 @@ def normalize_criterion(raw: Mapping[str, Any], spec: CriterionSpec) -> dict[str
     if status not in CRITERION_STATUSES:
         status = "inconclusive"
     evidence = [str(value).strip() for value in raw.get("evidence") or [] if str(value).strip()]
-    earned = _bounded_number(raw.get("earned"), 0.0, spec.max_points) if status == "evaluated" else 0.0
+    earned = (
+        _bounded_number(raw.get("earned"), 0.0, spec.max_points) if status == "evaluated" else 0.0
+    )
     if earned > 0 and not evidence:
         status = "inconclusive"
         earned = 0.0
@@ -263,9 +388,9 @@ def normalize_domain(raw: Mapping[str, Any], spec: DomainSpec) -> dict[str, Any]
     return {
         "id": spec.id,
         "name": spec.name,
-        "status": "evaluated" if potential_max and evaluated_max == potential_max else (
-            "not_applicable" if not potential_max else "inconclusive"
-        ),
+        "status": "evaluated"
+        if potential_max and evaluated_max == potential_max
+        else ("not_applicable" if not potential_max else "inconclusive"),
         "earned": earned,
         "max": evaluated_max,
         "potential_max": potential_max,
@@ -276,7 +401,9 @@ def normalize_domain(raw: Mapping[str, Any], spec: DomainSpec) -> dict[str, Any]
 
 
 def _hard_issue(issue: Mapping[str, Any]) -> bool:
-    severity = str(issue.get("review_severity") or issue.get("legacy_severity") or issue.get("severity") or "").lower()
+    severity = str(
+        issue.get("review_severity") or issue.get("legacy_severity") or issue.get("severity") or ""
+    ).lower()
     return severity in HARD_SEVERITIES
 
 
@@ -305,15 +432,15 @@ def aggregate_review(
     normalized_issues = [dict(issue) for issue in issues]
     normalized_gates = [dict(gate) for gate in gates]
     blocked = any(_hard_issue(issue) for issue in normalized_issues) or any(
-        str(gate.get("status") or "").lower() in {"blocked", "fail"}
-        for gate in normalized_gates
+        str(gate.get("status") or "").lower() in {"blocked", "fail"} for gate in normalized_gates
     )
     gate_inconclusive = any(
-        str(gate.get("status") or "").lower() == "inconclusive"
-        for gate in normalized_gates
+        str(gate.get("status") or "").lower() == "inconclusive" for gate in normalized_gates
     )
     gate_status = "blocked" if blocked else "inconclusive" if gate_inconclusive else "pass"
-    execution_status = "failed" if not evaluated_max else "partial" if coverage < 1.0 else "completed"
+    execution_status = (
+        "failed" if not evaluated_max else "partial" if coverage < 1.0 else "completed"
+    )
     if blocked:
         delivery_status = "blocked"
     elif gate_inconclusive or coverage < min_coverage or quality_score is None:
@@ -325,7 +452,9 @@ def aggregate_review(
     production_gate_status = (
         delivery_status
         if production_gate_enabled
-        else "disabled" if normalized_calibration == "calibrated" else "disabled_uncalibrated"
+        else "disabled"
+        if normalized_calibration == "calibrated"
+        else "disabled_uncalibrated"
     )
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,

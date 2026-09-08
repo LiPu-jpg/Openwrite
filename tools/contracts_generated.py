@@ -4,7 +4,7 @@
 #   review-manifest-v2.schema.json sha256:c74873990a9d $id: https://openwrite.dev/schemas/review-manifest-v2.schema.json
 #   delivery-manifest-v2.schema.json sha256:cb149eae6952 $id: https://openwrite.dev/schemas/delivery-manifest-v2.schema.json
 #   delivery-stage-v2.schema.json sha256:04d2637e1e4d $id: https://openwrite.dev/schemas/delivery-stage-v2.schema.json
-#   model-benchmark-v1.schema.json sha256:4d56ab63c3ea $id: https://openwrite.dev/schemas/model-benchmark-v1.schema.json
+#   model-benchmark-v1.schema.json sha256:04b62b3e4934 $id: https://openwrite.dev/schemas/model-benchmark-v1.schema.json
 #   model-profile-surface-v1.schema.json sha256:d44a07240d23 $id: https://openwrite.dev/schemas/model-profile-surface-v1.schema.json
 #   task-surface-v1.schema.json sha256:b25a2195014a $id: https://openwrite.dev/schemas/task-surface-v1.schema.json
 #   research-surface-v1.schema.json sha256:c66c3f1494a1 $id: https://openwrite.dev/schemas/research-surface-v1.schema.json
@@ -214,10 +214,37 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
                 "null"
               ]
             },
+            "outline_chapter_count": {
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "outline_chapters": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "outline_end_chapter": {
+              "maximum": 100000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "outline_start_chapter": {
+              "maximum": 100000,
+              "minimum": 1,
+              "type": "integer"
+            },
             "reliability_status": {
               "enum": [
                 "completed",
                 "failed"
+              ]
+            },
+            "task_type": {
+              "enum": [
+                "chapter",
+                "outline"
               ]
             },
             "usage": {
@@ -283,6 +310,74 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
               "creative"
             ]
           },
+          "outline_chapter_count": {
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "outline_end_chapter": {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "outline_start_chapter": {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "pipeline": {
+            "properties": {
+              "execution_mode": {
+                "enum": [
+                  "framework",
+                  "creative"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "nodes": {
+                "items": {
+                  "properties": {
+                    "depends_on": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "depends_on"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "review_domains": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
           "repeats": {
             "maximum": 5,
             "minimum": 1,
@@ -301,6 +396,12 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
             "maximum": 12000,
             "minimum": 200,
             "type": "integer"
+          },
+          "task_type": {
+            "enum": [
+              "chapter",
+              "outline"
+            ]
           },
           "writer_profile_ids": {
             "items": {
@@ -457,6 +558,12 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
       "task_id": {
         "minLength": 1,
         "type": "string"
+      },
+      "task_type": {
+        "enum": [
+          "chapter",
+          "outline"
+        ]
       }
     },
     "required": [
@@ -1674,6 +1781,11 @@ class ModelBenchmarkV1Candidate(_ModelBenchmarkV1CandidateRequired, total=False)
     cost_reported: bool
     latency_ms: int | None
     error: ModelBenchmarkV1CandidateError | None
+    task_type: Literal["chapter", "outline"]
+    outline_start_chapter: int
+    outline_end_chapter: int
+    outline_chapter_count: int
+    outline_chapters: list[dict[str, Any]]
 
 
 class ModelBenchmarkV1EvaluationUsage(TypedDict, total=False):
@@ -1714,6 +1826,34 @@ class ModelBenchmarkV1Evaluation(_ModelBenchmarkV1EvaluationRequired, total=Fals
     error: ModelBenchmarkV1EvaluationError | None
 
 
+class _ModelBenchmarkV1ConfigPipelineNodeRequired(TypedDict):
+    """Required keys of ModelBenchmarkV1ConfigPipelineNode."""
+
+    id: str
+    label: str
+    depends_on: list[str]
+
+
+class ModelBenchmarkV1ConfigPipelineNode(_ModelBenchmarkV1ConfigPipelineNodeRequired, total=False):
+    """ModelBenchmarkV1ConfigPipelineNode."""
+
+
+class ModelBenchmarkV1ConfigPipelineReviewDomain(TypedDict, total=False):
+    """ModelBenchmarkV1ConfigPipelineReviewDomain."""
+
+    id: str
+    label: str
+
+
+class ModelBenchmarkV1ConfigPipeline(TypedDict, total=False):
+    """ModelBenchmarkV1ConfigPipeline."""
+
+    id: str
+    execution_mode: Literal["framework", "creative"]
+    nodes: list[ModelBenchmarkV1ConfigPipelineNode]
+    review_domains: list[ModelBenchmarkV1ConfigPipelineReviewDomain]
+
+
 class _ModelBenchmarkV1ConfigRequired(TypedDict):
     """Required keys of ModelBenchmarkV1Config."""
 
@@ -1730,6 +1870,11 @@ class ModelBenchmarkV1Config(_ModelBenchmarkV1ConfigRequired, total=False):
     blind_review: bool
     run_scoped_profiles: bool
     execution_mode: Literal["framework", "creative"]
+    task_type: Literal["chapter", "outline"]
+    outline_start_chapter: int
+    outline_end_chapter: int
+    outline_chapter_count: int
+    pipeline: ModelBenchmarkV1ConfigPipeline
 
 
 class ModelBenchmarkV1Summary(TypedDict, total=False):
@@ -1757,6 +1902,7 @@ class ModelBenchmarkV1(_ModelBenchmarkV1Required, total=False):
     task_id: str
     started_at: str
     summary: ModelBenchmarkV1Summary
+    task_type: Literal["chapter", "outline"]
 
 
 class _ModelProfileSurfaceV1Required(TypedDict):

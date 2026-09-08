@@ -301,6 +301,10 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 chapter_id = parse_qs(parsed.query).get("chapter", [""])[0]
                 self._json(self.app.dog_graphs(chapter_id))
                 return
+            if parsed.path == "/api/benchmarks/options":
+                self.app.require_project()
+                self._json(studio_success_payload(self.app.benchmark_options(), self.request_id))
+                return
             if parsed.path == "/api/benchmarks":
                 self.app.require_project()
                 raw_limit = parse_qs(parsed.query).get("limit", ["20"])[0]

@@ -28,9 +28,9 @@ from ..llm.context import ContextBudgetPolicy
 from ..review_rubric import (
     DIMENSION_NAMES,
     GATE_CHECK_IDS,
-    REVIEW_SCHEMA_VERSION,
     DomainSpec,
     aggregate_review,
+    attach_optional_criteria,
     legacy_adapter,
     selected_domains,
 )
@@ -174,7 +174,11 @@ class ReviewerAgent(BaseAgent):
         ai_issues = self._detect_ai_tells(content)
         all_issues.extend(ai_issues)
 
-        domains = selected_domains(dimensions)
+        domains = attach_optional_criteria(
+            selected_domains(dimensions),
+            form=context.get("review_form") or context.get("form"),
+            chapter_id=context.get("chapter_id"),
+        )
         domain_results, llm_issues = await self._llm_review_domains(
             content,
             context,
@@ -228,7 +232,9 @@ class ReviewerAgent(BaseAgent):
             quality_threshold=float(context.get("quality_threshold") or 70),
             min_coverage=float(context.get("min_review_coverage") or 0.80),
             production_gate_enabled=context.get("review_production_gate_enabled") is True,
-            calibration_status=str(context.get("review_threshold_calibration_status") or "uncalibrated"),
+            calibration_status=str(
+                context.get("review_threshold_calibration_status") or "uncalibrated"
+            ),
         )
         review_v2["strict"] = bool(strict)
         review_v2["requested_dimensions"] = (
@@ -288,7 +294,11 @@ class ReviewerAgent(BaseAgent):
                 content,
                 context,
                 domain,
-                [issue for issue in deterministic_issues if issue.dimension in domain.legacy_check_ids],
+                [
+                    issue
+                    for issue in deterministic_issues
+                    if issue.dimension in domain.legacy_check_ids
+                ],
             )
             for domain in domains
         ]
@@ -309,7 +319,12 @@ class ReviewerAgent(BaseAgent):
                     {
                         "id": domain.id,
                         "criteria": [
-                            {"id": criterion.id, "status": "inconclusive", "earned": 0, "evidence": []}
+                            {
+                                "id": criterion.id,
+                                "status": "inconclusive",
+                                "earned": 0,
+                                "evidence": [],
+                            }
                             for criterion in domain.criteria
                         ],
                     }
@@ -329,8 +344,8 @@ class ReviewerAgent(BaseAgent):
         from ..llm.response import ProviderResponseError
 
         criteria_contract = "\n".join(
-            f'- {criterion.id}: {criterion.name}, max={criterion.max_points:g}, '
-            f'legacy_check_ids={list(criterion.legacy_check_ids)}'
+            f"- {criterion.id}: {criterion.name}, max={criterion.max_points:g}, "
+            f"legacy_check_ids={list(criterion.legacy_check_ids)}"
             for criterion in domain.criteria
         )
         system_prompt = f"""你是小说质量评审员。只评审“{domain.name}”域，并按正向证据累加得分。
@@ -479,18 +494,20 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
         try:
             value = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise ProviderResponseError("MALFORMED_STRUCTURED_OUTPUT", "评审结果不是合法 JSON") from exc
+            raise ProviderResponseError(
+                "MALFORMED_STRUCTURED_OUTPUT", "评审结果不是合法 JSON"
+            ) from exc
         if not isinstance(value, dict):
             raise ProviderResponseError("MALFORMED_STRUCTURED_OUTPUT", "评审结果必须是 JSON 对象")
         return value
 
     @staticmethod
     def _validated_criteria(raw: object, domain: DomainSpec, content: str) -> list[dict]:
-        by_id = {
-            str(item.get("id") or ""): dict(item)
-            for item in raw or []
-            if isinstance(item, dict)
-        } if isinstance(raw, list) else {}
+        by_id = (
+            {str(item.get("id") or ""): dict(item) for item in raw or [] if isinstance(item, dict)}
+            if isinstance(raw, list)
+            else {}
+        )
         validated: list[dict] = []
         for spec in domain.criteria:
             item = by_id.get(spec.id, {"id": spec.id, "status": "inconclusive"})
@@ -519,7 +536,11 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
             dimension = item.get("dimension")
             severity = str(item.get("severity") or "").lower()
             evidence = str(item.get("evidence") or "").strip()
-            if dimension not in allowed_dimensions or severity not in {"critical", "warning", "info"}:
+            if dimension not in allowed_dimensions or severity not in {
+                "critical",
+                "warning",
+                "info",
+            }:
                 continue
             if not evidence or evidence not in content:
                 continue

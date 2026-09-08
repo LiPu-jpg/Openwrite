@@ -17,7 +17,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tools.benchmark_execution import BenchmarkExecution
+from tools.benchmark_tasks import (
+    OUTLINE_PROMPT_VERSION,
+    OUTLINE_RUBRIC_VERSION,
+    benchmark_options,
+    benchmark_pipeline,
+    benchmark_target,
+    validate_outline_ready,
+)
 from tools.model_profiles import ModelProfileStore, activate_model_profile
+from tools.novel_workspace import count_writing_units
 from tools.review_rubric import RUBRIC_VERSION
 
 BENCHMARK_SCHEMA_VERSION = "openwrite.model-benchmark.v1"
@@ -141,18 +151,18 @@ def _benchmark_comparison(record: dict[str, Any]) -> dict[str, Any]:
 
     config = record.get("config") if isinstance(record.get("config"), dict) else {}
     snapshot = (
-        record.get("context_snapshot")
-        if isinstance(record.get("context_snapshot"), dict)
-        else {}
+        record.get("context_snapshot") if isinstance(record.get("context_snapshot"), dict) else {}
     )
     manifest = snapshot.get("manifest") if isinstance(snapshot.get("manifest"), dict) else {}
     measurement = (
-        manifest.get("measurement")
-        if isinstance(manifest.get("measurement"), dict)
-        else {}
+        manifest.get("measurement") if isinstance(manifest.get("measurement"), dict) else {}
     )
     schema_version = _text_or_none(manifest.get("schema_version"))
     comparison = {
+        "task_type": str(config.get("task_type") or record.get("task_type") or "chapter"),
+        "chapter_id": _text_or_none(record.get("chapter_id")),
+        "outline_start_chapter": config.get("outline_start_chapter"),
+        "outline_chapter_count": config.get("outline_chapter_count"),
         "context_hash": _text_or_none(record.get("context_hash")),
         "prompt_version": _text_or_none(record.get("prompt_version")),
         "rubric_version": _text_or_none(record.get("rubric_version")),
@@ -168,6 +178,10 @@ def _benchmark_comparison(record: dict[str, Any]) -> dict[str, Any]:
     identity_fields = {
         key: comparison[key]
         for key in (
+            "task_type",
+            "chapter_id",
+            "outline_start_chapter",
+            "outline_chapter_count",
             "context_hash",
             "prompt_version",
             "rubric_version",
@@ -303,6 +317,13 @@ class BenchmarkStore:
                         "run_id": record.get("run_id"),
                         "status": record.get("status"),
                         "chapter_id": record.get("chapter_id"),
+                        "task_type": record.get("task_type") or "chapter",
+                        "outline_start_chapter": (record.get("config") or {}).get(
+                            "outline_start_chapter"
+                        ),
+                        "outline_chapter_count": (record.get("config") or {}).get(
+                            "outline_chapter_count"
+                        ),
                         "created_at": record.get("created_at"),
                         "context_hash": record.get("context_hash"),
                         "candidate_count": len(record.get("candidates") or []),
@@ -347,6 +368,14 @@ class ModelBenchmarkService:
             "runs": self.store.list(limit),
         }
 
+    def options(self) -> dict[str, Any]:
+        return benchmark_options(self.project_root, self.novel_id)
+
+    def target(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return benchmark_target(
+            self.project_root, self.novel_id, payload, enforce_history=self._readiness_gate
+        )
+
     def run(
         self,
         payload: dict[str, Any],
@@ -366,10 +395,18 @@ class ModelBenchmarkService:
         reviewer_ids = self._profile_ids(raw_reviewers, "reviewer_profile_ids", maximum=4)
         repeats = self._bounded_int(payload.get("repeats"), 1, 5, 1)
         concurrency = self._bounded_int(payload.get("concurrency"), 1, 4, 1)
-        execution_mode = str(payload.get("execution_mode") or "framework").strip().lower()
-        if execution_mode not in {"framework", "creative"}:
-            raise ValueError("execution_mode must be framework or creative")
-        chapter_id = str(context_preview.get("chapter_id") or payload.get("chapter_id") or "")
+        target = self.target(
+            {
+                **payload,
+                "chapter_id": payload.get("chapter_id") or context_preview.get("chapter_id"),
+            }
+        )
+        execution_mode, task_type = target["execution_mode"], target["task_type"]
+        chapter_id = target["chapter_id"]
+        if chapter_id != context_preview.get("chapter_id"):
+            raise BenchmarkFrameworkError(
+                "测试目标与冻结上下文不一致，请刷新后重试", code="BENCHMARK_CONTEXT_CHANGED"
+            )
         match = re.fullmatch(r"ch_(\d+)", chapter_id)
         if match is None:
             raise ValueError("benchmark context has an invalid chapter id")
@@ -383,20 +420,32 @@ class ModelBenchmarkService:
         packet = context_preview.get("packet")
         if not isinstance(packet, dict):
             raise ValueError("benchmark requires the full novel_context_preview packet")
+        packet = {**packet, **target}
         # Readiness gate: refuse to run on un-authored projects or on chapters
         # that have no outline node.  Otherwise the model free-writes against a
         # thin context and blind review cannot catch the drift (garbage-in).
-        if self._readiness_gate:
+        if self._readiness_gate and task_type == "chapter":
+            from tools.manuscript_acceptance import ManuscriptAcceptanceService
             from tools.write_guard import validate_chapter_writable
 
+            ManuscriptAcceptanceService(self.project_root, self.novel_id).require_current(
+                chapter_id
+            )
             guard = validate_chapter_writable(self.project_root, self.novel_id, chapter_id)
             if not guard.get("ok"):
                 raise BenchmarkFrameworkError(
                     str(guard.get("message") or "项目未就绪或目标章节无大纲节点"),
                     code=str(guard.get("code") or "PROJECT_NOT_READY"),
                 )
+        elif self._readiness_gate:
+            validate_outline_ready(self.project_root, self.novel_id, chapter_id)
+        if task_type == "outline" and not str(packet.get("planning_context") or "").strip():
+            raise BenchmarkFrameworkError(
+                "大纲测试缺少冻结规划上下文", code="BENCHMARK_CONTEXT_MISSING"
+            )
         strict_review = bool(payload.get("strict_review") or payload.get("strict", False))
         snapshot = {
+            **target,
             "chapter_id": chapter_id,
             "target_words": target_words,
             "packet": packet,
@@ -410,7 +459,9 @@ class ModelBenchmarkService:
         )
         created_at = _utc_now()
         writer_profiles = {
-            profile_id: self.profile_store.resolve_profile(profile_id, operation="chapter_write")
+            profile_id: self.profile_store.resolve_profile(
+                profile_id, operation="goethe" if task_type == "outline" else "chapter_write"
+            )
             for profile_id in writer_ids
         }
         reviewer_profiles = {
@@ -418,12 +469,19 @@ class ModelBenchmarkService:
             for profile_id in reviewer_ids
         }
         search_profile = (
-            self.profile_store.resolve("search") if execution_mode == "framework" else None
+            self.profile_store.resolve("search")
+            if execution_mode == "framework" and task_type == "chapter"
+            else None
         )
         route_snapshot = dict(self.profile_store.load().get("routes") or {})
 
         if progress:
-            progress("model", "生成隔离的 benchmark 候选正文")
+            progress(
+                "model",
+                "生成隔离的 benchmark 候选大纲"
+                if task_type == "outline"
+                else "生成隔离的 benchmark 候选正文",
+            )
         candidates: list[dict[str, Any]] = []
         jobs = [
             (profile_id, repeat) for profile_id in writer_ids for repeat in range(1, repeats + 1)
@@ -501,6 +559,44 @@ class ModelBenchmarkService:
         evaluations.sort(
             key=lambda item: (str(item["candidate_id"]), str(item["reviewer_profile"]["id"]))
         )
+        for candidate in candidates:
+            framework = candidate.get("framework") or {}
+            execution = framework.get("pipeline_execution")
+            if not isinstance(execution, dict):
+                continue
+            reviews = [
+                item for item in evaluations if item["candidate_id"] == candidate["candidate_id"]
+            ]
+            review_node = next(
+                (node for node in execution["nodes"] if node["id"] == "review"), None
+            )
+            if review_node is not None and reviews:
+                states = {item["execution_status"] for item in reviews}
+                review_node["status"] = (
+                    "failed"
+                    if "failed" in states
+                    else "partial"
+                    if "partial" in states
+                    else "completed"
+                )
+                review_node["evidence"] = [
+                    {
+                        **evidence,
+                        "reviewer_profile_id": item["reviewer_profile"]["id"],
+                        "status": item["execution_status"],
+                    }
+                    for item in reviews
+                    for node in ((item.get("framework") or {}).get("pipeline_execution") or {}).get(
+                        "nodes", []
+                    )
+                    if node["id"] == "review"
+                    for evidence in node.get("evidence", [])
+                ]
+                framework["stage_statuses"]["review"] = review_node["status"]
+                if framework.get("execution_path"):
+                    Path(framework["execution_path"]).write_text(
+                        json.dumps(execution, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                    )
 
         if self.profile_store.load().get("routes") != route_snapshot:
             raise RuntimeError("benchmark mutated global model routes")
@@ -537,6 +633,7 @@ class ModelBenchmarkService:
             and not isinstance(item.get("latency_ms"), bool)
         ]
         artifact = {
+            "task_type": task_type,
             "schema_version": BENCHMARK_SCHEMA_VERSION,
             "run_id": run_id,
             "status": status,
@@ -546,14 +643,19 @@ class ModelBenchmarkService:
             "chapter_id": chapter_id,
             "context_hash": context_hash,
             "context_snapshot": {
+                **target,
                 "chapter_id": chapter_id,
                 "target_words": target_words,
                 "characters": list(context_preview.get("characters") or []),
                 "manifest": context_preview.get("manifest") or {},
             },
-            "prompt_version": BENCHMARK_PROMPT_VERSION,
-            "rubric_version": RUBRIC_VERSION,
+            "prompt_version": OUTLINE_PROMPT_VERSION
+            if task_type == "outline"
+            else BENCHMARK_PROMPT_VERSION,
+            "rubric_version": OUTLINE_RUBRIC_VERSION if task_type == "outline" else RUBRIC_VERSION,
             "config": {
+                **target,
+                "pipeline": benchmark_pipeline(task_type, execution_mode),
                 "writer_profile_ids": writer_ids,
                 "reviewer_profile_ids": reviewer_ids,
                 "repeats": repeats,
@@ -592,6 +694,7 @@ class ModelBenchmarkService:
             progress("committing", "保存隔离 benchmark artifact")
         path = self.store.save(artifact)
         return {
+            "task_type": task_type,
             "run_id": run_id,
             "status": status,
             "artifact_path": str(path),
@@ -616,6 +719,8 @@ class ModelBenchmarkService:
         started = time.perf_counter()
         candidate_id = f"{run_id}_{profile['id']}_{repeat}"
         workspace_path = ""
+        trace = None
+        stage = "context"
         try:
             if execution_mode == "framework":
                 workspace = self._prepare_framework_workspace(run_id, candidate_id)
@@ -629,10 +734,25 @@ class ModelBenchmarkService:
                     search_profile,
                 )
             else:
+                workspace = self.store.workspace_project(run_id, candidate_id)
+                workspace_path = str(workspace)
+                root = workspace / "benchmark_execution"
+                trace = BenchmarkExecution(
+                    root / "execution.json", benchmark_pipeline("chapter", "creative")
+                )
+                trace.start(stage)
+                (root / "context.json").write_bytes(_json_bytes(packet))
+                trace.complete(stage, root / "context.json")
+                stage = "draft"
+                trace.start(stage)
                 result = self._generation_executor(profile, packet, chapter_number, target_words)
+                (root / "draft.json").write_bytes(_json_bytes(result))
+                trace.complete(stage, root / "draft.json")
+                result = {**result, "framework": trace.evidence()}
             usage = dict(result.get("usage") or {})
             cost_usd, cost_reported = _cost_details(usage)
             return {
+                "task_type": str(packet.get("task_type") or "chapter"),
                 "candidate_id": candidate_id,
                 "benchmark_run_id": run_id,
                 "chapter_id": chapter_id,
@@ -641,7 +761,17 @@ class ModelBenchmarkService:
                 "reliability_status": "completed",
                 "title": str(result.get("title") or ""),
                 "content": str(result.get("content") or ""),
-                "word_count": int(result.get("word_count") or 0),
+                "word_count": count_writing_units(str(result.get("content") or "")),
+                **{
+                    key: result[key]
+                    for key in (
+                        "outline_start_chapter",
+                        "outline_end_chapter",
+                        "outline_chapter_count",
+                        "outline_chapters",
+                    )
+                    if key in result
+                },
                 "finish_reason": str(result.get("finish_reason") or ""),
                 "response_model": str(result.get("model") or ""),
                 "response_provider": str(result.get("provider") or ""),
@@ -656,7 +786,14 @@ class ModelBenchmarkService:
                 "error": None,
             }
         except Exception as exc:
+            failure_framework = dict(getattr(exc, "framework", {}) or {})
+            if trace is not None:
+                trace.fail(stage, str(getattr(exc, "code", "MODEL_RUN_FAILED")))
+                failure_framework.update(trace.evidence())
+            usage = dict(getattr(exc, "usage", {}) or {})
+            cost_usd, cost_reported = _cost_details(usage)
             return {
+                "task_type": str(packet.get("task_type") or "chapter"),
                 "candidate_id": candidate_id,
                 "benchmark_run_id": run_id,
                 "chapter_id": chapter_id,
@@ -669,14 +806,14 @@ class ModelBenchmarkService:
                 "finish_reason": "",
                 "response_model": "",
                 "response_provider": "",
-                "usage": {},
-                "reasoning_tokens": 0,
-                "cost_usd": 0,
-                "cost_reported": False,
+                "usage": usage,
+                "reasoning_tokens": _reasoning_tokens(usage),
+                "cost_usd": cost_usd,
+                "cost_reported": cost_reported,
                 "latency_ms": round((time.perf_counter() - started) * 1000),
                 "execution_mode": execution_mode,
                 "workspace_path": workspace_path,
-                "framework": dict(getattr(exc, "framework", {}) or {}),
+                "framework": failure_framework,
                 "error": {
                     "code": str(getattr(exc, "code", "MODEL_RUN_FAILED")),
                     "message": exc.__class__.__name__,
@@ -693,13 +830,43 @@ class ModelBenchmarkService:
         strict_review: bool = False,
     ) -> dict[str, Any]:
         started = time.perf_counter()
+        trace = None
         try:
-            if execution_mode == "framework":
+            if candidate.get("task_type") == "outline":
+                from tools.outline_benchmark import review_outline_candidate
+
+                workspace = self._candidate_workspace(candidate)
+                with activate_model_profile(profile):
+                    result = review_outline_candidate(
+                        workspace,
+                        self.novel_id,
+                        str(candidate["content"]),
+                        packet,
+                        str(profile["id"]),
+                    )
+            elif execution_mode == "framework":
                 result = self._review_framework(
                     profile, candidate, search_profile, strict_review=strict_review
                 )
             else:
+                workspace = self._candidate_workspace(candidate)
+                root = workspace / "benchmark_execution"
+                previous = json.loads((root / "execution.json").read_text(encoding="utf-8"))
+                trace = BenchmarkExecution(
+                    root / f"review_{profile['id']}.execution.json",
+                    benchmark_pipeline("chapter", "creative"),
+                    previous=previous,
+                )
+                trace.start("review")
                 result = self._review_executor(profile, str(candidate["content"]), packet)
+                artifact = root / f"review_{profile['id']}.json"
+                artifact.write_bytes(_json_bytes(result))
+                status = str((result.get("review_v2") or {}).get("execution_status") or "completed")
+                trace.complete("review", artifact, status=status)
+                result = {
+                    **result,
+                    "framework": {**trace.evidence(), "artifact_path": str(artifact)},
+                }
             usage = dict(result.get("token_usage") or result.get("usage") or {})
             cost_usd, cost_reported = _cost_details(usage)
             v2 = result.get("review_v2") if isinstance(result.get("review_v2"), dict) else {}
@@ -726,6 +893,10 @@ class ModelBenchmarkService:
                 "error": None,
             }
         except Exception as exc:
+            failure_framework = dict(getattr(exc, "framework", {}) or {})
+            if trace is not None:
+                trace.fail("review", str(getattr(exc, "code", "REVIEW_RUN_FAILED")))
+                failure_framework.update(trace.evidence())
             return {
                 "candidate_id": candidate["candidate_id"],
                 "reviewer_profile": _safe_profile(profile),
@@ -742,7 +913,7 @@ class ModelBenchmarkService:
                 "cost_reported": False,
                 "latency_ms": round((time.perf_counter() - started) * 1000),
                 "execution_mode": execution_mode,
-                "framework": dict(getattr(exc, "framework", {}) or {}),
+                "framework": failure_framework,
                 "error": {
                     "code": str(getattr(exc, "code", "REVIEW_RUN_FAILED")),
                     "message": exc.__class__.__name__,
@@ -790,6 +961,11 @@ class ModelBenchmarkService:
         target_words: int,
         search_profile: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        if packet.get("task_type") == "outline":
+            from tools.outline_benchmark import generate_outline_candidate
+
+            with activate_model_profile(profile):
+                return generate_outline_candidate(workspace, self.novel_id, packet)
         from tools.chapter_pipeline import execute_write_chapter, load_chapter
         from tools.chapter_run_v2 import ChapterRunV2Store
 
@@ -806,6 +982,7 @@ class ModelBenchmarkService:
         run_id_v2 = str(result.get("run_id_v2") or "")
         manifest = ChapterRunV2Store(workspace, self.novel_id).load(run_id_v2)
         framework = self._framework_evidence(
+            workspace=workspace,
             entrypoint="execute_write_chapter",
             run_id_v2=run_id_v2,
             manifest=manifest,
@@ -835,7 +1012,7 @@ class ModelBenchmarkService:
         return {
             "title": str(result.get("title") or ""),
             "content": content,
-            "word_count": int(result.get("word_count") or 0),
+            "word_count": count_writing_units(content),
             "finish_reason": str(result.get("finish_reason") or ""),
             "model": str(result.get("model") or ""),
             "provider": str(result.get("provider") or ""),
@@ -853,22 +1030,17 @@ class ModelBenchmarkService:
         from tools.chapter_pipeline import execute_review_chapter
         from tools.chapter_run_v2 import ChapterRunV2Store
 
-        workspace = Path(str(candidate.get("workspace_path") or "")).resolve()
-        try:
-            expected_workspace = self.store.workspace_project(
-                str(candidate.get("benchmark_run_id") or ""),
-                str(candidate.get("candidate_id") or ""),
-            ).resolve()
-        except ValueError as exc:
+        source_workspace = self._candidate_workspace(candidate)
+        reviewer_id = str(profile.get("id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", reviewer_id):
             raise BenchmarkFrameworkError(
-                "benchmark candidate identity is invalid",
-                code="BENCHMARK_WORKSPACE_INVALID",
-            ) from exc
-        if workspace != expected_workspace or not workspace.is_dir():
-            raise BenchmarkFrameworkError(
-                "benchmark workspace does not match its candidate",
-                code="BENCHMARK_WORKSPACE_INVALID",
+                "benchmark reviewer identity is invalid", code="BENCHMARK_WORKSPACE_INVALID"
             )
+        # A production review writes its run manifest and artifact. Each reviewer
+        # must start from the same generated candidate and retain its own evidence.
+        workspace = source_workspace.parent / "reviews" / reviewer_id / "project"
+        shutil.copytree(source_workspace, workspace)
+        workspace.chmod(0o700)
         framework = candidate.get("framework")
         framework = framework if isinstance(framework, dict) else {}
         run_id_v2 = str(framework.get("run_id_v2") or "")
@@ -884,6 +1056,7 @@ class ModelBenchmarkService:
             )
         manifest = ChapterRunV2Store(workspace, self.novel_id).load(run_id_v2)
         framework_evidence = self._framework_evidence(
+            workspace=workspace,
             entrypoint="execute_review_chapter",
             run_id_v2=run_id_v2,
             manifest=manifest,
@@ -903,14 +1076,31 @@ class ModelBenchmarkService:
                 code="FRAMEWORK_REVIEW_EVIDENCE_INCOMPLETE",
                 framework=framework_evidence,
             )
-        return {
-            **result,
-            "framework": framework_evidence,
-        }
+        return {**result, "framework": framework_evidence}
+
+    def _candidate_workspace(self, candidate: dict[str, Any]) -> Path:
+        workspace = Path(str(candidate.get("workspace_path") or "")).resolve()
+        try:
+            expected_workspace = self.store.workspace_project(
+                str(candidate.get("benchmark_run_id") or ""),
+                str(candidate.get("candidate_id") or ""),
+            ).resolve()
+        except ValueError as exc:
+            raise BenchmarkFrameworkError(
+                "benchmark candidate identity is invalid",
+                code="BENCHMARK_WORKSPACE_INVALID",
+            ) from exc
+        if workspace != expected_workspace or not workspace.is_dir():
+            raise BenchmarkFrameworkError(
+                "benchmark workspace does not match its candidate",
+                code="BENCHMARK_WORKSPACE_INVALID",
+            )
+        return workspace
 
     @staticmethod
     def _framework_evidence(
         *,
+        workspace: Path,
         entrypoint: str,
         run_id_v2: str,
         manifest: Any,
@@ -928,8 +1118,31 @@ class ModelBenchmarkService:
             manifest.stages.get(failed_stage) if manifest is not None and failed_stage else None
         )
         entrypoint_key = "review_entrypoint" if committed_stage == "review" else "write_entrypoint"
+
+        def stage_evidence(stage_id: str) -> list[dict[str, Any]]:
+            if manifest is None or not manifest.stages[stage_id].artifact:
+                return []
+            stage = manifest.stages[stage_id]
+            artifact = (workspace / stage.artifact).resolve()
+            evidence = {"path": str(artifact), "output_revision": stage.output_revision}
+            if artifact.is_relative_to(workspace.resolve()) and artifact.is_file():
+                data = artifact.read_bytes()
+                evidence.update(sha256=hashlib.sha256(data).hexdigest(), bytes=len(data))
+            return [evidence]
+
         return {
             entrypoint_key: entrypoint,
+            "pipeline_execution": {
+                "id": benchmark_pipeline("chapter", "framework")["id"],
+                "nodes": [
+                    {
+                        **node,
+                        "status": stages.get(node["id"], "pending"),
+                        "evidence": stage_evidence(node["id"]),
+                    }
+                    for node in benchmark_pipeline("chapter", "framework")["nodes"]
+                ],
+            },
             "run_id_v2": run_id_v2,
             "stage_statuses": stages,
             committed_key: stages.get(committed_stage) == "completed",

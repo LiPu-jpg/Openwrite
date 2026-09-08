@@ -14,6 +14,9 @@ from uuid import uuid4
 
 from models.runtime_diagnostics import RollingPlanCandidateV1
 
+PLANNING_WINDOW_DEFAULT = 50
+PLANNING_WINDOW_MAX = 50
+
 
 class RollingPlanningError(RuntimeError):
     def __init__(self, message: str, *, code: str = "ROLLING_PLAN_ERROR") -> None:
@@ -28,7 +31,12 @@ class RollingPlanningService:
         self.novel_root = self.project_root / "data" / "novels" / self.novel_id
         self.root = self.novel_root / "data" / "planning" / "rolling_candidates"
 
-    def create(self, *, current_arc: str = "", window_size: int = 5) -> RollingPlanCandidateV1:
+    def create(
+        self,
+        *,
+        current_arc: str = "",
+        window_size: int = PLANNING_WINDOW_DEFAULT,
+    ) -> RollingPlanCandidateV1:
         from tools.chapter_memory import ChapterMemoryStore
         from tools.foreshadowing_manager import ForeshadowingDAGManager
         from tools.outline_tree import build_outline_structure
@@ -41,12 +49,13 @@ class RollingPlanningService:
         state = TruthFilesManager(self.project_root, self.novel_id).load_runtime_state()
         arc = str(current_arc or "arc_001")
         chapters = self._chapters(outline.get("roots", []))
-        drafted = [item["id"] for item in chapters if item.get("status") == "drafted"]
-        planned = [item["id"] for item in chapters if item.get("status") != "drafted"]
-        size = max(1, min(20, int(window_size)))
+        accepted_ids = set(self._accepted_chapter_ids())
+        accepted = [item["id"] for item in chapters if item["id"] in accepted_ids]
+        planned = [item["id"] for item in chapters if item["id"] not in accepted_ids]
+        size = self._clamp_window_size(window_size)
         memory_store = ChapterMemoryStore(self.project_root, self.novel_id)
         summaries = []
-        for chapter_id in drafted[-size:]:
+        for chapter_id in accepted[-size:]:
             memory = memory_store.load(chapter_id) or {}
             summary = str(memory.get("summary") or memory.get("observations") or "").strip()
             if summary:
@@ -66,7 +75,7 @@ class RollingPlanningService:
         ]
         style_drift: list[str] = []
         review_store = ReviewStore(self.project_root, self.novel_id)
-        for chapter_id in drafted[-size:]:
+        for chapter_id in accepted[-size:]:
             review = review_store.load(chapter_id) or {}
             for issue in review.get("issue_details") or []:
                 if str(issue.get("dimension") or "").startswith("style"):
@@ -84,8 +93,9 @@ class RollingPlanningService:
             created_at=datetime.now(timezone.utc).isoformat(),
             outline_revision=str(outline.get("revision") or ""),
             facts_revision=str(state.revision),
-            current_window=tuple(drafted[-size:]),
+            current_window=tuple(accepted[-size:]),
             next_window=tuple(planned[:size]),
+            window_size=size,
             direction=self._direction(outline),
             arc_summary="\n".join(summaries) or "当前弧尚无可用章节摘要。",
             character_state=tuple(
@@ -234,7 +244,11 @@ class RollingPlanningService:
         for raw in proposal.splitlines():
             match = re.match(r"^#{1,6}\s*第\s*(\d+)\s*章[：:]\s*(.*)$", raw.strip())
             if match is not None:
-                if current is not None and current["number"] is not None and current["number"] not in existing:
+                if (
+                    current is not None
+                    and current["number"] is not None
+                    and current["number"] not in existing
+                ):
                     added.append(current)
                 elif current is not None:
                     skipped.append(f"ch_{int(current['number']):03d}（已存在/冲突）")
@@ -296,13 +310,18 @@ class RollingPlanningService:
                 {"id": item["id"], "title": item["title"]} for item in added
             ],
             "skipped": skipped,
-            "message": f"已追加 {len(added)} 章到正式大纲（{', '.join(item['title'] for item in added[:6])}）",
+            "message": (
+                f"已追加 {len(added)} 章到正式大纲"
+                f"（{', '.join(item['title'] for item in added[:6])}）"
+            ),
         }
 
     def payload(self, candidate: RollingPlanCandidateV1) -> dict[str, Any]:
         result = candidate.model_dump(mode="json")
         result["revision"] = self.revision(candidate)
         result["goethe_brief"] = self.goethe_brief(candidate)
+        result["accepted_window"] = list(candidate.current_window)
+        result["planned_window"] = list(candidate.next_window)
         # Attach the staged proposal body so viewers can render the draft
         # without re-reading files. The draft lives in the shared outline draft
         # slot; only attach when its hash still matches the candidate revision.
@@ -328,8 +347,10 @@ class RollingPlanningService:
         return (
             f"当前弧: {candidate.current_arc}\n"
             f"全书方向: {candidate.direction}\n"
-            f"已写窗口: {', '.join(candidate.current_window) or '无'}\n"
-            f"待规划窗口: {', '.join(candidate.next_window) or '已耗尽'}\n"
+            f"已接纳窗口（事实，{candidate.window_size} 章内）: "
+            f"{', '.join(candidate.current_window) or '无'}\n"
+            f"待规划窗口（计划，非事实，最多 {candidate.window_size} 章）: "
+            f"{', '.join(candidate.next_window) or '已耗尽'}\n"
             f"当前弧摘要:\n{candidate.arc_summary}\n"
             f"未决伏笔: {', '.join(candidate.unresolved_foreshadowing) or '无'}\n"
             f"下一弧候选目标: {'; '.join(candidate.next_arc_goals)}\n"
@@ -362,6 +383,25 @@ class RollingPlanningService:
         if not clean.startswith("roll_") or any(part in clean for part in ("/", "\\", "..")):
             raise RollingPlanningError("无效滚动规划候选 ID", code="INVALID_CANDIDATE_ID")
         return self.root / f"{clean}.json"
+
+    def _accepted_chapter_ids(self) -> list[str]:
+        from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+        surface = ManuscriptAcceptanceService(self.project_root, self.novel_id).inspect()
+        return [
+            str(item["chapter_id"])
+            for item in surface.get("chapters") or []
+            if str(item.get("status") or "") == "current"
+            and str(item.get("accepted_revision") or "")
+        ]
+
+    @staticmethod
+    def _clamp_window_size(window_size: Any) -> int:
+        try:
+            size = int(window_size)
+        except (TypeError, ValueError):
+            size = PLANNING_WINDOW_DEFAULT
+        return max(1, min(PLANNING_WINDOW_MAX, size))
 
     @staticmethod
     def _chapters(roots: Any) -> list[dict[str, Any]]:
@@ -410,7 +450,7 @@ def rolling_plan_action(
         return service.payload(
             service.create(
                 current_arc=str(payload.get("current_arc") or ""),
-                window_size=int(payload.get("window_size") or 5),
+                window_size=int(payload.get("window_size") or PLANNING_WINDOW_DEFAULT),
             )
         )
     candidate_id = str(payload.get("candidate_id") or "")
