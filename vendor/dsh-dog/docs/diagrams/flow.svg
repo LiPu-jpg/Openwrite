@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 980" font-family="ui-sans-serif, system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#4b5563" />
+    </marker>
+  </defs>
+  <rect width="1460" height="980" fill="#f8fafc" />
+
+  <text x="24" y="36" font-size="21" font-weight="700" fill="#111827">DoG v0.2 — 单次运行流程</text>
+  <text x="24" y="58" font-size="13" fill="#6b7280">分阶段执行:失败结算不会停止无关验证。绿=人、紫=LLM Agent、蓝=程序、橙=开发 Agent。</text>
+
+  <!-- 泳道标题 -->
+  <text x="40" y="100" font-size="13" font-weight="600" fill="#2f9e63">人类</text>
+  <text x="470" y="100" font-size="13" font-weight="600" fill="#7c6ce8">规划 / 覆盖率评审(LLM)</text>
+  <text x="900" y="100" font-size="13" font-weight="600" fill="#3f7fd1">DoG 核心(程序)</text>
+  <text x="1250" y="100" font-size="13" font-weight="600" fill="#d97706">开发 Agent</text>
+  <line x1="24" y1="112" x2="1436" y2="112" stroke="#d1d5db" stroke-width="1.5" />
+
+  <!-- 1 人提出目标 -->
+  <rect x="40" y="130" width="220" height="52" rx="9" fill="#2f9e63" />
+  <text x="150" y="152" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">1 · 人提出目标</text>
+  <text x="150" y="170" font-size="11" fill="#e8f5ee" text-anchor="middle">非形式化验收标准</text>
+  <line x1="260" y1="156" x2="460" y2="156" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <rect x="470" y="130" width="300" height="52" rx="9" fill="#7c6ce8" />
+  <text x="620" y="152" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">2 · 规划 Agent</text>
+  <text x="620" y="170" font-size="11" fill="#efeaff" text-anchor="middle">目标分解为图(LLM,隔离)</text>
+  <line x1="770" y1="156" x2="890" y2="156" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <rect x="900" y="130" width="260" height="52" rx="9" fill="#3f7fd1" />
+  <text x="1030" y="152" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">dog_validate</text>
+  <text x="1030" y="170" font-size="11" fill="#dbe9f8" text-anchor="middle">schema 校验 + 静态规则(程序)</text>
+  <line x1="1030" y1="182" x2="1030" y2="210" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- 3 覆盖率评审 -->
+  <rect x="470" y="216" width="300" height="52" rx="9" fill="#7c6ce8" />
+  <text x="620" y="238" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">3 · 覆盖率评审</text>
+  <text x="620" y="256" font-size="11" fill="#efeaff" text-anchor="middle">隔离审图 → 通过/拒绝(LLM)</text>
+  <line x1="620" y1="268" x2="620" y2="320" stroke="#4b5563" stroke-width="1.6" />
+  <line x1="620" y1="320" x2="260" y2="320" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <rect x="40" y="304" width="220" height="52" rx="9" fill="#2f9e63" />
+  <text x="150" y="326" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">4 · 人确认</text>
+  <text x="150" y="344" font-size="11" fill="#e8f5ee" text-anchor="middle">图成为固定标准</text>
+  <line x1="150" y1="356" x2="150" y2="380" stroke="#4b5563" stroke-width="1.6" />
+  <line x1="150" y1="380" x2="830" y2="380" stroke="#4b5563" stroke-width="1.6" />
+  <line x1="830" y1="380" x2="830" y2="242" stroke="#4b5563" stroke-width="1.6" />
+  <line x1="830" y1="242" x2="900" y2="242" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- 5 dog_create -->
+  <rect x="900" y="216" width="260" height="52" rx="9" fill="#3f7fd1" />
+  <text x="1030" y="238" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">5 · dog_create</text>
+  <text x="1030" y="256" font-size="11" fill="#dbe9f8" text-anchor="middle">编译 · 验收计划 · 契约</text>
+  <line x1="1030" y1="268" x2="1030" y2="296" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- 6 capture -->
+  <rect x="900" y="304" width="260" height="52" rx="9" fill="#3f7fd1" />
+  <text x="1030" y="326" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">6 · capture</text>
+  <text x="1030" y="344" font-size="11" fill="#dbe9f8" text-anchor="middle">快照(sha256,不可变)</text>
+  <line x1="1030" y1="356" x2="1030" y2="384" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- 7 增量选择 -->
+  <rect x="900" y="390" width="260" height="52" rx="9" fill="#3f7fd1" />
+  <text x="1030" y="412" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">7 · revalidate_select</text>
+  <text x="1030" y="430" font-size="11" fill="#dbe9f8" text-anchor="middle">GM 摘要 → 重跑或继承</text>
+  <line x1="1030" y1="442" x2="1030" y2="470" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- 8 verify -->
+  <rect x="900" y="476" width="260" height="88" rx="9" fill="#3f7fd1" />
+  <text x="1030" y="498" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">8 · verify(调度)</text>
+  <text x="1030" y="518" font-size="11" fill="#dbe9f8" text-anchor="middle">依赖门禁 · 工作区池</text>
+  <text x="1030" y="536" font-size="11" fill="#dbe9f8" text-anchor="middle">确定性 → 程序(蓝)</text>
+  <text x="1030" y="552" font-size="11" fill="#dbe9f8" text-anchor="middle">agentic → 验证 Agent(LLM,隔离)</text>
+  <line x1="1030" y1="564" x2="1030" y2="592" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- 9 recompute -->
+  <rect x="900" y="598" width="260" height="52" rx="9" fill="#3f7fd1" />
+  <text x="1030" y="620" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">9 · recompute</text>
+  <text x="1030" y="638" font-size="11" fill="#dbe9f8" text-anchor="middle">沿所有受影响路径传播(结果)</text>
+  <line x1="1030" y1="650" x2="1030" y2="678" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <text x="1060" y="692" font-size="10" fill="#6b7280">失败结算结果 — 无关叶子继续运行</text>
+
+  <!-- 10 人审 -->
+  <rect x="40" y="704" width="220" height="52" rx="9" fill="#2f9e63" />
+  <text x="150" y="726" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">10 · 人审(按需)</text>
+  <text x="150" y="744" font-size="11" fill="#e8f5ee" text-anchor="middle">失败 · 不确定 · 覆盖率</text>
+  <line x1="260" y1="730" x2="810" y2="730" stroke="#4b5563" stroke-width="1.6" />
+  <line x1="810" y1="730" x2="810" y2="640" stroke="#4b5563" stroke-width="1.6" />
+  <line x1="810" y1="640" x2="900" y2="640" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- 11 report -->
+  <rect x="900" y="704" width="260" height="52" rx="9" fill="#3f7fd1" />
+  <text x="1030" y="726" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">11 · report</text>
+  <text x="1030" y="744" font-size="11" fill="#dbe9f8" text-anchor="middle">证据 · 继承 · 阈值警告</text>
+  <line x1="1030" y1="756" x2="1030" y2="784" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <!-- 12 terminal -->
+  <rect x="900" y="790" width="260" height="52" rx="9" fill="#3f7fd1" />
+  <text x="1030" y="812" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">12 · terminal</text>
+  <text x="1030" y="830" font-size="11" fill="#dbe9f8" text-anchor="middle">诚实根状态持久化</text>
+  <line x1="1160" y1="816" x2="1240" y2="816" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+
+  <rect x="1250" y="790" width="180" height="52" rx="9" fill="#d97706" />
+  <text x="1340" y="812" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">开发 Agent</text>
+  <text x="1340" y="830" font-size="11" fill="#fde8d0" text-anchor="middle">读报告 · 修复 · 重交</text>
+
+  <line x1="1340" y1="842" x2="1340" y2="890" stroke="#4b5563" stroke-width="1.6" />
+  <line x1="1340" y1="890" x2="1030" y2="890" stroke="#4b5563" stroke-width="1.6" />
+  <line x1="1030" y1="890" x2="1030" y2="842" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <text x="1170" y="906" font-size="10" fill="#6b7280">新产物 + dog_run → 下一轮</text>
+</svg>

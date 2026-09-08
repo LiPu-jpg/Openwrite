@@ -1,0 +1,246 @@
+{
+  "schemaVersion": "0.9",
+  "id": "do-dog-genesis",
+  "root": "root",
+  "nodes": {
+    "root": {
+      "kind": "composite",
+      "title": "产出高质量 DoG 图",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "group-root" },
+          { "op": "ref", "id": "group-layers" },
+          { "op": "ref", "id": "group-leaves" },
+          { "op": "ref", "id": "group-engineering" },
+          { "op": "ref", "id": "group-complete" }
+        ]
+      },
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "把生成的图作为整体读一遍:各维度单独都过,作为一张图是否真的可用——层级是否一眼能懂、有没有哪个方面其实和用户目标无关(过度设计)?给结论与证据。"
+      }
+    },
+    "group-root": {
+      "kind": "composite",
+      "title": "根的目标正确性",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "root-from-user" },
+          { "op": "ref", "id": "root-non-formal" }
+        ]
+      }
+    },
+    "root-from-user": {
+      "kind": "leaf",
+      "title": "根是用户的原始目标",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "把根节点讲的目标与用户的原始话对齐:是否忠实反映了用户想要什么(而不是 agent 自行偷换成'更容易验收'的另一件事)?发现任何偷换即 fail,给证据。"
+      }
+    },
+    "root-non-formal": {
+      "kind": "leaf",
+      "title": "根不可形式化",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查根目标是否可能被任何公式/规则直接判定:若能(如'字数大于X'),说明它不是一个合格的非形式化目标,要么重写给用户,要么说明这不是 DoG 的场景。给结论与证据。"
+      }
+    },
+    "group-layers": {
+      "kind": "composite",
+      "title": "抽象层级正确",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "same-abstract-plane" },
+          { "op": "ref", "id": "no-execution-details" },
+          { "op": "ref", "id": "groups-are-logic" }
+        ]
+      }
+    },
+    "same-abstract-plane": {
+      "kind": "leaf",
+      "title": "同一层只回答同一问题",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "逐层查看:同层的每个节点是否都在回答同一个抽象问题(如第一层都是'目标由哪些本质方面构成')?有没有哪一层混进了另一层的问题(把'单件判据'当成'方面'、或把'方面'当成'执行步骤')?给证据。"
+      }
+    },
+    "no-execution-details": {
+      "kind": "leaf",
+      "title": "图上不写'怎么做'",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "审查全图:是否存在任何'执行指令'(先做A再做B、写完后渲染、按模板排版这类怎么做)?图上只允许'什么样算好'的判据。找到任何怎么做即 fail,给证据。"
+      }
+    },
+    "groups-are-logic": {
+      "kind": "leaf",
+      "title": "中间层是逻辑组合不是工序",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "查看每个中间节点:它是否在用逻辑(全部/任一/至少N)与'整体断言'组织其子项,而不是描述'阶段/流程/先决步骤'?发现工序式中间层即 fail,给证据。"
+      }
+    },
+    "group-leaves": {
+      "kind": "composite",
+      "title": "叶子语义质量",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "one-judgment" },
+          { "op": "ref", "id": "single-purpose" },
+          { "op": "ref", "id": "remains-semantic" }
+        ]
+      }
+    },
+    "one-judgment": {
+      "kind": "leaf",
+      "title": "一片叶子只一个判据",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "读每一片叶子的判据语句:它是不是只包含一个判据(而不是'检查X、Y、Z三个维度后给出结论'的一股脑)?发现多判据混在一片的,列出并 fail。给证据。"
+      }
+    },
+    "single-purpose": {
+      "kind": "leaf",
+      "title": "只干一件事(无法再拆)",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "对每片叶子自问:它还能拆成两个都能各自独立判定的目标吗?若能,说明它不止一件事(不合格);若不能,它才是一件事。逐一判定,给证据。"
+      }
+    },
+    "remains-semantic": {
+      "kind": "leaf",
+      "title": "叶子仍是语义目标",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "逐片检查:质量类叶子是不是仍然靠'看/判断/审美'而定(好与坏),而不是被改写成了规则清单(词表/阈值/公式)?被改写的不进质量叶子(规则部分留给程序化辅助)。给结论与证据。"
+      }
+    },
+    "group-engineering": {
+      "kind": "composite",
+      "title": "判定工程正确",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "verifier-addressable" },
+          { "op": "ref", "id": "composition-complete" },
+          { "op": "ref", "id": "dependency-direction" }
+        ]
+      }
+    },
+    "verifier-addressable": {
+      "kind": "leaf",
+      "title": "每个判据可执行",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查每个叶子:agentic 判据是否给了足够边界(什么算过/什么算不过)并明确要求证据;程序化是否指向真实存在的脚本名。判据含糊到执行者只能猜的,列出来 fail。给证据。"
+      }
+    },
+    "composition-complete": {
+      "kind": "leaf",
+      "title": "组合与失败传播齐全",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "逐组检查:每个中间节点是否有 completion 逻辑、每个子项是否有 contains 边与失败策略(fatal/tolerable/degrade)、根是否 hard 且 fatal 终点在根?缺任何一项即 fail,列举缺失项。"
+      }
+    },
+    "dependency-direction": {
+      "kind": "leaf",
+      "title": "依赖方向正确",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "检查每条依赖边:source 依赖 target(先跑的放 target);是否有自依赖/悬空引用/环;方向反了即 fail,给证据。"
+      }
+    },
+    "group-complete": {
+      "kind": "composite",
+      "title": "完备性",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "completion": {
+        "op": "all",
+        "items": [
+          { "op": "ref", "id": "coverage" },
+          { "op": "ref", "id": "no-over-design" }
+        ]
+      }
+    },
+    "coverage": {
+      "kind": "leaf",
+      "title": "本质面全覆盖",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "站在用户原始目标的角度,检查图中是否覆盖了'所有重要方面'(读目标自问:还有一个一眼看得出的方面没有任何叶子对应吗?)。有遗漏即 fail,明确指出漏什么。"
+      }
+    },
+    "no-over-design": {
+      "kind": "leaf",
+      "title": "无与目标无关的枝叶",
+      "constraint": "hard",
+      "target": "generated-dog.graph.json",
+      "verifier": {
+        "mode": "agentic",
+        "instruction": "通读全图:是否存在'与用户目标无关'的分支(为了显得全面而加的、用户根本没提也不关心的维度)?有即 fail,列出多余枝叶。"
+      }
+    }
+  },
+  "contains": [
+    { "parent": "root", "child": "group-root", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "group-layers", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "group-leaves", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "group-engineering", "required": true, "failure": "fatal" },
+    { "parent": "root", "child": "group-complete", "required": true, "failure": "fatal" },
+    { "parent": "group-root", "child": "root-from-user", "required": true, "failure": "fatal" },
+    { "parent": "group-root", "child": "root-non-formal", "required": true, "failure": "fatal" },
+    { "parent": "group-layers", "child": "same-abstract-plane", "required": true, "failure": "fatal" },
+    { "parent": "group-layers", "child": "no-execution-details", "required": true, "failure": "fatal" },
+    { "parent": "group-layers", "child": "groups-are-logic", "required": true, "failure": "fatal" },
+    { "parent": "group-leaves", "child": "one-judgment", "required": true, "failure": "fatal" },
+    { "parent": "group-leaves", "child": "single-purpose", "required": true, "failure": "fatal" },
+    { "parent": "group-leaves", "child": "remains-semantic", "required": true, "failure": "fatal" },
+    { "parent": "group-engineering", "child": "verifier-addressable", "required": true, "failure": "fatal" },
+    { "parent": "group-engineering", "child": "composition-complete", "required": true, "failure": "fatal" },
+    { "parent": "group-engineering", "child": "dependency-direction", "required": true, "failure": "fatal" },
+    { "parent": "group-complete", "child": "coverage", "required": true, "failure": "fatal" },
+    { "parent": "group-complete", "child": "no-over-design", "required": true, "failure": "fatal" }
+  ],
+  "dependsOn": []
+}

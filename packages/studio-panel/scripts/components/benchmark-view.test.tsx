@@ -142,6 +142,19 @@ async function renderAndRun(api: ReturnType<typeof makeApi>) {
 }
 
 describe('BenchmarkView M1c task wiring', () => {
+  it('retains in-flight cancellation status and loads durable partial results before completion', async () => {
+    const api = makeApi({ task: { task_id: 'tsk_run', status: 'running', cancel_requested: true,
+      progress: { completed_units: 1, total_units: 3, unit_kind: 'candidates' },
+      result_ref: { type: 'benchmark_run', id: 'partial' } },
+      details: { partial: { ...RUN_DETAIL, run_id: 'partial', status: 'cancelling', in_flight: 1 } } })
+    await renderAndRun(api)
+    const button = await screen.findByRole('button', { name: '取消中…' })
+    expect((button as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect(api.fetchStudioApi).toHaveBeenCalledWith('/benchmarks/partial'))
+    expect(screen.getByText(/已发送的请求仍可能产生费用/)).toBeTruthy()
+    expect(await screen.findByText(/还有 1 个请求在途/)).toBeTruthy()
+  })
+
   it('renders real progress units and the phase while the task runs', async () => {
     const api = makeApi({
       task: {

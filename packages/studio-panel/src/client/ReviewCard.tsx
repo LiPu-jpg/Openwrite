@@ -17,10 +17,10 @@
  */
 
 import { useState, type KeyboardEvent } from 'react'
-import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText } from './MarkdownText.tsx'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ToolResultNode } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ToolResultNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import css from './ReviewCard.module.css'
 
 /** Review card props: the toolview runtime share plus the standard locale seat. */

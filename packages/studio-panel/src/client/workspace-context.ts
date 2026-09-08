@@ -8,21 +8,18 @@
  * dsh-native flow, the panel only ever reflects the session's binding.
  */
 import { useEffect } from 'react'
-import type {
-  ISessions,
-  IWorkspaces,
-  SessionId,
-  WorkspaceListState,
-  WorkspaceView,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { IWorkspaces, WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+import type { UiWorkspace } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { StudioApiInjected } from './api.ts'
 import { workbenchStore } from './WorkbenchStore.ts'
 
 /** The framework standard-kit members the Workspace helpers consume. */
 export interface WorkspaceStandardKit {
   sessionId: SessionId | undefined
-  useWorkspaces: SnapshotSelectorHook<WorkspaceListState>
+  useWorkspaces: SnapshotSelectorHook<WorkspaceSnapshot>
 }
 
 /**
@@ -31,7 +28,7 @@ export interface WorkspaceStandardKit {
  * workspace create → session connect).
  */
 export interface StudioPanelInjected extends StudioApiInjected {
-  workspaces: IWorkspaces
+  workspaces: IWorkspaces & Pick<UiWorkspace, 'pickDirectory' | 'connectWorkspace'>
   sessions: ISessions
 }
 

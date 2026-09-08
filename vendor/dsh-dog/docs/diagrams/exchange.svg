@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1460 640" font-family="ui-sans-serif, system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#4b5563" />
+    </marker>
+  </defs>
+  <rect width="1460" height="640" fill="#f8fafc" />
+
+  <text x="24" y="36" font-size="21" font-weight="700" fill="#111827">DoG v0.2 — 数据交换链路</text>
+  <text x="24" y="58" font-size="13" fill="#6b7280">每个载荷在解析或持久化前先由 schema 校验。失败即拒,绝不强转。</text>
+
+  <text x="60" y="96" font-size="12" font-weight="600" fill="#374151">生产者 → 消费者</text>
+  <text x="560" y="96" font-size="12" font-weight="600" fill="#374151">载荷</text>
+  <text x="880" y="96" font-size="12" font-weight="600" fill="#374151">格式</text>
+  <text x="1140" y="96" font-size="12" font-weight="600" fill="#374151">Schema(规范)</text>
+
+  <line x1="24" y1="108" x2="1436" y2="108" stroke="#d1d5db" stroke-width="1.5" />
+
+  <!-- 行1 图 -->
+  <rect x="40" y="124" width="300" height="56" rx="9" fill="#7c6ce8" />
+  <text x="56" y="146" font-size="13" font-weight="600" fill="#ffffff">规划 Agent → 编译器</text>
+  <text x="56" y="164" font-size="11" fill="#efeaff">图输入(dog_validate / dog_create)</text>
+  <line x1="340" y1="152" x2="540" y2="152" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="560" y="124" width="300" height="56" rx="9" fill="#eef2f7" stroke="#cbd5e1" />
+  <text x="710" y="146" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">图</text>
+  <text x="710" y="164" font-size="11" fill="#475569" text-anchor="middle">nodes · contains · dependsOn</text>
+  <line x1="860" y1="152" x2="1040" y2="152" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="880" y="124" width="220" height="56" rx="9" fill="#fefce8" stroke="#f59e0b" />
+  <text x="990" y="146" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">JSON</text>
+  <text x="990" y="164" font-size="11" fill="#92400e" text-anchor="middle">schemaVersion 0.2</text>
+  <line x1="1100" y1="152" x2="1130" y2="152" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="1140" y="124" width="280" height="56" rx="9" fill="#dbeafe" stroke="#3b82f6" />
+  <text x="1280" y="146" font-size="12" font-weight="600" fill="#1e3a8a" text-anchor="middle">graph.schema.json</text>
+  <text x="1280" y="164" font-size="11" fill="#1e3a8a" text-anchor="middle">addProps:false · kind 分支 · AST</text>
+
+  <!-- 行2 运行 -->
+  <rect x="40" y="208" width="300" height="56" rx="9" fill="#3f7fd1" />
+  <text x="56" y="230" font-size="13" font-weight="600" fill="#ffffff">引擎 → 存储 / 状态读取</text>
+  <text x="56" y="248" font-size="11" fill="#dbe9f8">运行记录(持久化并读回)</text>
+  <line x1="340" y1="236" x2="540" y2="236" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="560" y="208" width="300" height="56" rx="9" fill="#eef2f7" stroke="#cbd5e1" />
+  <text x="710" y="230" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">运行</text>
+  <text x="710" y="248" font-size="11" fill="#475569" text-anchor="middle">state · goals · gmDigests · 调用信息</text>
+  <line x1="860" y1="236" x2="1040" y2="236" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="880" y="208" width="220" height="56" rx="9" fill="#fefce8" stroke="#f59e0b" />
+  <text x="990" y="230" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">JSON</text>
+  <text x="990" y="248" font-size="11" fill="#92400e" text-anchor="middle">runs/&lt;runId&gt;.json</text>
+  <line x1="1100" y1="236" x2="1130" y2="236" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="1140" y="208" width="280" height="56" rx="9" fill="#dbeafe" stroke="#3b82f6" />
+  <text x="1280" y="230" font-size="12" font-weight="600" fill="#1e3a8a" text-anchor="middle">run.schema.json</text>
+  <text x="1280" y="248" font-size="11" fill="#1e3a8a" text-anchor="middle">含 inherited + inheritedFrom</text>
+
+  <!-- 行3 验证 -->
+  <rect x="40" y="292" width="300" height="56" rx="9" fill="#3f7fd1" />
+  <text x="56" y="314" font-size="13" font-weight="600" fill="#ffffff">验证执行 → 存储</text>
+  <text x="56" y="332" font-size="11" fill="#dbe9f8">验证结果(追加写)</text>
+  <line x1="340" y1="320" x2="540" y2="320" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="560" y="292" width="300" height="56" rx="9" fill="#eef2f7" stroke="#cbd5e1" />
+  <text x="710" y="314" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">验证</text>
+  <text x="710" y="332" font-size="11" fill="#475569" text-anchor="middle">snapshotId · gmDigest · observation</text>
+  <line x1="860" y1="320" x2="1040" y2="320" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="880" y="292" width="220" height="56" rx="9" fill="#fefce8" stroke="#f59e0b" />
+  <text x="990" y="314" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">JSONL</text>
+  <text x="990" y="332" font-size="11" fill="#92400e" text-anchor="middle">每行一个对象</text>
+  <line x1="1100" y1="320" x2="1130" y2="320" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="1140" y="292" width="280" height="56" rx="9" fill="#dbeafe" stroke="#3b82f6" />
+  <text x="1280" y="314" font-size="12" font-weight="600" fill="#1e3a8a" text-anchor="middle">verification.schema.json</text>
+  <text x="1280" y="332" font-size="11" fill="#1e3a8a" text-anchor="middle">schemaVersion 0.1 · sha256 引用</text>
+
+  <!-- 行4 事件 -->
+  <rect x="40" y="376" width="300" height="56" rx="9" fill="#3f7fd1" />
+  <text x="56" y="398" font-size="13" font-weight="600" fill="#ffffff">引擎 → 存储</text>
+  <text x="56" y="416" font-size="11" fill="#dbe9f8">有界诊断(按目标)</text>
+  <line x1="340" y1="404" x2="540" y2="404" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="560" y="376" width="300" height="56" rx="9" fill="#eef2f7" stroke="#cbd5e1" />
+  <text x="710" y="398" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">运行时事件</text>
+  <text x="710" y="416" font-size="11" fill="#475569" text-anchor="middle">phase · state · attempt · duration</text>
+  <line x1="860" y1="404" x2="1040" y2="404" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="880" y="376" width="220" height="56" rx="9" fill="#fefce8" stroke="#f59e0b" />
+  <text x="990" y="398" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">JSONL</text>
+  <text x="990" y="416" font-size="11" fill="#92400e" text-anchor="middle">绝不作为验证证据</text>
+  <line x1="1100" y1="404" x2="1130" y2="404" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="1140" y="376" width="280" height="56" rx="9" fill="#dbeafe" stroke="#3b82f6" />
+  <text x="1280" y="398" font-size="12" font-weight="600" fill="#1e3a8a" text-anchor="middle">runtime-event.schema.json</text>
+  <text x="1280" y="416" font-size="11" fill="#1e3a8a" text-anchor="middle">phase 枚举含 grounding_*</text>
+
+  <!-- 行5 报告 -->
+  <rect x="40" y="460" width="300" height="56" rx="9" fill="#d97706" />
+  <text x="56" y="482" font-size="13" font-weight="600" fill="#ffffff">引擎 → 开发 Agent / CI</text>
+  <text x="56" y="500" font-size="11" fill="#fde8d0">dog_status 完整响应</text>
+  <line x1="340" y1="488" x2="540" y2="488" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="560" y="460" width="300" height="56" rx="9" fill="#eef2f7" stroke="#cbd5e1" />
+  <text x="710" y="482" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">CI 报告</text>
+  <text x="710" y="500" font-size="11" fill="#475569" text-anchor="middle">rootState · 证据 · inherited · warning</text>
+  <line x1="860" y1="488" x2="1040" y2="488" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="880" y="460" width="220" height="56" rx="9" fill="#fefce8" stroke="#f59e0b" />
+  <text x="990" y="482" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">JSON</text>
+  <text x="990" y="500" font-size="11" fill="#92400e" text-anchor="middle">机器可读</text>
+  <line x1="1100" y1="488" x2="1130" y2="488" stroke="#4b5563" stroke-width="1.6" marker-end="url(#arrow)" />
+  <rect x="1140" y="460" width="280" height="56" rx="9" fill="#dbeafe" stroke="#3b82f6" />
+  <text x="1280" y="482" font-size="12" font-weight="600" fill="#1e3a8a" text-anchor="middle">report.schema.json</text>
+  <text x="1280" y="500" font-size="11" fill="#1e3a8a" text-anchor="middle">revalidated / inherited 数组</text>
+
+  <!-- 底部字节流 -->
+  <rect x="40" y="540" width="1380" height="70" rx="10" fill="#f1f5f9" stroke="#cbd5e1" />
+  <text x="60" y="562" font-size="13" font-weight="600" fill="#334155">内容寻址字节流(无 schema;完整性由哈希保证)</text>
+  <text x="60" y="582" font-size="12" fill="#475569">产物快照:绑定路径 → 产物存储(sha256 字节 + manifest JSON)</text>
+  <text x="60" y="598" font-size="12" fill="#475569">证据对象:验证 Agent → 产物存储(字节 + 验证记录中的 sha256 引用)</text>
+  <text x="60" y="612" font-size="12" fill="#475569">GM 材料:提取器 → 引擎(规范化 JSON → gmDigest,由提取器声明 schema)</text>
+</svg>

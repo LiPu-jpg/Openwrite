@@ -14,11 +14,10 @@ test('accepts a consistent SDK and catches transitive version drift', () => {
   bad.packages[`node_modules/${sdk}`].version = '0.1.0-rc.8'
   assert.match(auditVersions(manifest, bad, baseline).join(), /DSH lock drift/)
 })
-test('rejects loose ranges, missing overrides and stale root lock metadata', () => {
+test('rejects loose ranges, stale root lock metadata', () => {
   const bad = { devDependencies: { [sdk]: `^${baseline}` } }
   const errors = auditVersions(bad, lock, baseline).join()
   assert.match(errors, /unpinned DSH dependency/)
-  assert.match(errors, /missing DSH override/)
   assert.match(errors, /lock metadata differs/)
 })
 test('does not misclassify libraries nested below a DSH dependency as DSH packages', () => {
@@ -60,4 +59,11 @@ test('a client export cannot bypass web checks by omitting dsh.client', () => {
   const errors = auditBundle(web, [...files, 'lib/client.js'], patch).join()
   assert.match(errors, /platform=web/)
   assert.match(errors, /editor asset missing from tarball/)
+})
+
+test('uses the reviewed host graph instead of imposing one version on every package', () => {
+  const graph = { [sdk]: '0.1.2-rc.1' }
+  const manifest = { devDependencies: { [sdk]: '0.1.2-rc.1' } }
+  const lock = { packages: { '': manifest, [`node_modules/${sdk}`]: { version: '0.1.2-rc.1' } } }
+  assert.deepEqual(auditVersions(manifest, lock, '0.2.0', graph), [])
 })

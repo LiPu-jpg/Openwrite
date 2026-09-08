@@ -65,6 +65,16 @@ export function parseMentionAssets(value: unknown): MentionAsset[] {
 
 type Needle = { label: string; asset: MentionAsset }
 
+/** One navigation chip per registered asset, including all name/alias hits. */
+export function uniqueMentionAssets(spans: readonly MentionSpan[]): MentionSpan[] {
+  const unique = new Map<string, MentionSpan>()
+  for (const span of spans) {
+    const key = JSON.stringify([span.kind, span.id])
+    if (!unique.has(key)) unique.set(key, span)
+  }
+  return [...unique.values()]
+}
+
 function needlesFor(assets: readonly MentionAsset[]): Needle[] {
   const needles: Needle[] = []
   for (const asset of assets) {

@@ -1,0 +1,24 @@
+name: Intel Mac runtime wheel
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/standard-plugin-release']
+    paths: ['.github/workflows/intel-runtime-wheel.yml', 'scripts/build-intel-wheel.py']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python scripts/build-intel-wheel.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: intel-runtime-wheel
+          path: .tmp-intel-wheel/output/
+          if-no-files-found: error

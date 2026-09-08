@@ -34,7 +34,6 @@ export class WorkspaceViewMemory<T> {
     if (key === null) return
     this.delete(key)
     const timer = setTimeout(() => this.delete(key), this.retentionMs)
-    if (typeof timer === 'object' && 'unref' in timer) timer.unref()
     this.entries.set(key, { value, expiresAt: Date.now() + this.retentionMs, timer })
     while (this.entries.size > this.limit) this.delete(this.entries.keys().next().value!)
   }

@@ -4,6 +4,9 @@ on:
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: plugin-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
   offline-contracts:
     runs-on: ubuntu-latest
@@ -19,7 +22,8 @@ jobs:
             packages/openwrite-bridge/package-lock.json
             packages/studio-panel/package-lock.json
       - run: npm install --global pnpm@9.15.9
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix packages/openwrite-bridge --no-audit --no-fund
       - run: npm ci --prefix packages/studio-panel --no-audit --no-fund
+      - run: npm ci --prefix vendor/dsh-dog --ignore-scripts --no-audit --no-fund
       - run: npm run check:plugin

@@ -27,7 +27,6 @@ const CLIENT_EXTERNALS: readonly string[] = [
   '@deepseek-ai/dsh-client-ui-primitives',
   '@deepseek-ai/dsh-client-ui-attachment',
   '@deepseek-ai/dsh-client-schema-form',
-  '@deepseek-ai/dsh-client-runtime/client', // documented store-engine exemption
 ]
 
 /** Browser-safe wire/type layers a bundle may inline (mirror of INLINE_SAFE). */

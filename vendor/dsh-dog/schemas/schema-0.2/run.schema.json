@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dsh-external/dsh-dog/schemas/schema-0.2/run.schema.json",
+  "title": "DoG v0.2 persisted run record (runs/<run-id>.json)",
+  "description": "Execution state and terminal result of one dog_run. Machine-readable counterpart of SPEC §8 + §11.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runId",
+    "graphId",
+    "graphDigest",
+    "state",
+    "goals",
+    "createdAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "runId": {
+      "$ref": "#/$defs/uuid"
+    },
+    "graphId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "graphDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "workspaceBaseDir": {
+      "description": "Calling session cwd; verifier workspaces are allocated under it when known.",
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "enum": [
+        "running",
+        "completed",
+        "cancelled",
+        "failed"
+      ]
+    },
+    "rootState": {
+      "description": "Terminal root state when settled (SPEC §8).",
+      "enum": [
+        "success",
+        "partial_success",
+        "failure",
+        "infeasible",
+        "needs_replan",
+        "cancelled"
+      ]
+    },
+    "goals": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/goalResult"
+      }
+    },
+    "gmDigests": {
+      "description": "Per-leaf grounding-material digest recorded at revalidate_select.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/sha256"
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callId"
+      ],
+      "properties": {
+        "callId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agentSessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parentSessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "invokedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "warning": {
+      "type": "string",
+      "description": "Bounded run warning (e.g. runtime-event persist failure); never alters a verdict."
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "runtimeWarning": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{64}|sha256:[0-9a-f]{64})$"
+    },
+    "goalResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "pending",
+            "running",
+            "success",
+            "failure",
+            "blocked",
+            "needs_human",
+            "cancelled",
+            "invalidated",
+            "partial",
+            "inherited"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "inheritedFrom": {
+          "description": "Run ID whose verification record was reused when state=inherited.",
+          "$ref": "#/$defs/uuid"
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "runId",
+            "graphId",
+            "graphDigest",
+            "goalId",
+            "judgment",
+            "passed",
+            "at"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "0.1"
+            },
+            "runId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "graphId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "graphDigest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "goalId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "judgment": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "programmatic",
+                    "agentic"
+                  ]
+                },
+                "script": {
+                  "type": "string"
+                },
+                "scriptDigest": {
+                  "type": "string"
+                },
+                "instructionHash": {
+                  "type": "string"
+                }
+              }
+            },
+            "gmDigest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "passed": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "evidence": {
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "agentSessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sessionId",
+              "role",
+              "boundAt"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "parentSessionId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "enum": [
+                  "orchestrator",
+                  "verifier",
+                  "reviewer"
+                ]
+              },
+              "boundAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

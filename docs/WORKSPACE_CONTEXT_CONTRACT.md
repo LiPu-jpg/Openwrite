@@ -119,3 +119,7 @@ operation trace，用于把 dsh 工具调用关联到领域变更。
 - 迟到的旧 generation 响应一律丢弃。
 - localStorage key 全部带 workspace 后缀：`dsh-novel.<key>.<workspaceId>`。
 - 面板不再调用 `/api/project/list`；新建流程固定为：目录选择/创建 → `workspace.create` → context 模式 `/api/project/init`（绝对 canonical path，初始化时创建该作品目录的独立 Git 仓库）→ `connectWorkspace`/`sessions.open` → `setContext`。
+
+### Unicode 路径传输（0.2.0）
+
+HTTP 请求头不能直接承载任意 Unicode 字符。bridge 对非 ASCII 路径使用 URI UTF-8 编码，并附加 `X-OpenWrite-Workspace-Root-Encoding: uri`；Core 只在该标记存在时解码一次，然后执行原有 realpath、Workspace、遍历与初始化目标检查。普通 ASCII 路径维持旧协议（包括字面百分号），浏览器仍只能提交宿主 Workspace ID。编码不赋予额外权限。

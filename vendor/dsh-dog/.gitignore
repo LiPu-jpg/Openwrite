@@ -1,0 +1,8 @@
+# DoG DSH plugin
+node_modules/
+lib/
+.DS_Store
+*.tsbuildinfo
+.dog-test/
+*.bak.*
+*.tgz

@@ -305,3 +305,10 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
+
+# Stable scoped tool catalog; no novel tools are registered by the host bridge.
+- id: openwrite-tools
+  name: dsh-openwrite/tools
+
+- id: openwrite-dog-tools
+  name: dsh-openwrite/dog-tools

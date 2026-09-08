@@ -10,7 +10,7 @@
 <p align="center">在 DeepSeek Harness 中规划、写作、审稿和管理长篇小说。</p>
 
 <p align="center">
-  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.1.0--rc.7-2563eb" alt="dsh 0.1.0-rc.7"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.1.2--rc.1-2563eb" alt="dsh 0.1.2-rc.1"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node-%E2%89%A522.19-15803d" alt="Node >= 22.19"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0f766e" alt="Apache-2.0"></a>
 </p>
@@ -28,31 +28,33 @@
 
 ## 快速安装
 
-**已有 dsh？把下面这段话复制给有终端权限的 Agent，让它完成安装。**
+**0.2.0 标准插件包**兼容 dsh **0.1.2-rc.1**。可下载版本、三平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.0) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。
 
-```text
-请帮我安装 dsh-Openwrite：
-https://github.com/LiPu-jpg/Openwrite
+已有匹配版本 dsh 的用户执行：
 
-先读取 main 分支的 docs/INSTALL.md，实际完成安装和检查。
-补齐依赖，安装插件、OpenWrite 创作预设和默认 DoG。
-main 放在 ~/novel-tools/dsh-Openwrite，
-native-core 放在相邻的 OpenWrite 目录。
-复用已有的正确安装、dsh 配置和作品；没有作品时创建 ~/my_novel。
-完成 doctor 检查并启动，指导我在作品 Workspace 新建创作会话。
-密钥由我在本机设置中填写，安装验收不调用写作模型。
-如需重启当前 dsh，先完成其余步骤，再告诉我重启命令。
-最后给出安装位置、作品位置、检查结果和浏览器地址。
+```sh
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.0/dsh-openwrite-0.2.0.tgz
+dsh web
 ```
 
-**手动安装或还没有 dsh**：按 [安装指南](docs/INSTALL.md) 操作。安装器会安装仓库锁定的 dsh CLI；支持 macOS / Linux，Windows 使用 WSL2。需要 Git、Node ≥ 22.19、npm、pnpm、rsync 和 uv。
+也可把这段话交给有终端权限的 Agent：
 
-安装默认包含创作预设、90 个小说工具、原生工作台和 DoG 图谱。首次安装需要下载依赖；日常模型调用按所选服务商计费。
+```text
+请按 https://github.com/LiPu-jpg/Openwrite 的 README 和对应 Release 安装 OpenWrite。
+先核对 Release 验收结果、精确 dsh 版本和 SHA-256，再安装发布的 .tgz。
+已有本地安装先备份并迁移，保留作品、自定义预设、凭据和其他插件。
+启动 dsh web，指导我点击 OpenWrite、准备环境并选择自己的作品。
+不要调用写作模型做安装检查，不要自动升级宿主或放宽 pnpm 构建授权。
+```
+
+首次使用会下载固定版本的 uv、Python 3.12 和锁定依赖，保存在当前 dsh 的专属目录。无需预装 Python，也无需克隆两个分支。目标平台为 macOS arm64/x64、Linux x64、Windows x64；各平台通过情况以发布验收报告为准。模型费用另计。
+
+具体的源码安装、升级、迁移和卸载见 [安装指南](docs/INSTALL.md)。
 
 ## 开始使用
 
-1. 启动后打开 [本地工作台](http://127.0.0.1:3080)，把小说目录添加为 dsh Workspace。
-2. 在该 Workspace 新建会话，选择 **OpenWrite 创作**。对话模型在 dsh 中配置；小说生成与评审模型在「任务 → 模型」配置。
+1. 执行 `dsh web`，打开它给出的浏览器地址，点击侧栏 **OpenWrite**。等待环境就绪后，选择作品目录。
+2. 入口自动建立 **OpenWrite 创作** 会话；点击 **创作** 即可打开工作台，无需先发消息。对话模型在 dsh 中配置；小说生成与评审模型在「任务 → 模型」配置。
 3. 和 Agent 讨论题材、人物与大纲，确认后再开始写章。已有旧稿可通过「任务 → 导入与导出」接入。
 
 | 日常操作 | 入口 |

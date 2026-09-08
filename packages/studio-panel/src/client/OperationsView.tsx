@@ -155,6 +155,7 @@ function OperationsWorkspace(props: OperationsViewProps) {
         <item.icon size={16} /><span>{item.label}</span>
         {item.id === 'tasks' && workbench.activeTasks > 0 && <b>{workbench.activeTasks}</b>}
       </button>)}
+      <button type="button" title="查看 DoG 的独立验收记录" onClick={() => window.dispatchEvent(new Event('openwrite:dog-open'))}>DoG 验收</button>
     </nav>
     <section className={css.workspaceContent}>
       {mode === 'tasks' && <TasksView key={workbench.contextEpoch} {...props} onNavigate={target => { setResultTarget(target); setMode(target.view) }} />}

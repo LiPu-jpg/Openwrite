@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { FilePenLine } from 'lucide-react'
-import type { ConversationLocationData, ConversationMatch, ConversationNodeContext, ConversationNodeDefinition } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationLocationData, ConversationMatch, ConversationNodeContext, ConversationNodeDefinition } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
 import { workbenchStore } from './WorkbenchStore.ts'
@@ -58,7 +58,7 @@ interface MutationState {
   items: readonly NovelMutationItem[]
 }
 
-declare module '@deepseek-ai/dsh-client-runtime/client' {
+declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ConversationTurnDataMap {
     'dsh-novel-mutations': NovelMutationSummary
   }
