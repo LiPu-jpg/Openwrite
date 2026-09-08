@@ -12,7 +12,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from tools.benchmark_scheduler import run_bounded
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -385,6 +385,7 @@ class ModelBenchmarkService:
         cancelled: Callable[[], bool] | None = None,
         report: Callable[[int, int, str], None] | None = None,
         task_id: str = "",
+        partial: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         writer_ids = self._profile_ids(
             payload.get("writer_profile_ids"), "writer_profile_ids", maximum=8
@@ -486,40 +487,69 @@ class ModelBenchmarkService:
         jobs = [
             (profile_id, repeat) for profile_id in writer_ids for repeat in range(1, repeats + 1)
         ]
-        # Generation units are honest and known up front: writers × repeats.
+        evaluations: list[dict[str, Any]] = []
+        is_cancelled = cancelled or (lambda: False)
+        last_in_flight = -1
+
+        def persist_partial(in_flight: int = 0) -> None:
+            items = [*candidates, *evaluations]
+            self.store.save({
+                "schema_version": BENCHMARK_SCHEMA_VERSION,
+                "run_id": run_id, "task_id": task_id, "task_type": task_type,
+                "created_at": created_at, "chapter_id": chapter_id,
+                "status": "cancelling" if is_cancelled() else "running",
+                "in_flight": in_flight, "cancel_requested": is_cancelled(),
+                "context_hash": context_hash, "context_snapshot": target,
+                "config": {**target, "writer_profile_ids": writer_ids, "reviewer_profile_ids": reviewer_ids,
+                           "repeats": repeats, "concurrency": concurrency, "execution_mode": execution_mode,
+                           "pipeline": benchmark_pipeline(task_type, execution_mode)},
+                "candidates": candidates, "evaluations": evaluations,
+                "summary": {
+                    "requested_candidates": len(jobs),
+                    "completed_candidates": sum(item.get("reliability_status") == "completed" for item in candidates),
+                    "failed_candidates": sum(item.get("reliability_status") != "completed" for item in candidates),
+                    "completed_evaluations": len(evaluations),
+                    "cost_item_count": len(items),
+                    "cost_reported_items": sum(item.get("cost_reported") is True for item in items),
+                    "cost_complete": bool(items) and all(item.get("cost_reported") for item in items),
+                    "total_cost_usd": sum(float(item.get("cost_usd") or 0) for item in items),
+                    "total_tokens": sum(_usage_total_tokens(dict(item.get("usage") or {})) for item in items),
+                },
+            })
+
+            if partial:
+                partial({"run_id": run_id, "status": "cancelling" if is_cancelled() else "running",
+                         "in_flight": in_flight, "cancel_requested": is_cancelled()})
+
+        def draining(count: int) -> None:
+            nonlocal last_in_flight
+            if count == last_in_flight:
+                return
+            last_in_flight = count
+            persist_partial(count)
+            if progress:
+                progress("model", f"取消中：仍有 {count} 个请求在途；用量将在返回后记录")
+
+        def completed_candidate(value: dict[str, Any], in_flight: int) -> None:
+            candidates.append(value)
+            persist_partial(in_flight)
+            if report:
+                report(len(candidates), len(jobs), "candidates")
+
         if report:
             report(0, len(jobs), "candidates")
-        with ThreadPoolExecutor(
-            max_workers=concurrency, thread_name_prefix="openwrite-benchmark-write"
-        ) as pool:
-            futures = {
-                pool.submit(
-                    self._run_generation,
-                    writer_profiles[profile_id],
-                    packet,
-                    chapter_id,
-                    chapter_number,
-                    target_words,
-                    run_id,
-                    repeat,
-                    execution_mode,
-                    search_profile,
-                ): (profile_id, repeat)
-                for profile_id, repeat in jobs
-            }
-            for future in as_completed(futures):
-                if cancelled and cancelled():
-                    for pending in futures:
-                        pending.cancel()
-                    raise RuntimeError("benchmark cancelled")
-                candidates.append(future.result())
-                if report:
-                    report(len(candidates), len(jobs), "candidates")
+        persist_partial()
+        run_bounded(
+            [(writer_profiles[profile_id], packet, chapter_id, chapter_number,
+              target_words, run_id, repeat, execution_mode, search_profile)
+             for profile_id, repeat in jobs],
+            self._run_generation, concurrency=concurrency, cancelled=is_cancelled,
+            completed=completed_candidate, draining=draining,
+        )
         candidates.sort(key=lambda item: (str(item["writer_profile"]["id"]), int(item["repeat"])))
 
-        if progress:
+        if progress and not is_cancelled():
             progress("validating", "使用独立评审模型执行盲评")
-        evaluations: list[dict[str, Any]] = []
         # Review units are computed only after generation ends, so provider
         # failures honestly reduce the total: committed candidates × reviewers.
         review_jobs = [
@@ -530,32 +560,18 @@ class ModelBenchmarkService:
         ]
         if report and review_jobs:
             report(0, len(review_jobs), "evaluations")
-        with ThreadPoolExecutor(
-            max_workers=concurrency, thread_name_prefix="openwrite-benchmark-review"
-        ) as pool:
-            futures = {
-                pool.submit(
-                    self._run_review,
-                    reviewer,
-                    candidate,
-                    packet,
-                    execution_mode,
-                    search_profile,
-                    strict_review,
-                ): (
-                    str(candidate["candidate_id"]),
-                    str(reviewer["id"]),
-                )
-                for candidate, reviewer in review_jobs
-            }
-            for future in as_completed(futures):
-                if cancelled and cancelled():
-                    for pending in futures:
-                        pending.cancel()
-                    raise RuntimeError("benchmark cancelled")
-                evaluations.append(future.result())
-                if report:
-                    report(len(evaluations), len(review_jobs), "evaluations")
+        def completed_review(value: dict[str, Any], in_flight: int) -> None:
+            evaluations.append(value)
+            persist_partial(in_flight)
+            if report:
+                report(len(evaluations), len(review_jobs), "evaluations")
+
+        run_bounded(
+            [(reviewer, candidate, packet, execution_mode, search_profile, strict_review)
+             for candidate, reviewer in review_jobs],
+            self._run_review, concurrency=concurrency, cancelled=is_cancelled,
+            completed=completed_review, draining=draining,
+        )
         evaluations.sort(
             key=lambda item: (str(item["candidate_id"]), str(item["reviewer_profile"]["id"]))
         )
@@ -614,6 +630,8 @@ class ModelBenchmarkService:
             if completed_candidates == len(candidates) and completed_evaluations == len(review_jobs)
             else ("partial" if completed_candidates else "failed")
         )
+        if is_cancelled():
+            status = "cancelled"
         billable_items = [*candidates, *evaluations]
         prompt_tokens = sum(
             _usage_tokens(dict(item.get("usage") or {}), "prompt_tokens", "input_tokens")
@@ -637,6 +655,8 @@ class ModelBenchmarkService:
             "schema_version": BENCHMARK_SCHEMA_VERSION,
             "run_id": run_id,
             "status": status,
+            "cancel_requested": is_cancelled(),
+            "in_flight": 0,
             "created_at": created_at,
             "started_at": created_at,
             "completed_at": _utc_now(),
@@ -897,6 +917,8 @@ class ModelBenchmarkService:
             if trace is not None:
                 trace.fail("review", str(getattr(exc, "code", "REVIEW_RUN_FAILED")))
                 failure_framework.update(trace.evidence())
+            usage = dict(getattr(exc, "usage", {}) or {})
+            cost_usd, cost_reported = _cost_details(usage)
             return {
                 "candidate_id": candidate["candidate_id"],
                 "reviewer_profile": _safe_profile(profile),
@@ -907,10 +929,10 @@ class ModelBenchmarkService:
                 "delivery_status": "inconclusive",
                 "production_gate_status": "not_evaluated",
                 "issue_count": 0,
-                "usage": {},
-                "reasoning_tokens": 0,
-                "cost_usd": 0,
-                "cost_reported": False,
+                "usage": usage,
+                "reasoning_tokens": _reasoning_tokens(usage),
+                "cost_usd": cost_usd,
+                "cost_reported": cost_reported,
                 "latency_ms": round((time.perf_counter() - started) * 1000),
                 "execution_mode": execution_mode,
                 "framework": failure_framework,
