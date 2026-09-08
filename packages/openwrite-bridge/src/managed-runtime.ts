@@ -280,6 +280,6 @@ export class ManagedRuntime {
       this.update('ready', '写作环境已就绪')
       return connection
     } catch (error) { await stopOwnedProcess(child); throw error }
-    finally { if (timer) clearTimeout(timer); lines.close() }
+    finally { if (timer) clearTimeout(timer); lines.close(); child.stdout?.resume() }
   }
 }

@@ -28,9 +28,9 @@
 
 ## 快速安装
 
-本分支正在验收 **0.2.0 标准发布包**，兼容 dsh **0.1.2-rc.1**。三平台验收完成前，不宣称开箱即用。发布状态和实际结果见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。
+**0.2.0 标准插件包**兼容 dsh **0.1.2-rc.1**。可下载版本、三平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.0) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。
 
-正式产物发布后，已有匹配版本 dsh 的用户执行：
+已有匹配版本 dsh 的用户执行：
 
 ```sh
 dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.0/dsh-openwrite-0.2.0.tgz

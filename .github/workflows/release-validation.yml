@@ -75,5 +75,43 @@ jobs:
         if: always()
         with:
           name: acceptance-${{ matrix.os }}-node-${{ matrix.node }}
-          path: release-report-*.json
+          path: |
+            release-report-*.json
+            release-browser-*.png
           if-no-files-found: warn
+  source-install:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --global pnpm@9.15.9
+      - run: node scripts/release-smoke.mjs github:LiPu-jpg/Openwrite#${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acceptance-github-source
+          path: release-report-source-*.json
+          if-no-files-found: warn
+  acceptance:
+    needs: [build, install, source-install]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          path: .tmp-release-final
+          merge-multiple: true
+      - run: node scripts/release-report.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validated-release
+          path: .tmp-release-final/*
+          if-no-files-found: error

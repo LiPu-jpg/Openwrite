@@ -1,12 +1,12 @@
 # 安装、更新与卸载
 
-0.2.0 当前是待验收候选。发布状态以 [验收报告](RELEASE_ACCEPTANCE.md) 和 GitHub Release 为准；尚未发布的 URL 不能作为可用下载。
+安装已发布的版本；可下载产物、SHA-256 和实际平台结果以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.0) 附件为准。验收方法见 [验收报告](RELEASE_ACCEPTANCE.md)。
 
 ## 标准安装
 
 本次锁定 dsh `0.1.2-rc.1`，Node 24 为完整验收基线；Node 22.19 / 26 做兼容检查。安装不自动升级 dsh。先执行 `dsh --version` 核对宿主。
 
-正式发布后的安装命令：
+安装命令：
 
 ```sh
 dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.0/dsh-openwrite-0.2.0.tgz
@@ -33,7 +33,7 @@ dsh 对话模型在宿主中配置。小说生成、评审与测试模型在「�
 
 ## 从旧本地安装迁移
 
-先停止正在运行的 dsh。下载并解开候选 `.tgz`，执行其中的维护脚本，先预览再应用：
+先停止正在运行的 dsh。下载并解开 Release `.tgz`，执行其中的维护脚本，先预览再应用：
 
 ```sh
 node package/scripts/maintenance.mjs migrate --profile web
@@ -72,7 +72,7 @@ bridge 的高级 `mode: external` / `baseUrl` 配置继续支持外部 Core，�
 
 ## GitHub 源码安装
 
-源码安装使用 dsh 官方 GitHub source 机制：`dsh plugin --profile web add -w github:LiPu-jpg/Openwrite`。仓库 `prepare` 自行构建三个插件，Core wheel 随固定提交提供，不访问相邻工作区。源码安装需要 Git 和构建依赖；建议普通用户优先使用已验收 Release 包。
+源码安装使用 dsh 官方 GitHub source 机制：`dsh plugin --profile web add -w github:LiPu-jpg/Openwrite#v0.2.0`。仓库 `prepare` 自行构建三个插件，Core wheel 随固定提交提供，不访问相邻工作区。源码安装需要 Git 和构建依赖；建议普通用户优先使用已验收 Release 包。
 
 如果 pnpm 按本机策略阻止构建，按它显示的构建审批指引仅批准本包，再重试。安装脚本不放宽构建授权。源码安装也必须在发布验收中通过，不能用本机已编译目录代替。
 

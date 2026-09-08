@@ -81,7 +81,9 @@
     "packages/studio-panel/LICENSE",
     "release/licenses",
     "release/wheels",
-    "release/*.in"
+    "release/*.in",
+    "docs",
+    "assets"
   ],
   "dependencies": {
     "@deepseek-ai/schemastery": "3.18.2",

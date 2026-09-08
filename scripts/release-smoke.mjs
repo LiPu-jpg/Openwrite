@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, mkdir, writeFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, release as osRelease } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
@@ -29,9 +29,24 @@ function run(args) {
 }
 let host
 let log = ''
-const report = { platform: process.platform, arch: process.arch, node: process.version, installSource: sourceSpec ?? 'release', artifactSha256: sourceSpec ? null : createHash('sha256').update(await readFile(artifact)).digest('hex'), checks: [], modelCalls: 0, status: 'failed' }
+async function stopHost() {
+  if (!host || host.exitCode !== null || host.signalCode !== null) return
+  const exited = new Promise(done => host.once('exit', done))
+  if (process.platform === 'win32') {
+    await new Promise(done => { const killer = spawn('taskkill', ['/pid', String(host.pid), '/T', '/F'], { stdio: 'ignore' }); killer.once('error', done); killer.once('exit', done) })
+  } else host.kill('SIGTERM')
+  await Promise.race([exited, delay(5000)])
+  if (host.exitCode === null && host.signalCode === null) { host.kill('SIGKILL'); await exited }
+}
+const report = { platform: process.platform, osRelease: osRelease(), arch: process.arch, node: process.version, installSource: sourceSpec ?? 'release', artifactSha256: sourceSpec ? null : createHash('sha256').update(await readFile(artifact)).digest('hex'), checks: [], modelCalls: 0, status: 'failed' }
 try {
   run(['--profile', 'web', '--dump-config'])
+  const other = join(temporary, 'coexist-plugin')
+  await mkdir(other, { recursive: true })
+  await writeFile(join(other, 'package.json'), JSON.stringify({ name: 'dsh-openwrite-coexist-fixture', version: '1.0.0', type: 'module', main: 'index.mjs', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
+  await writeFile(join(other, 'cordis.patch.yml'), '- insert:\n    - id: coexist-fixture\n      name: dsh-openwrite-coexist-fixture\n')
+  await writeFile(join(other, 'index.mjs'), `export const name = 'dsh-openwrite-coexist-fixture'; export function apply(ctx) { ctx.inject(['webServer'], c => c.effect(() => c.webServer.register({ kind: 'exact', path: '/coexist-fixture', handler: (_req, res) => { res.writeHead(200); res.end('other plugin available'); } }))); }`)
+  run(['plugin', '--profile', 'web', 'add', '-w', other])
   run(['plugin', '--profile', 'web', 'add', '-w', installSpec])
   const profile = JSON.parse(await readFile(join(env.DSH_HOME, 'profiles/web/package.json')))
   assert.equal(profile.dsh.profile.bundles.filter(name => name === 'dsh-openwrite').length, 1)
@@ -67,6 +82,8 @@ try {
     await delay(500)
   }
   assert.ok(status, `Runtime route unavailable: ${log}`)
+  assert.equal(await (await browserFetch(base + '/coexist-fixture')).text(), 'other plugin available')
+  report.checks.push('existing-plugin-coexistence')
   const presetId = `openwrite-${version.replace(/[^a-z0-9-]/g, '-')}`
   assert.match(presetId, /^[a-z0-9][a-z0-9-]*$/)
   await readFile(join(env.DSH_HOME, '.agent-presets', presetId, 'agent.cordis.yml'))
@@ -104,18 +121,21 @@ try {
     console.log('Browser QA host:', base, 'isolated home:', env.DSH_HOME)
     await new Promise(done => host.once('exit', done))
   }
-  host.kill('SIGTERM')
-  await Promise.race([new Promise(done => host.once('exit', done)), delay(5000)])
-  if (host.exitCode === null) host.kill('SIGKILL')
+  await stopHost()
   run(['plugin', '--profile', 'web', 'remove', '-w', 'dsh-openwrite'])
   const removed = JSON.parse(await readFile(join(env.DSH_HOME, 'profiles/web/package.json')))
   assert.equal(removed.dsh.profile.bundles.includes('dsh-openwrite'), false)
+  assert.equal(removed.dsh.profile.bundles.includes('dsh-openwrite-coexist-fixture'), true)
   assert.ok(await readFile(join(env.DSH_HOME, 'openwrite', 'active.json')), 'uninstall preserves runtime data')
   report.checks.push('uninstall', 'retain-data')
   report.status = 'passed'
   console.log('Uninstall passed')
+} catch (error) {
+  report.error = String(error).replace(/([?&](?:token|key|signature)=)[^&\s]+/gi, '$1[redacted]')
+  console.error(report.error)
+  throw error
 } finally {
   await writeFile(join(root, `release-report-${sourceSpec ? 'source-' : ''}${process.platform}-${process.arch}-${process.version}.json`), JSON.stringify(report, null, 2) + '\n')
-  if (host && host.exitCode === null) host.kill('SIGTERM')
-  if (!process.argv.includes('--keep')) await rm(temporary, { recursive: true, force: true })
+  await stopHost()
+  if (!process.argv.includes('--keep')) await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
 }

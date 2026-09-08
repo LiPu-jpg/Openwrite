@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile, writeFile, cp, mkdir, rm } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 export async function acceptRuntime(installed, home, temporary) {
   const { ManagedRuntime, stopOwnedProcess } = await import(pathToFileURL(join(installed, 'packages/openwrite-bridge/lib/managed-runtime.js')).href)
@@ -12,6 +13,8 @@ export async function acceptRuntime(installed, home, temporary) {
   const second = new ManagedRuntime(root, artifacts)
   try {
     const [a, b] = await Promise.all([first.ensure(), second.ensure()])
+    const native = spawnSync(first.child.spawnfile, ['-I', '-c', 'import onnxruntime, fastembed; from cryptography.hazmat.backends.openssl.backend import backend; assert "CPUExecutionProvider" in onnxruntime.get_available_providers(); assert backend.openssl_version_text()'], { cwd: root, encoding: 'utf8', timeout: 60_000 })
+    assert.equal(native.status, 0, `Native dependency import failed: ${native.stderr}`)
     assert.notEqual(a.baseUrl, b.baseUrl, 'instances choose separate free ports')
     assert.equal((await fetch(a.baseUrl + '/api/health')).status, 401)
     assert.equal((await fetch(a.baseUrl + '/api/project/init', { method: 'POST', headers: { 'X-OpenWrite-Studio': '1' } })).status, 401)
@@ -39,6 +42,6 @@ export async function acceptRuntime(installed, home, temporary) {
     const rollback = new ManagedRuntime(root, artifacts)
     try { await rollback.ensure(); assert.equal(rollback.status().phase, 'ready') }
     finally { await rollback.dispose() }
-    return ['multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
+    return ['native-dependency-load', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
   } finally { await first.dispose(); await second.dispose() }
 }

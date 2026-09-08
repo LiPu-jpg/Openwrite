@@ -10,7 +10,7 @@ const manifest = JSON.parse(await readFile(join(root, 'package.json')))
 const visited = new Set()
 const components = []
 async function collect(name, from) {
-  if (name.startsWith('@deepseek-ai/') || name === 'react') return
+  if ((name.startsWith('@deepseek-ai/') && !['@deepseek-ai/schemastery', '@deepseek-ai/cosmokit'].includes(name)) || ['react', 'react-dom'].includes(name)) return
   const require = createRequire(join(from, 'package.json'))
   let directory
   try { directory = dirname(require.resolve(name + '/package.json')) }
@@ -37,6 +37,11 @@ async function collect(name, from) {
   for (const child of Object.keys(pkg.dependencies ?? {})) await collect(child, directory)
 }
 for (const name of Object.keys(manifest.dependencies ?? {})) await collect(name, root)
+for (const relative of ['packages/openwrite-bridge', 'packages/studio-panel', 'vendor/dsh-dog']) {
+  const directory = join(root, relative)
+  const pkg = JSON.parse(await readFile(join(directory, 'package.json')))
+  for (const name of Object.keys(pkg.dependencies ?? {})) await collect(name, directory)
+}
 const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
 // pnpm's GitHub source provider downloads a commit archive without .git.
 // Hash the actual source tree in that case; never invent a commit or borrow
@@ -44,7 +49,7 @@ const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).t
 const sourceHash = createHash('sha256')
 async function hashSource(directory, prefix = '') {
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (['node_modules', 'lib', 'dist', '.git', 'licenses'].includes(entry.name) || entry.name.startsWith('.tmp-') || /(?:\.log|\.tgz|\.manifest\.json)$/.test(entry.name) || entry.name.startsWith('release-report-') || prefix + entry.name === 'release/source.json') continue
+    if (['node_modules', 'lib', '.git', 'licenses', '.pw-browsers', 'test-results', 'playwright-report'].includes(entry.name) || (entry.name === 'dist' && !prefix.includes('vendor/')) || entry.name.startsWith('.tmp-') || /(?:\.log|\.tgz|\.manifest\.json)$/.test(entry.name) || entry.name.startsWith('release-report-') || prefix + entry.name === 'release/source.json') continue
     sourceHash.update(prefix + entry.name + '\0')
     if (entry.isDirectory()) await hashSource(join(directory, entry.name), prefix + entry.name + '/')
     else if (entry.isFile()) sourceHash.update(await readFile(join(directory, entry.name)))
