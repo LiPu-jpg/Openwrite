@@ -336,3 +336,28 @@ def test_git_checkpoint_uses_nested_standalone_content_repository(tmp_path: Path
         capture_output=True,
     ).stdout.strip()
     assert Path(git_root).resolve() == project.resolve()
+
+
+@pytest.mark.parametrize("failure", [
+    FileNotFoundError("git not installed"),
+    subprocess.TimeoutExpired("git", 10),
+    subprocess.CalledProcessError(1, "git"),
+])
+def test_optional_git_failure_preserves_initialized_novel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception,
+):
+    def unavailable(*args, **kwargs):
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["timeout"] == 10
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", unavailable)
+    project = tmp_path / "中文作品"
+    init_project(project, "git-optional", "新书")
+    assert (project / "novel_config.yaml").is_file()
+    assert (project / "data/novels/git-optional/src/outline.md").is_file()
+    assert (project / ".openwrite/project.yaml").is_file()
+    status = GitCheckpointManager(project).status()
+    assert status["eligible"] is False
+    assert status["enabled"] is False
+    assert "Git" in status["reason"]

@@ -92,13 +92,22 @@ def initialize_content_git(project_root: Path) -> bool:
     if git_path.is_dir() or git_path.is_file():
         return False
     root.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "init", "--quiet"],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    # Git is an optional checkpoint capability. It must never inherit the
+    # managed backend's parent-liveness stdin or prevent a novel from opening.
+    try:
+        subprocess.run(
+            ["git", "init", "--quiet"],
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
     return True
 
 
