@@ -13,6 +13,8 @@ import { acceptBrowser } from './browser-acceptance.mjs'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const version = JSON.parse(await readFile(join(root, 'package.json'))).version
 const artifact = resolve(process.argv.find(arg => arg.endsWith('.tgz')) ?? join(root, `dsh-openwrite-${version}.tgz`))
+const sourceSpec = process.argv.find(arg => arg.startsWith('github:'))
+const installSpec = sourceSpec ?? artifact
 const temporary = process.argv.includes('--reuse')
   ? JSON.parse(await readFile(join(root, '.tmp-release-smoke.json'), 'utf8')).temporary
   : await mkdtemp(join(tmpdir(), 'openwrite-release-'))
@@ -27,13 +29,13 @@ function run(args) {
 }
 let host
 let log = ''
-const report = { platform: process.platform, arch: process.arch, node: process.version, artifactSha256: createHash('sha256').update(await readFile(artifact)).digest('hex'), checks: [], modelCalls: 0, status: 'failed' }
+const report = { platform: process.platform, arch: process.arch, node: process.version, installSource: sourceSpec ?? 'release', artifactSha256: sourceSpec ? null : createHash('sha256').update(await readFile(artifact)).digest('hex'), checks: [], modelCalls: 0, status: 'failed' }
 try {
   run(['--profile', 'web', '--dump-config'])
-  run(['plugin', '--profile', 'web', 'add', '-w', artifact])
+  run(['plugin', '--profile', 'web', 'add', '-w', installSpec])
   const profile = JSON.parse(await readFile(join(env.DSH_HOME, 'profiles/web/package.json')))
   assert.equal(profile.dsh.profile.bundles.filter(name => name === 'dsh-openwrite').length, 1)
-  run(['plugin', '--profile', 'web', 'add', '-w', artifact])
+  run(['plugin', '--profile', 'web', 'add', '-w', installSpec])
   report.checks.push('install', 'repeat-install')
   const dump = run(['--profile', 'web', '--dump-config'])
   assert.match(dump, /openwrite-bridge/)
@@ -113,7 +115,7 @@ try {
   report.status = 'passed'
   console.log('Uninstall passed')
 } finally {
-  await writeFile(join(root, `release-report-${process.platform}-${process.arch}-${process.version}.json`), JSON.stringify(report, null, 2) + '\n')
+  await writeFile(join(root, `release-report-${sourceSpec ? 'source-' : ''}${process.platform}-${process.arch}-${process.version}.json`), JSON.stringify(report, null, 2) + '\n')
   if (host && host.exitCode === null) host.kill('SIGTERM')
   if (!process.argv.includes('--keep')) await rm(temporary, { recursive: true, force: true })
 }
