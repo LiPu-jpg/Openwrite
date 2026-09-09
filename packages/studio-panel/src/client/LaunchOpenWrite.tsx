@@ -45,12 +45,13 @@ export function LaunchOpenWrite({ wide, openWorkspace }: { wide: boolean; openWo
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setBusy(false) }
   }
-  const preparing = !['idle', 'ready', 'error', 'cancelled', 'stopped'].includes(status.phase)
+  const preparing = !['idle', 'ready', 'error', 'cancelled', 'stopped', 'uninstalled'].includes(status.phase)
+  const title = status.phase === 'ready' ? '写作环境已就绪' : status.phase === 'recovering' ? '正在恢复写作环境' : status.phase === 'uninstalled' ? '插件已卸载' : '准备写作环境'
   return <>
     <button className={css.entry} type="button" title="OpenWrite" aria-label="打开 OpenWrite" onClick={() => setOpen(true)}><BookOpen size={18} />{wide && <span>OpenWrite</span>}</button>
     {open && <dialog ref={dialog} className={css.dialog} onCancel={() => setOpen(false)}>
       <header><div><small>长篇小说工作台</small><h2>开始创作</h2></div><button type="button" aria-label="关闭" onClick={() => setOpen(false)}><X size={20} /></button></header>
-      <section aria-live="polite"><strong>{status.phase === 'ready' ? '写作环境已就绪' : '准备写作环境'}</strong><p>{status.message ?? '正在连接…'}</p>
+      <section aria-live="polite"><strong>{title}</strong><p>{status.message ?? '正在连接…'}</p>
         {preparing && <progress value={status.totalBytes ? status.downloadedBytes : undefined} max={status.totalBytes} aria-label="环境准备进度" />}
         {preparing && <button type="button" onClick={() => void runtimeAction('cancel').catch(cause => setError(String(cause)))}>取消准备</button>}
         {['error', 'cancelled', 'stopped'].includes(status.phase) && <button type="button" onClick={() => { setError(''); void runtimeAction('retry').catch(cause => setError(String(cause))) }}>重试</button>}

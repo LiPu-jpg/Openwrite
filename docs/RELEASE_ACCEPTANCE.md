@@ -1,6 +1,21 @@
-# 0.2.1 发布验收记录
+# 0.2.2 发布验收记录
 
-下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.1) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256、插件提交、Core 提交、宿主版本和原生执行记录。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物，不重新打包。
+下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.2) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256、插件提交、Core 提交、宿主版本和原生执行记录。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物，不重新打包。不覆盖 `v0.2.1` 附件。
+
+宿主基线：dsh **0.1.2-rc.1**（npm `latest`/`next` 同此版本；`alpha` 为 `0.1.5-alpha.1`，本版不追随）。Core 5.8.0 / contract 1。
+
+## 本版改动与验收
+
+- 旧安装迁移检查 bundle **和** `dependencies`；应用时走宿主 `dsh plugin remove`，先备份、失败恢复。不再只改 bundle 列表而把旧包留给后续 `plugin add` 重新登记（该路径会触发 `duplicate loader entry id: openwrite-bridge`）。作者所有预设按无包装标记识别，不会删除；历史会话不改绑。
+- 受管理后端在 dsh 运行期间对已启动进程的异常退出做有上限退避自动恢复；取消、宿主退出、卸载不复活。恢复只重连服务，不重放写作/评审等付费请求，状态文案不得写成任务已恢复。
+- 安装与 Python 子进程使用允许列表环境，不继承无关 API Key。工具策略测试覆盖只读、计划模式、缺失/伪造 Workspace、过期 revision、未认证请求。文档标明这不是操作系统沙箱。
+- 成本比较方法见 [COST_MEASUREMENT.md](COST_MEASUREMENT.md)。离线 schema 字节继续由测试打印；真实 tokenizer/缓存/费用本版 `not-run`。
+
+平台矩阵、浏览器检查和 GitHub 源码安装仍以本版 CI `Release artifact validation` 为准。真实模型调用本版未授权，记为 `not-run`。
+
+## 0.2.1 记录
+
+下载与最终结果以 [v0.2.1 Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.1) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256、插件提交、Core 提交、宿主版本和原生执行记录。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物，不重新打包。
 
 宿主基线：dsh 0.1.2-rc.1；Core 5.8.0 / contract 1。Core 固定提交和 DoG v1.2.0 来源见 `release/runtime-manifest.json`。构建任务记录插件提交、依赖来源和许可证，最终 `.tgz.manifest.json` 绑定产物 SHA-256。
 

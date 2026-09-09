@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- 旧安装迁移同时处理 bundle 登记和 `dependencies`，通过宿主 `dsh plugin remove` 删除 `@dsh-novel/openwrite-bridge`、`@dsh-novel/studio-panel`、`@dsh-external/dsh-dog`；备份失败可恢复，不改用户 `node_modules` 源码，不删除作者预设。
+- 受管理后端异常退出后有限次退避自动恢复；取消、卸载和宿主退出不复活。恢复不重放付费请求。
+- Python / uv 子进程改为允许列表环境，不再整包继承 `process.env`。
+- 补齐 leftover-deps、自动恢复、环境允许列表、Workspace/revision/未认证策略的回归测试。真实模型费用测量未执行。
+
 ## 2026-08-23 - dsh 原生创作工作台
 
 - OpenWrite 改为无界面领域后端；`NovelDomainService` 统一工具、同源 API 代理和轻量 revision 失效流。

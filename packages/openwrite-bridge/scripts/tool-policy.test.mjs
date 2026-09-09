@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { novelEffect, novelPolicyDenial } from '../lib/tool-policy.js'
-import { registerNovelTools } from '../lib/tools.js'
+import { registerNovelTools, workspaceContextFromExec } from '../lib/tools.js'
+import { StudioClient, StudioError } from '../lib/client.js'
 
 test('every registered novel tool has a conservative effect; mixed actions do not inherit read access', () => {
   const tools = []
@@ -13,6 +17,11 @@ test('every registered novel tool has a conservative effect; mixed actions do no
   assert.equal(novelEffect('novel_document_change_plan', { action: 'preview' }), 'write')
   assert.equal(novelEffect('novel_reference_library_action', { action: 'import' }), 'write')
   assert.equal(novelEffect('novel_unknown_future_action', { action: 'read' }), 'write')
+  assert.equal(novelEffect('novel_manuscript_acceptance', {}), 'read')
+  assert.equal(novelEffect('novel_export_preflight', {}), 'read')
+  assert.equal(novelEffect('novel_export', {}), 'write')
+  assert.equal(novelEffect('novel_task_retry', {}), 'generate')
+  assert.equal(novelEffect('novel_task_cancel', {}), 'write')
 })
 
 test('host write policy and plan state independently gate generation and changes', () => {
@@ -67,4 +76,28 @@ test('real dsh tool registry isolates 90 tools by preset and disposes them', asy
     await scope.dispose()
     assert.equal(root.tools.schemas(writing).length, 0)
   } finally { await root.fiber.dispose() }
+})
+
+test('workspace context fails closed for missing, relative, and unknown roots', async () => {
+  const exec = header => workspaceContextFromExec({ name: 'novel_doc_read', callId: 'c1', agent: { session: { header } } })
+  assert.throws(() => exec({}), error => error.code === 'WORKSPACE_CONTEXT_MISSING')
+  assert.throws(() => exec({ cwd: '' }), error => error.code === 'WORKSPACE_CONTEXT_MISSING')
+  assert.throws(() => exec({ cwd: 'relative/path' }), error => error.code === 'WORKSPACE_ROOT_INVALID' && error.details.reason === 'not_absolute')
+  assert.throws(() => exec({ cwd: '/definitely-not-an-openwrite-workspace-root' }), error => error.code === 'WORKSPACE_ROOT_INVALID' && error.details.reason === 'not_found')
+})
+
+test('stale revision is returned as CONFLICT and does not look like success', async t => {
+  const workspace = await mkdtemp(join(tmpdir(), 'openwrite-policy-ws-'))
+  t.after(() => rm(workspace, { recursive: true, force: true }))
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ error: 'revision changed', code: 'CONFLICT' }), {
+    status: 409, headers: { 'content-type': 'application/json' },
+  }))
+  const client = new StudioClient({ baseUrl: 'http://127.0.0.1:9', timeoutMs: 1_000 }).scoped({ workspaceRoot: workspace })
+  const tools = []
+  registerNovelTools({ tools: { register: tool => tools.push(tool) } }, () => client, { timeoutMs: 1_000, outputDir: join(workspace, 'out') })
+  const exec = { signal: new AbortController().signal, name: 'novel_outline_edit', callId: 'c1', agent: { session: { header: { cwd: workspace } } } }
+  await assert.rejects(
+    () => tools.find(tool => tool.name === 'novel_outline_edit').execute({ operation: 'rename', revision: 'stale-rev' }, exec),
+    error => error instanceof StudioError && error.status === 409 && error.code === 'CONFLICT',
+  )
 })
