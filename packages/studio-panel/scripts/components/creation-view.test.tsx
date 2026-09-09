@@ -1665,6 +1665,24 @@ describe('CreationView selection notes and marker insert', () => {
     expect(screen.getByText('creation.notes.rangeLost')).not.toBeNull()
   })
 
+  it('lets the author focus and type in the annotation note field', async () => {
+    const postStudioApi = vi.fn(async (_url: string, body?: Record<string, unknown>) => {
+      if (body?.['action'] === 'annotations') return { annotations: [] }
+      return {}
+    })
+    render(<CreationView {...(viewProps({ fetchStudioApi: editingFetch(), putStudioApi: vi.fn(), postStudioApi }) as never)} />)
+    await screen.findByText(/1,200 \/ 2,500/)
+    await selectSpan(0, 4)
+    fireEvent.click(screen.getByRole('button', { name: 'creation.selection.annotate' }))
+    const note = screen.getByPlaceholderText('creation.notes.note') as HTMLTextAreaElement
+    expect(fireEvent.mouseDown(note)).toBe(true)
+    note.focus()
+    expect(document.activeElement).toBe(note)
+    fireEvent.change(note, { target: { value: '查来源' } })
+    expect(note.value).toBe('查来源')
+    expect(screen.getByRole('form', { name: 'creation.notes.title' })).not.toBeNull()
+  })
+
   it('ignores a late annotation list from the previous chapter', async () => {
     const nextPath = 'data/novels/demo/data/manuscript/ch_002.md'
     harness.snapshot = { ...harness.snapshot, chapters: [chapter(), { ...chapter(nextPath), title: '第二章' }] }
