@@ -56,16 +56,6 @@ try {
   assert.equal(profile.dsh.profile.bundles.filter(name => name === 'dsh-openwrite').length, 1)
   run(['plugin', '--profile', 'web', 'add', '-w', installSpec])
   report.checks.push('install', 'repeat-install')
-  const hostRequire = createRequire(cli)
-  const pluginRequire = createRequire(join(env.DSH_HOME, 'profiles/web/node_modules/dsh-openwrite/package.json'))
-  report.hostServices = {}
-  for (const name of ['@deepseek-ai/cordis', '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-settings', '@deepseek-ai/dsh-tools']) {
-    const expected = hostRequire(name + '/package.json').version
-    const actual = pluginRequire(name + '/package.json').version
-    assert.equal(actual, expected, `${name}: plugin must use the host's service version`)
-    report.hostServices[name] = actual
-  }
-  report.checks.push('host-service-versions')
   const dump = run(['--profile', 'web', '--dump-config'])
   assert.match(dump, /openwrite-bridge/)
   const server = createServer()
@@ -96,6 +86,18 @@ try {
     await delay(500)
   }
   assert.ok(status, `Runtime route unavailable: ${log}`)
+  // dsh wires shared SDK dependencies while booting the profile. Inspect them
+  // only after its runtime route proves the plugin has finished loading.
+  const hostRequire = createRequire(cli)
+  const pluginRequire = createRequire(join(env.DSH_HOME, 'profiles/web/node_modules/dsh-openwrite/package.json'))
+  report.hostServices = {}
+  for (const name of ['@deepseek-ai/cordis', '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-settings', '@deepseek-ai/dsh-tools']) {
+    const expected = hostRequire(name + '/package.json').version
+    const actual = pluginRequire(name + '/package.json').version
+    assert.equal(actual, expected, `${name}: plugin must use the host's service version`)
+    report.hostServices[name] = actual
+  }
+  report.checks.push('host-service-versions')
   assert.equal(await (await browserFetch(base + '/coexist-fixture')).text(), 'other plugin available')
   report.checks.push('existing-plugin-coexistence')
   const installedVersion = JSON.parse(await readFile(join(env.DSH_HOME, 'profiles/web/node_modules/dsh-openwrite/package.json'))).version
