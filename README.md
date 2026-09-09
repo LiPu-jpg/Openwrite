@@ -28,12 +28,12 @@
 
 ## 快速安装
 
-**0.2.3 标准插件包**兼容 dsh **0.1.2-rc.1**。可下载版本、三平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.3) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。不追随 dsh `alpha`。
+**0.2.4 标准插件包**兼容 dsh **0.1.2-rc.1**。可下载版本、三平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.4) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。不追随 dsh `alpha`。
 
 已有匹配版本 dsh 的用户执行：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.3/dsh-openwrite-0.2.3.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.4/dsh-openwrite-0.2.4.tgz
 dsh web
 ```
 
@@ -71,7 +71,7 @@ dsh web
 | 工作环节 | 可以做什么 |
 |---|---|
 | **规划与资料** | 在同一创作会话中整理灵感、人物、世界观、分层大纲与伏笔，维护作品设定。 |
-| **正文创作** | 章节导航、连续审读、正文编辑、自动保存、版本保护与场景结构管理。 |
+| **正文创作** | 章节导航、连续审读、正文编辑、选区批注与着色、内部状态/关系标记、自动保存、版本保护与场景结构管理。 |
 | **审稿与修订** | 六域评审、问题定位、修订差异和复评；通过 DAG 查看流程、依赖及证据。 |
 | **模型测试** | 测章节写作或指定范围的大纲设计，多模型独立生成与交叉评审，查看质量、可靠性和费用；候选保存在隔离副本。 |
 | **研究与检索** | 检索作品资料与参考库，管理研究报告、正典和写作记忆。 |

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreationView } from '../../src/client/CreationView.tsx'
 import { StudioApiError } from '../../src/client/api.ts'
@@ -58,13 +58,33 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 
 vi.mock('../../src/client/VditorBody.tsx', () => ({
   loadVditor: () => Promise.resolve(),
-  VditorBody: ({ initial, onChange, onReady, onSelectionChange }: {
+  VditorBody: ({ initial, onChange, onReady, onSelectionChange, onEditorApi }: {
     initial: string
     onChange: (value: string) => void
     onReady: () => void
     onSelectionChange?: (selection: { start: number; end: number; text: string } | null) => void
+    onEditorApi?: (api: { insertAtCaret: (markdown: string) => void } | null) => void
   }) => {
+    const editorRef = useRef<HTMLTextAreaElement>(null)
+    const onChangeRef = useRef(onChange)
+    onChangeRef.current = onChange
+    const onEditorApiRef = useRef(onEditorApi)
+    onEditorApiRef.current = onEditorApi
     useEffect(() => { onReady() }, [onReady])
+    useEffect(() => {
+      onEditorApiRef.current?.({
+        insertAtCaret: (markdown: string) => {
+          const node = editorRef.current
+          if (node === null) return
+          const start = node.selectionStart
+          const end = node.selectionEnd
+          const next = `${node.value.slice(0, start)}${markdown}\n${node.value.slice(end)}`
+          node.value = next
+          onChangeRef.current(next)
+        },
+      })
+      return () => onEditorApiRef.current?.(null)
+    }, [])
     const emitSelection = (event: { currentTarget: HTMLTextAreaElement }) => {
       const start = event.currentTarget.selectionStart
       const end = event.currentTarget.selectionEnd
@@ -72,7 +92,7 @@ vi.mock('../../src/client/VditorBody.tsx', () => ({
         ? { start, end, text: event.currentTarget.value.slice(start, end) }
         : null)
     }
-    return <textarea aria-label="manuscript-editor" defaultValue={initial}
+    return <textarea ref={editorRef} aria-label="manuscript-editor" defaultValue={initial}
       onChange={event => onChange(event.target.value)}
       onSelect={emitSelection}
       onMouseUp={emitSelection}
@@ -192,6 +212,13 @@ function viewProps(api: {
     useWorkspaces: vi.fn(),
     t,
   }
+}
+
+function mutatingStudioPosts(post: ReturnType<typeof vi.fn>) {
+  return post.mock.calls.filter(call => {
+    const body = call[1] as Record<string, unknown> | undefined
+    return !(String(call[0]) === '/manuscript-editing' && body?.['action'] === 'annotations')
+  })
 }
 
 beforeEach(() => {
@@ -1373,7 +1400,7 @@ describe('CreationView selection polish', () => {
     fireEvent.click(screen.getByRole('button', { name: 'creation.proposals.applySelected' }))
     await act(async () => { await Promise.resolve() })
 
-    expect(postStudioApi).not.toHaveBeenCalled()
+    expect(mutatingStudioPosts(postStudioApi)).toEqual([])
     expect(putStudioApi).not.toHaveBeenCalled()
     expect(screen.getByText('creation.proposals.sourceConflict')).not.toBeNull()
     expect(harness.setEditorStatus).not.toHaveBeenCalled()
@@ -1395,7 +1422,7 @@ describe('CreationView selection polish', () => {
     await selectSpan(0, 4)
     fireEvent.click(screen.getByRole('button', { name: 'creation.selection.reviewFix' }))
     await act(async () => { await Promise.resolve() })
-    expect(postStudioApi).not.toHaveBeenCalled()
+    expect(mutatingStudioPosts(postStudioApi)).toEqual([])
     expect(screen.getByText('creation.selection.reviewRequired')).not.toBeNull()
   })
 })
@@ -1467,7 +1494,7 @@ describe('CreationView manuscript mentions', () => {
     fireEvent.click(screen.getByRole('button', { name: /林舟 渡船船主 character · ferryman/ }))
     expect(screen.getByRole('region', { name: 'creation.mentions.card' }).getAttribute('data-asset')).toBe('character:ferryman')
     expect(screen.queryByRole('region', { name: 'creation.mentions.choose' })).toBeNull()
-    expect(postStudioApi).not.toHaveBeenCalled()
+    expect(mutatingStudioPosts(postStudioApi)).toEqual([])
   })
 
   it('clears unresolved candidates when changing Workspace and chapter', async () => {
@@ -1507,7 +1534,189 @@ describe('CreationView manuscript mentions', () => {
     expect(await screen.findByDisplayValue('雨停了。')).not.toBeNull()
     expect(screen.queryByRole('region', { name: 'creation.mentions.card' })).toBeNull()
     expect(screen.queryByText('钟楼守夜人')).toBeNull()
-    expect(postStudioApi).not.toHaveBeenCalled()
+    expect(mutatingStudioPosts(postStudioApi)).toEqual([])
     expect(postStudioApi.mock.calls.some(call => String(call[0]) === '/assets/update')).toBe(false)
+  })
+})
+
+describe('CreationView selection notes and marker insert', () => {
+  const manuscript = '密信还在桌上。夜雨未停。'
+  const annotationRecord = {
+    annotation_id: 'ann_abcdefghijklmnop',
+    chapter_id: 'ch_001',
+    source_revision: 'revision-current',
+    quote: '密信还在',
+    start_hint: 0,
+    end_hint: 4,
+    current_start: 0,
+    current_end: 4,
+    note: '查来源',
+    status: 'open',
+    anchor_state: 'attached',
+    color: 'sky',
+    created_at: '2026-09-09T00:00:00Z',
+    updated_at: '2026-09-09T00:00:00Z',
+  }
+
+  function editingFetch(content = manuscript, extras: Record<string, unknown> = {}) {
+    return vi.fn(async (url: string) => {
+      if (url.startsWith('/document')) {
+        const path = decodeURIComponent(url.split('path=')[1] ?? '')
+        if (path.includes('ch_002')) {
+          return { path, title: '第二章', content: '雨停了。', version: 'v1', revision: 'r2' }
+        }
+        return { path: chapter().path, title: '第一章', content, version: 'v1', revision: 'revision-current' }
+      }
+      if (url === '/assets' || url.startsWith('/assets?')) {
+        return extras['assets'] ?? { data: { assets: [
+          { kind: 'character', id: 'linji', name: '林霁', summary: '灯塔看守', aliases: ['霁哥'] },
+          { kind: 'character', id: 'zhouzhou', name: '周舟', summary: '调查者', aliases: [] },
+        ] } }
+      }
+      if (url.startsWith('/chapters/') && url.includes('/work-brief')) return chapterWorkBrief({
+        path: url.includes('ch_002') ? 'data/novels/demo/data/manuscript/ch_002.md' : chapter().path,
+      })
+      if (url.startsWith('/revisions')) return { proposals: [] }
+      if (url.startsWith('/manuscript/versions')) return { versions: [] }
+      return {}
+    })
+  }
+
+  async function selectSpan(start: number, end: number) {
+    const editor = await waitFor(() => {
+      const node = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'manuscript-editor' })
+      expect(node.value.slice(start, end).length).toBe(end - start)
+      return node
+    })
+    await act(async () => {
+      editor.focus()
+      editor.setSelectionRange(start, end)
+      fireEvent.mouseUp(editor)
+      fireEvent.select(editor)
+    })
+    await screen.findByRole('button', { name: 'creation.selection.annotate' })
+    return editor
+  }
+
+  it('saves a selection note with color after save-then-revalidate and lists it in revisions', async () => {
+    const postStudioApi = vi.fn(async (_url: string, body?: Record<string, unknown>) => {
+      if (body?.['action'] === 'annotations') return { annotations: [annotationRecord] }
+      if (body?.['action'] === 'annotate') return annotationRecord
+      return {}
+    })
+    const putStudioApi = vi.fn(async (_path: string, body: Record<string, unknown>) => ({
+      path: chapter().path, title: '第一章', content: body['content'], version: 'v2', revision: 'revision-saved',
+    }))
+    render(<CreationView {...(viewProps({ fetchStudioApi: editingFetch(), putStudioApi, postStudioApi }) as never)} />)
+    await screen.findByText(/1,200 \/ 2,500/)
+    const editor = await selectSpan(0, 4)
+    fireEvent.click(screen.getByRole('button', { name: 'creation.selection.annotate' }))
+    fireEvent.change(editor, { target: { value: `${manuscript}补一句。` } })
+    fireEvent.change(screen.getByPlaceholderText('creation.notes.note'), { target: { value: '查来源' } })
+    fireEvent.click(screen.getByRole('radio', { name: 'creation.notes.color.sky' }))
+    fireEvent.click(screen.getByRole('button', { name: 'creation.notes.submit' }))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(putStudioApi).toHaveBeenCalled()
+    expect(postStudioApi).toHaveBeenCalledWith('/manuscript-editing', expect.objectContaining({
+      action: 'annotate',
+      chapter_id: 'ch_001',
+      quote: '密信还在',
+      start_hint: 0,
+      end_hint: 4,
+      note: '查来源',
+      color: 'sky',
+      revision: 'revision-saved',
+    }))
+    expect(await screen.findByText('查来源')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'creation.notes.locate' }))
+    expect(screen.getAllByText('creation.notes.attached').length).toBeGreaterThan(0)
+  })
+
+  it('refuses to bind a note after save if the original span no longer matches', async () => {
+    const postStudioApi = vi.fn(async (_url: string, body?: Record<string, unknown>) => {
+      if (body?.['action'] === 'annotations') return { annotations: [] }
+      return {}
+    })
+    const putStudioApi = vi.fn(async (_path: string, body: Record<string, unknown>) => ({
+      path: chapter().path, title: '第一章', content: body['content'], version: 'v2', revision: 'revision-saved',
+    }))
+    render(<CreationView {...(viewProps({ fetchStudioApi: editingFetch(), putStudioApi, postStudioApi }) as never)} />)
+    await screen.findByText(/1,200 \/ 2,500/)
+    const editor = await selectSpan(0, 4)
+    fireEvent.click(screen.getByRole('button', { name: 'creation.selection.annotate' }))
+    fireEvent.change(screen.getByPlaceholderText('creation.notes.note'), { target: { value: '查来源' } })
+    fireEvent.change(editor, { target: { value: '这段已经改掉了。' } })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.notes.submit' }))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(mutatingStudioPosts(postStudioApi).some(call => (call[1] as { action?: string })?.action === 'annotate')).toBe(false)
+    expect(screen.getByText('creation.notes.rangeLost')).not.toBeNull()
+  })
+
+  it('ignores a late annotation list from the previous chapter', async () => {
+    const nextPath = 'data/novels/demo/data/manuscript/ch_002.md'
+    harness.snapshot = { ...harness.snapshot, chapters: [chapter(), { ...chapter(nextPath), title: '第二章' }] }
+    const first = deferred<Record<string, unknown>>()
+    let annotationsCalls = 0
+    const postStudioApi = vi.fn(async (_url: string, body?: Record<string, unknown>) => {
+      if (body?.['action'] !== 'annotations') return {}
+      annotationsCalls += 1
+      if (annotationsCalls === 1) return first.promise
+      return { annotations: [] }
+    })
+    const props = viewProps({ fetchStudioApi: editingFetch(), putStudioApi: vi.fn(), postStudioApi })
+    const view = render(<CreationView {...(props as never)} />)
+    await screen.findByRole('textbox', { name: 'manuscript-editor' })
+    setSnapshot('ws-a', nextPath, 1)
+    harness.snapshot = { ...harness.snapshot, chapters: [chapter(), { ...chapter(nextPath), title: '第二章' }] }
+    await act(async () => {
+      view.rerender(<CreationView {...(props as never)} />)
+      await Promise.resolve()
+    })
+    expect(await screen.findByDisplayValue('雨停了。')).not.toBeNull()
+    await act(async () => {
+      first.resolve({ annotations: [annotationRecord] })
+      await first.promise
+      await Promise.resolve()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.showInspector' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'creation.revisions' }))
+    expect(await screen.findByText('creation.notes.empty')).not.toBeNull()
+    expect(screen.queryByText('查来源')).toBeNull()
+  })
+
+  it('inserts Core markers at the caret without posting, and requires an explicit id for homonyms', async () => {
+    const assets = { data: { assets: [
+      { kind: 'character', id: 'c1', name: '林霁', summary: '灯塔看守', aliases: ['霁哥'] },
+      { kind: 'character', id: 'c2', name: '林霁', summary: '同名路人', aliases: [] },
+      { kind: 'character', id: 'zhouzhou', name: '周舟', summary: '调查者', aliases: [] },
+    ] } }
+    const postStudioApi = vi.fn(async (_url: string, body?: Record<string, unknown>) => {
+      if (body?.['action'] === 'annotations') return { annotations: [] }
+      return { mutated: true }
+    })
+    render(<CreationView {...(viewProps({
+      fetchStudioApi: editingFetch(manuscript, { assets }), putStudioApi: vi.fn(), postStudioApi,
+    }) as never)} />)
+    await screen.findByRole('textbox', { name: 'manuscript-editor' })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.marker.insert' }))
+    expect(await screen.findByRole('form', { name: 'creation.marker.title' })).not.toBeNull()
+    expect(mutatingStudioPosts(postStudioApi)).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: 'creation.marker.insertNow' }))
+    expect(screen.getByText('creation.marker.needId')).not.toBeNull()
+    await waitFor(() => { expect(screen.getByRole('option', { name: /灯塔看守/ })).not.toBeNull() })
+    fireEvent.change(screen.getByRole('combobox', { name: 'creation.marker.pickCharacter' }), { target: { value: 'c1' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'creation.marker.field' }), { target: { value: '位置' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'creation.marker.oldState' }), { target: { value: '旧港' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'creation.marker.newState' }), { target: { value: '灯塔' } })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.marker.insertNow' }))
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'manuscript-editor' }).value).toContain('//**林霁[位置]：旧港 -> 灯塔**')
+    fireEvent.click(screen.getByRole('button', { name: 'creation.marker.insert' }))
+    fireEvent.click(screen.getByRole('button', { name: 'creation.marker.relation' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'creation.marker.source' }), { target: { value: 'c1' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'creation.marker.target' }), { target: { value: 'zhouzhou' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'creation.marker.description' }), { target: { value: '共同调查灯塔' } })
+    fireEvent.click(screen.getByRole('button', { name: 'creation.marker.insertNow' }))
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'manuscript-editor' }).value).toContain('//**林霁~>周舟:共同调查灯塔**')
+    expect(mutatingStudioPosts(postStudioApi)).toEqual([])
   })
 })

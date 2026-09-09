@@ -1,6 +1,20 @@
-# 0.2.3 发布验收记录
+# 0.2.4 发布验收记录
 
-下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.3) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.2` / `v0.2.1` 附件。
+下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.4) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.3` / `v0.2.2` 附件。
+
+宿主基线：dsh **0.1.2-rc.1**。Core **5.8.1** / contract 1。
+
+## 本版改动与验收
+
+- 创作工作台 Vditor IR 正文可对选区添加作者批注：保存后绑定 chapter、revision 与精确范围；重复引文不静默取第一处。未保存草稿先保存再核对选区，否则拒绝。脱离原文或多处匹配显示「已脱离原文／需重新定位」，不把颜色或 HTML 写进 Markdown。
+- 批注使用固定调色板；旧记录缺颜色时显示琥珀。状态变化 `//**人物[维度]：旧 -> 新**` 与指向关系 `//**A~>B:关系**` 使用另一组覆盖层颜色。插入标记从当前作品人物选择，同名需明确 id；打开表单不写盘、不调模型。有效内部标记不计入可读字数和默认导出。
+- Core `ManuscriptAnnotationV1` 增加可选 `color`，钉住 `native-core` 的 5.8.1 wheel。v0.2.3 的迁移、子进程环境允许列表和受管理后端恢复行为未回退。
+
+平台矩阵仍以 GitHub `Release artifact validation` 为准。真实模型测量 `not-run`。本机已运行的 dsh 安装默认不自动替换。
+
+## 0.2.3 记录
+
+下载与最终结果以 [v0.2.3 Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.3) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.2` / `v0.2.1` 附件。
 
 宿主基线：dsh **0.1.2-rc.1**。
 

@@ -14,14 +14,18 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import VditorRuntime, { installVditorIcons } from 'dsh-vditor-runtime'
 import {
-  manuscriptSelectionFromRange, shouldClearManuscriptSelection, type ManuscriptSelection,
+  countOccurrences, locateSelectedMarkdown, shouldClearManuscriptSelection, type ManuscriptSelection,
 } from './manuscript-selection.ts'
+import type { ManuscriptAnnotation } from './manuscript-annotations.ts'
+import { parseMarkers } from './manuscript-markers.ts'
+import { overlayBands, overlayFill, type OverlayBand } from './manuscript-overlay.ts'
 import css from './views.module.css'
 
 /** The slice of the bundled Vditor API this editor uses. */
 interface VditorInstance {
   getValue: () => string
   getSelection?: () => string
+  insertValue?: (value: string, render?: boolean) => void
   setTheme: (theme: string, contentTheme?: string, codeTheme?: string, contentThemePath?: string) => void
   destroy: () => void
 }
@@ -106,19 +110,89 @@ interface VditorBodyProps {
   disabled: boolean
   /** The consumer can synchronously retain callbacks delivered during cleanup. */
   flushOnLeave?: boolean
+  annotations?: readonly ManuscriptAnnotation[]
+  onInsertMarker?: () => void
+  onEditorApi?: (api: { insertAtCaret: (markdown: string) => void } | null) => void
+}
+
+function occurrenceBeforeCaret(host: HTMLElement, selected: string): number | undefined {
+  const native = window.getSelection()
+  if (native === null || native.rangeCount === 0 || selected === '') return undefined
+  const range = native.getRangeAt(0)
+  if (!host.contains(range.startContainer)) return undefined
+  const prefix = document.createRange()
+  prefix.selectNodeContents(host)
+  prefix.setEnd(range.startContainer, range.startOffset)
+  return countOccurrences(prefix.toString(), selected)
+}
+
+function rangeForNeedle(root: ParentNode, needle: string, occurrence: number): Range | null {
+  if (needle === '') return null
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let remaining = occurrence
+  let seen = 0
+  let node = walker.nextNode()
+  while (node !== null) {
+    const value = node.nodeValue ?? ''
+    let from = 0
+    while (from <= value.length - needle.length) {
+      const index = value.indexOf(needle, from)
+      if (index < 0) break
+      if (remaining === 0) {
+        const range = document.createRange()
+        range.setStart(node, index)
+        range.setEnd(node, index + needle.length)
+        return range
+      }
+      remaining -= 1
+      from = index + needle.length
+      seen += 1
+    }
+    node = walker.nextNode()
+  }
+  return seen === 0 && occurrence === 0 ? null : null
+}
+
+function paintOverlay(host: HTMLElement, overlay: HTMLElement, bands: readonly OverlayBand[], dark: boolean): void {
+  overlay.replaceChildren()
+  const ir = host.querySelector('.vditor-ir') ?? host
+  const frame = overlay.getBoundingClientRect()
+  for (const band of bands) {
+    const range = rangeForNeedle(ir, band.needle, band.occurrence)
+    if (range === null) continue
+    const fill = overlayFill(band.kind, dark ? 'dark' : 'light', band.color)
+    for (const rect of Array.from(range.getClientRects())) {
+      const mark = document.createElement('span')
+      mark.className = css.overlayMark ?? 'ow-overlay-mark'
+      mark.dataset.kind = band.kind
+      mark.title = band.title
+      mark.setAttribute('aria-hidden', 'true')
+      mark.style.position = 'absolute'
+      mark.style.left = `${rect.left - frame.left}px`
+      mark.style.top = `${rect.top - frame.top}px`
+      mark.style.width = `${rect.width}px`
+      mark.style.height = `${rect.height}px`
+      mark.style.background = fill
+      mark.style.pointerEvents = 'none'
+      overlay.append(mark)
+    }
+  }
 }
 
 /** One Vditor IR instance bound to the shell theme; destroyed on unmount. */
-function locateSelectedMarkdown(value: string, selected: string): ManuscriptSelection | null {
-  if (selected === '') return null
-  const start = value.indexOf(selected)
-  if (start < 0) return null
-  return manuscriptSelectionFromRange(value, start, start + selected.length)
-}
-
-export function VditorBody({ initial, onChange, onSelectionChange, onReady = () => {}, onFailed, disabled, flushOnLeave = false }: VditorBodyProps) {
+export function VditorBody({
+  initial, onChange, onSelectionChange, onReady = () => {}, onFailed, disabled, flushOnLeave = false,
+  annotations = [], onInsertMarker, onEditorApi,
+}: VditorBodyProps) {
   const hostRef = useRef<HTMLDivElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
   const instanceRef = useRef<VditorInstance | null>(null)
+  const annotationsRef = useRef(annotations)
+  annotationsRef.current = annotations
+  const onInsertMarkerRef = useRef(onInsertMarker)
+  onInsertMarkerRef.current = onInsertMarker
+  const onEditorApiRef = useRef(onEditorApi)
+  onEditorApiRef.current = onEditorApi
   // onChange identity changes every keystroke upstream; keep the latest in a
   // ref so the Vditor `input` closure stays stable for the instance lifetime.
   const onChangeRef = useRef(onChange)
@@ -168,6 +242,7 @@ export function VditorBody({ initial, onChange, onSelectionChange, onReady = () 
       .then((Vditor) => {
         if (disposed || hostRef.current === null) return
         const dark = document.body.hasAttribute('data-ds-dark-theme')
+        let refreshOverlay = (_value: string) => { /* assigned after the instance exists */ }
         const instance = new Vditor(hostRef.current, {
           value: initial,
           cdn: VDITOR_BASE,
@@ -184,6 +259,13 @@ export function VditorBody({ initial, onChange, onSelectionChange, onReady = () 
           toolbar: [
             'undo', 'redo', '|', 'headings', 'bold', 'italic', 'strike', '|',
             'list', 'ordered-list', 'quote', 'link', 'inline-code', 'code', 'table',
+            ...(onInsertMarkerRef.current ? [{
+              name: 'ow-insert-marker',
+              tip: '插入标记',
+              tipPosition: 's',
+              icon: '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M3 3h10v2H3zm0 4h7v2H3zm0 4h10v2H3z"/></svg>',
+              click: () => onInsertMarkerRef.current?.(),
+            }] : []),
           ],
           toolbarConfig: { pin: false },
           counter: { enable: false },
@@ -199,10 +281,32 @@ export function VditorBody({ initial, onChange, onSelectionChange, onReady = () 
             },
           },
           after: () => { onReadyRef.current() },
-          input: (value: string) => { inputObserved = true; emitChange(value) },
+          input: (value: string) => { inputObserved = true; emitChange(value); refreshOverlay(value) },
         })
         instanceRef.current = instance
         if (disposed) return
+        refreshOverlay = (value: string) => {
+          const overlay = overlayRef.current
+          const editorHost = hostRef.current
+          if (overlay === null || editorHost === null) return
+          paintOverlay(
+            editorHost,
+            overlay,
+            overlayBands(value, annotationsRef.current, parseMarkers(value)),
+            document.body.hasAttribute('data-ds-dark-theme'),
+          )
+        }
+        onEditorApiRef.current?.({
+          insertAtCaret: (markdown: string) => {
+            const current = instanceRef.current
+            if (current === null || typeof current.insertValue !== 'function') return
+            current.insertValue(`${markdown}\n`)
+            const next = current.getValue()
+            emitChange(next)
+            refreshOverlay(next)
+          },
+        })
+        refreshOverlay(instance.getValue())
         emitSelection = () => {
           const current = instanceRef.current
           const editorHost = hostRef.current
@@ -221,7 +325,8 @@ export function VditorBody({ initial, onChange, onSelectionChange, onReady = () 
             return
           }
           const selected = (typeof current.getSelection === 'function' ? current.getSelection() : native?.toString()) ?? ''
-          notify(locateSelectedMarkdown(current.getValue(), selected))
+          const value = current.getValue()
+          notify(locateSelectedMarkdown(value, selected, occurrenceBeforeCaret(editorHost, selected)))
         }
         hostRef.current.addEventListener('mouseup', emitSelection)
         hostRef.current.addEventListener('keyup', emitSelection)
@@ -253,12 +358,28 @@ export function VditorBody({ initial, onChange, onSelectionChange, onReady = () 
         // Half-built instance: nothing committed, safe to drop.
       }
       instanceRef.current = null
+      onEditorApiRef.current?.(null)
     }
     // initial seeds the editor once; later external value changes do not reset it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  return <div className={css.vditorHost} ref={hostRef} aria-disabled={disabled} />
+  useEffect(() => {
+    const host = hostRef.current
+    const overlay = overlayRef.current
+    const instance = instanceRef.current
+    if (host === null || overlay === null || instance === null) return
+    try {
+      paintOverlay(host, overlay, overlayBands(instance.getValue(), annotations, parseMarkers(instance.getValue())), document.body.hasAttribute('data-ds-dark-theme'))
+    } catch { /* editor not ready */ }
+  }, [annotations])
+
+  return (
+    <div className={css.vditorFrame} aria-disabled={disabled}>
+      <div className={css.vditorHost} ref={hostRef} />
+      <div className={css.vditorOverlay} ref={overlayRef} aria-hidden="true" />
+    </div>
+  )
 }
 
 /** Loading line shown while the Vditor script is in flight. */

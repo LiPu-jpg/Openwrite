@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  MANUSCRIPT_SELECTION_PRESERVE_ATTR, manuscriptSelectionFromRange, reviewIssuesForSelection,
-  selectionPolishRequest, shouldClearManuscriptSelection,
+  MANUSCRIPT_SELECTION_PRESERVE_ATTR, locateQuote, locateSelectedMarkdown, manuscriptSelectionFromRange,
+  reviewIssuesForSelection, selectionPolishRequest, shouldClearManuscriptSelection,
 } from '../../src/client/manuscript-selection.ts'
 
 describe('manuscript selection polish mapping', () => {
@@ -61,6 +61,23 @@ describe('manuscript selection polish mapping', () => {
         expected_document_revision: 'rev',
       },
     })
+  })
+
+  it('does not bind the first duplicate quote without an occurrence index', () => {
+    expect(locateSelectedMarkdown('密信还在桌上。密信还在桌上。', '密信还在')).toBeNull()
+    expect(locateSelectedMarkdown('密信还在桌上。密信还在桌上。', '密信还在', 1)).toEqual({
+      start: 7, end: 11, text: '密信还在',
+    })
+    expect(locateSelectedMarkdown('只有一次密信还在这里', '密信还在')).toEqual({
+      start: 4, end: 8, text: '密信还在',
+    })
+  })
+
+  it('relocates a unique quote and detaches ambiguous or missing spans', () => {
+    expect(locateQuote('前 密信还在 后', '密信还在', 0, 4)).toEqual({ state: 'relocated', start: 2, end: 6 })
+    expect(locateQuote('密信还在。密信还在。', '密信还在', 1, 5)).toEqual({ state: 'detached', reason: 'ambiguous' })
+    expect(locateQuote('没有这段', '密信还在', 0, 4)).toEqual({ state: 'detached', reason: 'missing' })
+    expect(locateQuote('密信还在桌上', '密信还在', 0, 4)).toEqual({ state: 'attached', start: 0, end: 4 })
   })
 
   it('selects review issues whose quote or range sits in the selection', () => {
