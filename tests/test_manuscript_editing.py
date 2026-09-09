@@ -184,6 +184,75 @@ def test_annotations_accept_document_reader_short_revision(tmp_path: Path) -> No
     assert annotations.list("ch_001")[0].anchor_state == "attached"
 
 
+def test_annotations_optional_color_loads_old_records_and_persists_palette(tmp_path: Path) -> None:
+    chapter = _project(tmp_path, "# 第一章\n\n甲乙丙，随后离开。\n")
+    versions = ManuscriptVersionStore(tmp_path, "demo")
+    annotations = ManuscriptAnnotationStore(tmp_path, "demo")
+    content = chapter.read_text(encoding="utf-8")
+    quote = "乙丙"
+    start = content.index(quote)
+    revision = versions.fingerprint(content)
+
+    defaulted = annotations.create(
+        "ch_001",
+        source_revision=revision,
+        quote=quote,
+        start_hint=start,
+        end_hint=start + len(quote),
+        note="无颜色",
+    )
+    colored = annotations.create(
+        "ch_001",
+        source_revision=revision,
+        quote=quote,
+        start_hint=start,
+        end_hint=start + len(quote),
+        note="天空色",
+        color="sky",
+    )
+    ignored = annotations.create(
+        "ch_001",
+        source_revision=revision,
+        quote=quote,
+        start_hint=start,
+        end_hint=start + len(quote),
+        note="非法色",
+        color="red",
+    )
+    assert defaulted.color is None
+    assert colored.color == "sky"
+    assert ignored.color is None
+
+    legacy_path = annotations._path("ch_001", "ann_legacycolor0001")
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "annotation_id": "ann_legacycolor0001",
+                "chapter_id": "ch_001",
+                "source_revision": revision,
+                "quote": quote,
+                "start_hint": start,
+                "end_hint": start + len(quote),
+                "note": "旧记录",
+                "status": "open",
+                "anchor_state": "attached",
+                "current_start": start,
+                "current_end": start + len(quote),
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    loaded = {item.annotation_id: item for item in annotations.list("ch_001")}
+    assert loaded["ann_legacycolor0001"].color is None
+    assert loaded[colored.annotation_id].color == "sky"
+
+
 def test_ai_revision_creates_recoverable_checkpoint_before_apply(tmp_path: Path) -> None:
     chapter = _project(tmp_path, "林舟推开钟楼的门。")
     original = chapter.read_text(encoding="utf-8")

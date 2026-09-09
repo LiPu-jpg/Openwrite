@@ -9,7 +9,7 @@
 <h1 align="center">面向长篇小说的 AI Agent 创作工作台<br><sub>从灵感、设定和大纲，一直写到审稿与成书</sub></h1>
 
 <p align="center">
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/version-5.8.0-2563eb" alt="Version 5.8.0"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/version-5.8.1-2563eb" alt="Version 5.8.1"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-%E2%89%A53.10-22c55e?logo=python&logoColor=white" alt="Python >= 3.10"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0f766e" alt="Apache-2.0 License"></a>
   <a href="https://github.com/LiPu-jpg/Openwrite/stargazers"><img src="https://img.shields.io/github/stars/LiPu-jpg/Openwrite?style=flat&color=f59e0b" alt="GitHub Stars"></a>

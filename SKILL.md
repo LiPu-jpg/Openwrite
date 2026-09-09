@@ -237,4 +237,4 @@ data/novels/{novel_id}/
 - [README.md](./README.md) — 项目概览与命令入口
 - `tests/test_novel_workspace.py` — 小说工作台、创作罗盘与导入导出验收
 
-*版本: 5.8.0 | 最后更新: 2026-07-14*
+*版本: 5.8.1 | 最后更新: 2026-09-09*

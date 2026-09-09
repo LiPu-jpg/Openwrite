@@ -26,7 +26,7 @@ def test_managed_server_authenticates_reads_and_writes_before_workspace_resoluti
             assert failure.value.code == 401
         with urlopen(Request(base + "/api/health", headers={"Authorization": f"Bearer {token}"}), timeout=5) as response:
             health = json.load(response)
-        assert health == {"ok": True, "core_version": "5.8.0", "contract_version": 1}
+        assert health == {"ok": True, "core_version": "5.8.1", "contract_version": 1}
         assert token not in json.dumps(health)
         assert not (tmp_path / "novel_config.yaml").exists()
     finally:

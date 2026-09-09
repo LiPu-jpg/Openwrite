@@ -2241,7 +2241,7 @@ wheels = [
 
 [[package]]
 name = "openwrite"
-version = "5.8.0"
+version = "5.8.1"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },

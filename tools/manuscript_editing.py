@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from models.manuscript_editing import ManuscriptAnnotationV1, ManuscriptVersionV1
+from models.manuscript_editing import (
+    ANNOTATION_COLORS,
+    ManuscriptAnnotationV1,
+    ManuscriptVersionV1,
+)
 from tools.novel_workspace import count_writing_units
 from tools.project_lock import ProjectBusyError, ProjectWriteLock
 from tools.review_store import ReviewStore
@@ -300,6 +304,7 @@ class ManuscriptAnnotationStore:
         start_hint: int,
         end_hint: int,
         note: str,
+        color: object = None,
     ) -> ManuscriptAnnotationV1:
         content = self.versions.chapter_path(chapter_id).read_text(encoding="utf-8")
         current_revision = self.versions.fingerprint(content)
@@ -320,6 +325,7 @@ class ManuscriptAnnotationStore:
             start_hint=start,
             end_hint=end,
             note=str(note or "").strip(),
+            color=color if color in ANNOTATION_COLORS else None,
             current_start=start,
             current_end=end,
             created_at=now,
@@ -461,6 +467,7 @@ def manuscript_editing_action(
             start_hint=int(payload.get("start_hint") or 0),
             end_hint=int(payload.get("end_hint") or 0),
             note=str(payload.get("note") or ""),
+            color=payload.get("color"),
         ).model_dump(mode="json")
     if action == "resolve_annotation":
         return annotations.resolve(

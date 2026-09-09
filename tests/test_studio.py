@@ -1957,7 +1957,7 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
 def test_studio_sync_create_import_and_context_preview(tmp_path: Path):
     init_project(tmp_path, "demo", "雾城来信")
     app = StudioApplication(tmp_path)
-    assert app.workspace()["version"] == "5.8.0"
+    assert app.workspace()["version"] == "5.8.1"
 
     character = app.create_document(
         {"kind": "character", "name": "林岑", "description": "在雨夜追查旧信的记者。"}

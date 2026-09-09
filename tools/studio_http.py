@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from http import HTTPStatus
 import hmac
-from importlib.metadata import version, PackageNotFoundError
+from tools.version import __version__ as CORE_VERSION
 
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -921,8 +921,4 @@ class OpenWriteStudioServer(ThreadingHTTPServer):
 
 def health_payload() -> dict[str, Any]:
     """Versioned, model-free handshake used by managed hosts."""
-    try:
-        core_version = version("openwrite")
-    except PackageNotFoundError:
-        core_version = "5.8.0"
-    return {"ok": True, "core_version": core_version, "contract_version": 1}
+    return {"ok": True, "core_version": CORE_VERSION, "contract_version": 1}

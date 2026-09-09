@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openwrite"
-version = "5.8.0"
+version = "5.8.1"
 description = "OpenWrite 长篇小说创作引擎 — AI 辅助小说创作"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

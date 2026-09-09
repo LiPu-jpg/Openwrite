@@ -23,6 +23,10 @@ class ManuscriptVersionV1(BaseModel):
     writing_units: int = 0
 
 
+ANNOTATION_COLORS = ("amber", "rose", "sky", "lime", "violet")
+AnnotationColor = Literal["amber", "rose", "sky", "lime", "violet"]
+
+
 class ManuscriptAnnotationV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -38,6 +42,7 @@ class ManuscriptAnnotationV1(BaseModel):
     anchor_state: Literal["attached", "relocated", "detached"] = "attached"
     current_start: int | None = None
     current_end: int | None = None
+    color: AnnotationColor | None = None
     created_at: str
     updated_at: str
 
