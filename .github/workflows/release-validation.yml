@@ -20,6 +20,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --global pnpm@9.15.9
       - run: node scripts/prepare.mjs
       - run: npm --prefix vendor/dsh-dog run typecheck
       - run: npm run doctor
