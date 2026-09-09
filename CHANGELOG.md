@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+
+- 受管理后端自动恢复失败不再把未处理 Promise 抛给宿主；dsh 保持运行。
+- 恢复过程中的启动失败按同一上限继续退避重试，而不是只试一次。
+- 恢复等待期间取消或卸载不产生未处理错误，也不会再拉起后端。
+
 ## 0.2.2
 
 - 旧安装迁移同时处理 bundle 登记和 `dependencies`，通过宿主 `dsh plugin remove` 删除 `@dsh-novel/openwrite-bridge`、`@dsh-novel/studio-panel`、`@dsh-external/dsh-dog`；备份失败可恢复，不改用户 `node_modules` 源码，不删除作者预设。
