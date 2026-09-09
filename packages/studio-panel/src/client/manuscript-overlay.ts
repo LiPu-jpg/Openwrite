@@ -49,27 +49,44 @@ export function overlayBands(content: string, notes: readonly ManuscriptAnnotati
 export const OVERLAY_THEME = {
   light: {
     note: {
-      amber: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 32%, transparent)',
-      rose: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 28%, transparent)',
-      sky: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, transparent)',
-      lime: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 28%, transparent)',
-      violet: 'color-mix(in srgb, var(--dsw-alias-label-primary) 16%, transparent)',
+      amber: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 48%, transparent)',
+      rose: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 42%, transparent)',
+      sky: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 42%, transparent)',
+      lime: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 42%, transparent)',
+      violet: 'color-mix(in srgb, var(--dsw-alias-label-primary) 28%, transparent)',
     },
-    state: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent)',
-    relation: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 18%, transparent)',
-    invalid: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent)',
+    state: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 26%, transparent)',
+    relation: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 26%, transparent)',
+    invalid: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent)',
   },
   dark: {
     note: {
-      amber: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent)',
-      rose: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 36%, transparent)',
-      sky: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 36%, transparent)',
-      lime: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 36%, transparent)',
-      violet: 'color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent)',
+      amber: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 55%, transparent)',
+      rose: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 50%, transparent)',
+      sky: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 50%, transparent)',
+      lime: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 50%, transparent)',
+      violet: 'color-mix(in srgb, var(--dsw-alias-label-primary) 34%, transparent)',
     },
-    state: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 24%, transparent)',
-    relation: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 24%, transparent)',
-    invalid: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent)',
+    state: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 32%, transparent)',
+    relation: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 32%, transparent)',
+    invalid: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 22%, transparent)',
+  },
+} as const
+
+const OVERLAY_UNDERLINE = {
+  light: {
+    amber: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 85%, transparent)',
+    rose: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 85%, transparent)',
+    sky: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 85%, transparent)',
+    lime: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 85%, transparent)',
+    violet: 'color-mix(in srgb, var(--dsw-alias-label-primary) 70%, transparent)',
+  },
+  dark: {
+    amber: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 90%, transparent)',
+    rose: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 90%, transparent)',
+    sky: 'color-mix(in srgb, var(--dsw-alias-state-business-primary) 90%, transparent)',
+    lime: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 90%, transparent)',
+    violet: 'color-mix(in srgb, var(--dsw-alias-label-primary) 75%, transparent)',
   },
 } as const
 
@@ -77,4 +94,8 @@ export function overlayFill(kind: OverlayKind, theme: 'light' | 'dark', color: A
   const tokens = OVERLAY_THEME[theme]
   if (kind === 'note') return tokens.note[color]
   return tokens[kind]
+}
+
+export function overlayUnderline(theme: 'light' | 'dark', color: AnnotationColor = 'amber'): string {
+  return OVERLAY_UNDERLINE[theme][color]
 }

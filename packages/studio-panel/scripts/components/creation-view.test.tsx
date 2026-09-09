@@ -1637,8 +1637,8 @@ describe('CreationView selection notes and marker insert', () => {
       color: 'sky',
       revision: 'revision-saved',
     }))
-    expect(await screen.findByText('查来源')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'creation.notes.locate' }))
+    expect(await screen.findByRole('button', { name: 'creation.notes.locate: 查来源' })).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'creation.notes.locate: 查来源' }))
     expect(harness.revealQuote).toHaveBeenCalledWith('密信还在', 0)
     expect(editor.selectionStart).toBe(0)
     expect(editor.selectionEnd).toBe(4)

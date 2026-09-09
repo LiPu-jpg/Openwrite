@@ -381,6 +381,12 @@
   overflow-wrap: anywhere;
 }
 
+.annotationHits button[data-color='amber'] { border-left: 4px solid var(--dsw-alias-state-warn-primary); }
+.annotationHits button[data-color='rose'] { border-left: 4px solid var(--dsw-alias-state-error-primary); }
+.annotationHits button[data-color='sky'] { border-left: 4px solid var(--dsw-alias-state-business-primary); }
+.annotationHits button[data-color='lime'] { border-left: 4px solid var(--dsw-alias-state-success-primary); }
+.annotationHits button[data-color='violet'] { border-left: 4px solid var(--dsw-alias-label-primary); }
+
 .mentionHits {
   display: flex;
   flex: none;

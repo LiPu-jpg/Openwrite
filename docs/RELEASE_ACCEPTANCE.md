@@ -1,6 +1,20 @@
-# 0.2.6 发布验收记录
+# 0.2.7 发布验收记录
 
-下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.6) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.5` / `v0.2.4` 附件。
+下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.7) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.6` / `v0.2.5` 附件。
+
+宿主基线：dsh **0.1.2-rc.1**。Core **5.8.1** / contract 1。
+
+## 本版改动与验收
+
+- 未解决批注出现在正文上方「作者选区批注」条，不必先打开右侧「修订」。
+- 正文覆盖层提高不透明度并加彩色下划线。
+- 回归：保存批注后出现 `creation.notes.locate: 查来源` 按钮。
+
+平台矩阵仍以 GitHub `Release artifact validation` 为准。真实模型测量 `not-run`。本机已运行的 dsh 安装默认不自动替换。
+
+## 0.2.6 记录
+
+下载与最终结果以 [v0.2.6 Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.6) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.5` / `v0.2.4` 附件。
 
 宿主基线：dsh **0.1.2-rc.1**。Core **5.8.1** / contract 1。
 
