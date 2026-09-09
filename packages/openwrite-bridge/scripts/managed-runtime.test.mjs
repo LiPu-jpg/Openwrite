@@ -93,6 +93,7 @@ const { createServer } = require('node:http')
 const { createInterface } = require('node:readline')
 const { appendFileSync } = require('node:fs')
 const crash = process.env.OPENWRITE_CRASH || ''
+if (crash === 'during-start') process.exit(Number(process.env.OPENWRITE_EXIT_CODE || 9))
 const crashMs = Number(process.env.OPENWRITE_CRASH_MS || 0)
 const log = process.env.OPENWRITE_POST_LOG
 const rl = createInterface({ input: process.stdin })
@@ -169,6 +170,27 @@ async function waitPhase(runtime, phase, timeout = 8_000) {
     await new Promise(resolve => setTimeout(resolve, 20))
   }
   throw new Error(`timed out waiting for ${phase}, last ${JSON.stringify(runtime.status())}`)
+}
+
+function trackUnhandled(t) {
+  const seen = []
+  const on = reason => { seen.push(reason) }
+  process.on('unhandledRejection', on)
+  t.after(() => process.removeListener('unhandledRejection', on))
+  return seen
+}
+
+function abortableDelay(ms, value, options) {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      const error = new Error('aborted')
+      error.name = 'AbortError'
+      reject(error)
+    }
+    if (options?.signal?.aborted) { abort(); return }
+    const timer = setTimeout(() => resolve(value), ms)
+    options?.signal?.addEventListener('abort', () => { clearTimeout(timer); abort() }, { once: true })
+  })
 }
 
 test('child env allowlist drops provider keys and keeps proxy/cert/OS start vars', () => {
@@ -339,5 +361,83 @@ test('in-flight generate is not replayed when the managed child is recovered', a
   assert.equal((await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length, 1)
   assert.match(runtime.status().message, /不会自动重试|已就绪/)
   assert.doesNotMatch(runtime.status().message, /任务恢复成功/)
+})
+
+test('recovery start failures retry up to the cap without an unhandled rejection', async t => {
+  const seen = trackUnhandled(t)
+  const { root, artifacts } = await prepared(t)
+  const recorded = []
+  let backendStarts = 0
+  const runtime = new ManagedRuntime(root, artifacts, {
+    spawn: backendSpawn(t, () => {
+      backendStarts += 1
+      // First process stays up. The next two recovery starts fail; later ones succeed until the cap test.
+      if (backendStarts === 2 || backendStarts === 3 || backendStarts >= 5) {
+        return { OPENWRITE_CRASH: 'during-start', OPENWRITE_EXIT_CODE: '9' }
+      }
+      return {}
+    }, recorded),
+    delay: async (ms, value, options) => {
+      if (options?.signal?.aborted) { const error = new Error('aborted'); error.name = 'AbortError'; throw error }
+      return value
+    },
+    restartLimit: 4,
+    backoffMs: [5, 5, 5, 5],
+  })
+  t.after(() => runtime.dispose())
+  await runtime.ensure()
+  assert.equal(backendStarts, 1)
+  await stopOwnedProcess(runtime.child)
+  await waitPhase(runtime, 'ready')
+  assert.ok(backendStarts >= 4, `recovery must retry failed starts, got ${backendStarts} spawns`)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(seen.length, 0, `unhandledRejection would take down dsh: ${seen.map(String).join('; ')}`)
+
+  await stopOwnedProcess(runtime.child)
+  await waitPhase(runtime, 'error')
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(seen.length, 0)
+  assert.match(runtime.status().message, /手动重试/)
+  assert.equal(runtime.status().phase, 'error')
+})
+
+test('cancel and dispose during recovery wait do not reject unhandled or start a backend', async t => {
+  const seen = trackUnhandled(t)
+  const { root, artifacts } = await prepared(t)
+  const recorded = []
+  const runtime = new ManagedRuntime(root, artifacts, {
+    spawn: backendSpawn(t, () => ({}), recorded),
+    delay: abortableDelay,
+    restartLimit: 5,
+    backoffMs: [30_000],
+  })
+  t.after(() => runtime.dispose())
+  await runtime.ensure()
+  const afterReady = recorded.filter(item => item.args.includes('tools.managed_runtime')).length
+  await stopOwnedProcess(runtime.child)
+  await waitPhase(runtime, 'recovering')
+  assert.equal(recorded.filter(item => item.args.includes('tools.managed_runtime')).length, afterReady)
+  await runtime.cancel()
+  await new Promise(resolve => setTimeout(resolve, 80))
+  assert.equal(runtime.status().phase, 'cancelled')
+  assert.equal(recorded.filter(item => item.args.includes('tools.managed_runtime')).length, afterReady)
+  assert.equal(seen.length, 0, `cancel leaked unhandledRejection: ${seen.map(String).join('; ')}`)
+
+  const second = new ManagedRuntime(root, artifacts, {
+    spawn: backendSpawn(t, () => ({}), recorded),
+    delay: abortableDelay,
+    restartLimit: 5,
+    backoffMs: [30_000],
+  })
+  t.after(() => second.dispose())
+  await second.ensure()
+  const beforeDispose = recorded.filter(item => item.args.includes('tools.managed_runtime')).length
+  await stopOwnedProcess(second.child)
+  await waitPhase(second, 'recovering')
+  await second.dispose()
+  await new Promise(resolve => setTimeout(resolve, 80))
+  assert.equal(second.status().phase, 'uninstalled')
+  assert.equal(recorded.filter(item => item.args.includes('tools.managed_runtime')).length, beforeDispose)
+  assert.equal(seen.length, 0, `dispose leaked unhandledRejection: ${seen.map(String).join('; ')}`)
 })
 

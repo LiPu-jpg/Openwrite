@@ -1,6 +1,6 @@
 # 安装、更新与卸载
 
-安装已发布的版本；可下载产物、SHA-256 和实际平台结果以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.2) 附件为准。验收方法见 [验收报告](RELEASE_ACCEPTANCE.md)。
+安装已发布的版本；可下载产物、SHA-256 和实际平台结果以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.3) 附件为准。验收方法见 [验收报告](RELEASE_ACCEPTANCE.md)。
 
 ## 标准安装
 
@@ -9,7 +9,7 @@
 安装命令：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.2/dsh-openwrite-0.2.2.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.3/dsh-openwrite-0.2.3.tgz
 dsh web
 ```
 
@@ -48,7 +48,7 @@ dsh 对话模型在宿主中配置。小说生成、评审与测试模型在「�
 ```sh
 node package/scripts/maintenance.mjs migrate --profile web
 node package/scripts/maintenance.mjs migrate --profile web --apply
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.2/dsh-openwrite-0.2.2.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.3/dsh-openwrite-0.2.3.tgz
 dsh web
 ```
 
@@ -84,7 +84,7 @@ bridge 的高级 `mode: external` / `baseUrl` 配置继续支持外部 Core，�
 
 ## GitHub 源码安装
 
-源码安装使用 dsh 官方 GitHub source 机制：`dsh plugin --profile web add -w github:LiPu-jpg/Openwrite#v0.2.2`。仓库 `prepare` 自行构建三个插件，Core wheel 随固定提交提供，不访问相邻工作区。源码安装需要 Git 和构建依赖；建议普通用户优先使用已验收 Release 包。
+源码安装使用 dsh 官方 GitHub source 机制：`dsh plugin --profile web add -w github:LiPu-jpg/Openwrite#v0.2.3`。仓库 `prepare` 自行构建三个插件，Core wheel 随固定提交提供，不访问相邻工作区。源码安装需要 Git 和构建依赖；建议普通用户优先使用已验收 Release 包。
 
 如果 pnpm 按本机策略阻止构建，按它显示的构建审批指引仅批准本包，再重试。安装脚本不放宽构建授权。源码安装也必须在发布验收中通过，不能用本机已编译目录代替。
 
@@ -92,7 +92,7 @@ bridge 的高级 `mode: external` / `baseUrl` 配置继续支持外部 Core，�
 
 界面「OpenWrite → 诊断与帮助」显示实时状态与可恢复错误。解包后执行 `node package/scripts/maintenance.mjs doctor --profile web` 检查标准包登记、**bundle 与 dependencies 中的旧包**、以及环境是否准备；不打印凭据或调用模型。若仍报告 leftover 旧包，先停止 dsh 再执行 `migrate --apply`。
 
-受管理后端随 **dsh 进程** 运行：首次打开时准备，就绪后若进程异常退出会有限次自动恢复（带退避），连续失败后显示脱敏的退出码/信号并提供手动重试。取消准备、退出 dsh 或卸载插件不会把后端拉起来。恢复只重新连接写作服务，不会重放写作、评审或其他付费请求。本插件不是开机常驻服务。
+受管理后端随 **dsh 进程** 运行：首次打开时准备，就绪后若进程异常退出会有限次自动恢复（带退避），启动失败也按同一上限继续重试。连续失败后显示脱敏的退出码/信号并提供手动重试；恢复失败不会把 dsh 一起退出。取消准备、退出 dsh 或卸载插件不会把后端拉起来，也不会留下未处理错误。恢复只重新连接写作服务，不会重放写作、评审或其他付费请求。本插件不是开机常驻服务。
 
 小说工具的只读 / 计划模式 / Workspace 绑定是 **dsh 策略与桥接检查**，不是操作系统沙箱。受管理 Python 与安装子进程只继承启动、代理和证书所需环境变量，不把无关 API Key 传给子进程。
 

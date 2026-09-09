@@ -1,6 +1,20 @@
-# 0.2.2 发布验收记录
+# 0.2.3 发布验收记录
 
-下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.2) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256、插件提交、Core 提交、宿主版本和原生执行记录。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物，不重新打包。不覆盖 `v0.2.1` 附件。
+下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.3) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.2` / `v0.2.1` 附件。
+
+宿主基线：dsh **0.1.2-rc.1**。
+
+## 本版改动与验收
+
+- 自动恢复的 `queueRestart` 失败不再变成未处理拒绝，因此不会把整个 dsh 带退出。
+- 恢复启动失败计入同一退避上限并继续重试；取消或卸载发生在恢复等待中时，不抛未处理错误、不再启动后端。
+- 回归：`recovery start failures retry up to the cap without an unhandled rejection`、`cancel and dispose during recovery wait do not reject unhandled or start a backend`。
+
+平台矩阵仍以 GitHub `Release artifact validation` 为准。真实模型测量 `not-run`。
+
+## 0.2.2 记录
+
+下载与最终结果以 [v0.2.2 Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.2) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256、插件提交、Core 提交、宿主版本和原生执行记录。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物，不重新打包。不覆盖 `v0.2.1` 附件。
 
 宿主基线：dsh **0.1.2-rc.1**（npm `latest`/`next` 同此版本；`alpha` 为 `0.1.5-alpha.1`，本版不追随）。Core 5.8.0 / contract 1。
 

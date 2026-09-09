@@ -187,21 +187,71 @@ export class ManagedRuntime {
     }
     this.recovered = true
     this.update('recovering', `写作后端异常退出，正在恢复（${this.restartAttempts}/${this.restartLimit}）`, { error })
-    void this.queueRestart()
+    // Auto-recovery has no caller; never let a rejected prepare become an unhandled rejection that kills dsh.
+    void this.queueRestart().catch(() => {})
   }
 
+  private live(): boolean { return Boolean(this.connection && this.child) }
+
   private queueRestart(): Promise<BackendConnection> {
-    if (this.pending) return this.pending
-    const controller = new AbortController()
-    this.controller = controller
-    const wait = this.backoffMs[Math.min(this.restartAttempts - 1, this.backoffMs.length - 1)] ?? 1_000
-    this.pending = this.wait(wait, undefined, { signal: controller.signal }).then(() => this.prepare(controller.signal)).catch(error => {
-      this.state = { phase: controller.signal.aborted ? 'cancelled' : 'error',
-        message: controller.signal.aborted ? '准备已取消，可重试' : '写作环境未就绪，可重试',
-        error: controller.signal.aborted ? undefined : sanitizeDiagnostic(String(error instanceof Error ? error.message : error)) }
-      throw error
-    }).finally(() => { this.pending = undefined; this.controller = undefined })
-    return this.pending
+    if (this.pending) {
+      const prior = this.pending
+      let assigned!: Promise<BackendConnection>
+      const chained = prior.then(connection => {
+        if (this.closed) throw new Error('OpenWrite 已卸载')
+        if (this.live()) return connection
+        if (!this.allowRevive) throw new Error('准备已取消，可重试')
+        if (this.pending === assigned) this.pending = undefined
+        return this.queueRestart()
+      }, error => {
+        if (this.closed || !this.allowRevive) throw error
+        if (this.live()) return this.connection as BackendConnection
+        if (this.pending === assigned) this.pending = undefined
+        return this.queueRestart()
+      })
+      assigned = chained.finally(() => {
+        if (this.pending === assigned) this.pending = undefined
+      })
+      this.pending = assigned
+      return assigned
+    }
+    const task = this.recover()
+    const assigned = task.finally(() => {
+      if (this.pending === assigned) {
+        this.pending = undefined
+        this.controller = undefined
+      }
+    })
+    this.pending = assigned
+    return assigned
+  }
+
+  private async recover(): Promise<BackendConnection> {
+    let lastError: unknown
+    while (!this.closed && this.allowRevive) {
+      const controller = new AbortController()
+      this.controller = controller
+      const wait = this.backoffMs[Math.min(Math.max(this.restartAttempts, 1) - 1, this.backoffMs.length - 1)] ?? 1_000
+      try {
+        await this.wait(wait, undefined, { signal: controller.signal })
+        if (this.closed || !this.allowRevive) break
+        return await this.prepare(controller.signal)
+      } catch (error) {
+        lastError = error
+        if (this.closed || !this.allowRevive || controller.signal.aborted) break
+        this.restartAttempts += 1
+        const diagnostic = sanitizeDiagnostic(String(error instanceof Error ? error.message : error))
+        if (this.restartAttempts > this.restartLimit) {
+          this.allowRevive = false
+          this.update('error', '写作后端多次异常退出，已停止自动恢复，可手动重试', { error: diagnostic })
+          throw error
+        }
+        this.update('recovering', `写作后端异常退出，正在恢复（${this.restartAttempts}/${this.restartLimit}）`, { error: diagnostic })
+      }
+    }
+    if (this.closed) throw new Error('OpenWrite 已卸载')
+    this.update('cancelled', '准备已取消，可重试')
+    throw lastError instanceof Error ? lastError : new Error('准备已取消，可重试')
   }
 
   private async download(item: Download, signal: AbortSignal): Promise<string> {
