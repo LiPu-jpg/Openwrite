@@ -28,12 +28,12 @@
 
 ## 快速安装
 
-**0.2.1 标准插件包**兼容 dsh **0.1.2-rc.1**。可下载版本、三平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.1) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。
+**0.2.2 标准插件包**兼容 dsh **0.1.2-rc.1**。可下载版本、三平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.2) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。不追随 dsh `alpha`。
 
 已有匹配版本 dsh 的用户执行：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.1/dsh-openwrite-0.2.1.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.2/dsh-openwrite-0.2.2.tgz
 dsh web
 ```
 

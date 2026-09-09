@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createInterface } from 'node:readline'
 import { x as untar } from 'tar'
@@ -17,11 +17,37 @@ export interface RuntimeManifest {
   requirements: { file: string; sha256: string }
   dependency_wheels?: Array<{ file: string; sha256: string }>
 }
+export type RuntimePhase = 'idle' | 'waiting' | 'downloading' | 'installing' | 'starting' | 'ready'
+  | 'recovering' | 'cancelled' | 'error' | 'stopped' | 'uninstalled'
 export interface RuntimeStatus {
-  phase: 'idle' | 'waiting' | 'downloading' | 'installing' | 'starting' | 'ready' | 'cancelled' | 'error' | 'stopped'
+  phase: RuntimePhase
   message: string; downloadedBytes?: number; totalBytes?: number; error?: string
 }
 export interface BackendConnection { baseUrl: string; token?: string }
+export type SpawnFn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess
+export interface RuntimeOptions {
+  spawn?: SpawnFn
+  delay?: typeof delay
+  restartLimit?: number
+  backoffMs?: number[]
+}
+
+export const DEFAULT_RESTART_LIMIT = 5
+export const DEFAULT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000]
+
+const CREDENTIAL_ENV = /(?:API[_-]?KEY|ACCESS[_-]?TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION)/i
+const ALLOWED_ENV = new Set([
+  'PATH', 'Path', 'PATHEXT',
+  'HOME', 'USER', 'USERNAME', 'LOGNAME',
+  'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
+  'TEMP', 'TMP', 'TMPDIR',
+  'SYSTEMROOT', 'SystemRoot', 'WINDIR', 'windir', 'COMSPEC', 'ComSpec',
+  'SystemDrive', 'PROGRAMDATA', 'ProgramData', 'ProgramFiles', 'PROGRAMFILES', 'ProgramFiles(x86)',
+  'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'OS',
+  'LANG', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES', 'LANGUAGE', 'TZ',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
+  'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
+])
 
 export async function sha256(file: string): Promise<string> {
   const hash = createHash('sha256')
@@ -34,6 +60,23 @@ export function sanitizeDiagnostic(message: string): string {
   return message.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@')
     .replace(/([?&](?:token|key|signature|credential|password|secret)=)[^&\s]+/gi, '$1[redacted]')
     .replace(/((?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
+    .replace(/\b[a-f0-9]{32,}\b/gi, '[redacted]')
+}
+
+/** Windows needs SystemRoot/PATH to start; proxy and CA vars stay when set. Credential names never copy. */
+export function buildChildEnv(source: NodeJS.ProcessEnv, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined || CREDENTIAL_ENV.test(key)) continue
+    const allowed = ALLOWED_ENV.has(key)
+      || (process.platform === 'win32' && [...ALLOWED_ENV].some(name => name.toLowerCase() === key.toLowerCase()))
+    if (allowed) env[key] = value
+  }
+  for (const [key, value] of Object.entries(extra)) {
+    if (value === undefined || CREDENTIAL_ENV.test(key)) continue
+    env[key] = value
+  }
+  return env
 }
 
 /** Stop only a child we spawned. POSIX groups and Windows trees include grandchildren. */
@@ -64,15 +107,35 @@ export class ManagedRuntime {
   private child?: ChildProcess
   private connection?: BackendConnection
   private closed = false
+  private allowRevive = true
+  private generation = 0
+  private restartAttempts = 0
+  private recovered = false
+  private readonly spawnFn: SpawnFn
+  private readonly wait: typeof delay
+  private readonly restartLimit: number
+  private readonly backoffMs: number[]
 
-  constructor(readonly root: string, readonly artifacts: string) {}
+  constructor(readonly root: string, readonly artifacts: string, options: RuntimeOptions = {}) {
+    this.spawnFn = options.spawn ?? spawn
+    this.wait = options.delay ?? delay
+    this.restartLimit = options.restartLimit ?? DEFAULT_RESTART_LIMIT
+    this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS
+  }
   status(): RuntimeStatus { return { ...this.state } }
-  private update(phase: RuntimeStatus['phase'], message: string): void { this.state = { phase, message } }
+  private update(phase: RuntimeStatus['phase'], message: string, extra: Partial<RuntimeStatus> = {}): void {
+    this.state = { phase, message, ...extra }
+  }
 
   ensure(): Promise<BackendConnection> {
     if (this.closed) return Promise.reject(new Error('OpenWrite 已卸载'))
     if (this.connection) return Promise.resolve(this.connection)
     if (this.pending) return this.pending
+    this.allowRevive = true
+    if (this.state.phase === 'error' || this.state.phase === 'cancelled' || this.state.phase === 'stopped') {
+      this.restartAttempts = 0
+      this.recovered = false
+    }
     const controller = new AbortController()
     this.controller = controller
     this.pending = this.prepare(controller.signal).catch(error => {
@@ -84,18 +147,61 @@ export class ManagedRuntime {
     return this.pending
   }
   async cancel(): Promise<void> {
+    this.allowRevive = false
     this.controller?.abort()
     await this.pending?.catch(() => {})
   }
   async dispose(): Promise<void> {
     this.closed = true
+    this.allowRevive = false
+    this.generation += 1
     await this.cancel()
     if (this.child) {
       this.child.stdin?.end()
       await stopOwnedProcess(this.child)
+      this.child = undefined
     }
     this.connection = undefined
-    this.update('stopped', '写作环境已停止，作品和配置已保留')
+    this.update('uninstalled', 'OpenWrite 已卸载，作品和配置已保留')
+  }
+
+  private exitDiagnostic(code: number | null, signalName: NodeJS.Signals | null, stderr = ''): string {
+    return sanitizeDiagnostic(`exit ${code ?? 'none'} signal ${signalName ?? 'none'}${stderr ? `: ${stderr}` : ''}`)
+  }
+
+  private handleReadyExit(generation: number, child: ChildProcess, code: number | null, signalName: NodeJS.Signals | null, stderr: string): void {
+    if (this.generation !== generation) return
+    if (this.child === child) this.child = undefined
+    this.connection = undefined
+    if (this.closed) return
+    const error = this.exitDiagnostic(code, signalName, stderr)
+    if (!this.allowRevive) {
+      this.update('cancelled', '准备已取消，可重试', { error })
+      return
+    }
+    this.restartAttempts += 1
+    if (this.restartAttempts > this.restartLimit) {
+      this.allowRevive = false
+      this.update('error', '写作后端多次异常退出，已停止自动恢复，可手动重试', { error })
+      return
+    }
+    this.recovered = true
+    this.update('recovering', `写作后端异常退出，正在恢复（${this.restartAttempts}/${this.restartLimit}）`, { error })
+    void this.queueRestart()
+  }
+
+  private queueRestart(): Promise<BackendConnection> {
+    if (this.pending) return this.pending
+    const controller = new AbortController()
+    this.controller = controller
+    const wait = this.backoffMs[Math.min(this.restartAttempts - 1, this.backoffMs.length - 1)] ?? 1_000
+    this.pending = this.wait(wait, undefined, { signal: controller.signal }).then(() => this.prepare(controller.signal)).catch(error => {
+      this.state = { phase: controller.signal.aborted ? 'cancelled' : 'error',
+        message: controller.signal.aborted ? '准备已取消，可重试' : '写作环境未就绪，可重试',
+        error: controller.signal.aborted ? undefined : sanitizeDiagnostic(String(error instanceof Error ? error.message : error)) }
+      throw error
+    }).finally(() => { this.pending = undefined; this.controller = undefined })
+    return this.pending
   }
 
   private async download(item: Download, signal: AbortSignal): Promise<string> {
@@ -150,8 +256,8 @@ export class ManagedRuntime {
 
   private async command(executable: string, args: string[], signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
-    const child = spawn(executable, args, { cwd: this.root, detached: process.platform !== 'win32', windowsHide: true,
-      env: { ...process.env, UV_CACHE_DIR: join(this.root, 'cache', 'uv'), UV_PYTHON_DOWNLOADS: 'never', UV_NO_CONFIG: '1' },
+    const child = this.spawnFn(executable, args, { cwd: this.root, detached: process.platform !== 'win32', windowsHide: true,
+      env: buildChildEnv(process.env, { UV_CACHE_DIR: join(this.root, 'cache', 'uv'), UV_PYTHON_DOWNLOADS: 'never', UV_NO_CONFIG: '1' }),
       stdio: ['ignore', 'ignore', 'pipe'] })
     let failure = ''
     child.stderr?.on('data', bytes => { failure = (failure + String(bytes)).slice(-2000) })
@@ -177,7 +283,7 @@ export class ManagedRuntime {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ELOCKED') throw error
         this.update('waiting', '另一个 OpenWrite 正在准备环境，等待完成')
-        await delay(250, undefined, { signal })
+        await this.wait(250, undefined, { signal })
       }
     }
   }
@@ -217,7 +323,7 @@ export class ManagedRuntime {
         } catch (error) { await rm(destination, { recursive: true, force: true }); throw error }
       }
       signal.throwIfAborted()
-      this.update('starting', '正在启动写作环境')
+      this.update(this.recovered ? 'recovering' : 'starting', this.recovered ? '正在恢复写作环境' : '正在启动写作环境')
       const connection = await this.start(python, manifest, signal)
       const pending = join(this.root, 'active.' + randomUUID() + '.json')
       try {
@@ -235,22 +341,31 @@ export class ManagedRuntime {
   private async start(python: string, manifest: RuntimeManifest, signal: AbortSignal): Promise<BackendConnection> {
     signal.throwIfAborted()
     const token = randomBytes(32).toString('hex')
+    const generation = ++this.generation
     // Windows defaults redirected stdout to its legacy locale encoding. Core
     // initialization logs and manuscript paths are Unicode; -I ignores Python
     // environment options, so set UTF-8 explicitly on the interpreter as well.
-    const child = spawn(python, ['-I', '-X', 'utf8', '-u', '-m', 'tools.managed_runtime'], {
+    const child = this.spawnFn(python, ['-I', '-X', 'utf8', '-u', '-m', 'tools.managed_runtime'], {
       cwd: this.root, detached: process.platform !== 'win32', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PYTHONNOUSERSITE: '1', PYTHONUTF8: '1' },
+      env: buildChildEnv(process.env, { PYTHONNOUSERSITE: '1', PYTHONUTF8: '1' }),
     })
     this.child = child
-    // Drain stderr but never forward model/provider secrets to browser diagnostics.
-    child.stderr?.resume()
+    let stderrTail = ''
+    child.stderr?.on('data', bytes => { stderrTail = (stderrTail + String(bytes)).slice(-500) })
     const lines = createInterface({ input: child.stdout! })
     let timer: ReturnType<typeof setTimeout> | undefined
+    let started = false
+    child.once('exit', (code, signalName) => {
+      if (!started) return
+      this.handleReadyExit(generation, child, code, signalName, stderrTail)
+    })
     try {
       const ready = new Promise<number>((done, reject) => {
         child.once('error', reject)
-        child.once('exit', () => reject(new Error('写作后端在启动时退出')))
+        child.once('exit', (code, signalName) => {
+          if (started) return
+          reject(new Error(`写作后端在启动时退出 (${code ?? 'none'}/${signalName ?? 'none'})`))
+        })
         timer = setTimeout(() => reject(new Error('写作后端启动超时')), 120_000)
         lines.on('line', line => {
           try {
@@ -276,13 +391,20 @@ export class ManagedRuntime {
         throw new Error('写作后端版本或接口不匹配，请重新安装')
       }
       this.connection = connection
-      child.once('exit', () => {
-        this.connection = undefined
-        if (!this.closed) this.state = { phase: 'error', message: '写作后端已退出，可重试' }
-      })
-      this.update('ready', '写作环境已就绪')
+      started = true
+      if (!this.recovered) this.restartAttempts = 0
+      this.update('ready', this.recovered
+        ? '写作环境已恢复；进行中的写作或评审任务不会自动重试'
+        : '写作环境已就绪')
       return connection
-    } catch (error) { await stopOwnedProcess(child); throw error }
+    } catch (error) {
+      if (this.generation === generation) {
+        this.generation += 1
+        this.connection = undefined
+        if (this.child === child) this.child = undefined
+      }
+      await stopOwnedProcess(child); throw error
+    }
     finally { if (timer) clearTimeout(timer); lines.close(); child.stdout?.resume() }
   }
 }

@@ -11,6 +11,7 @@ const reads = new Set([
   'novel_assets_list', 'novel_search', 'novel_doc_read', 'novel_asset_read', 'novel_revisions_list',
   'novel_revision_get', 'novel_tasks_list', 'novel_continuity', 'novel_diagnostics',
   'novel_research_status', 'novel_research_report', 'novel_model_profiles',
+  'novel_manuscript_acceptance', 'novel_export_preflight',
 ])
 const generates = new Set([
   'novel_write_chapter', 'novel_review_chapter', 'novel_multi_write', 'novel_task_create',

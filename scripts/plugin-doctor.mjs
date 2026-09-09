@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isAbsolute, join, resolve } from 'node:path'
 import { load } from 'js-yaml'
+import { inspectProfile } from './maintenance.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const packageDirs = ['.', 'packages/openwrite-bridge', 'packages/studio-panel', 'vendor/dsh-dog']
@@ -94,7 +95,8 @@ async function checkProfiles(report) {
       const pkg = await readJson(join(installed, 'package.json'))
       if (pkg.name !== name || !pkg.dsh?.bundle?.patch) throw new Error('invalid installed bundle')
       await readFile(join(installed, 'release/runtime-manifest.json'))
-      if (manifest.dsh.profile.bundles.some(n => ['@dsh-novel/openwrite-bridge', '@dsh-novel/studio-panel', '@dsh-external/dsh-dog'].includes(n))) throw new Error('legacy bundle still mounted; run openwrite-maintenance migrate with dsh stopped')
+      const leftover = inspectProfile(manifest).leftover
+      if (leftover.length) throw new Error(`legacy packages still in bundles or dependencies (${leftover.join(', ')}); run openwrite-maintenance migrate --apply with dsh stopped`)
     })
   }
 }

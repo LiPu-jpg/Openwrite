@@ -31,7 +31,7 @@ class ResponseCapture extends EventEmitter {
   }
 }
 
-async function mountHost() {
+async function mountHost({ requestRejection = () => undefined } = {}) {
   const routes = new Map()
   class Tools extends Service {
     constructor(ctx) { super(ctx, 'tools') }
@@ -50,13 +50,35 @@ async function mountHost() {
     get(id) { return id === 'a' || id === 'b' ? { path: `/novels/${id}` } : undefined }
   }
   const root = new Context()
-  root.provide('connection', { requestRejection: () => undefined })
+  root.provide('connection', { requestRejection })
   await root.plugin(Tools)
   const webFork = await root.plugin(WebServer)
   await root.plugin(Registry)
   const fork = await root.plugin(plugin, plugin.Config({}))
   return { root, routes, fork, webFork, WebServer }
 }
+
+test('unauthenticated browser and runtime requests never reach the domain', async t => {
+  t.mock.method(globalThis, 'fetch', async () => jsonResponse({ ok: true }))
+  const host = await mountHost({ requestRejection: () => 401 })
+  t.after(() => host.root.fiber.dispose())
+  for (const [path, url] of [
+    ['/studio-panel/runtime', '/studio-panel/runtime'],
+    ['/studio-panel/events', '/studio-panel/events?workspace=a'],
+    ['/studio-panel/api', '/studio-panel/api/workspace'],
+  ]) {
+    const response = new ResponseCapture()
+    await host.routes.get(path).handler({ method: 'GET', url, headers: {} }, response)
+    assert.equal(response.status, 401, path)
+    assert.match(response.chunks.join(''), /authentication required/)
+  }
+  const unknown = new ResponseCapture()
+  const allowed = await mountHost()
+  t.after(() => allowed.root.fiber.dispose())
+  await allowed.routes.get('/studio-panel/events').handler({ method: 'GET', url: '/studio-panel/events?workspace=forged' }, unknown)
+  assert.equal(unknown.status, 400)
+  assert.equal(JSON.parse(unknown.chunks[0]).code, 'WORKSPACE_UNKNOWN')
+})
 
 test('HTTP errors cannot be unwrapped as success or notify a mutation', async t => {
   let mutations = 0

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { auditBundle, auditVersions } from './plugin-doctor.mjs'
+import { inspectProfile } from './maintenance.mjs'
 
 const sdk = '@deepseek-ai/dsh-tools'
 const baseline = '0.1.0-rc.7'
@@ -59,6 +60,15 @@ test('a client export cannot bypass web checks by omitting dsh.client', () => {
   const errors = auditBundle(web, [...files, 'lib/client.js'], patch).join()
   assert.match(errors, /platform=web/)
   assert.match(errors, /editor asset missing from tarball/)
+})
+
+test('profile doctor treats unregistered leftover dependencies as a migrate failure', () => {
+  const leftover = inspectProfile({
+    dependencies: { '@dsh-novel/openwrite-bridge': 'file:/old', other: '1' },
+    dsh: { profile: { bundles: ['other', 'dsh-openwrite'] } },
+  })
+  assert.deepEqual(leftover.leftover, ['@dsh-novel/openwrite-bridge'])
+  assert.equal(leftover.installed, true)
 })
 
 test('uses the reviewed host graph instead of imposing one version on every package', () => {

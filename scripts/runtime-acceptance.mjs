@@ -43,10 +43,13 @@ export async function acceptRuntime(installed, home, temporary) {
       }
       throw error
     }
+    const previousUrl = a.baseUrl
     await stopOwnedProcess(first.child)
-    assert.equal(first.status().phase, 'error')
     const recovered = await first.ensure()
-    assert.equal(first.status().phase, 'ready')
+    assert.equal(first.status().phase, 'ready', `expected auto-recovery, got ${JSON.stringify(first.status())}`)
+    assert.match(first.status().message, /不会自动重试|已就绪/)
+    assert.doesNotMatch(first.status().message, /任务恢复成功/)
+    assert.notEqual(recovered.baseUrl, previousUrl)
     assert.equal((await fetch(recovered.baseUrl + '/api/health', { headers: { Authorization: 'Bearer ' + b.token } })).status, 401)
     await first.dispose()
     assert.equal(second.status().phase, 'ready', 'one plugin cannot stop another instance')

@@ -1,6 +1,6 @@
 # 安装、更新与卸载
 
-安装已发布的版本；可下载产物、SHA-256 和实际平台结果以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.1) 附件为准。验收方法见 [验收报告](RELEASE_ACCEPTANCE.md)。
+安装已发布的版本；可下载产物、SHA-256 和实际平台结果以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.2) 附件为准。验收方法见 [验收报告](RELEASE_ACCEPTANCE.md)。
 
 ## 标准安装
 
@@ -9,7 +9,7 @@
 安装命令：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.1/dsh-openwrite-0.2.1.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.2/dsh-openwrite-0.2.2.tgz
 dsh web
 ```
 
@@ -35,18 +35,28 @@ dsh 对话模型在宿主中配置。小说生成、评审与测试模型在「�
 
 ## 从旧本地安装迁移
 
-先停止正在运行的 dsh。下载并解开 Release `.tgz`，执行其中的维护脚本，先预览再应用：
+旧开发安装会同时留下 `@dsh-novel/openwrite-bridge`、`@dsh-novel/studio-panel`、`@dsh-external/dsh-dog` 的 bundle 登记和 `dependencies`。只取消 bundle 而不走宿主 `dsh plugin remove` 时，随后的 `plugin add` 会按依赖重新登记，启动时报 `duplicate loader entry id: openwrite-bridge`。
+
+执行顺序（dsh 必须已停止；需要本机 `dsh` 与 `pnpm`）：
+
+1. 下载并解开新 Release `.tgz`。
+2. 预览：检查 bundle **和** dependencies，不改文件。
+3. 应用：先备份，再对仍在依赖中的旧包执行宿主 `dsh plugin --profile <name> remove -w <旧包名>`；失败则恢复备份。
+4. 再执行下面的标准 `plugin add` 安装新包。
+5. 启动 `dsh web`。不要修改用户 `node_modules` 源码来掩盖重复加载。
 
 ```sh
 node package/scripts/maintenance.mjs migrate --profile web
 node package/scripts/maintenance.mjs migrate --profile web --apply
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.2/dsh-openwrite-0.2.2.tgz
+dsh web
 ```
 
-脚本先备份 profile 配置、宿主 settings 和预设目录到 `$DSH_HOME/openwrite/migration-backups/`，再只取消旧 bridge、panel、DoG 三个包的 bundle 登记。它不删除依赖、用户配置、作品和会话，不改变其他插件登记。使用过旧 headless profile 的用户，再对 `--profile headless` 执行同样步骤。
+备份写入 `$DSH_HOME/openwrite/migration-backups/`，包含 profile 的 `package.json` / lock、宿主 settings 和预设目录副本。不删除其他插件、用户配置、凭据、作品和历史会话。使用过旧 headless profile 的用户，再对 `--profile headless` 执行同样的预览与应用。
 
-随后执行标准安装命令并重启。确认新会话正常后，可通过 `dsh plugin --profile web remove -w <旧包名>` 清理旧依赖。旧自定义预设仍保留；继续使用其小说工具时，按下面的自定义预设方式接入。旧会话不强行切换预设。
+预设按来源区分：带 `.openwrite-managed.json` 的是包装管理的官方版本预设（目录名为 `openwrite-<版本>`）；没有该标记、或内容与包装校验不一致的，视为作者所有，迁移不会删除。本机若仍有旧名 `openwrite` 默认预设，会保留；已有会话继续使用当时绑定的预设，不会被改写。需要改官方预设时，先复制为 `openwrite-你的名称`。历史会话不会自动切换到新版本预设。
 
-旧全局模型配置不会被受管理环境自动读取；作者可在新环境中重新配置，也可停机备份后迁移相应配置文件。不要把凭据复制进作品或 Git 仓库。
+旧全局模型配置不会被受管理环境自动读取；作者可在新环境中重新配置，也可停机备份后迁移相应配置文件。不要把凭据复制进作品或 Git 仓库。不要手工改用户 `node_modules` 里的 JS 来消除重复 loader。
 
 ## 更新与回退
 
@@ -74,12 +84,16 @@ bridge 的高级 `mode: external` / `baseUrl` 配置继续支持外部 Core，�
 
 ## GitHub 源码安装
 
-源码安装使用 dsh 官方 GitHub source 机制：`dsh plugin --profile web add -w github:LiPu-jpg/Openwrite#v0.2.1`。仓库 `prepare` 自行构建三个插件，Core wheel 随固定提交提供，不访问相邻工作区。源码安装需要 Git 和构建依赖；建议普通用户优先使用已验收 Release 包。
+源码安装使用 dsh 官方 GitHub source 机制：`dsh plugin --profile web add -w github:LiPu-jpg/Openwrite#v0.2.2`。仓库 `prepare` 自行构建三个插件，Core wheel 随固定提交提供，不访问相邻工作区。源码安装需要 Git 和构建依赖；建议普通用户优先使用已验收 Release 包。
 
 如果 pnpm 按本机策略阻止构建，按它显示的构建审批指引仅批准本包，再重试。安装脚本不放宽构建授权。源码安装也必须在发布验收中通过，不能用本机已编译目录代替。
 
 ## 诊断
 
-界面「OpenWrite → 诊断与帮助」显示实时状态与可恢复错误。解包后执行 `node package/scripts/maintenance.mjs doctor --profile web` 检查标准包登记、旧包冲突和环境是否准备；不打印凭据或调用模型。
+界面「OpenWrite → 诊断与帮助」显示实时状态与可恢复错误。解包后执行 `node package/scripts/maintenance.mjs doctor --profile web` 检查标准包登记、**bundle 与 dependencies 中的旧包**、以及环境是否准备；不打印凭据或调用模型。若仍报告 leftover 旧包，先停止 dsh 再执行 `migrate --apply`。
+
+受管理后端随 **dsh 进程** 运行：首次打开时准备，就绪后若进程异常退出会有限次自动恢复（带退避），连续失败后显示脱敏的退出码/信号并提供手动重试。取消准备、退出 dsh 或卸载插件不会把后端拉起来。恢复只重新连接写作服务，不会重放写作、评审或其他付费请求。本插件不是开机常驻服务。
+
+小说工具的只读 / 计划模式 / Workspace 绑定是 **dsh 策略与桥接检查**，不是操作系统沙箱。受管理 Python 与安装子进程只继承启动、代理和证书所需环境变量，不把无关 API Key 传给子进程。
 
 反馈请提供宿主版本、系统与架构、Release 版本、安装阶段及脱敏错误。来源、许可证和校验值见 Release 附件及包内 `release/`。不要提交 API Key、浏览器登录 URL 或作品全文。
