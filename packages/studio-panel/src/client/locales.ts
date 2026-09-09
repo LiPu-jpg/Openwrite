@@ -199,6 +199,47 @@ export type StudioPanelKey =
   | 'creation.selection.saveRequired'
   | 'creation.selection.reviewRequired'
   | 'creation.selection.noIssues'
+  | 'creation.selection.annotate'
+  | 'creation.notes.title'
+  | 'creation.notes.note'
+  | 'creation.notes.color'
+  | 'creation.notes.submit'
+  | 'creation.notes.cancel'
+  | 'creation.notes.working'
+  | 'creation.notes.saved'
+  | 'creation.notes.empty'
+  | 'creation.notes.rangeLost'
+  | 'creation.notes.saveRequired'
+  | 'creation.notes.locate'
+  | 'creation.notes.resolve'
+  | 'creation.notes.resolved'
+  | 'creation.notes.attached'
+  | 'creation.notes.relocated'
+  | 'creation.notes.detached'
+  | 'creation.notes.quote'
+  | 'creation.notes.color.amber'
+  | 'creation.notes.color.rose'
+  | 'creation.notes.color.sky'
+  | 'creation.notes.color.lime'
+  | 'creation.notes.color.violet'
+  | 'creation.marker.insert'
+  | 'creation.marker.title'
+  | 'creation.marker.purpose'
+  | 'creation.marker.state'
+  | 'creation.marker.relation'
+  | 'creation.marker.field'
+  | 'creation.marker.oldState'
+  | 'creation.marker.newState'
+  | 'creation.marker.source'
+  | 'creation.marker.target'
+  | 'creation.marker.description'
+  | 'creation.marker.pickCharacter'
+  | 'creation.marker.insertNow'
+  | 'creation.marker.cancel'
+  | 'creation.marker.empty'
+  | 'creation.marker.newline'
+  | 'creation.marker.reserved'
+  | 'creation.marker.needId'
   | 'creation.mentions.title'
   | 'creation.mentions.mention'
   | 'creation.mentions.card'
@@ -1224,6 +1265,47 @@ export const zh: Record<StudioPanelKey, string> = {
   'creation.selection.saveRequired': '请先保存当前草稿，再对选区生成修订。',
   'creation.selection.reviewRequired': '本章没有可校验的当前审稿，不能按审稿改选区。',
   'creation.selection.noIssues': '选区没有可定位的审稿问题。',
+  'creation.selection.annotate': '批注',
+  'creation.notes.title': '作者选区批注',
+  'creation.notes.note': '批注内容',
+  'creation.notes.color': '批注颜色',
+  'creation.notes.submit': '保存批注',
+  'creation.notes.cancel': '取消批注',
+  'creation.notes.working': '正在保存批注…',
+  'creation.notes.saved': '批注已保存，可在「修订」中定位或标为已解决。',
+  'creation.notes.empty': '本章还没有选区批注。',
+  'creation.notes.rangeLost': '保存后选区已变化，请重新选择后再批注。',
+  'creation.notes.saveRequired': '请先保存当前草稿，再添加选区批注。',
+  'creation.notes.locate': '定位',
+  'creation.notes.resolve': '标为已解决',
+  'creation.notes.resolved': '已解决',
+  'creation.notes.attached': '已定位',
+  'creation.notes.relocated': '已重新定位',
+  'creation.notes.detached': '已脱离原文／需重新定位',
+  'creation.notes.quote': '引用',
+  'creation.notes.color.amber': '琥珀',
+  'creation.notes.color.rose': '玫红',
+  'creation.notes.color.sky': '天空',
+  'creation.notes.color.lime': '新绿',
+  'creation.notes.color.violet': '紫罗兰',
+  'creation.marker.insert': '插入标记',
+  'creation.marker.title': '插入内部标记',
+  'creation.marker.purpose': '这些是内部元数据，不计入可读字数，也不会进入默认导出。只插入人物状态变化或指向关系。',
+  'creation.marker.state': '状态变化',
+  'creation.marker.relation': '指向关系',
+  'creation.marker.field': '维度',
+  'creation.marker.oldState': '旧状态',
+  'creation.marker.newState': '新状态',
+  'creation.marker.source': '关系源',
+  'creation.marker.target': '关系目标',
+  'creation.marker.description': '具体关系',
+  'creation.marker.pickCharacter': '选择人物',
+  'creation.marker.insertNow': '插入到光标',
+  'creation.marker.cancel': '取消插入',
+  'creation.marker.empty': '必填项不能为空。',
+  'creation.marker.newline': '字段不能包含换行。',
+  'creation.marker.reserved': '字段不能包含 *、[]、@ 或 **。',
+  'creation.marker.needId': '同名或别名冲突，请选择明确的人物。',
   'creation.mentions.title': '提及',
   'creation.mentions.mention': '提及',
   'creation.mentions.card': '资料卡',
@@ -2240,6 +2322,47 @@ export const en: Record<StudioPanelKey, string> = {
   'creation.selection.saveRequired': 'Save the current draft before polishing a selection.',
   'creation.selection.reviewRequired': 'This chapter has no verified current review, so the selection cannot be revised from review.',
   'creation.selection.noIssues': 'The selection has no locatable review issues.',
+  'creation.selection.annotate': 'Note',
+  'creation.notes.title': 'Selection notes',
+  'creation.notes.note': 'Note text',
+  'creation.notes.color': 'Note color',
+  'creation.notes.submit': 'Save note',
+  'creation.notes.cancel': 'Cancel note',
+  'creation.notes.working': 'Saving the note…',
+  'creation.notes.saved': 'The note was saved. Locate or resolve it in Revisions.',
+  'creation.notes.empty': 'This chapter has no selection notes yet.',
+  'creation.notes.rangeLost': 'The selection changed after save. Select the span again.',
+  'creation.notes.saveRequired': 'Save the current draft before adding a selection note.',
+  'creation.notes.locate': 'Locate',
+  'creation.notes.resolve': 'Mark resolved',
+  'creation.notes.resolved': 'Resolved',
+  'creation.notes.attached': 'Located',
+  'creation.notes.relocated': 'Relocated',
+  'creation.notes.detached': 'Detached from the manuscript; relocate required',
+  'creation.notes.quote': 'Quote',
+  'creation.notes.color.amber': 'Amber',
+  'creation.notes.color.rose': 'Rose',
+  'creation.notes.color.sky': 'Sky',
+  'creation.notes.color.lime': 'Lime',
+  'creation.notes.color.violet': 'Violet',
+  'creation.marker.insert': 'Insert marker',
+  'creation.marker.title': 'Insert internal marker',
+  'creation.marker.purpose': 'These are internal metadata. They are excluded from readable word count and default export. Only character state changes and directed relations can be inserted.',
+  'creation.marker.state': 'State change',
+  'creation.marker.relation': 'Directed relation',
+  'creation.marker.field': 'Dimension',
+  'creation.marker.oldState': 'Previous state',
+  'creation.marker.newState': 'New state',
+  'creation.marker.source': 'Relation source',
+  'creation.marker.target': 'Relation target',
+  'creation.marker.description': 'Relation',
+  'creation.marker.pickCharacter': 'Choose character',
+  'creation.marker.insertNow': 'Insert at caret',
+  'creation.marker.cancel': 'Cancel insert',
+  'creation.marker.empty': 'Required fields cannot be empty.',
+  'creation.marker.newline': 'Fields cannot contain newlines.',
+  'creation.marker.reserved': 'Fields cannot contain *, [], @, or **.',
+  'creation.marker.needId': 'This name is shared. Choose a specific character.',
   'creation.mentions.title': 'Mentions',
   'creation.mentions.mention': '提及',
   'creation.mentions.card': '资料卡',

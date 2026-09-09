@@ -44,6 +44,79 @@ export function manuscriptSelectionFromRange(value: string, start: number, end: 
   return { start, end, text: value.slice(start, end) }
 }
 
+/** Count non-overlapping occurrences of needle in haystack. */
+export function countOccurrences(haystack: string, needle: string): number {
+  if (needle === '') return 0
+  let count = 0
+  let from = 0
+  while (from <= haystack.length - needle.length) {
+    const index = haystack.indexOf(needle, from)
+    if (index < 0) return count
+    count += 1
+    from = index + needle.length
+  }
+  return count
+}
+
+/** Zero-based nth occurrence start, or -1. */
+export function nthIndexOf(haystack: string, needle: string, occurrence: number): number {
+  if (needle === '' || occurrence < 0 || !Number.isInteger(occurrence)) return -1
+  let from = 0
+  for (let index = 0; index <= occurrence; index += 1) {
+    const start = haystack.indexOf(needle, from)
+    if (start < 0) return -1
+    if (index === occurrence) return start
+    from = start + needle.length
+  }
+  return -1
+}
+
+/**
+ * Map a live editor selection onto markdown offsets.
+ * Duplicate quotes without an occurrence index do not bind the first hit.
+ */
+export function locateSelectedMarkdown(
+  value: string,
+  selected: string,
+  occurrence?: number,
+): ManuscriptSelection | null {
+  if (selected === '') return null
+  if (occurrence !== undefined) {
+    const start = nthIndexOf(value, selected, occurrence)
+    return start < 0 ? null : manuscriptSelectionFromRange(value, start, start + selected.length)
+  }
+  if (countOccurrences(value, selected) !== 1) return null
+  const start = value.indexOf(selected)
+  return manuscriptSelectionFromRange(value, start, start + selected.length)
+}
+
+export type QuoteAnchor =
+  | { state: 'attached' | 'relocated'; start: number; end: number }
+  | { state: 'detached'; reason: 'missing' | 'ambiguous' | 'mismatch' }
+
+/** Bind a stored quote to current markdown using hints, then unique relocate. */
+export function locateQuote(
+  content: string,
+  quote: string,
+  startHint: number,
+  endHint: number,
+): QuoteAnchor {
+  if (quote === '') return { state: 'detached', reason: 'missing' }
+  if (
+    Number.isInteger(startHint) && Number.isInteger(endHint)
+    && startHint >= 0 && endHint <= content.length && endHint > startHint
+    && content.slice(startHint, endHint) === quote
+  ) {
+    return { state: 'attached', start: startHint, end: endHint }
+  }
+  const matches = countOccurrences(content, quote)
+  if (matches === 1) {
+    const start = content.indexOf(quote)
+    return { state: 'relocated', start, end: start + quote.length }
+  }
+  return { state: 'detached', reason: matches === 0 ? 'missing' : 'ambiguous' }
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>

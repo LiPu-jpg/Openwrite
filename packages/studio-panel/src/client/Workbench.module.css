@@ -262,6 +262,125 @@
 
 .selectionPolish > span { overflow-wrap: anywhere; }
 
+.annotateForm,
+.markerForm {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.annotateForm header,
+.markerForm header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.annotateForm textarea,
+.markerForm input,
+.markerForm select {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
+.annotateForm textarea { min-height: 64px; resize: vertical; }
+
+.colorDots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.colorDot {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.colorDot[data-color='amber'] { background: var(--dsw-alias-state-warn-primary); }
+.colorDot[data-color='rose'] { background: var(--dsw-alias-state-error-primary); }
+.colorDot[data-color='sky'] { background: var(--dsw-alias-state-business-primary); }
+.colorDot[data-color='lime'] { background: var(--dsw-alias-state-success-primary); }
+.colorDot[data-color='violet'] { background: var(--dsw-alias-label-primary); }
+
+.colorDot[data-selected='true'] {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.annotateForm footer,
+.markerForm footer,
+.annotationCard footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.markerFields {
+  display: grid;
+  gap: 6px;
+}
+
+.annotationList { display: grid; gap: 7px; }
+
+.annotationCard {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  padding: 9px;
+}
+
+.annotationCard[data-state='detached'] {
+  border-color: var(--dsw-alias-state-warn-tertiary);
+}
+
+.annotationCard header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.annotationCard header strong { min-width: 0; overflow-wrap: anywhere; }
+
+.annotationChip {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.annotationChip[data-color='rose'] { background: var(--dsw-alias-state-error-primary); }
+.annotationChip[data-color='sky'] { background: var(--dsw-alias-state-business-primary); }
+.annotationChip[data-color='lime'] { background: var(--dsw-alias-state-success-primary); }
+.annotationChip[data-color='violet'] { background: var(--dsw-alias-label-primary); }
+
+.annotationQuote {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
 .mentionHits {
   display: flex;
   flex: none;

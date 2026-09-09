@@ -36,6 +36,34 @@ export function isPersonOrPlaceKind(kind: string): boolean {
   return PERSON_OR_PLACE.has(kind)
 }
 
+export function isCharacterKind(kind: string): boolean {
+  return kind === 'character'
+}
+
+/** Characters for marker insert. Homonyms stay distinct by id. */
+export function characterChoices(assets: readonly MentionAsset[]): MentionAsset[] {
+  return assets.filter(asset => isCharacterKind(asset.kind))
+}
+
+export function characterMatches(assets: readonly MentionAsset[], label: string): MentionAsset[] {
+  const needle = label.trim()
+  if (needle === '') return []
+  return characterChoices(assets).filter(asset => asset.name === needle || asset.aliases.includes(needle))
+}
+
+/** Homonyms require an explicit id; a unique match may be used without one. */
+export function resolveCharacterChoice(
+  assets: readonly MentionAsset[],
+  selectedId: string,
+  label = '',
+): MentionAsset | null {
+  if (selectedId !== '') {
+    return characterChoices(assets).find(asset => asset.id === selectedId) ?? null
+  }
+  const matches = characterMatches(assets, label)
+  return matches.length === 1 ? matches[0]! : null
+}
+
 /** Unwrap Studio GET /assets into character and location summaries. */
 export function parseMentionAssets(value: unknown): MentionAsset[] {
   const root = asRecord(value)

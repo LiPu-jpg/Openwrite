@@ -23,9 +23,14 @@ import {
   type ManuscriptSelection, type SelectionPolishKind,
 } from './manuscript-selection.ts'
 import {
-  findManuscriptMentions, parseMentionAssets, uniqueMentionAssets,
+  characterChoices, findManuscriptMentions, parseMentionAssets, resolveCharacterChoice, uniqueMentionAssets,
   type MentionAsset,
 } from './manuscript-mentions.ts'
+import {
+  ANNOTATION_COLOR_LABEL, ANNOTATION_COLORS, annotateRequest, liveAnnotationAnchor, parseAnnotationList,
+  revalidateAnnotationRange, unsavedAnnotationGuard, type AnnotationColor, type ManuscriptAnnotation,
+} from './manuscript-annotations.ts'
+import { formatRelationMarker, formatStateMarker } from './manuscript-markers.ts'
 import { useWorkbench, workbenchStore, type ChapterSummary } from './WorkbenchStore.ts'
 import { ContinuousReader } from './ContinuousReader.tsx'
 import {
@@ -619,6 +624,21 @@ export function CreationView(props: CreationViewProps) {
     summary: string
     aliases: string[]
   } | null>(null)
+  const [annotations, setAnnotations] = useState<ManuscriptAnnotation[]>([])
+  const [annotateOpen, setAnnotateOpen] = useState(false)
+  const [annotateNote, setAnnotateNote] = useState('')
+  const [annotateColor, setAnnotateColor] = useState<AnnotationColor>('amber')
+  const [annotateBusy, setAnnotateBusy] = useState(false)
+  const [insertOpen, setInsertOpen] = useState(false)
+  const [insertKind, setInsertKind] = useState<'state' | 'relation'>('state')
+  const [insertSourceId, setInsertSourceId] = useState('')
+  const [insertTargetId, setInsertTargetId] = useState('')
+  const [insertField, setInsertField] = useState('综合状态')
+  const [insertOldState, setInsertOldState] = useState('')
+  const [insertNewState, setInsertNewState] = useState('')
+  const [insertDescription, setInsertDescription] = useState('')
+  const [insertError, setInsertError] = useState('')
+  const [editorApi, setEditorApi] = useState<{ insertAtCaret: (markdown: string) => void } | null>(null)
   const [readingOrder, setReadingOrder] = useState<ReadingOrderDto | null>(null)
   const [readingOrderState, setReadingOrderState] = useState<LoadState>('idle')
   const [readingOrderError, setReadingOrderError] = useState('')
@@ -647,9 +667,12 @@ export function CreationView(props: CreationViewProps) {
   const draftUpdatedAtRef = useRef(0)
   const inspectorLoadedKeyRef = useRef('')
   const historyLoadedKeyRef = useRef('')
+  const annotationLoadedKeyRef = useRef('')
   const contextRevisionRef = useRef({ identity: '', revision: '', sourceRevision: '' })
   const fetchStudioApiRef = useRef(fetchStudioApi)
   fetchStudioApiRef.current = fetchStudioApi
+  const postStudioApiRef = useRef(postStudioApi)
+  postStudioApiRef.current = postStudioApi
   const path = workbench.activeChapterPath
   const orderedChapters = useMemo<readonly ChapterSummary[]>(() => {
     if (readingOrder === null) return workbench.chapters
@@ -1117,6 +1140,50 @@ export function CreationView(props: CreationViewProps) {
     workbench.epochs.manuscript,
     workbench.epochs.revisions,
   ])
+
+  useEffect(() => {
+    const id = chapterId(path)
+    const sourceEpochs = [
+      workbench.epochs.workspace,
+      workbench.epochs.manuscript,
+      workbench.epochs.revisions,
+    ].join(':')
+    const requestKey = `${workspaceId ?? ''}:${path}:${sourceEpochs}:${String(inspectorReload)}`
+    if (id === '' || path === '') {
+      setAnnotations([])
+      annotationLoadedKeyRef.current = requestKey
+      return
+    }
+    if (annotationLoadedKeyRef.current === requestKey) return
+    setAnnotations([])
+    let cancelled = false
+    void Promise.resolve(postStudioApiRef.current('/manuscript-editing', { action: 'annotations', chapter_id: id }))
+      .then(payload => {
+        if (cancelled) return
+        setAnnotations(parseAnnotationList(payload))
+        annotationLoadedKeyRef.current = requestKey
+      })
+      .catch(() => {
+        if (cancelled) return
+        setAnnotations([])
+        annotationLoadedKeyRef.current = requestKey
+      })
+    return () => { cancelled = true }
+  }, [
+    inspectorReload,
+    path,
+    workspaceId,
+    workbench.epochs.workspace,
+    workbench.epochs.manuscript,
+    workbench.epochs.revisions,
+  ])
+
+  useEffect(() => {
+    setAnnotateOpen(false)
+    setInsertOpen(false)
+    setInsertError('')
+    setSelectionNotice('')
+  }, [path, workspaceId])
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -1613,6 +1680,113 @@ export function CreationView(props: CreationViewProps) {
     }
   }
 
+  const submitAnnotation = async () => {
+    const selection = manuscriptSelectionRef.current
+    const id = chapterId(path)
+    if (selection === null || annotateBusy || id === '') return
+    if (unsavedAnnotationGuard(dirtyRef.current) === 'save-first') {
+      await saveRef.current(false, 'manual')
+      if (dirtyRef.current) {
+        setSelectionNotice(t('creation.notes.saveRequired'))
+        return
+      }
+    }
+    const live = revalidateAnnotationRange(draftRef.current, selection)
+    if (live === null) {
+      setSelectionNotice(t('creation.notes.rangeLost'))
+      return
+    }
+    const request = annotateRequest({
+      chapterId: id,
+      revision: documentRef.current?.revision ?? '',
+      selection: live,
+      note: annotateNote,
+      color: annotateColor,
+    })
+    if (!request.ok) {
+      setSelectionNotice(t(request.reason === 'save-first' ? 'creation.notes.saveRequired' : 'creation.selection.empty'))
+      return
+    }
+    setAnnotateBusy(true)
+    setSelectionNotice('')
+    try {
+      await postStudioApi('/manuscript-editing', request.body)
+      setAnnotateOpen(false)
+      setAnnotateNote('')
+      setInspectorTab('revisions')
+      setInspectorVisible(true)
+      setRightOpen(true)
+      workbenchStore.invalidate('revisions')
+      setInspectorReload(value => value + 1)
+      setSelectionNotice(t('creation.notes.saved'))
+    } catch (cause: unknown) {
+      setSelectionNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setAnnotateBusy(false)
+    }
+  }
+
+  const locateAnnotation = (item: ManuscriptAnnotation) => {
+    const live = liveAnnotationAnchor(draftRef.current, item)
+    if (live.state === 'detached') {
+      setSelectionNotice(t('creation.notes.detached'))
+      return
+    }
+    const next = { start: live.start, end: live.end, text: item.quote }
+    manuscriptSelectionRef.current = next
+    setManuscriptSelection(next)
+    setSelectionNotice(t(live.state === 'relocated' ? 'creation.notes.relocated' : 'creation.notes.attached'))
+  }
+
+  const resolveAnnotation = async (item: ManuscriptAnnotation) => {
+    const id = chapterId(path)
+    if (id === '' || annotateBusy) return
+    setAnnotateBusy(true)
+    try {
+      await postStudioApi('/manuscript-editing', {
+        action: 'resolve_annotation',
+        chapter_id: id,
+        annotation_id: item.annotationId,
+      })
+      workbenchStore.invalidate('revisions')
+      setInspectorReload(value => value + 1)
+    } catch (cause: unknown) {
+      setSelectionNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setAnnotateBusy(false)
+    }
+  }
+
+  const insertMarker = () => {
+    const source = resolveCharacterChoice(mentionAssets, insertSourceId)
+    const target = insertKind === 'relation' ? resolveCharacterChoice(mentionAssets, insertTargetId) : source
+    if (source === null || target === null) {
+      setInsertError(t('creation.marker.needId'))
+      return
+    }
+    const result = insertKind === 'state'
+      ? formatStateMarker({
+        name: source.name, field: insertField, oldState: insertOldState, newState: insertNewState,
+      })
+      : formatRelationMarker({
+        source: source.name, target: target.name, description: insertDescription,
+      })
+    if (!result.ok) {
+      setInsertError(t(
+        result.error === 'newline' ? 'creation.marker.newline'
+          : result.error === 'reserved' ? 'creation.marker.reserved'
+            : 'creation.marker.empty',
+      ))
+      return
+    }
+    editorApi?.insertAtCaret(result.markdown)
+    setInsertOpen(false)
+    setInsertError('')
+    setInsertOldState('')
+    setInsertNewState('')
+    setInsertDescription('')
+  }
+
   const toggleRevisionHunk = (proposalId: string, hunkId: string) => {
     setRevisionSelections(previous => {
       const selected = new Set(previous[proposalId] ?? [])
@@ -1807,6 +1981,13 @@ export function CreationView(props: CreationViewProps) {
               aria-expanded={rightOpen} onClick={() => setRightOpen(value => !value)}>
               <PanelRight size={17} />
             </button>
+            {!readerMode && (
+              <button type="button" className={css.commandButton}
+                aria-label={t('creation.marker.insert')}
+                onClick={() => { setInsertOpen(value => !value); setInsertError('') }}>
+                {t('creation.marker.insert')}
+              </button>
+            )}
             <button type="button" className={css.saveState} data-status={workbench.editorStatus}
               title={workbench.editorMessage || t(`creation.status.${workbench.editorStatus}`)}
               aria-label={t(`creation.status.${workbench.editorStatus}`)} disabled={!hasUnsavedDraft}
@@ -1827,9 +2008,127 @@ export function CreationView(props: CreationViewProps) {
                 {t(action.label)}
               </button>
             ))}
+            <button type="button" className={css.commandButton}
+              disabled={annotateBusy}
+              onMouseDown={preserveManuscriptSelection}
+              onClick={() => { setAnnotateOpen(true); setInsertOpen(false) }}>
+              {t('creation.selection.annotate')}
+            </button>
             {selectionBusy !== '' && <small>{t('creation.selection.working')}</small>}
+            {annotateBusy && <small>{t('creation.notes.working')}</small>}
             {selectionNotice !== '' && <span role="status">{selectionNotice}</span>}
           </div>
+        )}
+        {!readerMode && annotateOpen && manuscriptSelection !== null && (
+          <form className={css.annotateForm} aria-label={t('creation.notes.title')}
+            {...{ [MANUSCRIPT_SELECTION_PRESERVE_ATTR]: '' }}
+            onMouseDown={preserveManuscriptSelection}
+            onSubmit={event => { event.preventDefault(); void submitAnnotation() }}>
+            <header>
+              <strong>{t('creation.notes.title')}</strong>
+              <button type="button" className={css.commandButton} onClick={() => setAnnotateOpen(false)}>
+                {t('creation.notes.cancel')}
+              </button>
+            </header>
+            <label>
+              <span className={css.visuallyHidden}>{t('creation.notes.note')}</span>
+              <textarea value={annotateNote} onChange={event => setAnnotateNote(event.target.value)}
+                placeholder={t('creation.notes.note')} />
+            </label>
+            <div className={css.colorDots} role="radiogroup" aria-label={t('creation.notes.color')}>
+              {ANNOTATION_COLORS.map(color => (
+                <button key={color} type="button" className={css.colorDot} data-color={color}
+                  data-selected={annotateColor === color} role="radio" aria-checked={annotateColor === color}
+                  aria-label={t(ANNOTATION_COLOR_LABEL[color])}
+                  onMouseDown={preserveManuscriptSelection}
+                  onClick={() => setAnnotateColor(color)} />
+              ))}
+            </div>
+            <footer>
+              <button type="submit" className={css.commandButton} disabled={annotateBusy || annotateNote.trim() === ''}>
+                {t('creation.notes.submit')}
+              </button>
+            </footer>
+          </form>
+        )}
+        {!readerMode && insertOpen && (
+          <form className={css.markerForm} aria-label={t('creation.marker.title')}
+            onSubmit={event => { event.preventDefault(); insertMarker() }}>
+            <header>
+              <strong>{t('creation.marker.title')}</strong>
+              <button type="button" className={css.commandButton} onClick={() => setInsertOpen(false)}>
+                {t('creation.marker.cancel')}
+              </button>
+            </header>
+            <p>{t('creation.marker.purpose')}</p>
+            <div className={css.colorDots} role="radiogroup" aria-label={t('creation.marker.title')}>
+              <button type="button" className={css.commandButton} data-active={insertKind === 'state'}
+                aria-pressed={insertKind === 'state'} onClick={() => setInsertKind('state')}>
+                {t('creation.marker.state')}
+              </button>
+              <button type="button" className={css.commandButton} data-active={insertKind === 'relation'}
+                aria-pressed={insertKind === 'relation'} onClick={() => setInsertKind('relation')}>
+                {t('creation.marker.relation')}
+              </button>
+            </div>
+            <div className={css.markerFields}>
+              <label>
+                <span>{insertKind === 'state' ? t('creation.marker.pickCharacter') : t('creation.marker.source')}</span>
+                <select value={insertSourceId} onChange={event => setInsertSourceId(event.target.value)}
+                  aria-label={insertKind === 'state' ? t('creation.marker.pickCharacter') : t('creation.marker.source')}>
+                  <option value="">{t('creation.marker.pickCharacter')}</option>
+                  {characterChoices(mentionAssets).map(asset => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.name} · {asset.summary || asset.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {insertKind === 'relation' && (
+                <label>
+                  <span>{t('creation.marker.target')}</span>
+                  <select value={insertTargetId} onChange={event => setInsertTargetId(event.target.value)}
+                    aria-label={t('creation.marker.target')}>
+                    <option value="">{t('creation.marker.pickCharacter')}</option>
+                    {characterChoices(mentionAssets).map(asset => (
+                      <option key={asset.id} value={asset.id}>
+                        {asset.name} · {asset.summary || asset.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {insertKind === 'state' ? (
+                <>
+                  <label>
+                    <span>{t('creation.marker.field')}</span>
+                    <input value={insertField} onChange={event => setInsertField(event.target.value)}
+                      aria-label={t('creation.marker.field')} />
+                  </label>
+                  <label>
+                    <span>{t('creation.marker.oldState')}</span>
+                    <input value={insertOldState} onChange={event => setInsertOldState(event.target.value)}
+                      aria-label={t('creation.marker.oldState')} />
+                  </label>
+                  <label>
+                    <span>{t('creation.marker.newState')}</span>
+                    <input value={insertNewState} onChange={event => setInsertNewState(event.target.value)}
+                      aria-label={t('creation.marker.newState')} />
+                  </label>
+                </>
+              ) : (
+                <label>
+                  <span>{t('creation.marker.description')}</span>
+                  <input value={insertDescription} onChange={event => setInsertDescription(event.target.value)}
+                    aria-label={t('creation.marker.description')} />
+                </label>
+              )}
+            </div>
+            {insertError !== '' && <span role="status">{insertError}</span>}
+            <footer>
+              <button type="submit" className={css.commandButton}>{t('creation.marker.insertNow')}</button>
+            </footer>
+          </form>
         )}
         {!readerMode && mentions.length > 0 && (
           <div className={css.mentionHits} aria-label={t('creation.mentions.title')}>
@@ -2004,6 +2303,9 @@ export function CreationView(props: CreationViewProps) {
             ) : (
               <VditorBody key={`${path}:${editorEpoch}`} initial={draft} disabled={false} onChange={updateDraft}
                 onSelectionChange={updateManuscriptSelection}
+                annotations={annotations}
+                onInsertMarker={() => { setInsertOpen(true); setInsertError('') }}
+                onEditorApi={setEditorApi}
                 onReady={() => setEditorReady(true)} onFailed={() => { setEditorReady(true); setEditorFailed(true) }} />
             )}
             {!editorReady && !editorFailed && (
@@ -2243,6 +2545,41 @@ export function CreationView(props: CreationViewProps) {
           )}
           {historyState === 'ready' && inspectorTab === 'revisions' && (
             <div className={css.revisionPane}>
+              <section className={css.historySection}>
+                <header className={css.historyHeader}>
+                  <strong>{t('creation.notes.title')}</strong>
+                </header>
+                {annotations.length === 0
+                  ? <div className={css.muted}>{t('creation.notes.empty')}</div>
+                  : <div className={css.annotationList}>{annotations.map(item => {
+                    const live = liveAnnotationAnchor(draft, item)
+                    const stateKey = item.status === 'resolved'
+                      ? 'creation.notes.resolved'
+                      : live.state === 'detached'
+                        ? 'creation.notes.detached'
+                        : live.state === 'relocated'
+                          ? 'creation.notes.relocated'
+                          : 'creation.notes.attached'
+                    return <article key={item.annotationId} className={css.annotationCard}
+                      data-state={item.status === 'resolved' ? 'resolved' : live.state}
+                      data-color={item.color}>
+                      <header>
+                        <span className={css.annotationChip} data-color={item.color} aria-hidden="true" />
+                        <strong>{item.note}</strong>
+                        <span>{t(stateKey)}</span>
+                      </header>
+                      <p className={css.annotationQuote}>{t('creation.notes.quote')} {item.quote}</p>
+                      <footer>
+                        <button type="button" className={css.commandButton}
+                          onClick={() => locateAnnotation(item)}>{t('creation.notes.locate')}</button>
+                        {item.status !== 'resolved' && (
+                          <button type="button" className={css.commandButton} disabled={annotateBusy}
+                            onClick={() => { void resolveAnnotation(item) }}>{t('creation.notes.resolve')}</button>
+                        )}
+                      </footer>
+                    </article>
+                  })}</div>}
+              </section>
               <section className={css.historySection}>
                 <header className={css.historyHeader}>
                   <strong><History size={15} />{t('creation.history.title')}</strong>

@@ -774,11 +774,49 @@
 
 
 /* Vditor (IR live editor) mounts here; its packaged stylesheet is served by
-   the dsh host. We only frame the host. */
+   the dsh host. Overlay marks are display-only and never written into markdown. */
+.vditorFrame {
+  position: relative;
+  min-width: 0;
+}
+
 .vditorHost {
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 6px;
   overflow: hidden;
+}
+
+.vditorOverlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.overlayMark {
+  position: absolute;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.overlayMark[data-kind='note'] {
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.overlayMark[data-kind='state'] {
+  outline: 1px dashed color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, transparent);
+  outline-offset: -1px;
+}
+
+.overlayMark[data-kind='relation'] {
+  outline: 1px dotted color-mix(in srgb, var(--dsw-alias-state-warn-primary) 65%, transparent);
+  outline-offset: -1px;
+}
+
+.overlayMark[data-kind='invalid'] {
+  outline: 1px dashed color-mix(in srgb, var(--dsw-alias-state-error-primary) 70%, transparent);
+  outline-offset: -1px;
 }
 
 /* --- graph view (SVG) --- */
