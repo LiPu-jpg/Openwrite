@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseAnnotation } from '../../src/client/manuscript-annotations.ts'
 import { parseMarkers } from '../../src/client/manuscript-markers.ts'
-import { overlayBands, overlayFill } from '../../src/client/manuscript-overlay.ts'
+import { overlayBands, overlayFill, overlayUnderline } from '../../src/client/manuscript-overlay.ts'
 
 describe('display-only overlay bands', () => {
   it('paints notes and markers distinctly and skips detached or resolved notes', () => {
@@ -24,5 +24,6 @@ describe('display-only overlay bands', () => {
     expect(bands.some(item => item.title === '旧批注' || item.title === '已处理')).toBe(false)
     expect(overlayFill('note', 'light', 'amber')).not.toBe(overlayFill('state', 'light'))
     expect(overlayFill('note', 'dark', 'sky')).not.toBe(overlayFill('relation', 'dark'))
+    expect(overlayUnderline('light', 'amber')).not.toBe(overlayFill('note', 'light', 'amber'))
   })
 })

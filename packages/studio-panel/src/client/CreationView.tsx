@@ -2134,6 +2134,19 @@ export function CreationView(props: CreationViewProps) {
             </footer>
           </form>
         )}
+        {!readerMode && annotations.some(item => item.status !== 'resolved') && (
+          <div className={`${css.mentionHits} ${css.annotationHits}`} aria-label={t('creation.notes.title')}>
+            <small>{t('creation.notes.title')}</small>
+            {annotations.filter(item => item.status !== 'resolved').map(item => (
+              <button key={item.annotationId} type="button" data-color={item.color}
+                aria-label={`${t('creation.notes.locate')}: ${item.note}`}
+                title={item.quote}
+                onClick={() => locateAnnotation(item)}>
+                {item.note}
+              </button>
+            ))}
+          </div>
+        )}
         {!readerMode && mentions.length > 0 && (
           <div className={css.mentionHits} aria-label={t('creation.mentions.title')}>
             <small>{t('creation.mentions.title')}</small>
@@ -2329,7 +2342,10 @@ export function CreationView(props: CreationViewProps) {
                 data-active={inspectorTab === tab} onClick={() => setInspectorTab(tab)}>
                 {tab === 'context' ? t('creation.context')
                   : tab === 'review' ? t('creation.review')
-                    : tab === 'revisions' ? t('creation.revisions')
+                    : tab === 'revisions'
+                      ? annotations.some(item => item.status !== 'resolved')
+                        ? `${t('creation.revisions')} ${String(annotations.filter(item => item.status !== 'resolved').length)}`
+                        : t('creation.revisions')
                       : foreshadowActions.length > 0
                         ? `${t('creation.activity')} ${String(foreshadowActions.length)}`
                         : t('creation.activity')}

@@ -18,7 +18,7 @@ import {
 } from './manuscript-selection.ts'
 import type { ManuscriptAnnotation } from './manuscript-annotations.ts'
 import { parseMarkers } from './manuscript-markers.ts'
-import { overlayBands, overlayFill, type OverlayBand } from './manuscript-overlay.ts'
+import { overlayBands, overlayFill, overlayUnderline, type OverlayBand } from './manuscript-overlay.ts'
 import { bindOverlayResync, rangeForNeedle, revealNeedle } from './manuscript-overlay-dom.ts'
 import css from './views.module.css'
 
@@ -152,6 +152,7 @@ function paintOverlay(host: HTMLElement, overlay: HTMLElement, bands: readonly O
       mark.style.width = `${rect.width}px`
       mark.style.height = `${rect.height}px`
       mark.style.background = fill
+      if (band.kind === 'note') mark.style.boxShadow = `inset 0 -3px 0 ${overlayUnderline(dark ? 'dark' : 'light', band.color)}`
       mark.style.pointerEvents = 'none'
       overlay.append(mark)
     }
