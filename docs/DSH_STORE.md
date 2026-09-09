@@ -21,6 +21,8 @@ OpenWrite 是一个完整的小说创作插件套件。商城安装目标是仓�
 
 本机 macOS arm64 / Node 24.15 使用 0.2.7 运行代码对 alpha.1 完成了隔离安装、启动、后端初始化、恢复、回退与卸载验证；新版元数据及正式产物另由下述 CI 门禁验证。
 
+alpha 浏览器验收进一步发现 persona 配置由 `text` 改成了必填 `prefix`；预设使用 YAML 锚点将同一份身份文本提供给两个字段，并以两版实际 Config / apply 验证身份只注册一次。
+
 默认宿主仍是 `0.1.2-rc.1`。商城当前滚动窗口还包含 alpha，所以额外验证 `0.1.5-alpha.1`，并保留 `0.1.3-alpha.1`、`0.1.3-alpha.2` 为未知。这不自动升级用户宿主，也不承诺整个 alpha 范围都兼容。
 
 2026-09-09，从官方 npm Registry 直接安装 `@deepseek-ai/dsh@0.1.5-alpha.1` 时，上游范围依赖选中了正在发布的 alpha.2，其中 `@deepseek-ai/dsh-tool-pwsh-persistent@^0.1.5-alpha.2` 当时缺失，安装失败（ETARGET）。兼容测试使用 npm 的 `--before=2026-09-09T00:00:00Z` 解析 alpha.1 发布时的依赖，并保留解析锁。没有修改官方包源码或用 replacements/overrides 冒充官方组件。此证据仅适用于报告中的宿主依赖图，不代表后续浮动依赖安装也通过。

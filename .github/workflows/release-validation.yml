@@ -115,6 +115,7 @@ jobs:
       # Freeze the published alpha.1 dependency graph: a later partial alpha.2
       # publication currently breaks unconstrained upstream npm installation.
       - run: npm install --prefix .tmp-dsh-alpha @deepseek-ai/dsh@0.1.5-alpha.1 --before=2026-09-09T00:00:00Z --registry=https://registry.npmjs.org --no-audit --no-fund
+      - run: node scripts/preset-smoke.mjs --host-cli=.tmp-dsh-alpha/node_modules/@deepseek-ai/dsh/lib/bin.js
       - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
       - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
       - uses: actions/download-artifact@v4
