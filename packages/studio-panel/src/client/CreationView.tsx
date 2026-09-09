@@ -1608,8 +1608,11 @@ export function CreationView(props: CreationViewProps) {
     setManuscriptSelection(next)
   }
 
-  const preserveManuscriptSelection = (event: { preventDefault: () => void }) => {
-    event.preventDefault()
+  const preserveManuscriptSelection = (event: { preventDefault: () => void; target?: EventTarget | null }) => {
+    const target = event.target
+    const editable = target instanceof Element
+      && target.closest('textarea, input, select, [contenteditable="true"]') !== null
+    if (!editable) event.preventDefault()
     preserveManuscriptSelectionRef.current = true
     const previous = releasePreserveListenerRef.current
     if (previous !== null) window.removeEventListener('mouseup', previous)
@@ -2033,7 +2036,7 @@ export function CreationView(props: CreationViewProps) {
             </header>
             <label>
               <span className={css.visuallyHidden}>{t('creation.notes.note')}</span>
-              <textarea value={annotateNote} onChange={event => setAnnotateNote(event.target.value)}
+              <textarea autoFocus value={annotateNote} onChange={event => setAnnotateNote(event.target.value)}
                 placeholder={t('creation.notes.note')} />
             </label>
             <div className={css.colorDots} role="radiogroup" aria-label={t('creation.notes.color')}>

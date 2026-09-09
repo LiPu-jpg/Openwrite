@@ -1,6 +1,19 @@
-# 0.2.5 发布验收记录
+# 0.2.6 发布验收记录
 
-下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.5) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.4` / `v0.2.3` 附件。
+下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.6) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.5` / `v0.2.4` 附件。
+
+宿主基线：dsh **0.1.2-rc.1**。Core **5.8.1** / contract 1。
+
+## 本版改动与验收
+
+- 批注输入框的 `mousedown` 不再 `preventDefault`，可以获得焦点并输入。颜色按钮和提交仍保留选区。
+- 回归：`lets the author focus and type in the annotation note field`。
+
+平台矩阵仍以 GitHub `Release artifact validation` 为准。真实模型测量 `not-run`。本机已运行的 dsh 安装默认不自动替换。
+
+## 0.2.5 记录
+
+下载与最终结果以 [v0.2.5 Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.5) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.4` / `v0.2.3` 附件。
 
 宿主基线：dsh **0.1.2-rc.1**。Core **5.8.1** / contract 1。
 
