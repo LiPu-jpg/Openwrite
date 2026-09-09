@@ -16,7 +16,7 @@ import {
   type ManuscriptDraftRecord,
 } from './draft-store.ts'
 import { storageKey } from './storage.ts'
-import { loadVditor, VditorBody } from './VditorBody.tsx'
+import { loadVditor, VditorBody, type ManuscriptEditorApi } from './VditorBody.tsx'
 import {
   MANUSCRIPT_SELECTION_PRESERVE_ATTR, reviewIssuesForSelection, SELECTION_POLISH_ACTIONS,
   manuscriptSelectionFromRange, selectionPolishRequest,
@@ -638,7 +638,7 @@ export function CreationView(props: CreationViewProps) {
   const [insertNewState, setInsertNewState] = useState('')
   const [insertDescription, setInsertDescription] = useState('')
   const [insertError, setInsertError] = useState('')
-  const [editorApi, setEditorApi] = useState<{ insertAtCaret: (markdown: string) => void } | null>(null)
+  const [editorApi, setEditorApi] = useState<ManuscriptEditorApi | null>(null)
   const [readingOrder, setReadingOrder] = useState<ReadingOrderDto | null>(null)
   const [readingOrderState, setReadingOrderState] = useState<LoadState>('idle')
   const [readingOrderError, setReadingOrderError] = useState('')
@@ -1735,6 +1735,7 @@ export function CreationView(props: CreationViewProps) {
     const next = { start: live.start, end: live.end, text: item.quote }
     manuscriptSelectionRef.current = next
     setManuscriptSelection(next)
+    editorApi?.revealQuote(item.quote, live.start)
     setSelectionNotice(t(live.state === 'relocated' ? 'creation.notes.relocated' : 'creation.notes.attached'))
   }
 

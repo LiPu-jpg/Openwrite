@@ -1,6 +1,21 @@
-# 0.2.4 发布验收记录
+# 0.2.5 发布验收记录
 
-下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.4) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.3` / `v0.2.2` 附件。
+下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.5) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.4` / `v0.2.3` 附件。
+
+宿主基线：dsh **0.1.2-rc.1**。Core **5.8.1** / contract 1。
+
+## 本版改动与验收
+
+- 覆盖层 Range 跨 IR 文本节点拼接，粗体拆分的引文和 `//**…**` 标记能定位。
+- 滚动 `.vditor-ir` 或窗口缩放后重新绘制覆盖层。
+- 「定位」调用编辑器 `revealQuote`，选中并滚到原文。
+- 回归：`manuscript-overlay-dom.test.ts` 拆节点引文/标记、第 n 处 reveal、scroll/resize 解绑；CreationView locate 调用 `revealQuote` 并设置选区。
+
+平台矩阵仍以 GitHub `Release artifact validation` 为准。真实模型测量 `not-run`。本机已运行的 dsh 安装默认不自动替换。
+
+## 0.2.4 记录
+
+下载与最终结果以 [v0.2.4 Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.4) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.3` / `v0.2.2` 附件。
 
 宿主基线：dsh **0.1.2-rc.1**。Core **5.8.1** / contract 1。
 

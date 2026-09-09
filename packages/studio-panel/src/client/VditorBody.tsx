@@ -19,6 +19,7 @@ import {
 import type { ManuscriptAnnotation } from './manuscript-annotations.ts'
 import { parseMarkers } from './manuscript-markers.ts'
 import { overlayBands, overlayFill, type OverlayBand } from './manuscript-overlay.ts'
+import { bindOverlayResync, rangeForNeedle, revealNeedle } from './manuscript-overlay-dom.ts'
 import css from './views.module.css'
 
 /** The slice of the bundled Vditor API this editor uses. */
@@ -100,6 +101,11 @@ export function loadVditor(): Promise<VditorCtor> {
   return loading
 }
 
+export type ManuscriptEditorApi = {
+  insertAtCaret: (markdown: string) => void
+  revealQuote: (quote: string, start: number) => boolean
+}
+
 interface VditorBodyProps {
   /** Initial markdown (the editor is the source of truth afterwards). */
   initial: string
@@ -112,7 +118,7 @@ interface VditorBodyProps {
   flushOnLeave?: boolean
   annotations?: readonly ManuscriptAnnotation[]
   onInsertMarker?: () => void
-  onEditorApi?: (api: { insertAtCaret: (markdown: string) => void } | null) => void
+  onEditorApi?: (api: ManuscriptEditorApi | null) => void
 }
 
 function occurrenceBeforeCaret(host: HTMLElement, selected: string): number | undefined {
@@ -124,33 +130,6 @@ function occurrenceBeforeCaret(host: HTMLElement, selected: string): number | un
   prefix.selectNodeContents(host)
   prefix.setEnd(range.startContainer, range.startOffset)
   return countOccurrences(prefix.toString(), selected)
-}
-
-function rangeForNeedle(root: ParentNode, needle: string, occurrence: number): Range | null {
-  if (needle === '') return null
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  let remaining = occurrence
-  let seen = 0
-  let node = walker.nextNode()
-  while (node !== null) {
-    const value = node.nodeValue ?? ''
-    let from = 0
-    while (from <= value.length - needle.length) {
-      const index = value.indexOf(needle, from)
-      if (index < 0) break
-      if (remaining === 0) {
-        const range = document.createRange()
-        range.setStart(node, index)
-        range.setEnd(node, index + needle.length)
-        return range
-      }
-      remaining -= 1
-      from = index + needle.length
-      seen += 1
-    }
-    node = walker.nextNode()
-  }
-  return seen === 0 && occurrence === 0 ? null : null
 }
 
 function paintOverlay(host: HTMLElement, overlay: HTMLElement, bands: readonly OverlayBand[], dark: boolean): void {
@@ -213,6 +192,7 @@ export function VditorBody({
   useEffect(() => {
     let disposed = false
     let observer: MutationObserver | null = null
+    let unbindOverlay: (() => void) | null = null
     let emitSelection: (() => void) | null = null
     let lastPointerTarget: EventTarget | null = null
     const rememberPointer = (event: Event) => { lastPointerTarget = event.target }
@@ -305,7 +285,28 @@ export function VditorBody({
             emitChange(next)
             refreshOverlay(next)
           },
+          revealQuote: (quote: string, start: number) => {
+            const editorHost = hostRef.current
+            const current = instanceRef.current
+            if (editorHost === null || current === null || quote === '') return false
+            const value = current.getValue()
+            const occurrence = countOccurrences(value.slice(0, Math.max(0, start)), quote)
+            const ir = editorHost.querySelector('.vditor-ir') ?? editorHost
+            const range = revealNeedle(ir, quote, occurrence)
+            if (range === null) return false
+            onSelectionChangeRef.current?.(locateSelectedMarkdown(value, quote, occurrence))
+            refreshOverlay(value)
+            return true
+          },
         })
+        const editorHost = hostRef.current
+        if (editorHost !== null) {
+          unbindOverlay = bindOverlayResync(editorHost, () => {
+            const current = instanceRef.current
+            if (current === null) return
+            try { refreshOverlay(current.getValue()) } catch { /* editor not ready */ }
+          })
+        }
         refreshOverlay(instance.getValue())
         emitSelection = () => {
           const current = instanceRef.current
@@ -345,6 +346,7 @@ export function VditorBody({
       host?.removeEventListener('input', rememberInput, true)
       host?.removeEventListener('focusout', flush)
       observer?.disconnect()
+      unbindOverlay?.()
       document.removeEventListener('mousedown', rememberPointer, true)
       if (emitSelection !== null) {
         host?.removeEventListener('mouseup', emitSelection)
