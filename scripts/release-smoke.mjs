@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { setTimeout as delay } from 'node:timers/promises'
 import { acceptRuntime } from './runtime-acceptance.mjs'
 import { acceptBrowser } from './browser-acceptance.mjs'
@@ -18,7 +19,10 @@ const installSpec = sourceSpec ?? artifact
 const temporary = process.argv.includes('--reuse')
   ? JSON.parse(await readFile(join(root, '.tmp-release-smoke.json'), 'utf8')).temporary
   : await mkdtemp(join(tmpdir(), 'openwrite-release-'))
-const cli = join(root, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
+// Use an independently installed host to test precise compatibility releases.
+const cli = resolve(process.argv.find(arg => arg.startsWith('--host-cli='))?.slice('--host-cli='.length)
+  ?? join(root, 'node_modules/@deepseek-ai/dsh/lib/bin.js'))
+const hostVersion = JSON.parse(await readFile(join(cli, '../../package.json'))).version
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/(?:API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)/i.test(key) && !key.startsWith('DSH_') && !['NODE_OPTIONS', 'NODE_PATH'].includes(key)))
 Object.assign(env, { DSH_HOME: join(temporary, 'dsh'), XDG_CONFIG_HOME: join(temporary, 'config'), XDG_DATA_HOME: join(temporary, 'data'), CI: '1' })
 await mkdir(env.DSH_HOME, { recursive: true })
@@ -38,7 +42,7 @@ async function stopHost() {
   await Promise.race([exited, delay(5000)])
   if (host.exitCode === null && host.signalCode === null) { host.kill('SIGKILL'); await exited }
 }
-const report = { platform: process.platform, osRelease: osRelease(), arch: process.arch, node: process.version, installSource: sourceSpec ?? 'release', artifactSha256: sourceSpec ? null : createHash('sha256').update(await readFile(artifact)).digest('hex'), checks: [], modelCalls: 0, status: 'failed' }
+const report = { host: hostVersion, platform: process.platform, osRelease: osRelease(), arch: process.arch, node: process.version, installSource: sourceSpec ?? 'release', artifactSha256: sourceSpec ? null : createHash('sha256').update(await readFile(artifact)).digest('hex'), checks: [], modelCalls: 0, status: 'failed' }
 try {
   run(['--profile', 'web', '--dump-config'])
   const other = join(temporary, 'coexist-plugin')
@@ -52,6 +56,16 @@ try {
   assert.equal(profile.dsh.profile.bundles.filter(name => name === 'dsh-openwrite').length, 1)
   run(['plugin', '--profile', 'web', 'add', '-w', installSpec])
   report.checks.push('install', 'repeat-install')
+  const hostRequire = createRequire(cli)
+  const pluginRequire = createRequire(join(env.DSH_HOME, 'profiles/web/node_modules/dsh-openwrite/package.json'))
+  report.hostServices = {}
+  for (const name of ['@deepseek-ai/cordis', '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-settings', '@deepseek-ai/dsh-tools']) {
+    const expected = hostRequire(name + '/package.json').version
+    const actual = pluginRequire(name + '/package.json').version
+    assert.equal(actual, expected, `${name}: plugin must use the host's service version`)
+    report.hostServices[name] = actual
+  }
+  report.checks.push('host-service-versions')
   const dump = run(['--profile', 'web', '--dump-config'])
   assert.match(dump, /openwrite-bridge/)
   const server = createServer()
@@ -84,7 +98,9 @@ try {
   assert.ok(status, `Runtime route unavailable: ${log}`)
   assert.equal(await (await browserFetch(base + '/coexist-fixture')).text(), 'other plugin available')
   report.checks.push('existing-plugin-coexistence')
-  const presetId = `openwrite-${version.replace(/[^a-z0-9-]/g, '-')}`
+  const installedVersion = JSON.parse(await readFile(join(env.DSH_HOME, 'profiles/web/node_modules/dsh-openwrite/package.json'))).version
+  report.pluginVersion = installedVersion
+  const presetId = `openwrite-${installedVersion.replace(/[^a-z0-9-]/g, '-')}`
   assert.match(presetId, /^[a-z0-9][a-z0-9-]*$/)
   await readFile(join(env.DSH_HOME, '.agent-presets', presetId, 'agent.cordis.yml'))
   assert.equal((await fetch(base + '/studio-panel/runtime')).status, 401, 'runtime control requires host browser authentication')
@@ -112,7 +128,7 @@ try {
     await delay(1000)
   }
   assert.equal(status.phase, 'ready')
-  report.checks.push('authenticated-runtime', 'isolated-python', 'core-handshake', 'editor-assets')
+  report.checks.push('start', 'authenticated-runtime', 'isolated-python', 'core-handshake', 'editor-assets')
   report.checks.push(...await acceptRuntime(join(env.DSH_HOME, 'profiles/web/node_modules/dsh-openwrite'), env.DSH_HOME, temporary))
   if (process.argv.includes('--browser')) report.checks.push(...await acceptBrowser(loginUrl, temporary))
   console.log(JSON.stringify({ platform: process.platform, arch: process.arch, node: process.version, artifact, installed: true, backend: 'ready', editorAssets: true, modelCalls: 0 }))
@@ -135,7 +151,7 @@ try {
   console.error(report.error)
   throw error
 } finally {
-  await writeFile(join(root, `release-report-${sourceSpec ? 'source-' : ''}${process.platform}-${process.arch}-${process.version}.json`), JSON.stringify(report, null, 2) + '\n')
+  await writeFile(join(root, `release-report-${process.argv.some(arg => arg.startsWith('--host-cli=')) ? hostVersion + '-' : ''}${sourceSpec ? 'source-' : ''}${process.platform}-${process.arch}-${process.version}.json`), JSON.stringify(report, null, 2) + '\n')
   await stopHost()
   if (!process.argv.includes('--keep')) await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
 }
