@@ -25,6 +25,14 @@ const harness = vi.hoisted(() => ({
   setEditorStatus: vi.fn(),
   invalidate: vi.fn(),
   setActiveChapter: vi.fn(),
+  revealQuote: vi.fn((quote: string, start: number) => {
+    const node = document.querySelector<HTMLTextAreaElement>('[aria-label="manuscript-editor"]')
+    if (node === null || node.value.slice(start, start + quote.length) !== quote) return false
+    node.focus()
+    node.setSelectionRange(start, start + quote.length)
+    node.scrollIntoView?.()
+    return true
+  }),
   draftStore: {
     load: vi.fn(),
     save: vi.fn(),
@@ -82,6 +90,7 @@ vi.mock('../../src/client/VditorBody.tsx', () => ({
           node.value = next
           onChangeRef.current(next)
         },
+        revealQuote: harness.revealQuote,
       })
       return () => onEditorApiRef.current?.(null)
     }, [])
@@ -226,6 +235,7 @@ beforeEach(() => {
   harness.setEditorStatus.mockClear()
   harness.invalidate.mockClear()
   harness.setActiveChapter.mockClear()
+  harness.revealQuote.mockClear()
   harness.draftStore.load.mockReset().mockResolvedValue(null)
   harness.draftStore.save.mockReset().mockResolvedValue(undefined)
   harness.draftStore.remove.mockReset().mockResolvedValue(undefined)
@@ -1629,6 +1639,9 @@ describe('CreationView selection notes and marker insert', () => {
     }))
     expect(await screen.findByText('查来源')).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'creation.notes.locate' }))
+    expect(harness.revealQuote).toHaveBeenCalledWith('密信还在', 0)
+    expect(editor.selectionStart).toBe(0)
+    expect(editor.selectionEnd).toBe(4)
     expect(screen.getAllByText('creation.notes.attached').length).toBeGreaterThan(0)
   })
 
