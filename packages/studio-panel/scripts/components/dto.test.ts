@@ -43,8 +43,8 @@ const M1C_PROFILE = {
     status: 'ok', tested_at: '2026-08-31T10:01:00Z', latency_ms: 300,
     provider: 'openai', resolved_model: 'fake-embed', error_code: null, failed_stage: null,
   },
-  api_key: 'must-not-enter-the-dto',
-  embedding_api_key: 'legacy-key-must-not-enter-the-dto',
+  api_key: 'test-only',
+  embedding_api_key: 'test-embedding',
 }
 
 describe('parseModelProfiles', () => {

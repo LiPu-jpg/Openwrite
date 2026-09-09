@@ -13,13 +13,17 @@ assert.equal(manifest.source.plugin.dirty, false, 'Release source must be clean'
 const reports = await Promise.all(files.filter(file => /^release-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
 const required = ['install', 'repeat-install', 'existing-plugin-coexistence', 'native-dependency-load', 'native-backend-project-init', 'backend-auth', 'failed-upgrade-preserves-active', 'rollback', 'uninstall', 'retain-data']
 for (const [platform, arch, major] of [['linux', 'x64', 24], ['darwin', 'arm64', 24], ['darwin', 'x64', 24], ['win32', 'x64', 24], ['linux', 'x64', 22], ['linux', 'x64', 26]]) {
-  const report = reports.find(r => r.installSource === 'release' && r.platform === platform && r.arch === arch && Number(r.node.match(/^v(\d+)/)?.[1]) === major)
+  const report = reports.find(r => r.installSource === 'release' && (!r.host || r.host === manifest.host) && r.platform === platform && r.arch === arch && Number(r.node.match(/^v(\d+)/)?.[1]) === major)
   assert.ok(report, `Missing ${platform}/${arch}/Node ${major}`)
   assert.equal(report.status, 'passed')
   assert.equal(report.artifactSha256, manifest.sha256, 'Platform tested different artifact')
   for (const check of required) assert.ok(report.checks.includes(check), `Missing check: ${check}`)
   assert.ok(report.checks.includes('native-browser-launch'), 'Missing browser acceptance')
 }
+const alpha = reports.find(r => r.host === '0.1.5-alpha.1' && r.platform === 'linux' && r.arch === 'x64')
+assert.equal(alpha?.status, 'passed', 'Exact alpha host compatibility must pass')
+assert.equal(alpha.artifactSha256, manifest.sha256, 'Alpha host tested different artifact')
+for (const check of [...required, 'host-service-versions', 'native-browser-launch']) assert.ok(alpha.checks.includes(check), `Alpha missing check: ${check}`)
 const source = reports.find(r => r.installSource.startsWith('github:'))
 assert.equal(source?.status, 'passed', 'GitHub source installation must pass')
 for (const check of required) assert.ok(source.checks.includes(check), `Source missing check: ${check}`)

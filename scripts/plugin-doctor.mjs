@@ -22,7 +22,14 @@ export function auditVersions(manifest, lock, baseline, graph = {}) {
     const locked = lock.packages?.['']?.[field] ?? {}
     for (const name of new Set([...Object.keys(declared), ...Object.keys(locked)])) {
       if (declared[name] !== locked[name]) errors.push(`lock metadata differs: ${field}.${name}`)
-      if (isDsh(name) && declared[name] !== undefined && declared[name] !== (graph[name] ?? baseline)) {
+      // Build dependencies remain pinned; public peers may enumerate verified hosts.
+      const peerVersions = typeof declared[name] === 'string' ? declared[name].split(' || ') : []
+      const verified = manifest.dsh?.compatibility?.dshReleases ?? {}
+      const compatiblePeer = field === 'peerDependencies' && peerVersions.length > 0
+        && peerVersions.includes(graph[name] ?? baseline)
+        && peerVersions.every(value => exactVersion(value)
+          && (value === (graph[name] ?? baseline) || verified[value] === 'compatible'))
+      if (isDsh(name) && declared[name] !== undefined && declared[name] !== (graph[name] ?? baseline) && !compatiblePeer) {
         errors.push(`unpinned DSH dependency: ${name}=${declared[name]}`)
       }
       if (isDsh(name) && declared[name] !== undefined

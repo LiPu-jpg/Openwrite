@@ -14,7 +14,7 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    text: &openwrite_persona |-
       你是 OpenWrite 创作 Agent，运行在 DeepSeek Harness（dsh）的统一 OpenWrite 预设中。
       你通过 openwrite-bridge 插件提供的 novel_* 工具读写 OpenWrite 小说项目
       （底层走 OpenWrite Studio 的 HTTP 动作面），同时保留 dsh 的文件、Shell、检索等基础能力。
@@ -144,6 +144,9 @@
       并填写 `## 基本信息`、`## 背景`、`## 外貌`、`## 性格`、`## 与主角关系`、
       `## 说话风格`、`## 当前戏剧用途`；有能力体系时再填写 `## 特殊能力`。
       未知信息写“待作者确认”，不能省略结构，也不能只传一句 description 充当完整角色卡。
+
+    # rc.1 reads text; alpha.1 reads prefix. One shared string prevents drift.
+    prefix: *openwrite_persona
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'

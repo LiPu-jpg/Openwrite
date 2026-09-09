@@ -77,3 +77,18 @@ test('uses the reviewed host graph instead of imposing one version on every pack
   const lock = { packages: { '': manifest, [`node_modules/${sdk}`]: { version: '0.1.2-rc.1' } } }
   assert.deepEqual(auditVersions(manifest, lock, '0.2.0', graph), [])
 })
+
+// Accept a second tested host without allowing caret ranges or untested peers.
+test('public peer unions require exact compatible releases and keep build pins', () => {
+  const release = '0.1.5-alpha.1'
+  const range = `${baseline} || ${release}`
+  const pkg = { peerDependencies: { [sdk]: range }, dsh: { compatibility: { dshReleases: { [release]: 'compatible' } } } }
+  const peers = { packages: { '': { peerDependencies: { [sdk]: range } }, [`node_modules/${sdk}`]: { version: baseline } } }
+  assert.deepEqual(auditVersions(pkg, peers, baseline), [])
+  pkg.dsh.compatibility.dshReleases[release] = 'unknown'
+  assert.match(auditVersions(pkg, peers, baseline).join(), /unpinned DSH dependency/)
+  pkg.dsh.compatibility.dshReleases[release] = 'compatible'
+  pkg.devDependencies = { [sdk]: range }
+  peers.packages[''].devDependencies = { [sdk]: range }
+  assert.match(auditVersions(pkg, peers, baseline).join(), /unpinned DSH dependency/)
+})

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+import { resolve } from 'node:path'
 import { load } from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 
@@ -13,10 +15,23 @@ const flatten = entries => entries.flatMap(row => [row, ...(row.group && Array.i
 const allRows = flatten(rows)
 assert.equal(allRows.some(row => row?.name === '@dsh-novel/openwrite-bridge'), false,
   'openwrite-bridge belongs to the host profile and must not be mounted by the preset')
-const require = createRequire(new URL('package.json', root))
+const hostCli = process.argv.find(arg => arg.startsWith('--host-cli='))?.slice('--host-cli='.length)
+const require = createRequire(hostCli ? resolve(hostCli) : new URL('package.json', root))
 for (const row of allRows) {
   if (row.name?.startsWith('@deepseek-ai/')) require.resolve(row.name)
 }
+
+// Validate against the actual host schema: alpha renamed persona.text to prefix.
+const persona = rows.find(row => row.name === '@deepseek-ai/dsh-persona')
+assert.equal(persona.config.prefix, persona.config.text, 'both SDK contracts share one persona')
+const personaModule = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-persona')).href)
+const personaConfig = personaModule.Config(persona.config)
+const sections = []
+personaModule.apply({
+  effect: action => action(),
+  systemPrompt: { section: value => sections.push(value), getSectionOrder: () => 0 },
+}, personaConfig)
+assert.equal(sections.filter(section => section.text === persona.config.text).length, 1, 'persona appears exactly once')
 
 const metadata = load(await readFile(new URL('preset.yml', presetDir), 'utf8'))
 assert.equal(metadata.name, 'OpenWrite 创作')
