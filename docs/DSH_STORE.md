@@ -13,7 +13,7 @@ OpenWrite 是一个完整的小说创作插件套件。商城安装目标是仓�
 
 根包统一加载 `openwrite-bundle`、`openwrite-bridge`、`studio-panel`、`openwrite-dog`。这些既有 ID 保持稳定。`packages/openwrite-bridge`、`packages/studio-panel` 是内部开发包，不应和根包一起登记到同一个 Profile，也不需要删除它们或拆成独立商城条目。
 
-源码安装必须固定到完整 Commit；`prepare` 会自包含构建三个内部插件，包含 Core wheel、编辑器静态资源、预设和许可证，不依赖相邻源码。构建授权仍遵循用户的 pnpm 设置。普通用户继续优先使用已验收的 GitHub Release `.tgz`，见 README。
+源码验收必须固定到完整 Commit；`prepare` 会自包含构建三个内部插件，包含 Core wheel、编辑器静态资源、预设和许可证，不依赖相邻源码。构建授权仍遵循用户的 pnpm 设置。普通用户优先使用 npm 预编译包：`dsh plugin --profile web add -w dsh-openwrite@latest`。latest 只在执行安装或升级时解析，运行中不自动更新。市场的版本、兼容和验收字段应记录实际核验的精确版本；不能把已有验收结果自动套用到未来版本。精确 npm 版本及对应 GitHub Release `.tgz` 继续用于复现与回退，见 README。
 
 ## 兼容声明与证据
 
