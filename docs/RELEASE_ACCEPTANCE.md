@@ -1,4 +1,19 @@
-# 0.2.7 发布验收记录
+# 发布验收记录
+
+## 0.2.9
+
+[Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.9) 与 npm dsh-openwrite@0.2.9 使用 [主分支 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/34532531326) 验收过的同一份包；来源提交为 8ecada040db2c3ddf699d7a5bc1ddd86336b88fe，SHA-256 为 2a885d03f931505432b78424922c63e7ac75c70a10ab57b7c7503d059af7b627。npm 下载后再次核对一致。
+
+- 六组原生平台安装、启动、浏览器和卸载，以及 GitHub 源码安装、固定 alpha 依赖图兼容检查全部通过；详见 Release 的 release-acceptance.json。
+- 287 项组件测试通过；编辑器随包资源改为固定同源脚本加载，并验证在不允许 unsafe-eval 的浏览器策略下正常初始化和渲染 Markdown。
+- 日常安装使用 npm latest；验收、兼容和回退保留精确版本。运行中不自动升级。宿主基线仍为 dsh 0.1.2-rc.1，Core 5.8.1 / contract 1。
+- 真实模型验证 not-run，模型调用 0 次。不将静态扫描警告全部消除作为本次结论。
+
+## 0.2.8
+
+[Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.8) 与 npm dsh-openwrite@0.2.8 的 SHA-256 均为 3a54f30fec03a5a64338f6cbc8216cafdc733cdf3622691fdbc8f029d78e4902。验收见 [CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/34368570869)：Intel 首次超时，未修改代码重跑通过；历史失败保留。npm 分发另在 macOS arm64 / Node 24 的隔离环境完成 25 项安装、运行、浏览器及卸载检查。真实模型验证 not-run。
+
+## 0.2.7 记录
 
 下载与最终结果以 [Release 附件](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.7) 的 `release-acceptance.json` 为准。报告绑定唯一 `.tgz` 的 SHA-256。失败、未运行、取消和跳过不计为通过；发布直接提升 CI 产物。不覆盖 `v0.2.6` / `v0.2.5` 附件。
 

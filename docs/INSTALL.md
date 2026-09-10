@@ -1,6 +1,6 @@
 # 安装、更新与卸载
 
-安装已发布的版本；可下载产物、SHA-256 和实际平台结果以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.8) 附件为准。验收方法见 [验收报告](RELEASE_ACCEPTANCE.md)。
+安装已发布的版本；可下载产物、SHA-256 和实际平台结果以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准。验收方法见 [验收报告](RELEASE_ACCEPTANCE.md)。
 
 ## 标准安装
 
