@@ -13,6 +13,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import VditorRuntime, { installVditorIcons } from 'dsh-vditor-runtime'
+import { loadPackagedEditorGlobal } from './packaged-editor-globals.ts'
 import {
   countOccurrences, locateSelectedMarkdown, shouldClearManuscriptSelection, type ManuscriptSelection,
 } from './manuscript-selection.ts'
@@ -44,19 +45,6 @@ function applyTheme(instance: VditorInstance, dark: boolean): void {
   instance.setTheme(dark ? 'dark' : 'classic', dark ? 'dark' : 'light', undefined, CONTENT_THEME_PATH)
 }
 
-async function installPackagedGlobal(path: string, globalName: 'Lute' | 'VditorI18n'): Promise<void> {
-  const win = window as unknown as Record<string, unknown>
-  if (win[globalName] !== undefined) return
-  const response = await fetch(path, { headers: { accept: 'text/javascript' } })
-  if (!response.ok) {
-    throw new Error(`studio-panel: failed to load ${globalName} (${String(response.status)})`)
-  }
-  const source = await response.text()
-  if (win[globalName] !== undefined) return
-  new Function(source).call(window)
-  if (win[globalName] === undefined) throw new Error(`studio-panel: ${globalName} did not initialize`)
-}
-
 /**
  * Attach Vditor's packaged CSS and resolve the constructor bundled into this
  * plugin. Auxiliary language/theme assets continue to use the same-origin
@@ -75,8 +63,8 @@ export function loadVditor(): Promise<VditorCtor> {
       document.head.appendChild(link)
     }
     await Promise.all([
-      installPackagedGlobal(`${VDITOR_BASE}/dist/js/i18n/zh_CN.js`, 'VditorI18n'),
-      installPackagedGlobal(`${VDITOR_BASE}/dist/js/lute/lute.min.js`, 'Lute'),
+      loadPackagedEditorGlobal('VditorI18n'),
+      loadPackagedEditorGlobal('Lute'),
     ])
     if (document.getElementById('vditorLuteScript') === null) {
       const marker = document.createElement('script')

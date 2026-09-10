@@ -1,6 +1,6 @@
 {
   "name": "dsh-openwrite",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "OpenWrite 长篇小说领域后端接入 DeepSeek Harness：统一创作 Agent 预设 + 原生创作工作台",
   "type": "module",
   "scripts": {
