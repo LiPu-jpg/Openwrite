@@ -74,6 +74,7 @@ jobs:
         with:
           name: release-package
       - run: node scripts/release-check.mjs
+      - run: node packages/studio-panel/scripts/packaged-globals-browser.mjs
       - run: node scripts/release-smoke.mjs --browser
       - uses: actions/upload-artifact@v4
         if: always()
