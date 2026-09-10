@@ -28,12 +28,12 @@
 
 ## 快速安装
 
-**0.2.7 标准插件包**兼容 dsh **0.1.2-rc.1**。可下载版本、三平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.7) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。默认使用 npm `latest` 渠道；商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
+**0.2.8 标准插件包**兼容 dsh **0.1.2-rc.1**。可下载版本、三平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.8) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。默认使用 npm `latest` 渠道；商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
 
 已有匹配版本 dsh 的用户执行：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.7/dsh-openwrite-0.2.7.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.8/dsh-openwrite-0.2.8.tgz
 dsh web
 ```
 
@@ -65,6 +65,27 @@ dsh web
 | 导出成稿 | `/export-book` 或「任务 → 导入与导出」 |
 
 已有会话不会自动切换预设。详细操作与工作区规则见 [使用流程](docs/WORKFLOWS.md)。
+
+## 配置模型
+
+安装和环境健康检查不需要模型 API Key，也不会调用写作模型。与 Agent 对话、生成章节和审稿需要可用的模型配置；使用收费服务商时会产生 API 费用。
+
+- **对话模型**：在 dsh 宿主中配置，用于 OpenWrite 创作会话。
+- **小说生成、评审与测试模型**：在「任务 → 模型」添加服务商，按服务商提供的信息填写模型名、接口地址和 API Key。不要把密钥粘贴到对话、作品正文或 Git 仓库。
+- **作品目录**：选择自己的本地目录；后端端口与 Python 环境由插件管理，无需手动配置。
+
+旧开发安装的全局模型配置不会自动迁入受管理环境，迁移步骤见 [安装指南](docs/INSTALL.md)。模型连通性测试可能实际调用服务商，应与不调用模型的环境健康检查区分。
+
+## 示例：从大纲开始一部新小说
+
+打开 OpenWrite，选择一个空的作品目录并完成初始化，然后进入 **OpenWrite 创作** 会话。可发送：
+
+```text
+请先帮我规划一部短篇悬疑小说：主角是一位修复旧照片的摄影师。
+先提出人物、核心谜题和五章大纲，等我确认后再生成正文。
+```
+
+确认大纲后使用 `/write-next` 开始写章，在「创作」中编辑正文或添加选区批注；使用 `/review-chapter` 审稿，在应用修订前查看差异。生成与评审会使用前面配置的模型。成稿通过 `/export-book` 或「任务 → 导入与导出」导出。
 
 ## 功能
 
