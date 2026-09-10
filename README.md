@@ -33,15 +33,17 @@
 已有匹配版本 dsh 的用户执行：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.8/dsh-openwrite-0.2.8.tgz
+dsh plugin --profile web add -w dsh-openwrite@0.2.8
 dsh web
 ```
+
+[npm 包](https://www.npmjs.com/package/dsh-openwrite)与 [v0.2.8 Release 预编译包](https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.8/dsh-openwrite-0.2.8.tgz) 是同一份产物。无需在安装时编译源码；也可将命令中的 `dsh-openwrite@0.2.8` 换成该 Release 下载地址。
 
 也可把这段话交给有终端权限的 Agent：
 
 ```text
 请按 https://github.com/LiPu-jpg/Openwrite 的 README 和对应 Release 安装 OpenWrite。
-先核对 Release 验收结果、精确 dsh 版本和 SHA-256，再安装发布的 .tgz。
+先核对 Release 验收结果和精确 dsh 版本，再安装对应版本的 npm 包或校验 SHA-256 后安装 Release .tgz。
 已有本地安装先备份并迁移，保留作品、自定义预设、凭据和其他插件。
 启动 dsh web，指导我点击 OpenWrite、准备环境并选择自己的作品。
 不要调用写作模型做安装检查，不要自动升级宿主或放宽 pnpm 构建授权。

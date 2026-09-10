@@ -9,8 +9,14 @@
 安装命令：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.8/dsh-openwrite-0.2.8.tgz
+dsh plugin --profile web add -w dsh-openwrite@0.2.8
 dsh web
+```
+
+npm 的 `dsh-openwrite@0.2.8` 与 GitHub Release 的 v0.2.8 `.tgz` 为同一份已验收产物，包含预编译插件、编辑器资源与 Core wheel。也可保留直接安装 Release 的方式：
+
+```sh
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.8/dsh-openwrite-0.2.8.tgz
 ```
 
 `-w` 是 pnpm profile workspace 的安装参数。只输入 `dsh` 会要求 `--profile`；启动浏览器使用 `dsh web`。浏览器地址由宿主输出，不固定为 3080。
@@ -48,7 +54,7 @@ dsh 对话模型在宿主中配置。小说生成、评审与测试模型在「�
 ```sh
 node package/scripts/maintenance.mjs migrate --profile web
 node package/scripts/maintenance.mjs migrate --profile web --apply
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.8/dsh-openwrite-0.2.8.tgz
+dsh plugin --profile web add -w dsh-openwrite@0.2.8
 dsh web
 ```
 
@@ -60,7 +66,7 @@ dsh web
 
 ## 更新与回退
 
-停止 dsh，对照新 Release 的精确宿主兼容版本，用新 `.tgz` 再执行 `plugin add`。环境安装使用临时目录，校验并成功启动后才替换活动记录；失败保留旧环境和配置。取消或失败后可从入口重试。
+停止 dsh，对照新 Release 的精确宿主兼容版本，指定新的 `dsh-openwrite@版本号` 或新 `.tgz` 再执行 `plugin add`。环境安装使用临时目录，校验并成功启动后才替换活动记录；失败保留旧环境和配置。取消或失败后可从入口重试。
 
 回退时，停止 dsh，重新安装上一份已验收 `.tgz`。官方预设采用版本 ID（如 `openwrite-0-2-1`），不会覆盖用户预设。请先把官方预设复制为 `openwrite-你的名称` 再修改；对被直接修改的同版本官方预设，插件保留文件并报告冲突。
 
