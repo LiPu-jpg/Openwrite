@@ -23,20 +23,23 @@ export async function acceptRuntime(installed, home, temporary) {
     const novel = join(temporary, 'backend-中文作品-100%')
     await mkdir(novel)
     const initializedAt = Date.now()
+    // Cold workspace initialization includes filesystem and Git work. Allow
+    // slower native runners to finish, without retrying this write operation.
+    const initializationTimeoutMs = 60_000
     console.log('Backend: initializing empty Unicode workspace; stdout paused:', second.child.stdout.isPaused())
     try {
       const initialized = await fetch(b.baseUrl + '/api/project/init', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + b.token, 'Content-Type': 'application/json', 'X-OpenWrite-Studio': '1', 'X-OpenWrite-Workspace-Root': encodeURIComponent(novel), 'X-OpenWrite-Workspace-Root-Encoding': 'uri' },
         body: JSON.stringify({ novel_id: 'backend-test', title: '后端初始化验收', project_path: novel }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(initializationTimeoutMs),
       })
       assert.equal(initialized.status, 200)
       const payload = await initialized.json()
       assert.equal((payload.data ?? payload).initialized, true)
       console.log('Backend: Unicode initialization complete', Date.now() - initializedAt, 'ms')
     } catch (error) {
-      console.error('Backend initialization diagnostics:', { elapsed: Date.now() - initializedAt, stdoutPaused: second.child.stdout.isPaused(), files: await readdir(novel, { recursive: true }) })
+      console.error('Backend initialization diagnostics:', { elapsed: Date.now() - initializedAt, timeoutMs: initializationTimeoutMs, stdoutPaused: second.child.stdout.isPaused(), files: await readdir(novel, { recursive: true }) })
       if (process.platform === 'win32') {
         const { diagnoseInitialization } = await import('./windows-runtime-diagnostic.mjs')
         await diagnoseInitialization(second.child.spawnfile, temporary, stopOwnedProcess)
