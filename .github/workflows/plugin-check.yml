@@ -1,7 +1,15 @@
 name: Plugin maintenance
 on:
   push:
+    branches: [main, native-core]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**/*.md'
   pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**/*.md'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:

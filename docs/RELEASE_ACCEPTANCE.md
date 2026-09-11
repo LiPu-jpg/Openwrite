@@ -1,5 +1,11 @@
 # 发布验收记录
 
+## CI 运行范围
+
+仅修改 README.md 或 docs 下的 Markdown 文档时，跳过插件维护与跨平台发布验收。预设、技能、脚本、依赖、资源和工作流变更仍触发检查；混合文档与代码的提交也照常检查。开发分支通过 PR 检查，避免同一提交在分支 push 与 PR 上重复执行；主分支合并后保留验收，两个工作流均可手动触发。发布必须使用完整验收通过的产物，跳过检查不能作为发布通过的证据。
+
+新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
+
 ## 0.2.9
 
 [Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.9) 与 npm dsh-openwrite@0.2.9 使用 [主分支 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/34532531326) 验收过的同一份包；来源提交为 8ecada040db2c3ddf699d7a5bc1ddd86336b88fe，SHA-256 为 2a885d03f931505432b78424922c63e7ac75c70a10ab57b7c7503d059af7b627。npm 下载后再次核对一致。

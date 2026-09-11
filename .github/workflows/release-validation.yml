@@ -1,8 +1,14 @@
 name: Release artifact validation
 on:
   push:
-    branches: [main, 'codex/**']
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**/*.md'
   pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**/*.md'
   workflow_dispatch:
 permissions:
   contents: read
