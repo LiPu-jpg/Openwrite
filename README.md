@@ -13,6 +13,7 @@
   <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.1.2--rc.1-2563eb" alt="dsh 0.1.2-rc.1"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node-%E2%89%A522.19-15803d" alt="Node >= 22.19"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0f766e" alt="Apache-2.0"></a>
+  <a href="https://dsh-plugin.org/plugins/lipu-jpg/openwrite"><img src="https://dsh-plugin.org/badges/listed.svg" alt="Listed on dsh-plugin.org"></a>
 </p>
 
 <p align="center">
