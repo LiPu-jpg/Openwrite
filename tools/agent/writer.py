@@ -170,7 +170,7 @@ class WriterAgent(BaseAgent):
         response = self.chat(
             messages=messages,
             temperature=temperature,
-            max_tokens=max(16384, target_words * 2),
+            max_tokens=None,  # Respect the selected model profile output budget.
         )
         first_usage = response.usage if response.usage else {}
         try:
@@ -234,7 +234,7 @@ class WriterAgent(BaseAgent):
                     Message("user", hint),
                 ],
                 temperature=max(0.2, temperature - 0.15),
-                max_tokens=max(16384, target_words * 2),
+                max_tokens=None,  # Respect the selected model profile output budget.
             )
             if retry_response.usage:
                 all_usage.append(retry_response.usage)
@@ -524,7 +524,7 @@ class WriterAgent(BaseAgent):
                 Message("user", user_prompt),
             ],
             temperature=0.5,
-            max_tokens=4096,
+            max_tokens=None,  # Reasoning and final content share the configured budget.
         )
 
         return {"content": response.content, "usage": response.usage or {}}
@@ -605,7 +605,7 @@ chapter_summary: |
                     Message("user", user_prompt),
                 ],
                 temperature=0.3,
-                max_tokens=8192,
+                max_tokens=None,  # Do not silently shrink the configured model budget.
             )
             return self._parse_settlement(
                 response.content,
@@ -644,7 +644,7 @@ chapter_summary: "80-150字章节摘要"
                 Message("user", compact_prompt),
             ],
             temperature=0.1,
-            max_tokens=4096,
+            max_tokens=None,  # Reasoning and final content share the configured budget.
         )
         return self._parse_settlement(
             retry.content,

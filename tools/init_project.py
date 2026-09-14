@@ -43,6 +43,8 @@ def init_project(
     title: str | None = None,
     *,
     template: str = "default",
+    author: str = "",
+    language: str = "zh-CN",
 ):
     """Validate and initialize a project with best-effort failure rollback."""
     root = Path(project_root)
@@ -68,7 +70,7 @@ def init_project(
 
     snapshot = _initialization_snapshot(root, clean_id)
     try:
-        result = _init_project_impl(root, clean_id, title, template=template)
+        result = _init_project_impl(root, clean_id, title, template=template, author=author, language=language)
         from tools.project_registry import initialize_content_git
 
         initialize_content_git(root)
@@ -183,6 +185,8 @@ def _init_project_impl(
     title: str | None = None,
     *,
     template: str = "default",
+    author: str = "",
+    language: str = "zh-CN",
 ):
     """初始化小说项目
 
@@ -223,19 +227,21 @@ def _init_project_impl(
 
     config_path = project_root / "novel_config.yaml"
     if not config_path.exists():
-        title_line = f"title: {title}\n" if title else ""
-        config_content = f"""novel_id: {novel_id}
-{title_line}style_id: {novel_id}
-current_arc: arc_001
-current_chapter: ch_001
-writing_targets:
-  book_words: 100000
-  chapter_words: 3000
-  outline_volume_words: 800
-  outline_act_words: 500
-  outline_section_words: 300
-  outline_chapter_words: 180
-"""
+        from tools.project_metadata import normalize_project_metadata
+
+        metadata = normalize_project_metadata({"title": title or "", "author": author, "language": language})
+        config_content = yaml.safe_dump({
+            "novel_id": novel_id,
+            **metadata,
+            "style_id": novel_id,
+            "current_arc": "arc_001",
+            "current_chapter": "ch_001",
+            "writing_targets": {
+                "book_words": 100000, "chapter_words": 3000,
+                "outline_volume_words": 800, "outline_act_words": 500,
+                "outline_section_words": 300, "outline_chapter_words": 180,
+            },
+        }, allow_unicode=True, sort_keys=False)
         config_path.write_text(config_content, encoding="utf-8")
         print("✓ 创建配置: novel_config.yaml")
 

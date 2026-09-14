@@ -45,11 +45,13 @@ class NovelApplicationService:
         title: str = "",
         *,
         template: str = "default",
+        author: str = "",
+        language: str = "zh-CN",
     ) -> NovelApplicationService:
         from tools.init_project import init_project
 
         try:
-            init_project(Path(project_root), novel_id, title, template=template)
+            init_project(Path(project_root), novel_id, title, template=template, author=author, language=language)
         except Exception as exc:
             raise NovelServiceError(f"初始化失败: {exc}", code="INVALID_INPUT") from exc
         return cls(Path(project_root))

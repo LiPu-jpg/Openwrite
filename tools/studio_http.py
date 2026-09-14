@@ -74,6 +74,7 @@ POST_ROUTES = {
     "/api/project/init": StudioPostRoute("initialize_project", requires_project=False),
     "/api/project/open": StudioPostRoute("open_project", requires_project=False),
     "/api/project/delete": StudioPostRoute("delete_project", requires_project=False),
+    "/api/project/metadata": StudioPostRoute("update_project_metadata"),
     "/api/project/writing-targets": StudioPostRoute("update_writing_targets"),
     "/api/write": StudioPostRoute("write_next_chapter"),
     "/api/chapter/delete": StudioPostRoute("delete_chapter"),
