@@ -734,7 +734,10 @@ class StudioApplication:
         if template not in {"default", "demo_short"}:
             raise StudioError("不支持的模板类型，可选 default 或 demo_short")
         try:
-            NovelApplicationService.initialize(target, novel_id, title, template=template)
+            NovelApplicationService.initialize(
+                target, novel_id, title, template=template,
+                author=payload.get("author", ""), language=payload.get("language", "zh-CN"),
+            )
         except NovelServiceError as exc:
             raise self._translate_service_error(exc) from exc
         write_content_project_metadata(target)
@@ -842,6 +845,8 @@ class StudioApplication:
 
     def _project_payload(self) -> dict[str, Any]:
         recent = self._project_registry.list() if self._project_registry is not None else []
+        metadata_text = self.config_path.read_text(encoding="utf-8") if self.initialized else ""
+        metadata_config = yaml.safe_load(metadata_text) or {}
         return {
             "root": str(self.project_root),
             "launch_root": str(self.launch_root),
@@ -850,6 +855,8 @@ class StudioApplication:
                 not self.initialized and is_framework_root(self.project_root)
             ),
             "recent": recent,
+            "metadata": {key: str(metadata_config.get(key) or ("zh-CN" if key == "language" else "")) for key in ("title", "author", "language")},
+            "metadata_revision": RevisionService.fingerprint(metadata_text) if self.initialized else "",
             "writing_targets": normalize_writing_targets(
                 self.config.get("writing_targets") if self.initialized else {}
             ),
@@ -2192,6 +2199,47 @@ class StudioApplication:
             result_revision=RevisionService.fingerprint(after_text),
         )
         return workspace
+
+    def update_project_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Update publication fields only, with an optimistic config revision."""
+        from tools.project_metadata import normalize_project_metadata
+
+        self.require_project()
+        if set(payload) - {"title", "author", "language", "expected_revision"}:
+            raise StudioError("只允许修改书名、作者和语言", HTTPStatus.BAD_REQUEST)
+        try:
+            changes = normalize_project_metadata(payload)
+        except ValueError as exc:
+            raise StudioError(str(exc), HTTPStatus.BAD_REQUEST) from exc
+        if not changes:
+            raise StudioError("请提供要修改的作品信息", HTTPStatus.BAD_REQUEST)
+        with self._write_lock:
+            before = self.config_path.read_text(encoding="utf-8")
+            if payload.get("expected_revision") != RevisionService.fingerprint(before):
+                raise StudioError("作品信息已变化，请重新载入后保存", HTTPStatus.CONFLICT)
+            config = yaml.safe_load(before) or {}
+            config.update(changes)
+            content = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
+            descriptor, name = tempfile.mkstemp(prefix=".novel_config.", suffix=".yaml.tmp", dir=self.config_path.parent)
+            temp_path = Path(name)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp_path, self.config_path)
+            finally:
+                temp_path.unlink(missing_ok=True)
+            self.config = config
+            if self._novel_service is not None:
+                self._novel_service.refresh()
+        result = self._project_payload()
+        result["mutation_summary"] = build_mutation_summary(
+            operation="project.metadata.update", entity_kind="project", entity_id=self.novel_id,
+            path="novel_config.yaml", before={key: (yaml.safe_load(before) or {}).get(key, "") for key in changes},
+            after=changes, source_revision=RevisionService.fingerprint(before), result_revision=RevisionService.fingerprint(content),
+        )
+        return result
 
     def update_writing_targets(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.require_project()
@@ -6447,6 +6495,9 @@ class LegacyStudioRequestHandler(SimpleHTTPRequestHandler):
                 return
             if route == "/api/project/delete":
                 self._json(self.app.delete_project(payload))
+                return
+            if route == "/api/project/metadata":
+                self._json(self.app.update_project_metadata(payload))
                 return
             if route == "/api/project/writing-targets":
                 self._json(self.app.update_writing_targets(payload))
