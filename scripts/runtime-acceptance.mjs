@@ -31,12 +31,22 @@ export async function acceptRuntime(installed, home, temporary) {
       const initialized = await fetch(b.baseUrl + '/api/project/init', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + b.token, 'Content-Type': 'application/json', 'X-OpenWrite-Studio': '1', 'X-OpenWrite-Workspace-Root': encodeURIComponent(novel), 'X-OpenWrite-Workspace-Root-Encoding': 'uri' },
-        body: JSON.stringify({ novel_id: 'backend-test', title: '后端初始化验收', project_path: novel }),
+        body: JSON.stringify({ novel_id: 'backend-test', title: '后端初始化验收', author: '初始化作者', language: 'zh-CN', project_path: novel }),
         signal: AbortSignal.timeout(initializationTimeoutMs),
       })
       assert.equal(initialized.status, 200)
       const payload = await initialized.json()
       assert.equal((payload.data ?? payload).initialized, true)
+      const project = (payload.data ?? payload).project
+      assert.equal(project.metadata.author, '初始化作者')
+      const metadataUrl = b.baseUrl + '/api/project/metadata'
+      const metadataHeaders = { Authorization: 'Bearer ' + b.token, 'Content-Type': 'application/json', 'X-OpenWrite-Studio': '1', 'X-OpenWrite-Workspace-Root': encodeURIComponent(novel), 'X-OpenWrite-Workspace-Root-Encoding': 'uri' }
+      const metadataBody = JSON.stringify({ author: '交付作者', expected_revision: project.metadata_revision })
+      const updated = await fetch(metadataUrl, { method: 'POST', headers: metadataHeaders, body: metadataBody, signal: AbortSignal.timeout(15_000) })
+      assert.equal(updated.status, 200)
+      assert.equal((await updated.json()).metadata.author, '交付作者')
+      assert.equal((await fetch(metadataUrl, { method: 'POST', headers: metadataHeaders, body: metadataBody, signal: AbortSignal.timeout(15_000) })).status, 409)
+      assert.equal((await fetch(metadataUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-OpenWrite-Studio': '1' }, body: metadataBody, signal: AbortSignal.timeout(15_000) })).status, 401)
       console.log('Backend: Unicode initialization complete', Date.now() - initializedAt, 'ms')
     } catch (error) {
       console.error('Backend initialization diagnostics:', { elapsed: Date.now() - initializedAt, timeoutMs: initializationTimeoutMs, stdoutPaused: second.child.stdout.isPaused(), files: await readdir(novel, { recursive: true }) })
@@ -71,6 +81,6 @@ export async function acceptRuntime(installed, home, temporary) {
     const rollback = new ManagedRuntime(root, artifacts)
     try { await rollback.ensure(); assert.equal(rollback.status().phase, 'ready') }
     finally { await rollback.dispose() }
-    return ['native-dependency-load', 'native-backend-project-init', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
+    return ['native-dependency-load', 'native-backend-project-init', 'project-metadata-update', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
   } finally { await first.dispose(); await second.dispose() }
 }

@@ -4,6 +4,7 @@ import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/clie
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { API_PROXY_BASE, studioContextHeaders } from './api.ts'
 import { parseExportPreflight, type ExportFormatDto, type ExportPreflightDto, type ExportPurposeDto } from './dto.ts'
+import { ProjectMetadataEditor } from './ProjectMetadataEditor.tsx'
 import { ResearchView } from './ResearchView.tsx'
 import { BenchmarkView } from './BenchmarkView.tsx'
 import { ModelView, type ModelNavigationGuard } from './ModelView.tsx'
@@ -357,6 +358,7 @@ function TransferPanel(props: OperationsViewProps) {
     <section className={css.operationSection}>
       <div><Download size={18} /><strong>{t('tools.export')}</strong></div>
       <div className={css.exportWorkspace}>
+        {workspace !== undefined && !notInitialized && <ProjectMetadataEditor fetchStudioApi={fetchStudioApi} postStudioApi={postStudioApi} t={t} onSaved={() => { setPreflightReload(value => value + 1); workbenchStore.invalidate('workspace') }} />}
         <div className={css.exportControls}>
           <span className={css.exportPurpose} role="group" aria-label={t('tools.export.purpose')}>
             {(['delivery', 'backup'] as const).map(purpose => <button key={purpose} type="button" className={css.actionButton}

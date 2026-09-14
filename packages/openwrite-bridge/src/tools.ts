@@ -1392,6 +1392,8 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     parameters: {
       novel_id: { type: 'string', required: true, description: 'Project id, e.g. "my_novel" (2-64 chars: letters, digits, "-", "_").' },
       title: { type: 'string', required: true, description: 'Book title (max 120 characters).' },
+      author: { type: 'string', description: 'Author credit for delivery export (max 120 characters).' },
+      language: { type: 'string', description: 'Book language tag, e.g. zh-CN or en (default zh-CN).' },
       project_path: { type: 'string', description: 'Target directory on the server; omit to use the server default location.' },
       template: { type: 'string', enum: ['default', 'demo_short'], description: 'Project template (default "default").' },
     },
@@ -1404,6 +1406,8 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       }
       if (!args.title.trim() || args.title.length > 120) throw new Error('title must be non-empty and at most 120 characters')
       const body: JsonObject = { novel_id: args.novel_id, title: args.title }
+      if (args.author !== undefined) body['author'] = args.author
+      if (args.language !== undefined) body['language'] = args.language
       if (args.project_path !== undefined) body['project_path'] = args.project_path
       if (args.template !== undefined) body['template'] = args.template
       return await client.postJson('/api/project/init', body, exec.signal)
