@@ -8,7 +8,7 @@
 
 ## 0.2.10
 
-[Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.10) 使用 [主分支 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/34836925547) 验收的同一份包，来源提交为 9108038699f64613f66a3fea21dfdb3841881d25，SHA-256 为 09f80826dd4ec72ba0f968feb978257f792033dab6f428dc6f09ab38e8b62f64。npm 发布尚待维护者重新登录；此时可使用 Release 安装包。
+[Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.10) 使用 [主分支 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/34836925547) 验收的同一份包，来源提交为 9108038699f64613f66a3fea21dfdb3841881d25，SHA-256 为 09f80826dd4ec72ba0f968feb978257f792033dab6f428dc6f09ab38e8b62f64。npm `dsh-openwrite@0.2.10` 已发布，`latest` 已更新；从公共 npm registry 重新下载后，SHA-256 与上述 Release 包一致。
 
 - 修复 #36：初始化支持 author / language；已有作品可在「任务 → 导入与导出 → 编辑作品信息」补齐出版元数据，保存经过认证、Workspace、revision 与原子写入保护。
 - 修复 #37：写作的五个调用点使用所选模型配置的输出预算，移除固定小预算覆盖；推理模型仍需配置足够额度，不自动增加付费重试。
