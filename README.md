@@ -137,3 +137,5 @@ conductor/                 连续写章、评审与修订编排
 
 项目采用 [Apache-2.0](LICENSE)。`oh-story-*` 技能和随包编辑器保留各自目录中的原有许可证。
 Logo 基于 OpenWrite `native-core` 分支，已调整深浅主题配色；基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，图谱集成使用 [dsh-dog](https://github.com/Fun10165/dsh-dog)。
+
+生态目录：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) · [社区插件市场](https://dshtui.com/plugins/)。OpenWrite 当前面向 DeepSeek Harness 的 `web` profile，使用 `dsh web` 打开创作工作台；尚未验证 dsh-TUI 界面兼容性。
