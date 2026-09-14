@@ -11,7 +11,7 @@ const manifest = JSON.parse(await readFile(join(directory, artifact + '.manifest
 assert.equal(createHash('sha256').update(await readFile(join(directory, artifact))).digest('hex'), manifest.sha256)
 assert.equal(manifest.source.plugin.dirty, false, 'Release source must be clean')
 const reports = await Promise.all(files.filter(file => /^release-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
-const required = ['install', 'repeat-install', 'existing-plugin-coexistence', 'native-dependency-load', 'native-backend-project-init', 'backend-auth', 'failed-upgrade-preserves-active', 'rollback', 'uninstall', 'retain-data']
+const required = ['install', 'repeat-install', 'existing-plugin-coexistence', 'native-dependency-load', 'native-backend-project-init', 'project-metadata-update', 'backend-auth', 'failed-upgrade-preserves-active', 'rollback', 'uninstall', 'retain-data']
 for (const [platform, arch, major] of [['linux', 'x64', 24], ['darwin', 'arm64', 24], ['darwin', 'x64', 24], ['win32', 'x64', 24], ['linux', 'x64', 22], ['linux', 'x64', 26]]) {
   const report = reports.find(r => r.installSource === 'release' && (!r.host || r.host === manifest.host) && r.platform === platform && r.arch === arch && Number(r.node.match(/^v(\d+)/)?.[1]) === major)
   assert.ok(report, `Missing ${platform}/${arch}/Node ${major}`)
@@ -19,6 +19,7 @@ for (const [platform, arch, major] of [['linux', 'x64', 24], ['darwin', 'arm64',
   assert.equal(report.artifactSha256, manifest.sha256, 'Platform tested different artifact')
   for (const check of required) assert.ok(report.checks.includes(check), `Missing check: ${check}`)
   assert.ok(report.checks.includes('native-browser-launch'), 'Missing browser acceptance')
+  assert.ok(report.checks.includes('browser-project-metadata'), 'Missing metadata browser acceptance')
 }
 const alpha = reports.find(r => r.host === '0.1.5-alpha.1' && r.platform === 'linux' && r.arch === 'x64')
 assert.equal(alpha?.status, 'passed', 'Exact alpha host compatibility must pass')

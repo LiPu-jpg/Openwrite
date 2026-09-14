@@ -18,7 +18,7 @@ export function HeaderProjectStatus({ t }: HeaderProps) {
     <span className={css.connectionDot} data-state={workbench.connection} />
     <strong>{workbench.projectTitle || 'OpenWrite'}</strong>
     {chapter !== undefined && <span>{chapter.id} · {chapter.title}</span>}
-    <span data-save={workbench.editorStatus}>{t(`creation.status.${workbench.editorStatus}`)}</span>
+    {workbench.editorStatus !== 'idle' && <span data-save={workbench.editorStatus}>{t(`creation.status.${workbench.editorStatus}`)}</span>}
     {workbench.activeTasks > 0 && <b>{workbench.activeTasks}</b>}
   </div>
 }

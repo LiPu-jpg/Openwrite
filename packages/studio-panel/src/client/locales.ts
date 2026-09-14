@@ -378,6 +378,10 @@ export type StudioPanelKey =
   | 'tools.export.bookTarget'
   | 'tools.export.chapterTarget'
   | 'tools.export.completion'
+  | 'tools.metadata.edit'
+  | 'tools.metadata.save'
+  | 'tools.metadata.cancel'
+  | 'tools.metadata.hint'
   | 'tools.export.metadata'
   | 'tools.export.metadata.title'
   | 'tools.export.metadata.author'
@@ -1330,7 +1334,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'creation.draft.restore': '恢复到编辑器',
   'creation.draft.dismiss': '忽略并删除',
   'creation.draft.unavailable': '本地恢复保护不可用；当前编辑器内容仍会保留到本页关闭前。',
-  'creation.status.idle': '未打开',
+  'creation.status.idle': '尚未载入正文',
   'creation.status.loading': '载入中',
   'creation.status.saved': '已保存',
   'creation.status.dirty': '未保存',
@@ -1444,6 +1448,10 @@ export const zh: Record<StudioPanelKey, string> = {
   'tools.export.bookTarget': '全书目标',
   'tools.export.chapterTarget': '单章目标',
   'tools.export.completion': '完成度',
+  'tools.metadata.edit': '编辑作品信息',
+  'tools.metadata.save': '保存作品信息',
+  'tools.metadata.cancel': '取消',
+  'tools.metadata.hint': '交付导出前请填写书名、作者署名和语言。',
   'tools.export.metadata': '书籍元数据',
   'tools.export.metadata.title': '书名',
   'tools.export.metadata.author': '作者',
@@ -2387,7 +2395,7 @@ export const en: Record<StudioPanelKey, string> = {
   'creation.draft.restore': 'Restore to editor',
   'creation.draft.dismiss': 'Ignore and delete',
   'creation.draft.unavailable': 'Local recovery protection is unavailable. The editor keeps this text until the page closes.',
-  'creation.status.idle': 'Not open',
+  'creation.status.idle': 'No manuscript loaded',
   'creation.status.loading': 'Loading',
   'creation.status.saved': 'Saved',
   'creation.status.dirty': 'Unsaved',
@@ -2501,6 +2509,10 @@ export const en: Record<StudioPanelKey, string> = {
   'tools.export.bookTarget': 'Book target',
   'tools.export.chapterTarget': 'Chapter target',
   'tools.export.completion': 'Completion',
+  'tools.metadata.edit': 'Edit book information',
+  'tools.metadata.save': 'Save book information',
+  'tools.metadata.cancel': 'Cancel',
+  'tools.metadata.hint': 'Set the title, author credit and language before delivery export.',
   'tools.export.metadata': 'Book metadata',
   'tools.export.metadata.title': 'Title',
   'tools.export.metadata.author': 'Author',
