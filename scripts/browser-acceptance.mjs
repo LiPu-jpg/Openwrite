@@ -40,8 +40,17 @@ export async function acceptBrowser(loginUrl, temporary) {
     await page.getByRole('button', { name: /^(初始化项目|Initialize project)$/ }).click()
     await page.getByRole('button', { name: /^(初始化项目|Initialize project)$/ }).waitFor({ state: 'hidden', timeout: 90_000 })
     for (const label of [/^(资料|Library)$/, /^(任务|Tasks)$/]) await page.getByRole('tab', { name: label }).click()
+    await page.getByRole('button', { name: /^(导入与导出|Import & export)$/ }).click()
+    await page.getByRole('button', { name: /^(编辑作品信息|Edit book information)$/ }).click()
+    await page.getByLabel(/^(作者|Author)$/).fill('发布验收作者')
+    await page.getByRole('button', { name: /^(保存作品信息|Save book information)$/ }).click()
+    await page.getByRole('button', { name: /^(保存作品信息|Save book information)$/ }).waitFor({ state: 'hidden' })
+    await page.getByText('发布验收作者', { exact: true }).waitFor()
+    // Read it back through a new request, rather than accepting optimistic form state.
+    await page.getByRole('button', { name: /^(编辑作品信息|Edit book information)$/ }).click()
+    assert.equal(await page.getByLabel(/^(作者|Author)$/).inputValue(), '发布验收作者')
     assert.deepEqual(errors, [], 'browser runtime errors')
-    return ['native-browser-launch', 'blank-session-workbench', 'workspace-selection', 'initialize-project', 'workbench-navigation']
+    return ['native-browser-launch', 'blank-session-workbench', 'workspace-selection', 'initialize-project', 'workbench-navigation', 'browser-project-metadata']
   } catch (error) {
     await page.screenshot({ path: `release-browser-${process.platform}-${process.arch}.png`, fullPage: true }).catch(() => {})
     console.error('Browser errors:', errors)

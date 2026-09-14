@@ -19,6 +19,7 @@ for (const [platform, arch, major] of [['linux', 'x64', 24], ['darwin', 'arm64',
   assert.equal(report.artifactSha256, manifest.sha256, 'Platform tested different artifact')
   for (const check of required) assert.ok(report.checks.includes(check), `Missing check: ${check}`)
   assert.ok(report.checks.includes('native-browser-launch'), 'Missing browser acceptance')
+  assert.ok(report.checks.includes('browser-project-metadata'), 'Missing metadata browser acceptance')
 }
 const alpha = reports.find(r => r.host === '0.1.5-alpha.1' && r.platform === 'linux' && r.arch === 'x64')
 assert.equal(alpha?.status, 'passed', 'Exact alpha host compatibility must pass')
