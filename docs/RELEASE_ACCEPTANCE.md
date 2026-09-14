@@ -6,6 +6,17 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.10
+
+[Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.10) 使用 [主分支 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/34836925547) 验收的同一份包，来源提交为 9108038699f64613f66a3fea21dfdb3841881d25，SHA-256 为 09f80826dd4ec72ba0f968feb978257f792033dab6f428dc6f09ab38e8b62f64。npm 发布尚待维护者重新登录；此时可使用 Release 安装包。
+
+- 修复 #36：初始化支持 author / language；已有作品可在「任务 → 导入与导出 → 编辑作品信息」补齐出版元数据，保存经过认证、Workspace、revision 与原子写入保护。
+- 修复 #37：写作的五个调用点使用所选模型配置的输出预算，移除固定小预算覆盖；推理模型仍需配置足够额度，不自动增加付费重试。
+- 修复 #38：会话头部隐藏 idle 保存状态，编辑器内显示「尚未载入正文」。
+- Core 5.8.2 / contract 1，来源 native-core 833c66407a780283bdb7f901540322a9b549ee1d；依赖声明不变。
+- 原生 Linux/macOS arm64/macOS x64/Windows Node 24、Linux Node 22.19/26、源码安装及精确 alpha 宿主全部通过。浏览器验收包含作者信息保存后重新读取，后端覆盖未认证请求和过期 revision。
+- Core 54 项回归、前端 291 项组件测试通过。真实模型测试 not-run，不计入通过；预算替身测试覆盖三个配置额度下的五个调用点。
+
 ## 0.2.9
 
 [Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.9) 与 npm dsh-openwrite@0.2.9 使用 [主分支 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/34532531326) 验收过的同一份包；来源提交为 8ecada040db2c3ddf699d7a5bc1ddd86336b88fe，SHA-256 为 2a885d03f931505432b78424922c63e7ac75c70a10ab57b7c7503d059af7b627。npm 下载后再次核对一致。
