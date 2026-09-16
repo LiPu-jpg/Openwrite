@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises'
 import { basename, dirname, resolve as resolvePath } from 'node:path'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
+import { normalizeMinimapProperties } from './scripts/react-flow-properties.mjs'
 
 /** Plugin id (package name), stamped into the module-loader handoff and style tags. */
 const ID = '@dsh-novel/studio-panel'
@@ -90,6 +91,13 @@ const client: UserConfig = {
   noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
   plugins: [{
     name: 'dsh-react-flow-style-inline',
+    transform(code: string, id: string) {
+      // React Flow uses these custom properties in both its CSS and MiniMap JS.
+      // Limit the rewrite to our bundled dependency, preserving all other text.
+      if (!id.replaceAll('\\', '/').includes('/node_modules/@xyflow/react/')) return null
+      const normalized = normalizeMinimapProperties(code)
+      return normalized === code ? null : { code: normalized, map: null }
+    },
     resolveId(source: string) {
       return source === REACT_FLOW_STYLE_SPECIFIER ? REACT_FLOW_STYLE_VIRTUAL_ID : null
     },
@@ -99,7 +107,7 @@ const client: UserConfig = {
       const source = await readFile(REACT_FLOW_STYLE_FILE)
       const { code } = transform({
         filename: REACT_FLOW_STYLE_FILE,
-        code: source,
+        code: Buffer.from(normalizeMinimapProperties(source.toString())),
         minify: true,
       })
       const tagId = `${ID}/react-flow`

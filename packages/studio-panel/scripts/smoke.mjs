@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { apply as installReleasePreset } from '../../../plugin.mjs'
 import * as React from 'react'
 import * as JsxRuntime from 'react/jsx-runtime'
+import { normalizeMinimapProperties } from './react-flow-properties.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const host = await import(`${root}lib/index.js`)
@@ -46,6 +47,13 @@ function capture() {
 }
 
 const bundle = await readFile(`${root}lib/client.js`, 'utf8')
+assert.equal(bundle.includes('--xy-minimap-mask-'), false, 'minimap CSS and JS use the same overlay property names')
+for (const property of ['background-color', 'stroke-color', 'stroke-width']) {
+  assert.ok(bundle.includes(`--xy-minimap-overlay-${property}-default:`), `${property} CSS definition`)
+  assert.ok(bundle.includes(`var(--xy-minimap-overlay-${property}-props`), `${property} CSS reference`)
+  assert.ok(bundle.includes(`"--xy-minimap-overlay-${property}-props":`), `${property} JS reference`)
+}
+assert.equal(normalizeMinimapProperties('maskColor sk-example --other-mask-color'), 'maskColor sk-example --other-mask-color', 'only scoped CSS properties may be renamed')
 assert.match(bundle, /__ModuleLoader__\.load\(\{[\s\S]*id: "@dsh-novel\/studio-panel"/)
 assert.ok(bundle.includes('dsh-vditor-runtime.mjs') && bundle.includes('vditorModule.exports'), 'Vditor runtime is bundled into the plugin client')
 assert.ok(bundle.includes('/studio-panel/vendor/vditor') && bundle.includes('lute/lute.min.js'), 'Vditor auxiliary assets use the packaged same-origin route')
