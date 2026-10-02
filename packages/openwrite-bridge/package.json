@@ -26,6 +26,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dsh": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2",
+      "dshReleases": {
+        "0.1.2-rc.1": "compatible",
+        "0.1.5-alpha.1": "compatible",
+        "0.2.0-rc.2": "compatible"
+      }
     }
   },
   "dependencies": {
@@ -35,10 +43,10 @@
     "tar": "7.5.7"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-workspace": "0.1.2-rc.1"
+    "@deepseek-ai/cordis": "4.0.2 || ~4.0.4",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-workspace": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-host-webserver": {

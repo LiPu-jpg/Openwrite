@@ -16,12 +16,21 @@ import {
 import { DogDebugger } from './DogDebugger.tsx'
 import { openInvocationSession } from './sessionNavigation.ts'
 import { DOG_DEBUG_CSS, DOG_DEBUG_STYLE_ID } from './styles.ts'
+import { debuggerSessionState } from './sessionState.ts'
 
 /** The overlay uses the shared trusted RPC transport and canonical session navigator. */
 export const inject = ['slots', 'sessions', 'connection', 'uiSession']
 
 /** Register the debugger beside other frame-wide overlays without replacing shipped UI. */
 export function apply(ctx: ClientContext): void {
+  try {
+    ctx.effect(() => install(ctx), 'openwrite-dog: client activation')
+  } catch (error) {
+    console.error('[OpenWrite/DoG] Debugger disabled: client activation failed', error)
+  }
+}
+
+function* install(ctx: ClientContext): Generator<() => void> {
   const connection = ctx.get('connection') as unknown as ConnectionHandle
   const sessions = ctx.get('sessions') as unknown as ISessions
   const call = async (endpoint: string, payload: unknown, signal?: AbortSignal): Promise<unknown> => {
@@ -31,23 +40,8 @@ export function apply(ctx: ClientContext): void {
   }
   const openSession = (sessionId: string, parentSessionId?: string): Promise<boolean> =>
     openInvocationSession(sessions, sessionId, parentSessionId)
-  let lastSessions = sessions.list.getSnapshot()
-  let lastPending = ctx.uiSession.pendingInteractions.getSnapshot()
-  let combined = { ...lastSessions, pendingInteractions: lastPending }
-  const getSessionState = () => {
-    const next = sessions.list.getSnapshot()
-    const pending = ctx.uiSession.pendingInteractions.getSnapshot()
-    if (next !== lastSessions || pending !== lastPending) {
-      lastSessions = next; lastPending = pending
-      combined = { ...next, pendingInteractions: pending }
-    }
-    return combined
-  }
-  const subscribeSessions = (listener: () => void) => {
-    const stopSession = sessions.list.subscribe(listener)
-    const stopPending = ctx.uiSession.pendingInteractions.subscribe(listener)
-    return () => { stopSession(); stopPending() }
-  }
+  const state = debuggerSessionState(sessions.list, ctx.uiSession)
+  state.getSnapshot()
   const DogDebuggerHost = (): JSX.Element | null => {
     const [request, setRequest] = useState(0)
     useEffect(() => {
@@ -59,17 +53,24 @@ export function apply(ctx: ClientContext): void {
     readSnapshot={signal => call(DOG_DEBUG_SNAPSHOT_ENDPOINT, {}, signal)}
     readGoalRuntime={(runId, goalId, signal) => call(DOG_RUNTIME_TRACE_ENDPOINT, { runId, goalId }, signal)}
     openSession={openSession}
-    getSessionState={getSessionState}
-    subscribeSessions={subscribeSessions}
+    getSessionState={state.getSnapshot}
+    subscribeSessions={state.subscribe}
     refreshAgentCatalog={parentSessionId => sessions.refreshSubagents(parentSessionId as SessionId)}
   />
   }
-  ctx.effect(installStyles, 'dog-debugger: styles')
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-    name: 'shell.overlay',
-    id: 'openwrite.dog-debugger',
-    order: 80,
-  }, DogDebuggerHost))
+  yield ctx.effect(installStyles, 'dog-debugger: styles')
+  yield ctx.slots.inject('shell.overlay', () => {
+    try {
+      return ctx.slots.register({
+        name: 'shell.overlay',
+        id: 'openwrite.dog-debugger',
+        order: 80,
+      }, DogDebuggerHost)
+    } catch (error) {
+      console.error('[OpenWrite/DoG] Debugger disabled: overlay registration failed', error)
+      return () => {}
+    }
+  })
 }
 
 function installStyles(): () => void {

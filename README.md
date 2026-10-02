@@ -62,6 +62,14 @@ dsh web
 
 具体的源码安装、升级、迁移和卸载见 [安装指南](docs/INSTALL.md)。
 
+### dsh 0.2 桌面端升级
+
+本分支已修复 [#45](https://github.com/LiPu-jpg/Openwrite/issues/45)，适配精确宿主版本 `0.2.0-rc.2`：工作台兼容新的 turn-tail list 槽位，DoG 调试面板使用新的 `sessionStatus`；根包和所有子包的兼容声明同步更新。已验证 0.2.0-rc.2 的 Web 客户端启动、OpenWrite 入口、DoG 面板及其他插件共存；Windows Electron 桌面端完整发布验收仍需按 Release 报告核对。
+
+**已发布的 `dsh-openwrite@0.2.10` 不包含这项修复。** 使用包含该修复的新发布包，或从本分支构建。不要通过给旧子包授权来代替升级：`dsh-openwrite` 的版本豁免不会覆盖 `@dsh-novel/studio-panel@<ver>` 和 `@dsh-external/dsh-dog@<ver>`，而旧客户端在 0.2.0-rc.2 上激活失败可能触发桌面端的 profile 恢复。
+
+若已发生恢复，先关闭桌面端并备份当前 profile，再从自己的 `cordis.patch.yml.bak-*` 备份恢复 patch，同时恢复原 `package.json` 的 `dsh.profile.bundles` 列表。安装包和作品目录通常仍在；不要用出厂模板覆盖其他插件配置。详细排查见 [安装指南](docs/INSTALL.md#dsh-02-客户端兼容排查)。
+
 ## 开始使用
 
 1. 执行 `dsh web`，打开它给出的浏览器地址，点击侧栏 **OpenWrite**。等待环境就绪后，选择作品目录。

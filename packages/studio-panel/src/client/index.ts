@@ -19,7 +19,7 @@ import { WorkspaceContextChip, HeaderProjectStatus, HeaderUtilities } from './He
 import { createDomainToolCard, type ToolFamily } from './DomainToolCard.tsx'
 import { en, NS, zh } from './locales.ts'
 import { NovelReviewCard } from './ReviewCard.tsx'
-import { novelMutationDefinition, TurnMutationSummaryView } from './TurnMutationSummary.tsx'
+import { novelMutationDefinition, TurnMutationSummaryView, TurnMutationSummaryListView } from './TurnMutationSummary.tsx'
 import type { StudioPanelInjected } from './workspace-context.ts'
 
 export const inject = ['slots', 'locale', 'uiConversation', 'workspaces', 'sessions', 'uiWorkspace', 'remote', 'remote.agentPresets']
@@ -47,9 +47,35 @@ const FAMILY_CARDS: Readonly<Record<ToolFamily, ReturnType<typeof createDomainTo
 }
 
 export function apply(ctx: Context): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'studio-panel: dictionaries')
+  try {
+    ctx.effect(() => install(ctx), 'studio-panel: client activation')
+  } catch (error) {
+    console.error('[OpenWrite/Studio] Workbench disabled: client activation failed', error)
+  }
+}
+
+function* install(ctx: Context): Generator<() => void> {
+  yield ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'studio-panel: dictionaries')
   const t = ctx.locale.bind(NS)
-  ctx.effect(() => ctx.uiConversation.events.register(novelMutationDefinition), 'studio-panel: novel mutation turn data')
+  // These registries are optional chrome capabilities. Keep the workbench
+  // available when a host no longer exposes the turn-summary extension point.
+  if (typeof ctx.uiConversation.events?.register === 'function') {
+    yield ctx.effect(() => ctx.uiConversation.events.register(novelMutationDefinition), 'studio-panel: novel mutation turn data')
+  } else {
+    console.warn('[OpenWrite/Studio] Turn summaries unavailable: uiConversation.events.register is missing')
+  }
+
+  const injectSlot = (name: Parameters<typeof ctx.slots.inject>[0], mount: () => (() => void) | Generator<() => void>) =>
+    ctx.slots.inject(name, () => {
+      try {
+        // Cordis unwinds yielded registrations if setup fails, including when
+        // the slot is declared after apply() has already returned.
+        return ctx.effect(mount, `studio-panel: ${name}`)
+      } catch (error) {
+        console.error(`[OpenWrite/Studio] UI contribution disabled: ${name}`, error)
+        return () => {}
+      }
+    })
 
   const workspaceServices: StudioPanelInjected['workspaces'] = {
     list: ctx.workspaces.list,
@@ -65,7 +91,7 @@ export function apply(ctx: Context): void {
 
   // A workbench is visible activity even before the first chat turn. Its
   // snapshot is independent of generated messages and preserves an empty log.
-  ctx.effect(() => ctx.uiConversation.views.register({
+  if (typeof ctx.uiConversation.views?.register === 'function') yield ctx.effect(() => ctx.uiConversation.views.register({
     target: 'openwrite.creation',
     create: () => ({ empty: true, replace: () => true, apply: () => true }),
     isActive: () => true,
@@ -77,7 +103,7 @@ export function apply(ctx: Context): void {
     workspaces: workspaceServices, sessions: ctx.sessions,
   }
 
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+  yield injectSlot('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'openwrite.launch', order: 10,
     inject: () => ({ openWorkspace: async (path?: string) => {
       const selected = path?.trim() || await ctx.uiWorkspace.pickDirectory()
@@ -88,20 +114,24 @@ export function apply(ctx: Context): void {
       if (!result.ok) throw new Error(result.error.message)
       ctx.sessions.open(sessionId)
       // Activate a UI target to leave the blank Hero without manufacturing a user turn.
-      ctx.uiConversation.binding(sessionId).activate('openwrite.creation')
+      if (typeof ctx.uiConversation.binding === 'function' && typeof ctx.uiConversation.views?.register === 'function') {
+        ctx.uiConversation.binding(sessionId).activate('openwrite.creation')
+      }
       return true
     } }),
   }, LaunchOpenWrite))
 
   const writingSlots = (name: Parameters<typeof ctx.slots.inject>[0], mount: () => (() => void) | Generator<() => void>) => {
-    ctx.slots.inject(name, () => watchWritingScope(ctx.sessions.list, () => {
-      const result = mount()
-      if (typeof result === 'function') return result
-      const disposers = [...result]
-      return () => { for (const dispose of disposers.reverse()) dispose() }
+    return injectSlot(name, () => watchWritingScope(ctx.sessions.list, () => {
+      try {
+        return ctx.effect(mount, `studio-panel: writing ${name}`)
+      } catch (error) {
+        console.error(`[OpenWrite/Studio] Writing UI contribution disabled: ${name}`, error)
+        return () => {}
+      }
     }))
   }
-  writingSlots('conversation.view' , function* () {
+  yield writingSlots('conversation.view' , function* () {
     yield ctx.slots.register({
       name: 'conversation.view', id: 'openwrite.creation', order: 22, locale: NS,
       label: () => t('view.creation'), inject: (): StudioPanelInjected => studioPanel,
@@ -116,26 +146,41 @@ export function apply(ctx: Context): void {
     }, OperationsView)
   })
 
-  writingSlots('conversation.session.header.actions', () => ctx.slots.register({
+  yield writingSlots('conversation.session.header.actions', () => ctx.slots.register({
     name: 'conversation.session.header.actions', id: 'novel-project-status', order: -20, locale: NS,
   }, HeaderProjectStatus))
-  writingSlots('conversation.session.header.utilities', () => ctx.slots.register({
+  yield writingSlots('conversation.session.header.utilities', () => ctx.slots.register({
     name: 'conversation.session.header.utilities', id: 'novel-utilities', order: 20, locale: NS,
     inject: () => ({ postStudioApi }),
   }, HeaderUtilities))
-  writingSlots('conversation.input.left', () => ctx.slots.register({
+  yield writingSlots('conversation.input.left', () => ctx.slots.register({
     name: 'conversation.input.left', id: 'novel-workspace-context', order: 20, locale: NS,
     inject: (): Pick<StudioPanelInjected, 'postStudioApi' | 'workspaces' | 'sessions'> => ({
       postStudioApi, workspaces: workspaceServices, sessions: ctx.sessions,
     }),
   }, WorkspaceContextChip))
-  ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
-    name: 'conversation.chat.turnTail', locale: NS,
-    select: owner => owner.turn.data.get('dsh-novel-mutations') ?? null,
-    inject: () => ({ postStudioApi }),
-  }, TurnMutationSummaryView))
+  if (typeof ctx.uiConversation.events?.register === 'function') yield injectSlot('conversation.chat.turnTail', () => {
+    // 0.1 uses a chain selector; 0.2 changed this extension point to a list.
+    if ((ctx.slots.spec('conversation.chat.turnTail')?.kind as string) === 'list') {
+      // The build SDK is pinned to 0.1; narrow the verified 0.2 overload at
+      // this boundary instead of pretending both SlotMap declarations merge.
+      const registerList = ctx.slots.register.bind(ctx.slots) as unknown as (
+        options: { name: 'conversation.chat.turnTail'; id: string; locale: typeof NS; inject: () => { postStudioApi: typeof postStudioApi } },
+        component: typeof TurnMutationSummaryListView,
+      ) => () => void
+      return registerList({
+        name: 'conversation.chat.turnTail', id: 'openwrite.mutation-summary', locale: NS,
+        inject: () => ({ postStudioApi }),
+      }, TurnMutationSummaryListView)
+    }
+    return ctx.slots.register({
+      name: 'conversation.chat.turnTail', locale: NS,
+      select: owner => owner.turn.data.get('dsh-novel-mutations') ?? null,
+      inject: () => ({ postStudioApi }),
+    }, TurnMutationSummaryView)
+  })
 
-  ctx.slots.inject('tool.call.toolview', function* () {
+  yield injectSlot('tool.call.toolview', function* () {
     yield ctx.slots.register({ name: 'tool.call.toolview', key: 'novel_review_chapter', locale: NS }, NovelReviewCard)
     for (const [family, tools] of Object.entries(FAMILY_TOOLS) as [ToolFamily, readonly string[]][]) {
       for (const tool of tools) {

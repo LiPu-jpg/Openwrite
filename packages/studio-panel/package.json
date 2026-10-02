@@ -33,6 +33,14 @@
         "@deepseek-ai/dsh-client-ui-chat"
       ],
       "platform": "web"
+    },
+    "compatibility": {
+      "dsh": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2",
+      "dshReleases": {
+        "0.1.2-rc.1": "compatible",
+        "0.1.5-alpha.1": "compatible",
+        "0.2.0-rc.2": "compatible"
+      }
     }
   },
   "files": [
@@ -60,8 +68,8 @@
     "lucide-react": "^0.468.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1",
+    "@deepseek-ai/cordis": "4.0.2 || ~4.0.4",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
