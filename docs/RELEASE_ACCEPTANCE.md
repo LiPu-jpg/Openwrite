@@ -6,6 +6,13 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.11
+
+- 修复 #45 的子包兼容声明和两个客户端 API 差异，增加初始化异常隔离、回滚与错误诊断；包含 #44 的 minimap CSS 修复。
+- 精确 `0.2.0-rc.2` Web 宿主已验证两个客户端激活、工作台入口、DoG 面板和其他插件共存，无需版本豁免。
+- Core 仍为 5.8.2 / contract 1。正式发布直接使用本版本完整 CI 验收通过的同一份产物，SHA-256、来源提交和原生平台结果以 Release 附件为准。
+- Windows Electron 桌面端启动及恢复链路尚未实机复测；宿主恢复策略未修改，已被重置的 profile 需要从备份恢复。真实模型验证未运行。
+
 ## 0.2.10
 
 [Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.10) 使用 [主分支 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/34836925547) 验收的同一份包，来源提交为 9108038699f64613f66a3fea21dfdb3841881d25，SHA-256 为 09f80826dd4ec72ba0f968feb978257f792033dab6f428dc6f09ab38e8b62f64。npm `dsh-openwrite@0.2.10` 已发布，`latest` 已更新；从公共 npm registry 重新下载后，SHA-256 与上述 Release 包一致。
