@@ -8,6 +8,8 @@
 
 ## 0.2.11
 
+[Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.11) 使用 [完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37012171411) 验收的同一份包，来源提交为 39454dbcd14ea672c6d9fa25eddea26f8ea71591，SHA-256 为 d11f2a3e9abbd0aaaaa42d5ffb4268e9c192f608236178a48cd112d09e03f1f9。六组原生平台、源码安装及精确 alpha 宿主验收均通过；对该产物另完成精确 0.2.0-rc.2 Web 客户端启动验证。GitHub Release 已发布，npm 0.2.11 发布尚待完成，当前 npm latest 仍为 0.2.10。
+
 - 修复 #45 的子包兼容声明和两个客户端 API 差异，增加初始化异常隔离、回滚与错误诊断；包含 #44 的 minimap CSS 修复。
 - 精确 `0.2.0-rc.2` Web 宿主已验证两个客户端激活、工作台入口、DoG 面板和其他插件共存，无需版本豁免。
 - Core 仍为 5.8.2 / contract 1。正式发布直接使用本版本完整 CI 验收通过的同一份产物，SHA-256、来源提交和原生平台结果以 Release 附件为准。
