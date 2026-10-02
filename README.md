@@ -33,7 +33,7 @@
 
 npm 包和对应 GitHub Release 使用同一份验收产物。也可安装精确版本的 Release 包：
 
-**当前发布状态：0.2.11 已发布到 GitHub Release，npm 发布尚未完成；npm `latest` 仍为 0.2.10。** 获取 #45 修复请先使用下列 Release 包命令，不要通过给旧子包授权来代替升级。
+**当前发布状态：0.2.11 已发布到 npm 和 GitHub Release，npm `latest` 已更新到 0.2.11。** 公共 npm 下载包的 SHA-256 与 CI 和 Release 产物一致；获取 #45 修复请升级到 0.2.11。
 
 ```sh
 dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.11/dsh-openwrite-0.2.11.tgz
