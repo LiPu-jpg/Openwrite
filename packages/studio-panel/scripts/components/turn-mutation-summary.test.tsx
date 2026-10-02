@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   novelMutationDefinition,
   TurnMutationSummaryView,
+  TurnMutationSummaryListView,
   type NovelMutationSummary,
 } from '../../src/client/TurnMutationSummary.tsx'
 
@@ -29,6 +30,14 @@ function resultMessage(callId: string, payload: unknown, isError = false) {
 }
 
 describe('TurnMutationSummary', () => {
+  it('declines unrelated turns in the DSH 0.2 list slot', () => {
+    const { container } = render(<TurnMutationSummaryListView {...{
+      turn: { data: { get: () => undefined } }, t: (key: string) => key,
+      openFile: vi.fn(), postStudioApi: vi.fn(),
+    } as never} />)
+    expect(container.innerHTML).toBe('')
+  })
+
   it('records the committed output path, revision, and recoverable history entry', () => {
     let state = startState()
     state = update(state, {
@@ -98,7 +107,9 @@ describe('TurnMutationSummary', () => {
         previewToken: '', undoPreviewToken: '',
       }],
     }
-    render(<TurnMutationSummaryView {...({ matched, openFile, t: (key: string) => key } as never)} />)
+    render(<TurnMutationSummaryListView {...({
+      turn: { data: { get: () => matched } }, openFile, t: (key: string) => key,
+    } as never)} />)
 
     expect(screen.getByText('turn.partial')).not.toBeNull()
     expect(screen.getByText('turn.refreshFailed')).not.toBeNull()

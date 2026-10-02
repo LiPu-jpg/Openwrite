@@ -17,6 +17,6 @@ export function watchWritingScope(
     if (!enabled && dispose) { dispose(); dispose = undefined }
   }
   const unsubscribe = source.subscribe(refresh)
-  refresh()
+  try { refresh() } catch (error) { unsubscribe(); throw error }
   return () => { unsubscribe(); dispose?.() }
 }

@@ -113,6 +113,24 @@ bridge 的高级 `mode: external` / `baseUrl` 配置继续支持外部 Core，�
 
 反馈请提供宿主版本、系统与架构、Release 版本、安装阶段及脱敏错误。来源、许可证和校验值见 Release 附件及包内 `release/`。不要提交 API Key、浏览器登录 URL 或作品全文。
 
+## dsh 0.2 客户端兼容排查
+
+`dsh-openwrite@0.2.10` 的旧工作台按 0.1 接口构建，不能通过版本豁免获得 0.2.0-rc.2 的客户端兼容性。根包豁免不覆盖内嵌子包：`@dsh-novel/studio-panel@<ver>`、`@dsh-external/dsh-dog@<ver>` 各自经过宿主版本检查。优先升级到包含 #45 修复的包；修复后的精确 `0.2.0-rc.2` 声明覆盖根包和所有子包，不需要手工编辑 `compatibility.json`。
+
+本修复同时处理 `conversation.chat.turnTail` 从 chain 到 list 的变化，以及 `uiSession.pendingInteractions` 到 `uiSession.sessionStatus` 的变化。客户端初始化或延迟槽位注册失败时，插件回滚对应注册并在浏览器控制台输出 `[OpenWrite/Studio]` / `[OpenWrite/DoG]` 和原始异常，避免让这类插件初始化异常升级为宿主 web boot 失败。此修复不更改桌面端自身的 profile 恢复策略。
+
+如果旧版本已经触发桌面端恢复，关闭桌面端后备份整个 profile，找到恢复前的 `cordis.patch.yml.bak-*`，恢复 patch 和原 `package.json` 中的 `dsh.profile.bundles`。这两项需一起核对，才能重新加载其他插件。保留已安装依赖和作品目录，不要用空 profile 替换完整配置。
+
+开发者可在锁定依赖和构建完成后运行真实客户端启动检查：
+
+```sh
+npm run test:client-boot
+node scripts/client-boot-smoke.mjs --host-cli=/absolute/path/to/dsh-0.2.0-rc.2/node_modules/@deepseek-ai/dsh/lib/bin.js
+node scripts/client-boot-smoke.mjs dsh-openwrite-<version>.tgz --host-cli=/absolute/path/to/dsh-0.2.0-rc.2/node_modules/@deepseek-ai/dsh/lib/bin.js
+```
+
+脚本需要 Playwright Chromium，创建临时 Web profile，检查无豁免版本闸门、两个客户端加载、OpenWrite 入口、DoG 面板及其他插件共存，不准备 Python 环境、不调用模型。它验证 Web 客户端兼容性；Windows Electron 的原生启动和恢复流程仍须在对应平台完成发布验收。
+
 ## 作品信息与推理模型预算
 
 在「任务 → 导入与导出 → 编辑作品信息」填写或修改书名、作者署名和语言。旧作品也可补齐作者，无需手工编辑配置文件。保存冲突时保留输入；请取消编辑并重新载入最新信息后再修改。未填写作者仍不能进行交付导出。`novel_project_init` 也支持可选 `author` 与 `language`。

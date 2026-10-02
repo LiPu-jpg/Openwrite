@@ -93,8 +93,20 @@ assert.deepEqual(exports_.inject, ['slots', 'locale', 'uiConversation', 'workspa
 const registrations = []
 const dictionaries = []
 let definition = null
+function effect(run) {
+  const disposers = []
+  const dispose = () => { for (const stop of disposers.splice(0).reverse()) stop() }
+  try {
+    const result = run()
+    if (typeof result === 'function') disposers.push(result)
+    else if (result?.[Symbol.iterator]) {
+      for (const stop of result) if (typeof stop === 'function') disposers.push(stop)
+    }
+    return dispose
+  } catch (error) { dispose(); throw error }
+}
 const fakeClientCtx = {
-  effect(run) { run() },
+  effect,
   uiConversation: { views: { register: () => () => {} }, events: { register(value) { definition = value; return () => {} } } },
   uiWorkspace: {},
   remote: { agentPresets: {} },
@@ -105,6 +117,7 @@ const fakeClientCtx = {
     bind: () => key => key,
   },
   slots: {
+    spec() { return { kind: 'chain' } },
     inject(_name, callback) {
       const produced = callback()
       if (produced !== null && typeof produced === 'object' && Symbol.iterator in produced) {
@@ -144,6 +157,53 @@ for (const key of ['novel_review_chapter', 'novel_status', 'novel_context_previe
   assert.ok(toolKeys.includes(key), `${key} has a native tool card`)
 }
 assert.ok(toolKeys.length >= 30, 'common novel tools use family cards')
+
+// The 0.2 turn-tail slot is a list. It requires an id and supplies owner
+// props directly; the component must perform the old chain selection itself.
+const listRegistrations = []
+exports_.apply({ ...fakeClientCtx, slots: {
+  ...fakeClientCtx.slots,
+  spec: () => ({ kind: 'list' }),
+  register(options, component) {
+    if (options.name === 'conversation.chat.turnTail') {
+      assert.equal(options.id, 'openwrite.mutation-summary')
+      assert.equal(options.select, undefined)
+    }
+    listRegistrations.push({ options, component })
+    return () => {}
+  },
+} })
+assert.equal(listRegistrations.filter(entry => entry.options.name === 'conversation.chat.turnTail').length, 1)
+
+// A failure after earlier tool cards registered must unwind those cards,
+// remain contained, and leave the launcher/workbench registrations usable.
+const failures = []
+const previousError = console.error
+const activeTools = new Set()
+let delayedMount
+console.error = (...args) => failures.push(args)
+try {
+  const failingSlots = {
+    ...fakeClientCtx.slots,
+    register(options) {
+      if (options.key === 'novel_doc_write') throw new Error('changed tool slot contract')
+      if (options.name === 'tool.call.toolview') activeTools.add(options.key)
+      return () => activeTools.delete(options.key)
+    },
+  }
+  assert.doesNotThrow(() => exports_.apply({ ...fakeClientCtx, slots: failingSlots }))
+  assert.equal(activeTools.size, 0, 'tool registration failure rolls back earlier cards')
+  assert.match(String(failures[0][0]), /UI contribution disabled: tool.call.toolview/)
+  exports_.apply({ ...fakeClientCtx, slots: {
+    ...failingSlots,
+    inject(name, callback) {
+      if (name === 'tool.call.toolview') { delayedMount = callback; return () => {} }
+      return fakeClientCtx.slots.inject(name, callback)
+    },
+  } })
+  assert.doesNotThrow(() => delayedMount(), 'late declarations contain setup errors too')
+  assert.equal(activeTools.size, 0)
+} finally { console.error = previousError }
 
 // Exercise the built launcher against the preset actually installed by the root
 // package. A hardcoded older ID must fail here before a version can be released.

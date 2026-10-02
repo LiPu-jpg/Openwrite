@@ -1,9 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import { isWritingSession, watchWritingScope } from '../../src/client/writing-scope.ts'
 
 const session = (preset: string) => ({ current: 'current', byId: { current: { projectionValues: { agentPreset: preset } } } }) as unknown as SessionListState
 describe('writing presentation scope', () => {
+  it('unsubscribes if the first writing-scope mount fails', () => {
+    const stop = vi.fn()
+    expect(() => watchWritingScope({
+      getSnapshot: () => session('openwrite'), subscribe: () => stop,
+    }, () => { throw new Error('unavailable slot') })).toThrow('unavailable slot')
+    expect(stop).toHaveBeenCalledOnce()
+  })
   it('follows preset identity without leaking UI or changing tools on navigation', () => {
     let state = session('standard')
     let change = () => {}

@@ -319,6 +319,14 @@ export const novelMutationDefinition: ConversationNodeDefinition<MutationState> 
 
 type TurnSummaryProps = PropsRuntime<'conversation.chat.turnTail'> & PropsLocale<'studio-panel'> & Pick<StudioApiInjected, 'postStudioApi'> & { matched: NovelMutationSummary }
 
+/** DSH 0.2 dispatches turnTail as a list; the component owns its selection. */
+export function TurnMutationSummaryListView(props: Omit<TurnSummaryProps, 'matched'> & {
+  turn: { data: { get(key: 'dsh-novel-mutations'): NovelMutationSummary | undefined } }
+}) {
+  const matched = props.turn.data.get('dsh-novel-mutations')
+  return matched ? <TurnMutationSummaryView {...props} matched={matched} /> : null
+}
+
 interface PlanActionState {
   status: NovelMutationItem['status']
   previewToken: string
