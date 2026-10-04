@@ -279,8 +279,10 @@
         toolName: subagent_fork
         backgroundMode: continuable
 
-    - id: workflow-worker-thread
-      name: '@deepseek-ai/dsh-workflow-worker-thread'
+    # dsh 0.2 removed @deepseek-ai/dsh-workflow-worker-thread; the shipped
+    # standard preset now uses workflow-ptc for the same entry-local realm.
+    - id: workflow-ptc
+      name: '@deepseek-ai/dsh-workflow-ptc'
       config:
         provider: spawn
 

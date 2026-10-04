@@ -20,7 +20,7 @@ import { createDomainToolCard, type ToolFamily } from './DomainToolCard.tsx'
 import { en, NS, zh } from './locales.ts'
 import { NovelReviewCard } from './ReviewCard.tsx'
 import { novelMutationDefinition, TurnMutationSummaryView, TurnMutationSummaryListView } from './TurnMutationSummary.tsx'
-import type { StudioPanelInjected } from './workspace-context.ts'
+import { sessionOpener, type StudioPanelInjected } from './workspace-context.ts'
 
 export const inject = ['slots', 'locale', 'uiConversation', 'workspaces', 'sessions', 'uiWorkspace', 'remote', 'remote.agentPresets']
 
@@ -87,6 +87,9 @@ function* install(ctx: Context): Generator<() => void> {
     insertSessionBefore: (id, session, before) => ctx.workspaces.insertSessionBefore(id, session, before),
     pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
     connectWorkspace: id => ctx.uiWorkspace.connectWorkspace(id),
+    // dsh 0.2 moved "show this session" out of the Session Controller
+    // (`ISessions` has no `open`); the opener probes both generations.
+    ...sessionOpener({ uiWorkspace: ctx.uiWorkspace, sessions: ctx.sessions }),
   }
 
   // A workbench is visible activity even before the first chat turn. Its
@@ -112,7 +115,7 @@ function* install(ctx: Context): Generator<() => void> {
       const sessionId = await ctx.sessions.create({ workspaceId: workspace.workspaceId })
       const result = await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
       if (!result.ok) throw new Error(result.error.message)
-      ctx.sessions.open(sessionId)
+      workspaceServices.openSession(sessionId)
       // Activate a UI target to leave the blank Hero without manufacturing a user turn.
       if (typeof ctx.uiConversation.binding === 'function' && typeof ctx.uiConversation.views?.register === 'function') {
         ctx.uiConversation.binding(sessionId).activate('openwrite.creation')

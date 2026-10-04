@@ -23,12 +23,39 @@ export interface WorkspaceStandardKit {
 }
 
 /**
+ * Showing a session. dsh 0.2 moved this out of the Session Controller
+ * (`ISessions` has no `open`) and into `UiWorkspace.openSession`; 0.1.x never
+ * had the latter. The injected face carries whichever one this host provides.
+ */
+export interface SessionOpener {
+  openSession(target: SessionId): void
+}
+
+/**
+ * Build the opener once per profile so one build serves both host generations:
+ * probe at call time rather than binding to either API shape.
+ * @param sources - the client services that may own session navigation.
+ * @returns an opener that throws only when the host offers neither API.
+ */
+export function sessionOpener(sources: { uiWorkspace: unknown; sessions: unknown }): SessionOpener {
+  return {
+    openSession(target) {
+      const uiWorkspace = sources.uiWorkspace as { openSession?: (value: SessionId) => void } | undefined
+      if (typeof uiWorkspace?.openSession === 'function') { uiWorkspace.openSession(target); return }
+      const sessions = sources.sessions as { open?: (value: SessionId) => void } | undefined
+      if (typeof sessions?.open === 'function') { sessions.open(target); return }
+      throw new Error('OpenWrite: no session navigation API (UiWorkspace.openSession / ISessions.open)')
+    },
+  }
+}
+
+/**
  * The full inject face for the conversation views: the Studio API trio plus
  * the dsh domain services the new-work flow drives (directory pick →
  * workspace create → session connect).
  */
 export interface StudioPanelInjected extends StudioApiInjected {
-  workspaces: IWorkspaces & Pick<UiWorkspace, 'pickDirectory' | 'connectWorkspace'>
+  workspaces: IWorkspaces & Pick<UiWorkspace, 'pickDirectory' | 'connectWorkspace'> & SessionOpener
   sessions: ISessions
 }
 
@@ -103,7 +130,7 @@ export async function createNovelWorkspace(
     title: input.title,
   })
   const sessionId = await services.workspaces.connectWorkspace(workspace.workspaceId)
-  services.sessions.open(sessionId)
+  services.workspaces.openSession(sessionId)
   // Re-affirm the binding with the connected session id, then pull fresh state.
   workbenchStore.setContext({ workspaceId: workspace.workspaceId, root: workspace.path, sessionId })
   await workbenchStore.refresh()

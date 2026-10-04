@@ -111,7 +111,7 @@ const fakeClientCtx = {
   uiWorkspace: {},
   remote: { agentPresets: {} },
   workspaces: { marker: 'workspaces' },
-  sessions: { marker: 'sessions', list: { subscribe: () => () => {}, getSnapshot: () => ({ current: 'writing', byId: { writing: { projectionValues: { agentPreset: 'openwrite-0.2.0' } } } }) } },
+  sessions: { marker: 'sessions', list: { subscribe: () => () => {}, getSnapshot: () => ({ ids: ['writing'], byId: { writing: { retainedBy: { mainView: 1 }, blank: false, projectionValues: { agentPreset: 'openwrite-0.2.0' } } }, phase: 'ready', projectionsBySession: {} }) } },
   locale: {
     register(ns, dicts) { dictionaries.push({ ns, dicts }); return () => {} },
     bind: () => key => key,
@@ -230,7 +230,7 @@ try {
     calls.push(['preset', presetId])
     return { ok: true }
   }
-  fakeClientCtx.sessions.open = id => calls.push(['open', id])
+  fakeClientCtx.uiWorkspace.openSession = target => calls.push(['open', target])
   fakeClientCtx.uiConversation.binding = id => ({ activate: target => calls.push(['activate', id, target]) })
   const launcher = registrations.find(entry => entry.options.id === 'openwrite.launch')
   assert.ok(launcher)
