@@ -1274,7 +1274,7 @@ def test_studio_default_model_connection_test_allows_reasoning_budget(
     )
 
     assert result == {"reply": "OK"}
-    assert captured["max_tokens"] == 32
+    assert captured["max_tokens"] == 24000
 
 
 def test_studio_empty_model_connection_reply_gets_actionable_error():
@@ -1957,7 +1957,8 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
 def test_studio_sync_create_import_and_context_preview(tmp_path: Path):
     init_project(tmp_path, "demo", "雾城来信")
     app = StudioApplication(tmp_path)
-    assert app.workspace()["version"] == "5.8.1"
+    from tools.version import __version__
+    assert app.workspace()["version"] == __version__
 
     character = app.create_document(
         {"kind": "character", "name": "林岑", "description": "在雨夜追查旧信的记者。"}
