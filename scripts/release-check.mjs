@@ -21,7 +21,7 @@ try {
   }
   assert.equal(packed.name, 'dsh-openwrite')
   assert.equal(packed.private, undefined)
-  for (const file of ['plugin.mjs', 'plugin.d.ts', 'cordis.patch.yml', 'packages/openwrite-bridge/lib/index.js', 'packages/openwrite-bridge/lib/index.d.ts', 'packages/openwrite-bridge/lib/preset-tools.js', 'packages/studio-panel/lib/client.js', 'packages/studio-panel/lib/types/index.d.ts', 'packages/studio-panel/vendor/vditor/LICENSE', 'vendor/dsh-dog/lib/index.js', 'vendor/dsh-dog/lib/client.js', 'vendor/dsh-dog/LICENSE', 'presets/openwrite/agent.cordis.yml', 'scripts/dog/review-record.js', 'LICENSE', 'THIRD_PARTY_NOTICES.md']) {
+  for (const file of ['plugin.mjs', 'preset-definition.mjs', 'plugin.d.ts', 'cordis.patch.yml', 'packages/openwrite-bridge/lib/index.js', 'packages/openwrite-bridge/lib/index.d.ts', 'packages/openwrite-bridge/lib/preset-tools.js', 'packages/studio-panel/lib/client.js', 'packages/studio-panel/lib/types/index.d.ts', 'packages/studio-panel/vendor/vditor/LICENSE', 'vendor/dsh-dog/lib/index.js', 'vendor/dsh-dog/lib/client.js', 'vendor/dsh-dog/LICENSE', 'presets/openwrite/agent.cordis.yml', 'scripts/dog/review-record.js', 'LICENSE', 'THIRD_PARTY_NOTICES.md']) {
     assert.ok((await readFile(join(root, file))).length > 0, file)
   }
   for (const asset of [manifest.wheel, manifest.requirements, ...(manifest.dependency_wheels ?? [])]) assert.equal(hash(await readFile(join(root, 'release', asset.file))), asset.sha256, asset.file)

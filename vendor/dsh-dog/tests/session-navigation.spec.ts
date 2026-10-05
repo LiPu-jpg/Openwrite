@@ -122,3 +122,35 @@ describe('invocation session navigation', () => {
     )).rejects.toThrow('did not select session session-target')
   })
 })
+
+describe('0.2 invocation navigation', () => {
+  it('confirms main-view retention without current or legacy navigation methods', async () => {
+    let snapshot = { ids: ['target'], byId: { target: { retainedBy: {} } } }
+    const listeners = new Set<() => void>()
+    const sessions = { list: { getSnapshot: () => snapshot, subscribe: (f: () => void) => { listeners.add(f); return () => listeners.delete(f) } } } as unknown as Navigator
+    const openSession = vi.fn(() => {
+      snapshot = { ids: ['target'], byId: { target: { retainedBy: { mainView: 1 } } } }
+      for (const listener of listeners) listener()
+    })
+    await expect(openInvocationSession(sessions, 'target', undefined, 100, { openSession })).resolves.toBe(true)
+    expect(openSession).toHaveBeenCalledWith('target')
+  })
+
+  it('uses the persisted continuable parent address when the old catalog API is absent', async () => {
+    let snapshot = { ids: ['parent'], byId: {} as Record<string, { retainedBy: { mainView: number } }> }
+    const listeners = new Set<() => void>()
+    const sessions = { list: { getSnapshot: () => snapshot, subscribe: (f: () => void) => { listeners.add(f); return () => listeners.delete(f) } } } as unknown as Navigator
+    const openSession = vi.fn(() => {
+      snapshot = { ...snapshot, byId: { child: { retainedBy: { mainView: 1 } } } }
+      for (const listener of listeners) listener()
+    })
+    await expect(openInvocationSession(sessions, 'child', 'parent', 100, { openSession })).resolves.toBe(true)
+    expect(openSession).toHaveBeenCalledWith({ parentSessionId: 'parent', childSessionId: 'child', mode: 'continuable' })
+    await expect(openInvocationSession(sessions, 'unknown', undefined, 100, { openSession })).resolves.toBe(false)
+  })
+
+  it('does not accept a successful navigation call without selection', async () => {
+    const sessions = { list: { getSnapshot: () => ({ ids: ['target'], byId: {} }), subscribe: () => () => {} } } as unknown as Navigator
+    await expect(openInvocationSession(sessions, 'target', undefined, 10, { openSession: vi.fn() })).rejects.toThrow('did not select')
+  })
+})

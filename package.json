@@ -1,6 +1,6 @@
 {
   "name": "dsh-openwrite",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "OpenWrite 长篇小说领域后端接入 DeepSeek Harness：统一创作 Agent 预设 + 原生创作工作台",
   "type": "module",
   "scripts": {
@@ -28,8 +28,7 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@deepseek-ai/cordis-plugin-include": "1.0.7",
-    "@deepseek-ai/dsh": "0.1.2-rc.1",
-    "js-yaml": "4.3.1"
+    "@deepseek-ai/dsh": "0.1.2-rc.1"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -71,6 +70,7 @@
   },
   "files": [
     "plugin.mjs",
+    "preset-definition.mjs",
     "plugin.d.ts",
     "cordis.patch.yml",
     "packages/studio-panel/vendor",
@@ -108,7 +108,8 @@
     "ajv-formats": "^3.0.1",
     "fflate": "0.8.2",
     "proper-lockfile": "4.1.2",
-    "tar": "7.5.7"
+    "tar": "7.5.7",
+    "js-yaml": "4.3.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.2 || ~4.0.4",

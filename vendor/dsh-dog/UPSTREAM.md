@@ -18,5 +18,12 @@ OpenWrite compatibility changes:
   on cancellation or unload, including Windows process trees. Artifact archiving
   uses the portable tar library instead of a required system tar executable.
 
+- The debugger starts without a global tool catalog. Its authenticated RPC
+  channel retains the Web carrier dependency on the Connection origin context.
+- DSH 0.2 entry-local SettingsForms replace the old standalone settings section;
+  volatile concurrency values are read through their live references.
+- Invocation navigation uses uiWorkspace and confirms main-view retention on 0.2;
+  the 0.1 selection and parent-catalog APIs remain supported.
+
 The verification engine, graph schema, evidence records and storage keys remain
 upstream-compatible. This is a maintained integration, not an upstream release.

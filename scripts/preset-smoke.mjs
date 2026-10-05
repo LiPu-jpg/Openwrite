@@ -4,19 +4,23 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { load } from 'js-yaml'
+import { presetDefinition } from '../preset-definition.mjs'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 
 const root = new URL('../', import.meta.url)
 const presetDir = new URL('presets/openwrite/', root)
 const composition = await readFile(new URL('agent.cordis.yml', presetDir), 'utf8')
-const rows = load(composition, { schema: entryListSchema })
+const hostCli = process.argv.find(arg => arg.startsWith('--host-cli='))?.slice('--host-cli='.length)
+const require = createRequire(hostCli ? resolve(hostCli) : new URL('package.json', root))
+let modern = false
+try { require.resolve('@deepseek-ai/dsh-agent-preset-registry'); modern = true } catch {}
+const version = JSON.parse(await readFile(new URL('package.json', root), 'utf8')).version
+const rows = (await presetDefinition(version, modern)).plugins
 assert.ok(Array.isArray(rows) && rows.length > 10, 'unified preset must be a non-trivial entry list')
 const flatten = entries => entries.flatMap(row => [row, ...(row.group && Array.isArray(row.config) ? flatten(row.config) : [])])
 const allRows = flatten(rows)
 assert.equal(allRows.some(row => row?.name === '@dsh-novel/openwrite-bridge'), false,
   'openwrite-bridge belongs to the host profile and must not be mounted by the preset')
-const hostCli = process.argv.find(arg => arg.startsWith('--host-cli='))?.slice('--host-cli='.length)
-const require = createRequire(hostCli ? resolve(hostCli) : new URL('package.json', root))
 for (const row of allRows) {
   if (row.name?.startsWith('@deepseek-ai/')) require.resolve(row.name)
 }

@@ -53,7 +53,7 @@ function props(fetchStudioApi: ReturnType<typeof vi.fn>) {
     useWorkspaces: (select: (state: unknown) => unknown) => select({ items: [WORKSPACE], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null, baselinesReady: true }),
     fetchStudioApi,
     postStudioApi: vi.fn(async () => ({})), putStudioApi: vi.fn(async () => ({})),
-    workspaces: { pickDirectory: vi.fn(), create: vi.fn(), connectWorkspace: vi.fn() }, sessions: { open: vi.fn() }, t,
+    workspaces: { pickDirectory: vi.fn(), create: vi.fn(), connectWorkspace: vi.fn(), openSession: vi.fn() }, sessions: { open: vi.fn() }, t,
   }
 }
 

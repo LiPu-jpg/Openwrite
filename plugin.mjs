@@ -4,6 +4,7 @@ import { lock } from 'proper-lockfile'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { presetDefinition } from './preset-definition.mjs'
 
 export const name = 'dsh-openwrite'
 
@@ -77,4 +78,10 @@ export async function apply(ctx) {
       await rm(destination, { recursive: true })
     }
   }))
+  // 0.1 discovers the managed directory above; 0.2 only accepts registered
+  // definitions. The declaring context owns registration and its resolution base.
+  ctx.inject(['agentPresets'], async function* (presetCtx) {
+    if (typeof presetCtx.agentPresets.register !== 'function') return
+    yield await presetCtx.agentPresets.register(await presetDefinition(version, true))
+  })
 }

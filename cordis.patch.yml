@@ -1,3 +1,12 @@
+# 0.2's carrier-neutral Connection does not require webServer itself, but its
+# custom RPC channel registrar reads that service from its declaring context.
+# OpenWrite targets Web/Desktop, where the carrier is present; declare it here
+# so authenticated DoG RPC channels can register without changing transport.
+- id: connection
+  inject:
+    - webRuntime
+    - webServer
+
 - insert:
     - id: openwrite-bundle
       name: dsh-openwrite

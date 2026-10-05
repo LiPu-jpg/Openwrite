@@ -44,6 +44,40 @@ jobs:
             dsh-openwrite-*.tgz
             dsh-openwrite-*.tgz.manifest.json
           if-no-files-found: error
+  client-contracts:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: '0.1.2-rc.1'
+            before: '2026-09-09T00:00:00Z'
+          - host: '0.1.5-alpha.1'
+            before: '2026-09-09T00:00:00Z'
+          - host: '0.2.0-rc.2'
+            before: '2026-10-03T00:00:00Z'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
+      - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-package
+      - run: npm install --prefix .tmp-client-host @deepseek-ai/dsh@${{ matrix.host }} --before=${{ matrix.before }} --registry=https://registry.npmjs.org --ignore-scripts --no-audit --no-fund
+      - run: node scripts/preset-smoke.mjs --host-cli=.tmp-client-host/node_modules/@deepseek-ai/dsh/lib/bin.js
+      - run: node scripts/client-boot-smoke.mjs dsh-openwrite-*.tgz --host-cli=.tmp-client-host/node_modules/@deepseek-ai/dsh/lib/bin.js --report=client-report-${{ matrix.host }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-client-${{ matrix.host }}
+          path: client-report-*.json
+          if-no-files-found: error
   install:
     needs: build
     strategy:
@@ -140,7 +174,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
   acceptance:
-    needs: [build, install, source-install, compatibility-alpha]
+    needs: [build, install, source-install, compatibility-alpha, client-contracts]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -88,6 +88,7 @@ function chipProps(sessionId: string | undefined) {
       pickDirectory: vi.fn(async () => '/picked/dir'),
       create: vi.fn(async () => ({ workspaceId: 'ws-new', path: '/picked/dir' })),
       connectWorkspace: vi.fn(async () => 's-new'),
+      openSession: vi.fn(async () => undefined),
     },
     sessions: { open: vi.fn() },
     t,
@@ -120,7 +121,7 @@ describe('WorkspaceContextChip', () => {
 
     await waitFor(() => expect(props.workspaces.create).toHaveBeenCalledWith({ path: '/picked/dir' }))
     await waitFor(() => expect(props.workspaces.connectWorkspace).toHaveBeenCalledWith('ws-new'))
-    expect(props.sessions.open).toHaveBeenCalledWith('s-new')
+    expect(props.workspaces.openSession).toHaveBeenCalledWith('s-new')
   })
 
   it('opens the inline init form for a bound-but-uninitialized workspace and inits at its canonical path', async () => {
@@ -152,7 +153,7 @@ function operationsProps() {
     fetchStudioApi: vi.fn(async () => ({ data: { tasks: [], counts: {} } })),
     postStudioApi,
     putStudioApi: vi.fn(async () => ({})),
-    workspaces: { pickDirectory: vi.fn(), create: vi.fn(), connectWorkspace: vi.fn() },
+    workspaces: { pickDirectory: vi.fn(), create: vi.fn(), connectWorkspace: vi.fn(), openSession: vi.fn() },
     sessions: { open: vi.fn() },
     t,
   }
