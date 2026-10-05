@@ -2868,7 +2868,7 @@ class StudioApplication:
         response = LLMClient(config).chat(
             [Message("user", "这是连接测试。请只回复 OK。")],
             temperature=0,
-            max_tokens=32,
+            max_tokens=settings["max_tokens"],
             stream=False,
         )
         reply = response.content.strip()
