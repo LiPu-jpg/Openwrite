@@ -60,6 +60,9 @@ export function ContinuousReader({
   const [state, setState] = useState<'loading' | 'ready'>('loading')
   const [loadError, setLoadError] = useState('')
   const [reload, setReload] = useState(0)
+  const chaptersSignature = JSON.stringify(chapters.map(chapter => [
+    chapter.occurrenceId, chapter.documentId, chapter.path, chapter.revision, chapter.status,
+  ]))
   const activeOccurrence = useMemo(() => chapters.findIndex(chapter =>
     activeOccurrenceId !== '' ? chapter.occurrenceId === activeOccurrenceId : chapter.path === activePath),
   [activeOccurrenceId, activePath, chapters])
@@ -67,16 +70,15 @@ export function ContinuousReader({
   useEffect(() => {
     let cancelled = false
     setState('loading')
-    setDocuments([])
     setLoadError('')
     void (async () => {
+      const loaded: ReaderDocument[] = []
       const canonical = chapters.length > 0 && readingOrderRevision !== '' &&
         chapters.every(chapter => chapter.occurrenceId !== '' && chapter.documentId !== '')
       if (canonical) {
         const byOccurrence = new Map(chapters.map((chapter, index) => [chapter.occurrenceId, { chapter, index }]))
         let anchor = chapters[0]?.occurrenceId ?? ''
         const visited = new Set<string>()
-        const loaded: ReaderDocument[] = []
         while (anchor !== '') {
           if (visited.has(anchor)) throw new Error('READING_PACKET_LOOP')
           visited.add(anchor)
@@ -97,7 +99,6 @@ export function ContinuousReader({
             })
           }
           if (cancelled) return
-          setDocuments([...loaded].sort((left, right) => left.occurrence - right.occurrence))
           if (!packet.has_next) break
           anchor = packet.documents.at(-1)?.next_occurrence_id ?? ''
           if (anchor === '') throw new Error('READING_PACKET_TRUNCATED')
@@ -116,17 +117,20 @@ export function ContinuousReader({
             }
           }
           if (cancelled) return
-          setDocuments(previous => [...previous, item])
+          loaded.push(item)
         }
       }
-      if (!cancelled) setState('ready')
+      if (!cancelled) {
+        setDocuments(loaded.sort((left, right) => left.occurrence - right.occurrence))
+        setState('ready')
+      }
     })().catch((cause: unknown) => {
       if (cancelled) return
       setLoadError(cause instanceof Error ? cause.message : String(cause))
       setState('ready')
     })
     return () => { cancelled = true }
-  }, [chapters, fetchStudioApi, readingOrderRevision, reload])
+  }, [chaptersSignature, fetchStudioApi, readingOrderRevision, reload])
 
   return <section className={css.continuousReader} aria-label={t('creation.reader.title')}>
     <header className={css.readerHeader}>
@@ -146,7 +150,7 @@ export function ContinuousReader({
       <header>
         <div>
           <span>{String(item.occurrence + 1).padStart(2, '0')}</span>
-          <strong>{item.chapter.title}</strong>
+          <strong>{chapters[item.occurrence]?.title ?? item.chapter.title}</strong>
         </div>
         <button type="button" onClick={() => onOpenChapter(item.path, item.chapter.occurrenceId)}>{t('creation.reader.openEditor')}</button>
       </header>

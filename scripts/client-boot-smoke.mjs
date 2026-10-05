@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
+import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { x as extract } from 'tar'
 
@@ -21,11 +22,11 @@ const profile = join(home, 'profiles/web')
 const require = createRequire(join(root, 'packages/studio-panel/package.json'))
 const expected = ['@dsh-novel/studio-panel', '@dsh-external/dsh-dog']
 const errors = []
+const artifact = process.argv.find(arg => arg.endsWith('.tgz'))
 let host, browser
 let log = ''
 try {
   let plugin = root
-  const artifact = process.argv.find(arg => arg.endsWith('.tgz'))
   if (artifact) {
     const staging = join(temporary, 'artifact')
     await mkdir(staging)
@@ -47,7 +48,10 @@ try {
   await writeFile(join(other, 'index.mjs'), `export function apply(ctx) {
     ctx.inject(['webServer'], c => c.effect(() => c.webServer.register({
       kind: 'exact', path: '/openwrite-coexist-fixture',
-      handler: (_req, res) => { res.writeHead(200); res.end('available'); },
+      handler: (_req, res) => { res.writeHead(200); res.end(JSON.stringify({
+        available: true, dog: !!c.get('openwriteDog'), connection: !!c.get('connection'),
+        subagents: !!c.get('subagents'), tools: !!c.get('tools'),
+      })); },
     })));
   }`)
   const manifest = { name: 'openwrite-client-test', private: true,
@@ -78,23 +82,71 @@ try {
   assert.doesNotMatch(log, /disabling profile plugin row|did not activate|incompatible with dsh/)
   browser = await require('@playwright/test').chromium.launch({ headless: true })
   const page = await browser.newPage()
+  page.on('response', response => {
+    if (response.status() >= 400 && response.status() !== 428) {
+      console.error('Unexpected HTTP response:', response.status(), new URL(response.url()).pathname)
+    }
+  })
   page.on('pageerror', error => errors.push(error.message))
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  page.on('console', message => { if (message.type() === 'error' && !message.text().includes('status of 428 (Precondition Required)')) errors.push(message.text()) })
   await page.goto(login)
   await page.getByRole('button', { name: /^(Continue|继续)$/ }).click()
   const configureLater = page.getByRole('button', { name: /^(Configure later|稍后配置)$/ })
+  await configureLater.waitFor()
   if (await configureLater.isVisible()) await configureLater.click()
   await page.getByRole('button', { name: /^(Open OpenWrite|打开 OpenWrite)$/ }).waitFor()
   const entries = await page.evaluate(() => window.__DSH_BOOT__.entries.map(entry => entry.id))
   for (const id of expected) assert.ok(entries.includes(id), `${id}: missing client boot entry`)
-  assert.equal(await page.evaluate(async () => (await fetch('/openwrite-coexist-fixture')).text()), 'available')
+  const hostServices = await page.evaluate(async () => (await fetch('/openwrite-coexist-fixture')).json())
+  assert.equal(hostServices.available, true)
+  // Real preset selection, retention and slot mounting; the backend's runtime
+  // readiness is a fixture here (runtime install has its own release gate).
+  await page.route('**/studio-panel/runtime', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ phase: 'ready' }),
+  }))
+  await page.route('**/studio-panel/api/**', route => route.fulfill({
+    status: 428, contentType: 'application/json',
+    body: JSON.stringify({ code: 'WORKSPACE_NOT_INITIALIZED', error: 'Project not initialized' }),
+  }))
+  try { await page.getByRole('button', { name: /^(Open OpenWrite|打开 OpenWrite)$/ }).click({ timeout: 5000 }) }
+  catch (error) { console.error('UI before launcher:', await page.locator('body').innerText()); throw error }
+  const launch = page.getByRole('dialog').filter({ has: page.getByLabel('作品目录', { exact: true }) })
+  await mkdir(join(temporary, 'novel'))
+  await launch.getByLabel('作品目录', { exact: true }).fill(join(temporary, 'novel'))
+  await launch.getByRole('button', { name: '进入作品', exact: true }).click()
+  try { await launch.waitFor({ state: 'hidden', timeout: 10000 }) }
+  catch (error) { console.error('Launcher failure:', await launch.innerText()); throw error }
+  for (const name of [/^(创作|Create|Creation)$/, /^(资料|Library)$/, /^(任务|Tasks)$/]) {
+    try { await page.getByRole('tab', { name }).waitFor({ timeout: 5000 }) }
+    catch (error) { console.error('Workbench UI:', await page.locator('body').innerText()); console.error('Errors:', errors); throw error }
+  }
+  // Activation contributes an empty-session activity snapshot; the host keeps
+  // the author's selected tab. Verify the actual workbench after selecting it.
+  await page.getByRole('tab', { name: /^(创作|Create|Creation)$/ }).click()
+  await page.getByRole('tab', { name: /^(创作|Create|Creation)$/, selected: true }).waitFor()
+  await page.getByRole('textbox', { name: /^(搜索章节|Search chapters)$/ }).fill('browser acceptance')
+  assert.equal(await page.getByRole('textbox', { name: /^(搜索章节|Search chapters)$/ }).inputValue(), 'browser acceptance')
   await page.evaluate(() => window.dispatchEvent(new Event('openwrite:dog-open')))
   await page.getByRole('dialog', { name: /DoG/i }).waitFor()
+  try { await page.getByText('No persisted graphs yet', { exact: true }).waitFor({ timeout: 5000 }) }
+  catch (error) {
+    console.error('DoG UI:', await page.getByRole('dialog', { name: /DoG/i }).innerText())
+    console.error('Host services:', JSON.stringify(hostServices))
+    throw error
+  }
   assert.deepEqual(errors, [], 'client initialization and debugger render errors')
   assert.deepEqual(JSON.parse(await readFile(join(profile, 'package.json'))).dsh.profile.bundles, manifest.dsh.profile.bundles)
-  console.log(JSON.stringify({ host: hostVersion, clients: expected, checks: [
-    'version-gates-without-exemptions', 'client-activation', 'launcher', 'dog-overlay', 'other-plugin-preserved',
-  ], modelCalls: 0 }))
+  const result = { status: 'passed', host: hostVersion,
+    artifactSha256: artifact ? createHash('sha256').update(await readFile(resolve(artifact))).digest('hex') : null,
+    clients: expected, checks: [
+      'version-gates-without-exemptions', 'client-activation', 'launcher', 'preset-selection', 'workspace-navigation', 'workbench-tabs', 'workbench-render', 'dog-overlay', 'dog-snapshot', 'other-plugin-preserved',
+    ], backend: 'readiness-and-uninitialized-workspace-fixture', modelCalls: 0 }
+  const report = process.argv.find(arg => arg.startsWith('--report='))?.slice(9)
+  if (report) await writeFile(resolve(report), JSON.stringify(result, null, 2) + '\n')
+  console.log(JSON.stringify(result))
+} catch (error) {
+  console.error('Host diagnostics:', log.replace(/https?:\/\/[^\s\u001b]+/g, '[URL]'))
+  throw error
 } finally {
   await browser?.close()
   if (host && host.exitCode === null && host.signalCode === null) {

@@ -59,7 +59,9 @@ export type * from './model.ts'
 /** Cordis plugin name. */
 export const name = 'dsh-dog'
 /** Required Harness services. */
-export const inject = ['tools', 'subagents']
+// The host owns storage, the debugger and delegation. Model-facing tools are
+// contributed by dog-tools in the preset; a host tools service is not required.
+export const inject: string[] = []
 
 declare module '@deepseek-ai/cordis' { interface Context { openwriteDog: { tools: ToolDefinition[] } } }
 
@@ -98,13 +100,29 @@ export const Config: z<Config> = z.object({
   subagentProvider: z.string().default('spawn'),
   subagentMaxDepth: z.natural().default(3),
 })
+// Metadata is understood by 0.2 SettingsForms; the pinned 0.1 SDK has no
+// volatile Meta field yet. Other deployment fields require a Loader remount.
+Object.assign(Config.dict!.maxConcurrentVerifications!.meta, { volatile: true })
+
+function concurrencyValue(value: number): number {
+  // 0.2 supplies volatile values as references, while 0.1 supplies numbers.
+  const reference = value as unknown as { get?: () => number }
+  return typeof reference?.get === 'function' ? reference.get() : value
+}
 
 /** Register all DoG tools as Cordis-owned effects so fiber disposal removes them. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const schema = await loadSchemaSet()
   let resolved: Config = config
   let settingsCurrent: (() => Config) | undefined
-  ctx.inject(['settings'], settingsCtx => settingsCtx.settings.installSection(
+  ctx.inject(['settings'], settingsCtx => {
+    // 0.2 derives settings from this profile entry's Config schema. The Loader
+    // supplies config directly; the removed standalone namespace is 0.1-only.
+    if (typeof settingsCtx.settings.installSection !== 'function') {
+      settingsCurrent = () => config
+      return
+    }
+    return settingsCtx.settings.installSection(
     ctx,
     'dog',
     z.object({
@@ -130,7 +148,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       },
       onChange: () => undefined,
     },
-  ))
+    )
+  })
   const repository = new DogRepository(dshHomePath(config.storageDirectory), schema)
   // Host boot: cancel runs a previous process left `running` (killed/restarted
   // host) as soon as the plugin loads — before any engine or tool call. Their
@@ -165,6 +184,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       dogEngine = new DogEngine({
         config: {
           ...effective,
+          maxConcurrentVerifications: concurrencyValue(effective.maxConcurrentVerifications),
           workspaceRoot: isAbsolute(effective.workspaceRoot) ? effective.workspaceRoot : dshHomePath(effective.workspaceRoot),
           scriptsDirectory: isAbsolute(effective.scriptsDirectory) ? effective.scriptsDirectory : dshHomePath(effective.scriptsDirectory),
         },
@@ -187,7 +207,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         },
         liveConfig: () => {
           const live = settingsCurrent?.()
-          return live === undefined ? {} : { maxConcurrentVerifications: live.maxConcurrentVerifications }
+          return live === undefined ? {} : { maxConcurrentVerifications: concurrencyValue(live.maxConcurrentVerifications) }
         },
         resolveLivingAgent: sessionId => {
           const agents = ctx.get('agents') as AgentRegistry | undefined
@@ -303,7 +323,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (reason?.kind !== 'interrupted') return
     void captureInterruptedTurn(repository, session, event as { readonly seq: number; readonly time: number }).catch(() => undefined)
   })
-  ctx.inject(['connection'], (connectionCtx) => {
+  // The authenticated RPC channel needs the Web carrier; the bundle also
+  // declares it on Connection's origin context for 0.2's service shadowing.
+  ctx.inject(['connection', 'webServer'], (connectionCtx) => {
     connectionCtx.effect(() => connectionCtx.connection.rpc.handle(
       DOG_DEBUG_RPC_CHANNEL,
       debugHandler,

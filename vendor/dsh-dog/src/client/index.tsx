@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import {
@@ -14,12 +14,12 @@ import {
   DOG_RUNTIME_TRACE_ENDPOINT,
 } from '../debug-contract.ts'
 import { DogDebugger } from './DogDebugger.tsx'
-import { openInvocationSession } from './sessionNavigation.ts'
+import { openInvocationSession, refreshInvocationCatalog } from './sessionNavigation.ts'
 import { DOG_DEBUG_CSS, DOG_DEBUG_STYLE_ID } from './styles.ts'
 import { debuggerSessionState } from './sessionState.ts'
 
 /** The overlay uses the shared trusted RPC transport and canonical session navigator. */
-export const inject = ['slots', 'sessions', 'connection', 'uiSession']
+export const inject = ['slots', 'sessions', 'connection', 'uiSession', 'uiWorkspace']
 
 /** Register the debugger beside other frame-wide overlays without replacing shipped UI. */
 export function apply(ctx: ClientContext): void {
@@ -39,7 +39,10 @@ function* install(ctx: ClientContext): Generator<() => void> {
     return result.value
   }
   const openSession = (sessionId: string, parentSessionId?: string): Promise<boolean> =>
-    openInvocationSession(sessions, sessionId, parentSessionId)
+    openInvocationSession(sessions, sessionId, parentSessionId, undefined,
+      typeof (ctx.uiWorkspace as unknown as { openSession?: unknown }).openSession === 'function'
+        ? ctx.uiWorkspace as unknown as NonNullable<Parameters<typeof openInvocationSession>[4]>
+        : undefined)
   const state = debuggerSessionState(sessions.list, ctx.uiSession)
   state.getSnapshot()
   const DogDebuggerHost = (): JSX.Element | null => {
@@ -55,7 +58,7 @@ function* install(ctx: ClientContext): Generator<() => void> {
     openSession={openSession}
     getSessionState={state.getSnapshot}
     subscribeSessions={state.subscribe}
-    refreshAgentCatalog={parentSessionId => sessions.refreshSubagents(parentSessionId as SessionId)}
+    refreshAgentCatalog={parentSessionId => refreshInvocationCatalog(sessions, parentSessionId)}
   />
   }
   yield ctx.effect(installStyles, 'dog-debugger: styles')

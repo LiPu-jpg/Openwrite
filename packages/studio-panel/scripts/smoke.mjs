@@ -9,7 +9,7 @@ import * as JsxRuntime from 'react/jsx-runtime'
 import { normalizeMinimapProperties } from './react-flow-properties.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
-const host = await import(`${root}lib/index.js`)
+const host = await import(new URL('../lib/index.js', import.meta.url).href)
 assert.equal(host.name, '@dsh-novel/studio-panel')
 assert.equal(host.VENDOR_ROUTE, '/studio-panel/vendor/vditor')
 
@@ -111,7 +111,7 @@ const fakeClientCtx = {
   uiWorkspace: {},
   remote: { agentPresets: {} },
   workspaces: { marker: 'workspaces' },
-  sessions: { marker: 'sessions', list: { subscribe: () => () => {}, getSnapshot: () => ({ current: 'writing', byId: { writing: { projectionValues: { agentPreset: 'openwrite-0.2.0' } } } }) } },
+  sessions: { marker: 'sessions', list: { subscribe: () => () => {}, getSnapshot: () => ({ ids: ['writing'], byId: { writing: { retainedBy: { mainView: 1 }, blank: false, projectionValues: { agentPreset: 'openwrite-0.2.0' } } }, phase: 'ready', projectionsBySession: {} }) } },
   locale: {
     register(ns, dicts) { dictionaries.push({ ns, dicts }); return () => {} },
     bind: () => key => key,
@@ -212,7 +212,7 @@ const previousHome = process.env.DSH_HOME
 const presetDisposers = []
 process.env.DSH_HOME = presetHome
 try {
-  await installReleasePreset({ effect: factory => presetDisposers.push(factory()) })
+  await installReleasePreset({ inject() {}, effect: factory => presetDisposers.push(factory()) })
   const calls = []
   fakeClientCtx.workspaces.create = async input => {
     calls.push(['workspace', input.path])
@@ -230,7 +230,12 @@ try {
     calls.push(['preset', presetId])
     return { ok: true }
   }
-  fakeClientCtx.sessions.open = id => calls.push(['open', id])
+  fakeClientCtx.uiWorkspace.openSession = target => {
+    calls.push(['open', target])
+    fakeClientCtx.sessions.list.getSnapshot = () => ({ ids: [target], byId: {
+      [target]: { retainedBy: { mainView: 1 }, projectionValues: { agentPreset: 'openwrite' } },
+    } })
+  }
   fakeClientCtx.uiConversation.binding = id => ({ activate: target => calls.push(['activate', id, target]) })
   const launcher = registrations.find(entry => entry.options.id === 'openwrite.launch')
   assert.ok(launcher)

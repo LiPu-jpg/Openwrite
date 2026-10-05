@@ -86,7 +86,7 @@ export function HeaderUtilities({ postStudioApi, t }: UtilityProps) {
  * path). An initialized workspace renders read-only.
  */
 export function WorkspaceContextChip(props: ContextChipProps) {
-  const { t, postStudioApi, workspaces, sessions } = props
+  const { t, postStudioApi, workspaces } = props
   const workbench = useWorkbench()
   const workspace = useBindStudioContext({ sessionId: props.sessionId, useWorkspaces: props.useWorkspaces })
   const notInitialized = workbench.workspaceError === 'WORKSPACE_NOT_INITIALIZED'
@@ -116,7 +116,7 @@ export function WorkspaceContextChip(props: ContextChipProps) {
       if (picked !== null) {
         const created = await workspaces.create({ path: picked })
         const sessionId = await workspaces.connectWorkspace(created.workspaceId)
-        sessions.open(sessionId)
+        workspaces.openSession(sessionId)
       }
       setOpen(false)
     } catch (cause: unknown) {

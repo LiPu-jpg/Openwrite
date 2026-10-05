@@ -2252,7 +2252,7 @@ export function CreationView(props: CreationViewProps) {
           </section>
         )}
 
-        {readerMode && <ContinuousReader key={`${workspaceId ?? ''}:${String(workbench.contextEpoch)}:${String(workbench.epochs.manuscript)}`}
+        {readerMode && <ContinuousReader key={`${workspaceId ?? ''}:${String(workbench.contextEpoch)}`}
           chapters={orderedChapters} activePath={path} activeOccurrenceId={activeOccurrenceId}
           readingOrderRevision={readingOrder?.revision ?? ''} fetchStudioApi={fetchStudioApi}
           onOpenChapter={chooseChapter} t={t} />}
