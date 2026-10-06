@@ -38,6 +38,20 @@ class StudioPostRoute:
     accepts_payload: bool = True
     envelope: bool = False
     path_parameter: str = ""
+    read_only: bool = False
+    read_only_actions: frozenset[str] = frozenset()
+    default_action: str = ""
+
+    def affects_state(self, payload: dict[str, Any]) -> bool:
+        """Classify successful actions by their public state, not their HTTP verb."""
+        if self.read_only:
+            return False
+        if not payload.get("action") and payload.get("confirm"):
+            return True
+        action = payload.get("action") or self.default_action
+        return not (
+            isinstance(action, str) and action.strip().lower() in self.read_only_actions
+        )
 
 
 POST_ROUTES = {
@@ -65,7 +79,7 @@ POST_ROUTES = {
         "delete_model_profile", requires_project=False, envelope=True
     ),
     "/api/model/profiles/delete-preview": StudioPostRoute(
-        "delete_model_profile_preview", requires_project=False, envelope=True
+        "delete_model_profile_preview", requires_project=False, envelope=True, read_only=True
     ),
     "/api/model/routes": StudioPostRoute(
         "save_model_routes", requires_project=False, envelope=True
@@ -85,16 +99,16 @@ POST_ROUTES = {
     "/api/revisions/from-review": StudioPostRoute("create_review_revision", envelope=True),
     "/api/assets": StudioPostRoute("create_asset", envelope=True),
     "/api/assets/update": StudioPostRoute("update_asset", envelope=True),
-    "/api/assets/package/preview": StudioPostRoute("asset_package_preview", envelope=True),
+    "/api/assets/package/preview": StudioPostRoute("asset_package_preview", envelope=True, read_only=True),
     "/api/assets/package/import": StudioPostRoute("import_asset_package", envelope=True),
     "/api/tasks": StudioPostRoute("create_task", envelope=True),
     "/api/benchmarks": StudioPostRoute("create_benchmark", envelope=True),
     "/api/sync": StudioPostRoute("sync_project", accepts_payload=False),
     "/api/document/create": StudioPostRoute("create_document"),
-    "/api/document/change-plan": StudioPostRoute("document_change_plan", envelope=True),
-    "/api/structured/change-plan": StudioPostRoute("structured_change_plan", envelope=True),
+    "/api/document/change-plan": StudioPostRoute("document_change_plan", envelope=True, read_only_actions=frozenset({"preview"}), default_action="preview"),
+    "/api/structured/change-plan": StudioPostRoute("structured_change_plan", envelope=True, read_only_actions=frozenset({"preview"}), default_action="preview"),
     "/api/import": StudioPostRoute("import_text"),
-    "/api/import/preview": StudioPostRoute("preview_import"),
+    "/api/import/preview": StudioPostRoute("preview_import", read_only=True),
     "/api/manuscript-imports/prepare": StudioPostRoute("prepare_manuscript_import", envelope=True),
     "/api/manuscript-imports/structure": StudioPostRoute(
         "revise_manuscript_import_structure", envelope=True
@@ -106,7 +120,7 @@ POST_ROUTES = {
     "/api/manuscript-imports/discard": StudioPostRoute("discard_manuscript_import", envelope=True),
     "/api/project-archives/create": StudioPostRoute("create_project_archive", envelope=True),
     "/api/project-archives/restore/preview": StudioPostRoute(
-        "project_restore_preview", envelope=True
+        "project_restore_preview", envelope=True, read_only=True
     ),
     "/api/project-archives/restore": StudioPostRoute("restore_project_archive", envelope=True),
     "/api/foreshadowing": StudioPostRoute("manage_foreshadowing"),
@@ -130,7 +144,11 @@ POST_ROUTES = {
     "/api/diagnostics": StudioPostRoute("runtime_diagnostics"),
     "/api/rolling-plans": StudioPostRoute("rolling_plan_action"),
     "/api/narrative-forecasts": StudioPostRoute("narrative_forecast_action"),
-    "/api/manuscript-editing": StudioPostRoute("manuscript_editing_action"),
+    "/api/manuscript-editing": StudioPostRoute(
+        "manuscript_editing_action",
+        read_only_actions=frozenset({"versions", "version", "compare", "annotations"}),
+        default_action="versions",
+    ),
     "/api/manuscript/acceptance/reconcile": StudioPostRoute(
         "reconcile_manuscript_acceptance", envelope=True
     ),
@@ -705,8 +723,8 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 response=result,
                 model_calls=collector.model_calls,
             )
-            self._json(result)
             self._bump_context_epoch()
+            self._json(result, mutated=True)
         except StudioError as exc:
             self._handle_studio_error(exc)
         except Exception as exc:
@@ -746,8 +764,10 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 )
             if route_contract.envelope:
                 result = studio_success_payload(result, self.request_id)
-            self._json(result)
-            self._bump_context_epoch()
+            mutated = route_contract.affects_state(payload)
+            if mutated:
+                self._bump_context_epoch()
+            self._json(result, mutated=mutated)
         except StudioError as exc:
             self._handle_studio_error(exc)
         except Exception as exc:
@@ -901,12 +921,14 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 code="WRITE_CREDENTIAL_REQUIRED",
             )
 
-    def _json(self, payload: Any, status: int = HTTPStatus.OK) -> None:
+    def _json(self, payload: Any, status: int = HTTPStatus.OK, *, mutated: bool | None = None) -> None:
         body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
         self.send_response(status)
         self._security_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("X-Request-ID", self.request_id)
+        if mutated is not None:
+            self.send_header("X-OpenWrite-Mutated", "1" if mutated else "0")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
