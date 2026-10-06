@@ -29,14 +29,14 @@
 
 ## 快速安装
 
-**0.2.12 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2**。0.2.0-rc.2 已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。默认使用 npm `latest` 渠道；商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
+**0.2.13 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2**。0.2.0-rc.2 已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。默认使用 npm `latest` 渠道；商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
 
 npm 包和对应 GitHub Release 使用同一份验收产物。也可安装精确版本的 Release 包：
 
-**0.2.12 已在 npm 和 GitHub Release 发布，npm `latest` 已更新到 0.2.12。** 两处安装包与完整 CI 验收产物的 SHA-256 一致。0.2.11 不包含本次进入工作台和连续审读修复，请升级到 0.2.12。
+**0.2.13 的 GitHub 安装包已发布，npm `latest` 暂时仍为 0.2.12，等待本次发布的 2FA 验证后同步发布。** 0.2.12 不包含 #57 的创作页刷新循环修复；请使用下方已发布的 0.2.13 Release 包。
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.12/dsh-openwrite-0.2.12.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.13/dsh-openwrite-0.2.13.tgz
 dsh web
 ```
 
@@ -66,13 +66,13 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
-`0.2.13` 候选包修复 [#57](https://github.com/LiPu-jpg/Openwrite/issues/57) 的创作页刷新循环：批注与版本读取不再作为写操作通知刷新，Core 的只读请求也不再增加工作区变更序号。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
+`0.2.13` 修复 [#57](https://github.com/LiPu-jpg/Openwrite/issues/57) 的创作页刷新循环：批注与版本读取不再作为写操作通知刷新，Core 的只读请求也不再增加工作区变更序号。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
 
 `0.2.12` 进一步修复 [#50](https://github.com/LiPu-jpg/Openwrite/issues/50)、[#51](https://github.com/LiPu-jpg/Openwrite/issues/51)、[#52](https://github.com/LiPu-jpg/Openwrite/issues/52) 的预设注册、导航、工作台挂载和 DoG 接口。连续审读按内容修订刷新，避免轮询闪烁（[#54](https://github.com/LiPu-jpg/Openwrite/issues/54)）。
 
 `0.2.11` 修复 [#45](https://github.com/LiPu-jpg/Openwrite/issues/45)，适配精确宿主版本 `0.2.0-rc.2`：工作台兼容新的 turn-tail list 槽位，DoG 调试面板使用新的 `sessionStatus`；根包和所有子包的兼容声明同步更新。已验证 0.2.0-rc.2 的 Web 客户端启动、OpenWrite 入口、DoG 面板及其他插件共存；Windows Electron 桌面端恢复链路尚未实机复测。
 
-**`dsh-openwrite@0.2.10` 不包含这项修复，请升级到 `dsh-openwrite@0.2.12` 或对应的 GitHub Release 包。** 不要通过给旧子包授权来代替升级：`dsh-openwrite` 的版本豁免不会覆盖 `@dsh-novel/studio-panel@<ver>` 和 `@dsh-external/dsh-dog@<ver>`，而旧客户端在 0.2.0-rc.2 上激活失败可能触发桌面端的 profile 恢复。
+**`dsh-openwrite@0.2.10` 不包含这项修复，请升级到 `0.2.13` 的 GitHub Release 包。** 不要通过给旧子包授权来代替升级：`dsh-openwrite` 的版本豁免不会覆盖 `@dsh-novel/studio-panel@<ver>` 和 `@dsh-external/dsh-dog@<ver>`，而旧客户端在 0.2.0-rc.2 上激活失败可能触发桌面端的 profile 恢复。
 
 若已发生恢复，先关闭桌面端并备份当前 profile，再从自己的 `cordis.patch.yml.bak-*` 备份恢复 patch，同时恢复原 `package.json` 的 `dsh.profile.bundles` 列表。安装包和作品目录通常仍在；不要用出厂模板覆盖其他插件配置。详细排查见 [安装指南](docs/INSTALL.md#dsh-02-客户端兼容排查)。
 

@@ -6,13 +6,13 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
-## 0.2.13 候选包
+## 0.2.13
 
 修复 #57 的只读 POST 失效循环。Core 5.8.4 在 HTTP action 契约声明是否改变公开状态，通过 `X-OpenWrite-Mutated` 统一驱动浏览器代理与 Agent 客户端；旧 Core 的正文版本和批注查询保留兼容处理。保存、批注写入及恢复版本按 manuscript 资源通知，批注读取不再监听无关的 workspace 失效。
 
-新增回归覆盖连续只读请求不增加 invalidation revision、SSE 和 Core context_epoch；真实写入仍增加序号。创作页验证重复 workspace 事件不会反复请求批注，实际编辑会刷新，切换作品清空旧批注并忽略迟到响应。完整发布验收正在运行，正式发布将使用通过门禁的同一份 CI 产物。
+新增回归覆盖连续只读请求不增加 invalidation revision、SSE 和 Core context_epoch；真实写入仍增加序号。创作页验证重复 workspace 事件不会反复请求批注，实际编辑会刷新，切换作品清空旧批注并忽略迟到响应。[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37483398522) 全部通过，六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告均绑定同一产物。来源提交 `72d19c1a1494da13b5b89d652746e13f13e90e1a`，SHA-256 为 `091dcb7201a88240d8282ef31526d7d88f6d63a390d0813a39f580f9be990a58`。[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.13) 已发布并核对四份附件的校验值；npm 本次发布认证已过期（404），等待重新验证，`latest` 暂时仍为 0.2.12。
 
-#50 报告的预设注册、主视图挂载、会话导航及托管模型配置问题已由 0.2.12 修复，并经三代精确 Web 宿主和原生 Windows 安装检查验证。Windows Electron 的实机启动/恢复尚未复测，该限制继续保留；本版不将其计为已通过的验收。
+#50、#57 已随 [PR #59](https://github.com/LiPu-jpg/Openwrite/pull/59) 合并关闭。#50 报告的预设注册、主视图挂载、会话导航及托管模型配置问题已由 0.2.12 修复，并经三代精确 Web 宿主和原生 Windows 安装检查验证。Windows Electron 的实机启动/恢复尚未复测，该限制继续保留；本版不将其计为已通过的验收。
 
 ## 0.2.12
 
