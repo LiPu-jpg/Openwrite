@@ -2,7 +2,7 @@ import type { BackendConnection } from './managed-runtime.js'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { StudioClient, workspaceRootHeaders, type WorkspaceContext } from './client.js'
+import { StudioClient, workspaceRootHeaders, mutationAffectsState, type WorkspaceContext } from './client.js'
 import { workspaceContextFromExec } from './tools.js'
 
 export const CONFIG_ROUTE = '/studio-panel/config.json'
@@ -118,6 +118,7 @@ function resourceForPath(path: string): string {
   if (path.startsWith('/api/benchmarks')) return 'benchmark'
   if (path.startsWith('/api/model')) return 'models'
   if (path.startsWith('/api/research')) return 'research'
+  if (path.startsWith('/api/manuscript-editing')) return 'manuscript'
   if (path.startsWith('/api/revisions')) return 'revisions'
   return 'workspace'
 }
@@ -519,7 +520,7 @@ export class NovelDomainService extends Service {
         if (disposition !== null) responseHeaders['content-disposition'] = disposition
         res.writeHead(upstream.status, responseHeaders)
         res.end(bytes)
-        if (isWrite && upstream.ok) {
+        if (isWrite && upstream.ok && mutationAffectsState(pathPart, body, upstream.headers)) {
           this.notifyMutation(`/api/${pathPart}`, { workspaceRoot: resolved.root, workspaceId: resolved.id })
         }
       } catch (error) {
