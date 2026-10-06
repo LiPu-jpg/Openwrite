@@ -8,7 +8,7 @@
 
 ## 0.2.12
 
-[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.12) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37389772004)验收的同一份包。来源提交 a349ea964e43d75f9fc98d1f83354a237bc2ff51，SHA-256 为 2545031292d80689f80d4c0d8c99e007c18ff0c477d662e2813cf67bc876246c。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；详见 Release 的 release-acceptance.json。npm 登录已过期，等待当前认证完成后发布，npm latest 暂时仍为 0.2.11。
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.12) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37389772004)验收的同一份包。来源提交 a349ea964e43d75f9fc98d1f83354a237bc2ff51，SHA-256 为 2545031292d80689f80d4c0d8c99e007c18ff0c477d662e2813cf67bc876246c。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；详见 Release 的 release-acceptance.json。npm `dsh-openwrite@0.2.12` 和 GitHub Release 均已发布，`latest` 已更新到 0.2.12；从公共 npm registry 无认证重新下载后，SHA-256 与上述 CI / Release 包一致。合并后的[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37390503895)也已通过。
 
 本版修复 #50–#52 的 0.2 宿主兼容问题及 #54 阅读模式刷新闪烁，纳入 #53 的导航和会话作用域改动，并保留旧宿主的预设插件。
 

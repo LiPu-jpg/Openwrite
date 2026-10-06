@@ -33,7 +33,7 @@
 
 npm 包和对应 GitHub Release 使用同一份验收产物。也可安装精确版本的 Release 包：
 
-**0.2.12 的 GitHub 安装包已发布，npm `latest` 暂时仍为 0.2.11，待本次 npm 认证完成后同步发布。** 0.2.11 不包含 #50–#54 的进入工作台和连续审读修复；请以已发布 Release 的版本和附件为准。
+**0.2.12 已在 npm 和 GitHub Release 发布，npm `latest` 已更新到 0.2.12。** 两处安装包与完整 CI 验收产物的 SHA-256 一致。0.2.11 不包含本次进入工作台和连续审读修复，请升级到 0.2.12。
 
 ```sh
 dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.12/dsh-openwrite-0.2.12.tgz
@@ -70,7 +70,7 @@ dsh web
 
 `0.2.11` 修复 [#45](https://github.com/LiPu-jpg/Openwrite/issues/45)，适配精确宿主版本 `0.2.0-rc.2`：工作台兼容新的 turn-tail list 槽位，DoG 调试面板使用新的 `sessionStatus`；根包和所有子包的兼容声明同步更新。已验证 0.2.0-rc.2 的 Web 客户端启动、OpenWrite 入口、DoG 面板及其他插件共存；Windows Electron 桌面端恢复链路尚未实机复测。
 
-**`dsh-openwrite@0.2.10` 不包含这项修复，请升级到 `0.2.12` 的 GitHub Release 包。** 不要通过给旧子包授权来代替升级：`dsh-openwrite` 的版本豁免不会覆盖 `@dsh-novel/studio-panel@<ver>` 和 `@dsh-external/dsh-dog@<ver>`，而旧客户端在 0.2.0-rc.2 上激活失败可能触发桌面端的 profile 恢复。
+**`dsh-openwrite@0.2.10` 不包含这项修复，请升级到 `dsh-openwrite@0.2.12` 或对应的 GitHub Release 包。** 不要通过给旧子包授权来代替升级：`dsh-openwrite` 的版本豁免不会覆盖 `@dsh-novel/studio-panel@<ver>` 和 `@dsh-external/dsh-dog@<ver>`，而旧客户端在 0.2.0-rc.2 上激活失败可能触发桌面端的 profile 恢复。
 
 若已发生恢复，先关闭桌面端并备份当前 profile，再从自己的 `cordis.patch.yml.bak-*` 备份恢复 patch，同时恢复原 `package.json` 的 `dsh.profile.bundles` 列表。安装包和作品目录通常仍在；不要用出厂模板覆盖其他插件配置。详细排查见 [安装指南](docs/INSTALL.md#dsh-02-客户端兼容排查)。
 
