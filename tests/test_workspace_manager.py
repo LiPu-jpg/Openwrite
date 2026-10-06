@@ -1189,3 +1189,67 @@ def test_invalid_encoded_workspace_fails_closed(tmp_path: Path, value: str) -> N
         manager.parse_context(
             {"X-OpenWrite-Workspace-Root": value, "X-OpenWrite-Workspace-Root-Encoding": "uri"}
         )
+
+
+def test_read_only_posts_do_not_bump_context_epoch(tmp_path: Path, opener):
+    from tools.manuscript_editing import ManuscriptVersionStore
+
+    launch = tmp_path / "server"
+    launch.mkdir()
+    root = tmp_path / "novel"
+    _author_workbench_project(root, "marker")
+    versions = ManuscriptVersionStore(root, "demo")
+    historical = versions.checkpoint("ch_001", label="test")
+    server, thread, base, _ = _start_server(launch, tmp_path / "state")
+    context = _context_headers(root)
+    headers = {**WRITE_HEADERS, **context, "Content-Type": "application/json"}
+
+    def post(payload):
+        request = Request(f"{base}/api/manuscript-editing", method="POST",
+                          data=json.dumps(payload).encode(), headers=headers)
+        with opener.open(request) as response:
+            return response.headers.get("X-OpenWrite-Mutated"), json.loads(response.read())
+
+    def epoch():
+        return _request(opener, base, "GET", "/api/workspace/context", headers=context)[1]["context_epoch"]
+
+    try:
+        before = epoch()
+        for action in ["versions", "version", "compare", "annotations", "annotations", "annotations"]:
+            declared, _ = post({"action": action, "chapter_id": "ch_001", "version_id": historical.version_id})
+            assert declared == "0"
+            assert epoch() == before
+        declared, _ = post({"chapter_id": "ch_001"})
+        assert declared == "0"  # omitted action defaults to versions
+        assert epoch() == before
+        declared, annotation = post({"action": "annotate", "chapter_id": "ch_001", "quote": "marker-ch_001",
+                                   "revision": historical.source_revision, "start_hint": 10, "end_hint": 23, "note": "test"})
+        assert declared == "1"
+        assert epoch() == before + 1
+        declared, data = post({"action": "annotations", "chapter_id": "ch_001"})
+        assert declared == "0"
+        assert data["annotations"][0]["annotation_id"] == annotation["annotation_id"]
+        assert epoch() == before + 1
+        declared, _ = post({"action": "resolve_annotation", "chapter_id": "ch_001", "annotation_id": annotation["annotation_id"]})
+        assert declared == "1"
+        assert epoch() == before + 2
+        status, _ = _request(opener, base, "POST", "/api/manuscript-editing", {"action": "unknown"}, headers)
+        assert status == 409
+        assert epoch() == before + 2
+    finally:
+        _stop_server(server, thread)
+
+
+def test_post_route_mutation_metadata():
+    from tools.studio_http import POST_ROUTES
+
+    for path in ["/api/document/change-plan", "/api/structured/change-plan"]:
+        route = POST_ROUTES[path]
+        assert not route.affects_state({"action": "preview"})
+        assert not route.affects_state({})
+        assert route.affects_state({"confirm": True})
+        for action in ["apply", "undo", "reject", "future-action"]:
+            assert route.affects_state({"action": action})
+    for path in ["/api/import/preview", "/api/assets/package/preview", "/api/project-archives/restore/preview", "/api/model/profiles/delete-preview"]:
+        assert not POST_ROUTES[path].affects_state({})
+    assert POST_ROUTES["/api/project-archives/restore"].affects_state({})
