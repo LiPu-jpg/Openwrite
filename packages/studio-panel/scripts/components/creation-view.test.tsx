@@ -1608,6 +1608,32 @@ describe('CreationView selection notes and marker insert', () => {
     return editor
   }
 
+  it('keeps annotations through workspace invalidations, refreshes edits, and clears across workspaces', async () => {
+    const reload = deferred<unknown>()
+    const postStudioApi = vi.fn().mockResolvedValueOnce({ annotations: [annotationRecord] })
+      .mockImplementationOnce(() => reload.promise)
+      .mockResolvedValue({ annotations: [] })
+    const props = viewProps({ fetchStudioApi: editingFetch(), putStudioApi: vi.fn(), postStudioApi })
+    const { rerender } = render(<CreationView {...(props as never)} />)
+    const note = await screen.findByRole('button', { name: 'creation.notes.locate: 查来源' })
+    for (let i = 1; i <= 3; i++) {
+      harness.snapshot = { ...harness.snapshot, epochs: { ...(harness.snapshot['epochs'] as object), workspace: i } }
+      await act(async () => { rerender(<CreationView {...(props as never)} />) })
+    }
+    expect(postStudioApi).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'creation.notes.locate: 查来源' })).toBe(note)
+    harness.snapshot = { ...harness.snapshot, epochs: { ...(harness.snapshot['epochs'] as object), manuscript: 1 } }
+    await act(async () => { rerender(<CreationView {...(props as never)} />) })
+    expect(postStudioApi).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: 'creation.notes.locate: 查来源' })).toBe(note)
+    setSnapshot('ws-b', chapter().path, 2)
+    await act(async () => { rerender(<CreationView {...(props as never)} />) })
+    expect(screen.queryByRole('button', { name: 'creation.notes.locate: 查来源' })).toBeNull()
+    await act(async () => { reload.resolve({ annotations: [annotationRecord] }); await reload.promise })
+    expect(screen.queryByRole('button', { name: 'creation.notes.locate: 查来源' })).toBeNull()
+    expect(postStudioApi).toHaveBeenCalledTimes(3)
+  })
+
   it('saves a selection note with color after save-then-revalidate and lists it in revisions', async () => {
     const postStudioApi = vi.fn(async (_url: string, body?: Record<string, unknown>) => {
       if (body?.['action'] === 'annotations') return { annotations: [annotationRecord] }

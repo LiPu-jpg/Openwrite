@@ -113,6 +113,22 @@ function applyParams(url: URL, params: QueryParams): void {
   }
 }
 
+/** Legacy Core fallback; newer servers declare mutation semantics in a response header. */
+export function mutationAffectsState(path: string, body: unknown, headers?: Headers): boolean {
+  const declared = headers?.get('X-OpenWrite-Mutated')
+  if (declared === '0' || declared === '1') return declared === '1'
+  const endpoint = path.split('?')[0]?.replace(/^\/+/, '').replace(/^api\//, '')
+  if (endpoint !== 'manuscript-editing') return true
+  let payload: unknown = body
+  if (Buffer.isBuffer(payload)) payload = payload.toString('utf8')
+  if (typeof payload === 'string') {
+    try { payload = JSON.parse(payload) as unknown } catch { return true }
+  }
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return true
+  const action = (payload as Record<string, unknown>)['action']
+  return typeof action !== 'string' || !['versions', 'version', 'compare', 'annotations'].includes(action)
+}
+
 export class StudioClient {
   private readonly connect: (() => Promise<BackendConnection>) | undefined
   private readonly baseUrl: string
@@ -172,7 +188,7 @@ export class StudioClient {
       signal,
     )
     const result = await this.readJson(response)
-    this.onMutation?.(path, this.context)
+    if (mutationAffectsState(path, body, response.headers)) this.onMutation?.(path, this.context)
     return result
   }
 
@@ -188,7 +204,7 @@ export class StudioClient {
       signal,
     )
     const result = await this.readJson(response)
-    this.onMutation?.(path, this.context)
+    if (mutationAffectsState(path, body, response.headers)) this.onMutation?.(path, this.context)
     return result
   }
 

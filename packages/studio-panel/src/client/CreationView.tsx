@@ -668,6 +668,7 @@ export function CreationView(props: CreationViewProps) {
   const inspectorLoadedKeyRef = useRef('')
   const historyLoadedKeyRef = useRef('')
   const annotationLoadedKeyRef = useRef('')
+  const annotationIdentityRef = useRef('')
   const contextRevisionRef = useRef({ identity: '', revision: '', sourceRevision: '' })
   const fetchStudioApiRef = useRef(fetchStudioApi)
   fetchStudioApiRef.current = fetchStudioApi
@@ -1144,18 +1145,21 @@ export function CreationView(props: CreationViewProps) {
   useEffect(() => {
     const id = chapterId(path)
     const sourceEpochs = [
-      workbench.epochs.workspace,
       workbench.epochs.manuscript,
       workbench.epochs.revisions,
     ].join(':')
-    const requestKey = `${workspaceId ?? ''}:${path}:${sourceEpochs}:${String(inspectorReload)}`
+    const identity = `${workspaceId ?? ''}:${String(workbench.contextEpoch)}:${path}`
+    const requestKey = `${identity}:${sourceEpochs}:${String(inspectorReload)}`
+    if (annotationIdentityRef.current !== identity) {
+      annotationIdentityRef.current = identity
+      setAnnotations([])
+    }
     if (id === '' || path === '') {
       setAnnotations([])
       annotationLoadedKeyRef.current = requestKey
       return
     }
     if (annotationLoadedKeyRef.current === requestKey) return
-    setAnnotations([])
     let cancelled = false
     void Promise.resolve(postStudioApiRef.current('/manuscript-editing', { action: 'annotations', chapter_id: id }))
       .then(payload => {
@@ -1173,7 +1177,7 @@ export function CreationView(props: CreationViewProps) {
     inspectorReload,
     path,
     workspaceId,
-    workbench.epochs.workspace,
+    workbench.contextEpoch,
     workbench.epochs.manuscript,
     workbench.epochs.revisions,
   ])

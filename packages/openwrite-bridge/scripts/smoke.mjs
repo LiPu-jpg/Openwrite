@@ -1137,6 +1137,61 @@ assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
   }, 'omitted outline range and execution mode keep the backend defaults authoritative')
 }
 
+// Read-only POSTs must not feed the inspector's SSE/refetch loop.
+{
+  const savedFetch = globalThis.fetch
+  let declaredMutation
+  globalThis.fetch = async () => new Response('{"ok":true,"data":{}}', {
+    headers: declaredMutation === undefined ? {} : { 'X-OpenWrite-Mutated': declaredMutation },
+  })
+  const changes = []
+  const client = new StudioClient({ baseUrl: 'http://127.0.0.1:9', timeoutMs: 1000, onMutation: (path, context) => changes.push({ path, context }) })
+    .scoped({ workspaceRoot: wsRootA, workspaceId: 'ws_a' })
+  const readSnapshot = async () => {
+    const response = capture()
+    await invalidationRoute.handler({ method: 'GET', url: '/studio-panel/invalidation.json?workspace=ws_a' }, response)
+    return JSON.parse(response.body).revision
+  }
+  const send = async (path, body) => {
+    const response = capture()
+    await proxyRoute.handler({ method: 'POST', url: '/studio-panel/api/' + path,
+      headers: { 'x-dsh-workspace-id': 'ws_a' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)) },
+    }, response)
+    assert.equal(response.status, 200)
+  }
+  try {
+    const before = await readSnapshot()
+    const events = eventResponseA.chunks.length
+    for (const action of ['versions', 'version', 'compare', 'annotations', 'annotations', 'annotations']) {
+      await client.postJson('/api/manuscript-editing?probe=1', { action, chapter_id: 'ch_001' })
+      await send('manuscript-editing', { action, chapter_id: 'ch_001' })
+    }
+    assert.equal(changes.length, 0, 'Agent reads do not announce mutations')
+    assert.equal(await readSnapshot(), before, 'browser reads keep invalidation revision stable')
+    assert.equal(eventResponseA.chunks.length, events, 'browser reads emit no invalidation SSE')
+    declaredMutation = '0'
+    for (const path of ['document/change-plan', 'structured/change-plan', 'project-archives/restore/preview']) {
+      await client.postJson('/api/' + path, { action: 'preview' })
+      await send(path, { action: 'preview' })
+    }
+    assert.equal(changes.length, 0)
+    assert.equal(await readSnapshot(), before, 'Core read metadata is shared by both transports')
+    declaredMutation = undefined
+    for (const action of ['annotate', 'resolve_annotation', 'checkpoint', 'restore', 'future-action']) {
+      await client.postJson('/api/manuscript-editing', { action })
+      await send('manuscript-editing', { action })
+    }
+    assert.equal(changes.length, 5, 'real and unknown writes still notify')
+    assert.equal(changes[0].context.workspaceRoot, wsRootA)
+    assert.equal(await readSnapshot(), before + 5)
+    assert.equal(JSON.parse(eventResponseA.chunks.at(-1).split('data: ')[1]).resource, 'manuscript')
+    declaredMutation = '1'
+    await client.putJson('/api/document', { content: 'saved' })
+    assert.equal(changes.length, 6, 'document saves still notify')
+  } finally { globalThis.fetch = savedFetch }
+}
+
 await root.fiber.dispose()
 await rm(wsRootA, { recursive: true, force: true })
 await rm(wsRootB, { recursive: true, force: true })

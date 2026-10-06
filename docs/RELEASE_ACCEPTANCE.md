@@ -6,6 +6,14 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.13 候选包
+
+修复 #57 的只读 POST 失效循环。Core 5.8.4 在 HTTP action 契约声明是否改变公开状态，通过 `X-OpenWrite-Mutated` 统一驱动浏览器代理与 Agent 客户端；旧 Core 的正文版本和批注查询保留兼容处理。保存、批注写入及恢复版本按 manuscript 资源通知，批注读取不再监听无关的 workspace 失效。
+
+新增回归覆盖连续只读请求不增加 invalidation revision、SSE 和 Core context_epoch；真实写入仍增加序号。创作页验证重复 workspace 事件不会反复请求批注，实际编辑会刷新，切换作品清空旧批注并忽略迟到响应。完整发布验收正在运行，正式发布将使用通过门禁的同一份 CI 产物。
+
+#50 报告的预设注册、主视图挂载、会话导航及托管模型配置问题已由 0.2.12 修复，并经三代精确 Web 宿主和原生 Windows 安装检查验证。Windows Electron 的实机启动/恢复尚未复测，该限制继续保留；本版不将其计为已通过的验收。
+
 ## 0.2.12
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.12) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37389772004)验收的同一份包。来源提交 a349ea964e43d75f9fc98d1f83354a237bc2ff51，SHA-256 为 2545031292d80689f80d4c0d8c99e007c18ff0c477d662e2813cf67bc876246c。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；详见 Release 的 release-acceptance.json。npm `dsh-openwrite@0.2.12` 和 GitHub Release 均已发布，`latest` 已更新到 0.2.12；从公共 npm registry 无认证重新下载后，SHA-256 与上述 CI / Release 包一致。合并后的[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37390503895)也已通过。

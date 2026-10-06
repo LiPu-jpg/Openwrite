@@ -47,6 +47,50 @@ export async function acceptRuntime(installed, home, temporary) {
       assert.equal((await updated.json()).metadata.author, '交付作者')
       assert.equal((await fetch(metadataUrl, { method: 'POST', headers: metadataHeaders, body: metadataBody, signal: AbortSignal.timeout(15_000) })).status, 409)
       assert.equal((await fetch(metadataUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-OpenWrite-Studio': '1' }, body: metadataBody, signal: AbortSignal.timeout(15_000) })).status, 401)
+      // Native packaged-Core regression: passive POST queries must not become workspace changes.
+      const manuscript = '# 第一章\n\n只读回归正文。\n'
+      const manuscriptPath = 'data/manuscript/arc_001/ch_001.md'
+      const manuscriptDirectory = join(novel, 'data/novels/backend-test/data/manuscript/arc_001')
+      await mkdir(manuscriptDirectory, { recursive: true })
+      await writeFile(join(manuscriptDirectory, 'ch_001.md'), manuscript)
+      const editing = async body => {
+        const response = await fetch(b.baseUrl + '/api/manuscript-editing', {
+          method: 'POST', headers: metadataHeaders, body: JSON.stringify(body), signal: AbortSignal.timeout(15_000),
+        })
+        const payload = await response.json()
+        assert.equal(response.status, 200, JSON.stringify(payload))
+        return { payload, mutated: response.headers.get('X-OpenWrite-Mutated') }
+      }
+      const epoch = async () => {
+        const response = await fetch(b.baseUrl + '/api/workspace/context', { headers: metadataHeaders })
+        assert.equal(response.status, 200)
+        return (await response.json()).context_epoch
+      }
+      const saved = await editing({ action: 'checkpoint', chapter_id: 'ch_001' })
+      assert.equal(saved.mutated, '1')
+      const beforeReads = await epoch()
+      for (const action of ['annotations', 'annotations', 'annotations', 'versions', 'version', 'compare']) {
+        const read = await editing({ action, chapter_id: 'ch_001', version_id: saved.payload.version_id })
+        assert.equal(read.mutated, '0')
+        assert.equal(await epoch(), beforeReads)
+      }
+      const quote = '只读回归正文。'
+      const start = manuscript.indexOf(quote)
+      const annotation = await editing({ action: 'annotate', chapter_id: 'ch_001', revision: saved.payload.source_revision,
+        quote, start_hint: start, end_hint: start + quote.length, note: '原生验收批注' })
+      assert.equal(annotation.mutated, '1')
+      assert.equal(await epoch(), beforeReads + 1)
+      const read = await editing({ action: 'annotations', chapter_id: 'ch_001' })
+      assert.equal(read.payload.annotations[0].annotation_id, annotation.payload.annotation_id)
+      assert.equal(await epoch(), beforeReads + 1)
+      const documentWrite = await fetch(b.baseUrl + '/api/document', {
+        method: 'PUT', headers: metadataHeaders, body: JSON.stringify({ path: manuscriptPath, content: manuscript + '真实修改。\n' }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      assert.equal(documentWrite.status, 200)
+      assert.equal(documentWrite.headers.get('X-OpenWrite-Mutated'), '1')
+      await documentWrite.json()
+      assert.equal(await epoch(), beforeReads + 2)
       console.log('Backend: Unicode initialization complete', Date.now() - initializedAt, 'ms')
     } catch (error) {
       console.error('Backend initialization diagnostics:', { elapsed: Date.now() - initializedAt, timeoutMs: initializationTimeoutMs, stdoutPaused: second.child.stdout.isPaused(), files: await readdir(novel, { recursive: true }) })
@@ -81,6 +125,6 @@ export async function acceptRuntime(installed, home, temporary) {
     const rollback = new ManagedRuntime(root, artifacts)
     try { await rollback.ensure(); assert.equal(rollback.status().phase, 'ready') }
     finally { await rollback.dispose() }
-    return ['native-dependency-load', 'native-backend-project-init', 'project-metadata-update', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
+    return ['native-dependency-load', 'native-backend-project-init', 'project-metadata-update', 'readonly-post-invalidation', 'manuscript-mutation-invalidation', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
   } finally { await first.dispose(); await second.dispose() }
 }

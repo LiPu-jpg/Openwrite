@@ -3,7 +3,7 @@
   "dsh": "0.1.2-rc.1",
   "uv_version": "0.11.19",
   "python_version": "3.12.13",
-  "core_version": "5.8.3",
+  "core_version": "5.8.4",
   "contract_version": 1,
   "platforms": {
     "darwin-arm64": {
@@ -56,8 +56,8 @@
     }
   },
   "wheel": {
-    "file": "openwrite-5.8.3-py3-none-any.whl",
-    "sha256": "16dee6342e1263412ae66d88338873a845a4efb00e9c936a759a625823a66a70"
+    "file": "openwrite-5.8.4-py3-none-any.whl",
+    "sha256": "a0521e92e62e1bd6c8ec856776ede1783131c5cb5b8d90504a32a613f61ae4b1"
   },
   "requirements": {
     "file": "requirements.lock",
@@ -66,7 +66,7 @@
   "sources": {
     "core": {
       "repository": "https://github.com/LiPu-jpg/Openwrite",
-      "commit": "b072420f9dbfcae356b4980d98597d0be4f22849"
+      "commit": "3a5da97659ad0be119dbc8e99e96721bc6a266bf"
     },
     "dog": {
       "repository": "https://github.com/Fun10165/dsh-dog",
