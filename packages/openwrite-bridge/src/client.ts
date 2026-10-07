@@ -236,7 +236,9 @@ export class StudioClient {
       return await fetch(target, { ...init, headers, signal: AbortSignal.any(signals) })
     } catch (error: unknown) {
       if (signal?.aborted) throw error
-      throw new StudioError(`Studio request failed: ${error instanceof Error ? error.message : String(error)}`, 0, 'NETWORK_ERROR')
+      const cause = error instanceof Error ? error.cause : undefined
+      const detail = cause instanceof Error ? ` (${cause.message})` : cause === undefined ? '' : ` (${String(cause)})`
+      throw new StudioError(`Studio request failed: ${error instanceof Error ? error.message : String(error)}${detail}`, 0, 'NETWORK_ERROR')
     }
   }
 

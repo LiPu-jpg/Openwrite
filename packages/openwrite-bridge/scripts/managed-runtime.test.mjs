@@ -208,6 +208,21 @@ test('child env allowlist drops provider keys and keeps proxy/cert/OS start vars
   assert.equal(env.UV_CACHE_DIR, '/tmp/uv')
 })
 
+test('no_proxy values are sanitized: bracketed IPv6 literals break httpx client construction', () => {
+  // DSH's loopback bypass appends "[::1]" for undici; httpx parses each entry
+  // as host:port and throws InvalidURL before any request leaves the process.
+  const env = buildChildEnv({
+    NO_PROXY: '192.168.2.88,.local,localhost,127.0.0.1,::1,[::1]',
+    no_proxy: 'localhost, [::1] ,internal.example,,',
+  })
+  assert.equal(env.NO_PROXY, '192.168.2.88,.local,localhost,127.0.0.1,::1')
+  assert.equal(env.no_proxy, 'localhost,internal.example')
+  // Entries without brackets are untouched; non-no_proxy vars are not rewritten.
+  const passthrough = buildChildEnv({ NO_PROXY: 'localhost,::1', HTTPS_PROXY: 'http://127.0.0.1:7897' })
+  assert.equal(passthrough.NO_PROXY, 'localhost,::1')
+  assert.equal(passthrough.HTTPS_PROXY, 'http://127.0.0.1:7897')
+})
+
 test('ready managed child auto-restarts with backoff; cap leaves a retryable error', async t => {
   const previous = {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
@@ -331,6 +346,81 @@ test('concurrent ensure starts one process; an old exit leaves the new connectio
   assert.equal(runtime.status().phase, 'ready')
   assert.equal((await runtime.ensure()).baseUrl, next.baseUrl)
   await runtime.dispose()
+})
+
+test('cached connection is health-probed; a zombie backend is torn down and recovered', async t => {
+  const { root, artifacts } = await prepared(t)
+  let healthy = true
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).includes('/api/health')) {
+      // Only the first backend turns zombie; the replacement must come up healthy.
+      if (!healthy && String(url).includes(':19090')) {
+        return new Response(JSON.stringify({ error: 'zombie' }), { status: 502 })
+      }
+      return new Response(JSON.stringify({ core_version: 'test-core', contract_version: 1 }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response('{}', { status: 404 })
+  })
+  let port = 19090
+  const children = []
+  const spawnFn = () => {
+    const child = new EventEmitter()
+    child.stdin = new PassThrough()
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.exitCode = null
+    child.signalCode = null
+    child.kill = () => { child.exitCode = 1; child.emit('exit', 1, null) }
+    child.stdin.once('data', () => child.stdout.write(JSON.stringify({ port: port++ }) + '\n'))
+    children.push(child)
+    return child
+  }
+  const runtime = new ManagedRuntime(root, artifacts, { spawn: spawnFn, delay: async () => undefined, restartLimit: 3, backoffMs: [1] })
+  t.after(() => runtime.dispose())
+  const first = await runtime.ensure()
+  assert.equal(runtime.status().phase, 'ready')
+  assert.equal(children.length, 1)
+  // Healthy connection is handed out as-is, without spawning anything new.
+  assert.equal((await runtime.ensure()).baseUrl, first.baseUrl)
+  assert.equal(children.length, 1)
+  // Process alive but no longer serving: probe fails, backend is replaced.
+  healthy = false
+  const second = await runtime.ensure()
+  assert.equal(children.length, 2)
+  assert.notEqual(second.baseUrl, first.baseUrl)
+  assert.equal(runtime.status().phase, 'ready')
+  // ... and the recovered connection is usable again.
+  healthy = true
+  assert.equal((await runtime.ensure()).baseUrl, second.baseUrl)
+  assert.equal(children.length, 2)
+})
+
+test('backend stderr is mirrored to state/logs/backend.log for postmortem diagnosis', async t => {
+  const { root, artifacts } = await prepared(t)
+  t.mock.method(globalThis, 'fetch', async url => String(url).includes('/api/health')
+    ? new Response(JSON.stringify({ core_version: 'test-core', contract_version: 1 }), { status: 200, headers: { 'content-type': 'application/json' } })
+    : new Response('{}', { status: 404 }))
+  const spawnFn = () => {
+    const child = new EventEmitter()
+    child.stdin = new PassThrough()
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.exitCode = null
+    child.signalCode = null
+    child.kill = () => { child.exitCode = 1; child.emit('exit', 1, null) }
+    child.stdin.once('data', () => child.stdout.write(JSON.stringify({ port: 19191 }) + '\n'))
+    return child
+  }
+  const runtime = new ManagedRuntime(root, artifacts, { spawn: spawnFn, delay: async () => undefined, restartLimit: 3, backoffMs: [1] })
+  t.after(() => runtime.dispose())
+  await runtime.ensure()
+  assert.equal(runtime.status().phase, 'ready')
+  const current = runtime.child
+  current.stderr.write('embedding probe thread stuck in import numpy\n')
+  // The debounced writer flushes within a few hundred milliseconds.
+  await new Promise(resolve => setTimeout(resolve, 400))
+  const log = await readFile(join(root, 'state', 'logs', 'backend.log'), 'utf8')
+  assert.match(log, /embedding probe thread stuck in import numpy/)
 })
 
 test('in-flight generate is not replayed when the managed child is recovered', async t => {
