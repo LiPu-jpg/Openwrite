@@ -6,13 +6,15 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
-## 0.2.14 候选包
+## 0.2.14
+
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.14) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37679578150)验收的同一份包。来源提交 `f62f268bd2c74badc8af56ad4896164c5403def2`，SHA-256 为 `b61b2d98bac0235cb23361b2aa593e287bb47a2db24669c9893ef8e27e173549`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #62](https://github.com/LiPu-jpg/Openwrite/pull/62)，#60、#61 随之关闭。npm 发布认证仍过期（ENEEDAUTH），`latest` 暂时仍为 0.2.12，GitHub Release 为当前正式可下载版本。
 
 修复 #60 系统代理场景下 `NO_PROXY` 含 `[::1]` 导致所有模型连接测试误报"服务商拒绝了请求"：桥接层 `buildChildEnv()` 转发前剥掉带方括号的 IPv6 字面量，Core 5.8.5 把 httpx 客户端构造期异常归类为本地配置错误（HTTP 412），`Studio request failed` 附带 `error.cause`。
 
 修复 #61 Embedding 连接测试在请求线程里懒加载 numpy 把后端变成"活着但不服务"的僵尸：Core 5.8.5 启动主线程预热 numpy、后台线程预热 fastembed，`run_embedding_probe()` 硬超时 `timeout_seconds + 30 s`，收尾限时 10 秒超时强制退出；桥接层复用就绪连接前做带超时的 `/api/health` 探活，探活失败的僵尸进程强制终止并自动恢复，子进程 stderr 落盘 `state/logs/backend.log`（末尾 64 KiB）。
 
-新增回归覆盖 no_proxy 消毒矩阵、僵尸连接探活恢复、stderr 落盘、错误分类矩阵与探测硬超时；wheel 重打包后全量 RECORD 哈希校验（498 文件）与 manifest 一致性检查通过。完整发布验收正在运行，正式发布将使用通过门禁的同一份 CI 产物。Windows 上的依赖预热与僵尸恢复链路本机未复测，保留 0.2.13 的同一限制。
+新增回归覆盖 no_proxy 消毒矩阵、僵尸连接探活恢复、stderr 落盘、错误分类矩阵与探测硬超时；wheel 重打包后全量 RECORD 哈希校验（498 文件）与 manifest 一致性检查通过。CI 另修复 apt 镜像加固（pin 到 https archive.ubuntu.com + 连接超时），消除 ubuntu 运行器镜像故障导致的矩阵腿卡死。Windows 上的依赖预热与僵尸恢复链路本机未复测，保留 0.2.13 的同一限制；DSH 核心 `dsh-http-proxy` 向 `NO_PROXY` 注入 `[::1]` 的治本修复仍需向 DeepSeek Harness Desktop 团队转达。
 
 ## 0.2.13
 
