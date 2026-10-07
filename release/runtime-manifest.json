@@ -57,7 +57,7 @@
   },
   "wheel": {
     "file": "openwrite-5.8.5-py3-none-any.whl",
-    "sha256": "7e0702665e5726c7939c26abd74fb53d74a885b8da191fa4c65fda2616e51335"
+    "sha256": "dea490837267b57b4b7f9e417fdf793ef5bf3c096fe8e7f4443d7cfcfc836c1b"
   },
   "requirements": {
     "file": "requirements.lock",
