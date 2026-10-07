@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.14
+
+- 修复 #60：桥接层转发前消毒 `NO_PROXY`/`no_proxy`（剥掉会令 httpx 构造即失败的 `[::1]` 类带括号 IPv6 字面量），系统代理场景下模型连接测试不再误报"服务商拒绝了请求"；Core 5.8.5 把 httpx 构造期异常归类为本地配置错误（HTTP 412）。`Studio request failed` 附带底层 `error.cause` 便于诊断。
+- 修复 #61：Core 5.8.5 启动时预热 numpy/fastembed 重依赖（请求线程里首次 import 会在 Windows 模块加载器里永久卡死），`run_embedding_probe()` 增加硬超时，收尾阶段限时 10 秒、超时强制退出，杜绝"活着但不服务"的僵尸后端；桥接层复用就绪连接前做带超时的健康探活，子进程 stderr 落盘 `state/logs/backend.log`（末尾 64 KiB）可事后取证。
+
 ## 0.2.13
 
 - 修复 #57：浏览器代理和 Agent 客户端只在实际写操作成功后通知数据变更，批注与版本读取不再触发自维持刷新循环。

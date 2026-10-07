@@ -66,6 +66,8 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
+`0.2.14` 候选包修复 [#60](https://github.com/LiPu-jpg/Openwrite/issues/60) 和 [#61](https://github.com/LiPu-jpg/Openwrite/issues/61)：系统代理下 `NO_PROXY` 含 `[::1]` 不再让所有模型连接测试误报"服务商拒绝了请求"（桥接层消毒 + Core 5.8.5 归类为本地配置错误）；Embedding 连接测试的依赖预热、硬超时与收尾兜底，加上桥接层的健康探活与 stderr 落盘，不再出现"后端活着但不服务、只能重启 dsh"的僵尸态。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
+
 `0.2.13` 修复 [#57](https://github.com/LiPu-jpg/Openwrite/issues/57) 的创作页刷新循环：批注与版本读取不再作为写操作通知刷新，Core 的只读请求也不再增加工作区变更序号。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
 
 `0.2.12` 进一步修复 [#50](https://github.com/LiPu-jpg/Openwrite/issues/50)、[#51](https://github.com/LiPu-jpg/Openwrite/issues/51)、[#52](https://github.com/LiPu-jpg/Openwrite/issues/52) 的预设注册、导航、工作台挂载和 DoG 接口。连续审读按内容修订刷新，避免轮询闪烁（[#54](https://github.com/LiPu-jpg/Openwrite/issues/54)）。
