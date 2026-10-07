@@ -6,6 +6,14 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.14 候选包
+
+修复 #60 系统代理场景下 `NO_PROXY` 含 `[::1]` 导致所有模型连接测试误报"服务商拒绝了请求"：桥接层 `buildChildEnv()` 转发前剥掉带方括号的 IPv6 字面量，Core 5.8.5 把 httpx 客户端构造期异常归类为本地配置错误（HTTP 412），`Studio request failed` 附带 `error.cause`。
+
+修复 #61 Embedding 连接测试在请求线程里懒加载 numpy 把后端变成"活着但不服务"的僵尸：Core 5.8.5 启动主线程预热 numpy、后台线程预热 fastembed，`run_embedding_probe()` 硬超时 `timeout_seconds + 30 s`，收尾限时 10 秒超时强制退出；桥接层复用就绪连接前做带超时的 `/api/health` 探活，探活失败的僵尸进程强制终止并自动恢复，子进程 stderr 落盘 `state/logs/backend.log`（末尾 64 KiB）。
+
+新增回归覆盖 no_proxy 消毒矩阵、僵尸连接探活恢复、stderr 落盘、错误分类矩阵与探测硬超时；wheel 重打包后全量 RECORD 哈希校验（498 文件）与 manifest 一致性检查通过。完整发布验收正在运行，正式发布将使用通过门禁的同一份 CI 产物。Windows 上的依赖预热与僵尸恢复链路本机未复测，保留 0.2.13 的同一限制。
+
 ## 0.2.13
 
 修复 #57 的只读 POST 失效循环。Core 5.8.4 在 HTTP action 契约声明是否改变公开状态，通过 `X-OpenWrite-Mutated` 统一驱动浏览器代理与 Agent 客户端；旧 Core 的正文版本和批注查询保留兼容处理。保存、批注写入及恢复版本按 manuscript 资源通知，批注读取不再监听无关的 workspace 失效。

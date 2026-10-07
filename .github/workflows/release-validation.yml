@@ -66,6 +66,16 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
+      - if: runner.os == 'Linux'
+        # GitHub-hosted ubuntu runners intermittently lose outbound port 80
+        # (the default Azure apt mirror goes dead and archive.ubuntu.com:80
+        # connection-fails while https stays healthy), leaving apt hanging
+        # single-threaded until the job timeout kills the whole matrix leg.
+        # Pin the mirror list to the public archive over https and bound
+        # every connection so a sick runner fails fast instead of wedging.
+        run: |
+          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
       - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
       - uses: actions/download-artifact@v4
         with:
@@ -106,6 +116,11 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm install --global pnpm@9.15.9
       - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
+      - if: runner.os == 'Linux'
+        # See client-contracts: guard apt against dead Azure mirrors.
+        run: |
+          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
       - if: runner.os != 'Windows'
         run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
       - if: runner.os == 'Windows'
@@ -158,6 +173,11 @@ jobs:
       - run: npm install --prefix .tmp-dsh-alpha @deepseek-ai/dsh@0.1.5-alpha.1 --before=2026-09-09T00:00:00Z --registry=https://registry.npmjs.org --no-audit --no-fund
       - run: node scripts/preset-smoke.mjs --host-cli=.tmp-dsh-alpha/node_modules/@deepseek-ai/dsh/lib/bin.js
       - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
+      - if: runner.os == 'Linux'
+        # See client-contracts: guard apt against dead Azure mirrors.
+        run: |
+          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
       - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
       - uses: actions/download-artifact@v4
         with:

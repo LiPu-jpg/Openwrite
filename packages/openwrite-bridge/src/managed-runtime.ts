@@ -35,6 +35,45 @@ export interface RuntimeOptions {
 export const DEFAULT_RESTART_LIMIT = 5
 export const DEFAULT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000]
 
+/** Budget for the per-request liveness probe of a previously-ready backend. */
+const HEALTH_PROBE_TIMEOUT_MS = 1_500
+/** The backend stderr log on disk keeps only the newest chunk. */
+const STDERR_LOG_LIMIT = 64 * 1024
+
+/**
+ * Keep the managed backend's stderr on disk (last 64 KiB) so a hung or zombie
+ * process can be diagnosed after the fact; the in-memory tail alone is lost
+ * with the host. Writes are debounced and serialized, and never throw —
+ * diagnostics must not break the backend lifecycle.
+ */
+class BackendStderrLog {
+  private tail = ''
+  private timer?: ReturnType<typeof setTimeout>
+  private pending: Promise<void> = Promise.resolve()
+
+  constructor(readonly path: string) {}
+
+  write(text: string): void {
+    this.tail = (this.tail + text).slice(-STDERR_LOG_LIMIT)
+    if (this.timer !== undefined) return
+    this.timer = setTimeout(() => { this.timer = undefined; void this.flush() }, 200)
+  }
+
+  tailText(): string { return this.tail }
+
+  flush(): Promise<void> {
+    if (this.timer !== undefined) { clearTimeout(this.timer); this.timer = undefined }
+    const tail = this.tail
+    this.pending = this.pending.then(async () => {
+      try {
+        await mkdir(dirname(this.path), { recursive: true })
+        await writeFile(this.path, tail)
+      } catch { /* best-effort diagnostics */ }
+    })
+    return this.pending
+  }
+}
+
 const CREDENTIAL_ENV = /(?:API[_-]?KEY|ACCESS[_-]?TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION)/i
 const ALLOWED_ENV = new Set([
   'PATH', 'Path', 'PATHEXT',
@@ -63,6 +102,18 @@ export function sanitizeDiagnostic(message: string): string {
     .replace(/\b[a-f0-9]{32,}\b/gi, '[redacted]')
 }
 
+/**
+ * Drop bracketed IPv6 literals (e.g. `[::1]`) from a no_proxy value. DSH's
+ * loopback bypass list is written for undici as well as generic consumers, but
+ * httpx parses each entry as host:port and fails at client construction with
+ * `Invalid port: ':1]'`, so the request never leaves the process. Plain
+ * entries such as `::1` stay — httpx handles them fine.
+ */
+export function sanitizeNoProxy(value: string): string {
+  return value.split(',').map(entry => entry.trim())
+    .filter(entry => entry !== '' && !/^\[.*\]$/.test(entry)).join(',')
+}
+
 /** Windows needs SystemRoot/PATH to start; proxy and CA vars stay when set. Credential names never copy. */
 export function buildChildEnv(source: NodeJS.ProcessEnv, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
@@ -75,6 +126,11 @@ export function buildChildEnv(source: NodeJS.ProcessEnv, extra: Record<string, s
   for (const [key, value] of Object.entries(extra)) {
     if (value === undefined || CREDENTIAL_ENV.test(key)) continue
     env[key] = value
+  }
+  // The Python backend reads NO_PROXY through httpx; bracketed IPv6 literals
+  // break client construction there even though Node's undici accepts them.
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'no_proxy' && typeof env[key] === 'string') env[key] = sanitizeNoProxy(env[key])
   }
   return env
 }
@@ -129,7 +185,7 @@ export class ManagedRuntime {
 
   ensure(): Promise<BackendConnection> {
     if (this.closed) return Promise.reject(new Error('OpenWrite 已卸载'))
-    if (this.connection) return Promise.resolve(this.connection)
+    if (this.connection) return this.verifyConnection(this.connection)
     if (this.pending) return this.pending
     this.allowRevive = true
     if (this.state.phase === 'error' || this.state.phase === 'cancelled' || this.state.phase === 'stopped') {
@@ -145,6 +201,46 @@ export class ManagedRuntime {
       throw error
     }).finally(() => { this.pending = undefined; this.controller = undefined })
     return this.pending
+  }
+
+  /**
+   * The child process can outlive its listening socket (a stuck request thread
+   * during shutdown leaves it alive but refusing connections), and no exit is
+   * ever observed in that state, so the auto-restart logic never fires. Probe
+   * the cached connection before handing it out; a dead backend is torn down
+   * forcefully and pushed through the normal recovery path.
+   */
+  private async verifyConnection(connection: BackendConnection): Promise<BackendConnection> {
+    if (await this.probeHealth(connection)) {
+      if (this.closed) throw new Error('OpenWrite 已卸载')
+      const current = this.connection
+      if (current) return current
+      return this.queueRestart()
+    }
+    if (this.connection !== connection) return this.queueRestart()
+    this.connection = undefined
+    const child = this.child
+    this.child = undefined
+    if (child) await stopOwnedProcess(child).catch(() => {})
+    if (this.closed) throw new Error('OpenWrite 已卸载')
+    if (!this.allowRevive) throw new Error('准备已取消，可重试')
+    this.update('recovering', '写作后端无响应，正在恢复')
+    return this.queueRestart()
+  }
+
+  /** Short-timeout liveness probe; false covers exit, refusal, hang, and auth drift. */
+  private async probeHealth(connection: BackendConnection): Promise<boolean> {
+    const child = this.child
+    if (!child || child.exitCode !== null || child.signalCode !== null) return false
+    try {
+      const response = await fetch(connection.baseUrl + '/api/health', {
+        headers: { Authorization: `Bearer ${connection.token}` },
+        signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+      })
+      return response.ok
+    } catch {
+      return false
+    }
   }
   async cancel(): Promise<void> {
     this.allowRevive = false
@@ -400,8 +496,16 @@ export class ManagedRuntime {
       env: buildChildEnv(process.env, { PYTHONNOUSERSITE: '1', PYTHONUTF8: '1' }),
     })
     this.child = child
+    // Mirror stderr to state/logs/backend.log (last 64 KiB): a stuck backend
+    // prints nothing and its in-memory tail dies with the host, leaving no way
+    // to diagnose "alive but not serving" failures after the fact.
+    const stderrLog = new BackendStderrLog(join(this.root, 'state', 'logs', 'backend.log'))
     let stderrTail = ''
-    child.stderr?.on('data', bytes => { stderrTail = (stderrTail + String(bytes)).slice(-500) })
+    child.stderr?.on('data', bytes => {
+      stderrLog.write(String(bytes))
+      stderrTail = stderrLog.tailText().slice(-500)
+    })
+    child.once('exit', () => { void stderrLog.flush() })
     const lines = createInterface({ input: child.stdout! })
     let timer: ReturnType<typeof setTimeout> | undefined
     let started = false
