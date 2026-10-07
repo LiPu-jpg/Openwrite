@@ -8,7 +8,7 @@
 
 ## 0.2.14
 
-[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.14) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37679578150)验收的同一份包。来源提交 `f62f268bd2c74badc8af56ad4896164c5403def2`，SHA-256 为 `b61b2d98bac0235cb23361b2aa593e287bb47a2db24669c9893ef8e27e173549`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #62](https://github.com/LiPu-jpg/Openwrite/pull/62)，#60、#61 随之关闭。npm 发布认证仍过期（ENEEDAUTH），`latest` 暂时仍为 0.2.12，GitHub Release 为当前正式可下载版本。
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.14) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37679578150)验收的同一份包。来源提交 `f62f268bd2c74badc8af56ad4896164c5403def2`，SHA-256 为 `b61b2d98bac0235cb23361b2aa593e287bb47a2db24669c9893ef8e27e173549`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #62](https://github.com/LiPu-jpg/Openwrite/pull/62)，#60、#61 随之关闭。npm `dsh-openwrite@0.2.14` 已发布，`latest` 已更新到 0.2.14；从公共 npm registry 无认证重新下载后，SHA-256 与上述 CI / Release 包一致。
 
 修复 #60 系统代理场景下 `NO_PROXY` 含 `[::1]` 导致所有模型连接测试误报"服务商拒绝了请求"：桥接层 `buildChildEnv()` 转发前剥掉带方括号的 IPv6 字面量，Core 5.8.5 把 httpx 客户端构造期异常归类为本地配置错误（HTTP 412），`Studio request failed` 附带 `error.cause`。
 
