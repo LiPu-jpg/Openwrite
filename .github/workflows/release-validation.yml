@@ -67,13 +67,14 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
       - if: runner.os == 'Linux'
-        # GitHub-hosted ubuntu runners occasionally get a runner whose Azure
-        # apt mirror is dead; apt then hangs single-threaded until the job
-        # timeout kills the whole matrix leg. Pin the mirror list to the
-        # public archive and bound every connection so a sick runner fails
-        # (and can be retried) in seconds instead of wedging for 25 minutes.
+        # GitHub-hosted ubuntu runners intermittently lose outbound port 80
+        # (the default Azure apt mirror goes dead and archive.ubuntu.com:80
+        # connection-fails while https stays healthy), leaving apt hanging
+        # single-threaded until the job timeout kills the whole matrix leg.
+        # Pin the mirror list to the public archive over https and bound
+        # every connection so a sick runner fails fast instead of wedging.
         run: |
-          echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
           printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
       - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
       - uses: actions/download-artifact@v4
@@ -118,7 +119,7 @@ jobs:
       - if: runner.os == 'Linux'
         # See client-contracts: guard apt against dead Azure mirrors.
         run: |
-          echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
           printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
       - if: runner.os != 'Windows'
         run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
@@ -175,7 +176,7 @@ jobs:
       - if: runner.os == 'Linux'
         # See client-contracts: guard apt against dead Azure mirrors.
         run: |
-          echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
           printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
       - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
       - uses: actions/download-artifact@v4
