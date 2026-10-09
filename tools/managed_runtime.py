@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 from pathlib import Path
@@ -12,6 +13,36 @@ from tools.studio import create_server
 from tools.studio_http import health_payload
 from tools.studio_preferences import StudioModelSettingsStore
 from tools.model_profiles import ModelProfileStore
+
+# A stuck request thread (e.g. a wedged embedding probe) must not keep this
+# process alive after serve_forever returns; the bridge can only restart a
+# process that actually exits.
+FINALIZE_TIMEOUT_SECONDS = 10
+
+
+def _prewarm_embedding_dependencies() -> None:
+    """Import embedding heavyweights off the request path.
+
+    ``tools.embedding_runtime`` is imported lazily from request handlers. On
+    Windows the first ``import numpy`` inside such a request thread can stall
+    in the module loader forever, hanging the handler and eventually wedging
+    the whole backend (alive but no longer serving). numpy is needed by every
+    embedding path, so load it on the startup thread; fastembed is only used
+    for on-device embeddings and costs seconds, so it loads best-effort in a
+    background thread — both keep the function-level lazy imports as fallback.
+    """
+    try:
+        import numpy  # noqa: F401
+    except ImportError:
+        pass
+
+    def _load_fastembed() -> None:
+        try:
+            import fastembed  # noqa: F401
+        except ImportError:
+            pass
+
+    threading.Thread(target=_load_fastembed, daemon=True, name="fastembed-prewarm").start()
 
 
 def create_managed_server(state: Path, token: str):
@@ -27,6 +58,7 @@ def create_managed_server(state: Path, token: str):
 
 
 def main() -> int:
+    _prewarm_embedding_dependencies()
     # The credential never appears in argv, environment, logs, or ready output.
     request = json.loads(sys.stdin.readline())
     state = Path(request["state_dir"]).resolve()
@@ -43,8 +75,26 @@ def main() -> int:
     try:
         server.serve_forever(poll_interval=0.1)
     finally:
-        server.workspace_manager.shutdown(wait=True)
-        server.server_close()
+        # Finalize off the main thread with a hard deadline: workspace
+        # shutdown waits for in-flight request threads, and one that never
+        # ends would leave this process alive but refusing connections — a
+        # zombie the host cannot restart. Better to die loudly.
+        finalized = threading.Event()
+
+        def _finalize() -> None:
+            try:
+                server.workspace_manager.shutdown(wait=True)
+                server.server_close()
+            finally:
+                finalized.set()
+
+        threading.Thread(target=_finalize, daemon=True, name="runtime-finalize").start()
+        if not finalized.wait(FINALIZE_TIMEOUT_SECONDS):
+            sys.stderr.write(
+                f"写作后端收尾超时（{FINALIZE_TIMEOUT_SECONDS} 秒），强制退出\n"
+            )
+            sys.stderr.flush()
+            os._exit(1)
     return 0
 
 
