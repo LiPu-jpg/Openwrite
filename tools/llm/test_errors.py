@@ -174,8 +174,20 @@ def _local_client_construction_error(exc: BaseException) -> bool:
     """
     try:
         import httpx
-        construction_errors = (httpx.InvalidURL, httpx.UnsupportedProtocol, httpx.InvalidProxy)
     except ImportError:  # pragma: no cover - dependency contract
+        return False
+    # httpx 仅在较新版本暴露 InvalidProxy（0.28.1 及更早版本没有该符号），
+    # 逐个 getattr 容错，避免 AttributeError 击穿整个错误分类路径。
+    construction_errors = tuple(
+        error_type
+        for error_type in (
+            getattr(httpx, "InvalidURL", None),
+            getattr(httpx, "UnsupportedProtocol", None),
+            getattr(httpx, "InvalidProxy", None),
+        )
+        if error_type is not None
+    )
+    if not construction_errors:
         return False
     seen: set[int] = set()
     current: BaseException | None = exc
