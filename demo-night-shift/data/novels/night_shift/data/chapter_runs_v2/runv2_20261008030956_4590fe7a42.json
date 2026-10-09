@@ -1,0 +1,183 @@
+{
+  "schema_version": 2,
+  "run_id": "runv2_20261008030956_4590fe7a42",
+  "novel_id": "night_shift",
+  "chapter_id": "ch_002",
+  "status": "committed",
+  "created_at": "2026-10-08T03:09:56.723806+00:00",
+  "updated_at": "2026-10-08T03:10:27.277571+00:00",
+  "requested_target_words": 0,
+  "effective_target_words": 3000,
+  "provider": "openai",
+  "model": "deepseek-chat",
+  "model_profile": "deepseek-chat",
+  "input_revisions": {
+    "context": "sha256:ce3801f5faeaafa530de89e669b6c3bb476f3ca98b4b6d04477b1201c68bf510",
+    "outline": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "runtime_state": "1",
+    "prompt": "writer-creative-v1"
+  },
+  "stages": {
+    "context": {
+      "status": "completed",
+      "input_revisions": {
+        "context": "sha256:ce3801f5faeaafa530de89e669b6c3bb476f3ca98b4b6d04477b1201c68bf510",
+        "runtime_state": "1"
+      },
+      "output_revision": "sha256:ce3801f5faeaafa530de89e669b6c3bb476f3ca98b4b6d04477b1201c68bf510",
+      "artifact": "data/novels/night_shift/data/chapter_runs_v2/artifacts/runv2_20261008030956_4590fe7a42/context.json",
+      "prompt_version": "",
+      "model_profile": "deepseek-chat",
+      "usage": {},
+      "error_code": "",
+      "error_message": "",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:09:56.724019+00:00",
+      "completed_at": "2026-10-08T03:09:56.724433+00:00"
+    },
+    "plan": {
+      "status": "completed",
+      "input_revisions": {
+        "outline": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "output_revision": "sha256:fe159c96c11d618fd20e0a9cb37cdc88269006fdfdc752d6736784e41149ce1b",
+      "artifact": "",
+      "prompt_version": "writer-plan-v1",
+      "model_profile": "deepseek-chat",
+      "usage": {},
+      "error_code": "",
+      "error_message": "",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:09:56.724653+00:00",
+      "completed_at": "2026-10-08T03:09:56.724855+00:00"
+    },
+    "draft": {
+      "status": "completed",
+      "input_revisions": {
+        "context": "sha256:ce3801f5faeaafa530de89e669b6c3bb476f3ca98b4b6d04477b1201c68bf510",
+        "outline": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "runtime_state": "1",
+        "prompt": "writer-creative-v1"
+      },
+      "output_revision": "sha256:447e234c67ded5e104e615f0c83d8af14018d7bff77ca5b35c2ecc243615271b",
+      "artifact": "data/novels/night_shift/data/chapter_runs_v2/artifacts/runv2_20261008030956_4590fe7a42/draft.json",
+      "prompt_version": "writer-creative-v1",
+      "model_profile": "deepseek-chat",
+      "usage": {
+        "completion_tokens": 6177,
+        "prompt_tokens": 7121,
+        "total_tokens": 13298,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 384,
+          "text_tokens": null,
+          "image_tokens": null,
+          "video_tokens": null
+        },
+        "prompt_cache_hit_tokens": 1024,
+        "prompt_cache_miss_tokens": 6097,
+        "cost_reported_calls": 0,
+        "usage_calls": 2,
+        "cost_reported": false
+      },
+      "error_code": "",
+      "error_message": "",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:09:56.725041+00:00",
+      "completed_at": "2026-10-08T03:10:27.259514+00:00"
+    },
+    "fact_extract": {
+      "status": "completed",
+      "input_revisions": {
+        "context": "sha256:ce3801f5faeaafa530de89e669b6c3bb476f3ca98b4b6d04477b1201c68bf510",
+        "outline": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "runtime_state": "1",
+        "prompt": "writer-creative-v1"
+      },
+      "output_revision": "sha256:f970e5764e9a125661a0c26786c5daa5ef67b32d4a7b5190d5eaec70cf7174b8",
+      "artifact": "data/novels/night_shift/data/chapter_runs_v2/artifacts/runv2_20261008030956_4590fe7a42/fact_extract.json",
+      "prompt_version": "runtime-delta-v1",
+      "model_profile": "deepseek-chat",
+      "usage": {},
+      "error_code": "",
+      "error_message": "",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:10:27.260234+00:00",
+      "completed_at": "2026-10-08T03:10:27.261247+00:00"
+    },
+    "settle": {
+      "status": "completed",
+      "input_revisions": {
+        "context": "sha256:ce3801f5faeaafa530de89e669b6c3bb476f3ca98b4b6d04477b1201c68bf510",
+        "outline": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "runtime_state": "1",
+        "prompt": "writer-creative-v1"
+      },
+      "output_revision": "sha256:18073f8b85e67812ba7e19443aed77a3c573f2e709e938f2dad6ce296f7b40e9",
+      "artifact": "",
+      "prompt_version": "runtime-delta-v1",
+      "model_profile": "deepseek-chat",
+      "usage": {},
+      "error_code": "",
+      "error_message": "",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:10:27.264795+00:00",
+      "completed_at": "2026-10-08T03:10:27.267967+00:00"
+    },
+    "validate": {
+      "status": "completed",
+      "input_revisions": {
+        "context": "sha256:ce3801f5faeaafa530de89e669b6c3bb476f3ca98b4b6d04477b1201c68bf510",
+        "outline": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "runtime_state": "1",
+        "prompt": "writer-creative-v1"
+      },
+      "output_revision": "sha256:c6608e91c6a101669cd11542b15403fc8683e9bf53b5d4cd2e0f9b99c0226b8d",
+      "artifact": "",
+      "prompt_version": "post-write-v1",
+      "model_profile": "deepseek-chat",
+      "usage": {},
+      "error_code": "",
+      "error_message": "",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:10:27.272151+00:00",
+      "completed_at": "2026-10-08T03:10:27.273260+00:00"
+    },
+    "commit": {
+      "status": "completed",
+      "input_revisions": {
+        "context": "sha256:ce3801f5faeaafa530de89e669b6c3bb476f3ca98b4b6d04477b1201c68bf510",
+        "outline": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "runtime_state": "1",
+        "prompt": "writer-creative-v1"
+      },
+      "output_revision": "sha256:1a471cdbfb3cb4cd9702d6621033187bcfa81b82eb8924bf7d0376b0ca84557b",
+      "artifact": "data/novels/night_shift/data/manuscript/arc_001/ch_002.md",
+      "prompt_version": "",
+      "model_profile": "deepseek-chat",
+      "usage": {},
+      "error_code": "",
+      "error_message": "",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:10:27.273761+00:00",
+      "completed_at": "2026-10-08T03:10:27.277571+00:00"
+    },
+    "review": {
+      "status": "pending",
+      "input_revisions": {},
+      "output_revision": "",
+      "artifact": "",
+      "prompt_version": "",
+      "model_profile": "",
+      "usage": {},
+      "error_code": "",
+      "error_message": "",
+      "attempts": 0,
+      "started_at": "",
+      "completed_at": ""
+    }
+  },
+  "interventions": [],
+  "stop_reason": "",
+  "cancel_requested": false
+}

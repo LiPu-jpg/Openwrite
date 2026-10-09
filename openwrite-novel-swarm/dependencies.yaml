@@ -1,0 +1,71 @@
+# dependencies.yaml — openwrite-novel-swarm 启动依赖检查
+#
+# 本文件由 Stage 2 自动匹配（本地扫描）生成：扫描了本地 OpenWrite native-core
+# 技能集与系统工具。每项在 Workflow Step 0 由 Leader 核对并上报用户决定。
+
+skills:
+  # --- OpenWrite native-core 本地技能（source: local，位于 OpenWrite 引擎仓库 skills/ 目录） ---
+  - name: goethe-agent
+    source: local
+    required: false
+    purpose: 长期规划会话与灵感收敛；缺失时 goethe-planner 退回内联人设模式
+  - name: novel-manager
+    source: local
+    required: false
+    purpose: 人物/大纲/世界观资产维护的门控与契约；缺失时 Leader 代管资产写入
+  - name: novel-creator
+    source: local
+    required: false
+    purpose: 章节写作 Pipeline 与 canonical context packet 组装；缺失时 dante-writer 退回内联人设模式
+  - name: text-processing
+    source: local
+    required: false
+    purpose: 长文本切割/压缩；修订匠与主笔处理超长章节时使用
+  - name: novel-reviewer
+    source: local
+    required: false
+    purpose: 六域评审 rubric 与证据结构；缺失时评审员按内联 schema 工作
+  - name: world-query
+    source: local
+    required: false
+    purpose: 世界观实体/关系图谱查询；reviewer-canon 的核对依据
+  - name: truth-validation
+    source: local
+    required: false
+    purpose: truth 文件一致性校验；reviewer-canon 的事实裁判
+  - name: foreshadowing-system
+    source: local
+    required: false
+    purpose: 伏笔 DAG 管理；reviewer-canon 的伏笔核对依据
+  - name: dialoguequality
+    source: local
+    required: false
+    purpose: 对话声口/口头禅分析；reviewer-drama 与 reviewer-prose 的辅助
+  - name: style-system
+    source: local
+    required: false
+    purpose: 风格指纹合成与提取；reviewer-prose 的文风基准
+  - name: post-validation
+    source: local
+    required: false
+    purpose: AI 痕迹与后置规则检测；reviewer-prose 的合规底线
+
+tools:
+  # --- 本地工具（Stage 2 通过 which 探测确认） ---
+  - name: python
+    required: true
+    purpose: 运行 OpenWrite 引擎（openwrite CLI / managed runtime）与资产读写脚本；缺失则整个蜂群无法工作
+  - name: git
+    required: false
+    purpose: 作品目录的版本保护与检查点（OpenWrite 项目即 Git 仓库）；缺失时关闭版本回滚能力
+  - name: openwrite-mcp
+    required: false
+    purpose: MCP server（stdio），25 个领域工具：读路径 8（get_context_packet /
+      get_review_framework / get_outline / list_foreshadowing / update_foreshadowing_status /
+      get_truth / get_chapter_foreshadowing / list_projects）+ 写路径 17：蜂群稿入库与
+      接纳门（save_external_chapter / manuscript_status / accept_manuscript /
+      resume_acceptance / acknowledge_impacts）、引擎原生写审（write_chapter / review_chapter）、
+      修订提案门（list_revision_proposals / apply_revision_proposal / reject_revision_proposal）、
+      规划写回（create_project / save_foundation_draft / promote_foundation /
+      save_outline_draft / promote_outline / stage_outline_edits）、导出（export_book）；
+      缺失时 teammate 退回内联人设模式。已在 jiuwenswarm config.mcp.servers 注册，name=openwrite

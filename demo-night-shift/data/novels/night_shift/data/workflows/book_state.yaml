@@ -1,0 +1,9 @@
+novel_id: night_shift
+stage: review_and_revise
+current_arc: ''
+current_section: ''
+current_chapter: ch_002
+pending_confirmation: ''
+blocking_reason: review_not_run
+last_agent_action: write_pending_review
+last_handoff_from: ''

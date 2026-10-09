@@ -1,0 +1,8 @@
+schema_version: 1
+project_type: novel-content
+repository_visibility: private
+git:
+  auto_checkpoint: false
+  checkpoint_on:
+  - confirmed_asset_change
+  debounce_minutes: 15

@@ -1,0 +1,51 @@
+novel_id: night_shift
+chapter_id: ch_002
+current_stage: review
+draft_path: /Users/jiaoziang/openjiu/demo-night-shift/data/novels/night_shift/data/manuscript/arc_001/ch_002.md
+polished_path: ''
+review_passed: true
+review_errors: []
+review_warnings: []
+user_approved: null
+stages:
+- name: context_assembly
+  status: completed
+  started_at: '2026-10-08T11:09:56.703094'
+  completed_at: '2026-10-08T11:09:56.721860'
+  message: canonical context assembled
+  data:
+    chapter_id: ch_002
+- name: writing
+  status: completed
+  started_at: '2026-10-08T11:09:56.722452'
+  completed_at: '2026-10-08T11:10:27.274171'
+  message: chapter committed
+  data:
+    draft_path: /Users/jiaoziang/openjiu/demo-night-shift/data/novels/night_shift/data/manuscript/arc_001/ch_002.md
+- name: review
+  status: pending
+  started_at: ''
+  completed_at: ''
+  message: ''
+  data: {}
+- name: user_confirm
+  status: pending
+  started_at: ''
+  completed_at: ''
+  message: ''
+  data: {}
+- name: styling
+  status: pending
+  started_at: ''
+  completed_at: ''
+  message: ''
+  data: {}
+- name: compression
+  status: pending
+  started_at: ''
+  completed_at: ''
+  message: ''
+  data: {}
+created_at: '2026-10-08T11:09:56.702084'
+updated_at: '2026-10-08T11:10:27.274184'
+error: ''

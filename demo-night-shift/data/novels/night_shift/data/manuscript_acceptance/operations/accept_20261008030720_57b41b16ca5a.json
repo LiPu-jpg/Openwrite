@@ -1,0 +1,134 @@
+{
+  "schema_version": "openwrite.manuscript-acceptance.v1",
+  "operation_id": "accept_20261008030720_57b41b16ca5a",
+  "novel_id": "night_shift",
+  "chapter_id": "ch_001",
+  "affected_chapters": [
+    "ch_001"
+  ],
+  "source": "agent",
+  "baseline": false,
+  "revises_existing": false,
+  "source_run_id": "",
+  "expected_previous_revision": "",
+  "previous_accepted_revision": "",
+  "target_revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372",
+  "accepted_revision": "",
+  "status": "pending",
+  "created_at": "2026-10-08T03:07:20.406725+00:00",
+  "updated_at": "2026-10-08T03:07:20.412188+00:00",
+  "completed_at": "",
+  "frozen_chapters": [
+    {
+      "chapter_id": "ch_001",
+      "path": "data/manuscript/arc_001/ch_001.md",
+      "revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372",
+      "snapshot": "snapshots/accept_20261008030720_57b41b16ca5a/ch_001.md"
+    }
+  ],
+  "analysis_results": {},
+  "impacts": [
+    {
+      "domain": "chapter_memory",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "runtime_facts",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "character_state",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "canon",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "review",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "plan",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "search",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "downstream_chapters",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "outline",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "foreshadowing",
+      "status": "stale",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    }
+  ],
+  "stages": {
+    "capture": {
+      "status": "completed",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:07:20.406725+00:00",
+      "completed_at": "2026-10-08T03:07:20.406725+00:00",
+      "error_code": "",
+      "error_message": ""
+    },
+    "invalidate": {
+      "status": "completed",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:07:20.407730+00:00",
+      "completed_at": "2026-10-08T03:07:20.412184+00:00",
+      "error_code": "",
+      "error_message": ""
+    },
+    "analyze": {
+      "status": "pending",
+      "attempts": 0,
+      "started_at": "",
+      "completed_at": "",
+      "error_code": "",
+      "error_message": ""
+    },
+    "rebuild": {
+      "status": "pending",
+      "attempts": 0,
+      "started_at": "",
+      "completed_at": "",
+      "error_code": "",
+      "error_message": ""
+    },
+    "propagate": {
+      "status": "pending",
+      "attempts": 0,
+      "started_at": "",
+      "completed_at": "",
+      "error_code": "",
+      "error_message": ""
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "run_id": "run_20261008030956_34634ce8e9",
+  "novel_id": "night_shift",
+  "chapter_id": "ch_002",
+  "status": "written",
+  "created_at": "2026-10-08T03:09:56.723014+00:00",
+  "updated_at": "2026-10-08T03:10:27.276629+00:00",
+  "requested_target_words": 0,
+  "outline_target_words": 3000,
+  "effective_target_words": 3000,
+  "provider": "openai",
+  "model": "deepseek-chat",
+  "routes": {
+    "write": "deepseek-chat",
+    "settle": "deepseek-chat"
+  },
+  "context_revision": "sha256:d6560189fca53ece973e3f246f489fb34280f52da7abfcc9c08ca38c177416da",
+  "baseline_state_revision": 1,
+  "prompt_versions": {
+    "creative": "writer-creative-v1",
+    "settlement": "runtime-delta-v1",
+    "review": "reviewer-v1"
+  },
+  "draft_revision": "sha256:8128c2a8144ad0dbd9a845ddea18d9abef1683db39a77990171d1cf7f9dd6ca7",
+  "review_revision": "",
+  "stages": {
+    "write": {
+      "status": "completed",
+      "started_at": "2026-10-08T03:09:56.723014+00:00",
+      "completed_at": "2026-10-08T03:10:27.276629+00:00",
+      "usage": {
+        "completion_tokens": 6177,
+        "prompt_tokens": 7121,
+        "total_tokens": 13298,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 384,
+          "text_tokens": null,
+          "image_tokens": null,
+          "video_tokens": null
+        },
+        "prompt_cache_hit_tokens": 1024,
+        "prompt_cache_miss_tokens": 6097,
+        "cost_reported_calls": 0,
+        "usage_calls": 2,
+        "cost_reported": false
+      },
+      "error_code": ""
+    },
+    "settle": {
+      "status": "completed",
+      "started_at": "",
+      "completed_at": "2026-10-08T03:10:27.276629+00:00",
+      "usage": {
+        "completion_tokens": 6177,
+        "prompt_tokens": 7121,
+        "total_tokens": 13298,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 384,
+          "text_tokens": null,
+          "image_tokens": null,
+          "video_tokens": null
+        },
+        "prompt_cache_hit_tokens": 1024,
+        "prompt_cache_miss_tokens": 6097,
+        "cost_reported_calls": 0,
+        "usage_calls": 2,
+        "cost_reported": false
+      },
+      "error_code": ""
+    },
+    "review": {
+      "status": "pending",
+      "started_at": "",
+      "completed_at": "",
+      "usage": {},
+      "error_code": ""
+    }
+  }
+}

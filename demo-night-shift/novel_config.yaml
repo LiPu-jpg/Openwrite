@@ -1,0 +1,14 @@
+novel_id: night_shift
+title: 夜班便利店
+author: openwrite-novel-swarm
+language: zh-CN
+style_id: night_shift
+current_arc: arc_001
+current_chapter: ch_001
+writing_targets:
+  book_words: 100000
+  chapter_words: 3000
+  outline_volume_words: 800
+  outline_act_words: 500
+  outline_section_words: 300
+  outline_chapter_words: 180

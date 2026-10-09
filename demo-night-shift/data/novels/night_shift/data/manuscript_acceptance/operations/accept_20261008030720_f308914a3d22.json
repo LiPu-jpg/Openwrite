@@ -1,0 +1,154 @@
+{
+  "schema_version": "openwrite.manuscript-acceptance.v1",
+  "operation_id": "accept_20261008030720_f308914a3d22",
+  "novel_id": "night_shift",
+  "chapter_id": "ch_001",
+  "affected_chapters": [
+    "ch_001"
+  ],
+  "source": "external_editor",
+  "baseline": false,
+  "revises_existing": true,
+  "source_run_id": "",
+  "expected_previous_revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372",
+  "previous_accepted_revision": "",
+  "target_revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372",
+  "accepted_revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372",
+  "status": "completed",
+  "created_at": "2026-10-08T03:07:20.414802+00:00",
+  "updated_at": "2026-10-08T03:09:56.684390+00:00",
+  "completed_at": "2026-10-08T03:09:56.676578+00:00",
+  "frozen_chapters": [
+    {
+      "chapter_id": "ch_001",
+      "path": "data/manuscript/arc_001/ch_001.md",
+      "revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372",
+      "snapshot": "snapshots/accept_20261008030720_f308914a3d22/ch_001.md"
+    }
+  ],
+  "analysis_results": {
+    "ch_001": {
+      "schema_version": "openwrite.manuscript-acceptance.v1",
+      "chapter_id": "ch_001",
+      "title": "第一章 多出来的客人",
+      "source_revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372",
+      "chapter_summary": "凌晨两点四十，便利店店员小周发现3号冰柜结霜异常，打开后看见一名深色外套、皮肤青灰的蜷缩人影。他拍照并报警，再次确认时人影消失，只剩压扁的冰淇淋、水渍和通向后的拖痕。后门电闸被胶带固定，店长老陈此时来交接，并提醒他别乱翻监控。监控回放中，2:41出现人影后又跳帧消失。小周将照片存入加密相册，并想起半年前街头目睹男人拽女人、自己低头离开的往事。",
+      "observations": "- 凌晨2:38，小周发现便利店3号冰柜结霜异常并记录在备忘录\n- 小周在3号冰柜内看见一名深色外套、皮肤青灰、嘴唇无血色的蜷缩人影\n- 小周拍下三张照片并拨打110，接线员要求其再次确认\n- 小周再次打开冰柜时人影消失，只剩压扁的冰淇淋和正在结冰的水渍\n- 冰柜底部有从柜内延伸到后门方向的浅浅拖痕\n- 后门电闸被胶带缠三圈固定在“开”的位置，小周未能扯动\n- 店长老陈在此时出现，称来交接，并注意到后门胶带\n- 老陈说“监控别乱翻，那玩意儿费电”\n- 监控回放显示2:39冰柜前空无一物，2:41出现深色外套人影，画面跳后人影消失\n- 小周将手机照片存入加密相册\n- 小周回忆半年前街头目睹男人拽女人胳膊、女人喊叫，自己看了几秒后离开\n- 小周后来换手机号并搬家",
+      "word_count": 1111,
+      "state_delta": {},
+      "legacy_updates": {
+        "current_state": "凌晨便利店3号冰柜出现异常结霜、短暂出现蜷缩人影、人影消失、柜底拖痕、后门电闸被胶带固定、监控画面跳帧等异常现象；店长老陈在交接时出现并阻止小周乱翻监控。",
+        "ledger": "小周手机备忘录记录：2:38，3号冰柜结霜异常；小周手机中存有三张冰柜内人影照片，并已存入加密相册；3号冰柜内有一盒被压扁的冰淇淋和一滩正在结冰的水渍；后门电闸被胶带缠三圈固定在“开”的位置。",
+        "relationships": "小周与店长老陈为店员与店长关系；老陈在交接时出现，并提醒小周不要乱翻监控；小周对老陈隐瞒了冰柜内看见人影一事。"
+      },
+      "token_usage": {},
+      "analyzed_at": "2026-10-08T03:09:56.667858+00:00"
+    }
+  },
+  "impacts": [
+    {
+      "domain": "chapter_memory",
+      "status": "current",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "runtime_facts",
+      "status": "current",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "character_state",
+      "status": "current",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "canon",
+      "status": "current",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "review",
+      "status": "current",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "plan",
+      "status": "current",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "search",
+      "status": "current",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "downstream_chapters",
+      "status": "current",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001"
+    },
+    {
+      "domain": "outline",
+      "status": "acknowledged",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001",
+      "acknowledged_at": "2026-10-08T03:09:56.684384+00:00"
+    },
+    {
+      "domain": "foreshadowing",
+      "status": "acknowledged",
+      "reason": "ch_001_content_changed",
+      "source_chapter": "ch_001",
+      "acknowledged_at": "2026-10-08T03:09:56.684388+00:00"
+    }
+  ],
+  "stages": {
+    "capture": {
+      "status": "completed",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:07:20.414802+00:00",
+      "completed_at": "2026-10-08T03:07:20.414802+00:00",
+      "error_code": "",
+      "error_message": ""
+    },
+    "invalidate": {
+      "status": "completed",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:07:20.415619+00:00",
+      "completed_at": "2026-10-08T03:07:20.415883+00:00",
+      "error_code": "",
+      "error_message": ""
+    },
+    "analyze": {
+      "status": "completed",
+      "attempts": 3,
+      "started_at": "2026-10-08T03:09:47.382947+00:00",
+      "completed_at": "2026-10-08T03:09:56.668458+00:00",
+      "error_code": "",
+      "error_message": ""
+    },
+    "rebuild": {
+      "status": "completed",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:09:56.668863+00:00",
+      "completed_at": "2026-10-08T03:09:56.675757+00:00",
+      "error_code": "",
+      "error_message": ""
+    },
+    "propagate": {
+      "status": "completed",
+      "attempts": 1,
+      "started_at": "2026-10-08T03:09:56.676065+00:00",
+      "completed_at": "2026-10-08T03:09:56.676331+00:00",
+      "error_code": "",
+      "error_message": ""
+    }
+  }
+}

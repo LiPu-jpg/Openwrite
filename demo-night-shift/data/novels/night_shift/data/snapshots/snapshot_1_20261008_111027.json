@@ -1,0 +1,11 @@
+{
+  "id": "snapshot_1_20261008_111027",
+  "chapter_number": 1,
+  "created_at": "2026-10-08T11:10:27.262639",
+  "files": {
+    "current_state": "## 后续章节状态增量\n\n### ch_001\n\n凌晨便利店3号冰柜出现异常结霜、短暂出现蜷缩人影、人影消失、柜底拖痕、后门电闸被胶带固定、监控画面跳帧等异常现象；店长老陈在交接时出现并阻止小周乱翻监控。",
+    "ledger": "## 后续章节账本增量\n\n### ch_001\n\n小周手机备忘录记录：2:38，3号冰柜结霜异常；小周手机中存有三张冰柜内人影照片，并已存入加密相册；3号冰柜内有一盒被压扁的冰淇淋和一滩正在结冰的水渍；后门电闸被胶带缠三圈固定在“开”的位置。",
+    "relationships": "## 后续章节关系增量\n\n### ch_001\n\n小周与店长老陈为店员与店长关系；老陈在交接时出现，并提醒小周不要乱翻监控；小周对老陈隐瞒了冰柜内看见人影一事。"
+  },
+  "runtime_state": "{\n  \"schema_version\": 1,\n  \"revision\": 1,\n  \"novel_id\": \"night_shift\",\n  \"source_chapter\": \"ch_001\",\n  \"updated_at\": \"2026-10-08T03:09:56.670104+00:00\",\n  \"legacy_documents\": {},\n  \"current_state_notes\": [\n    {\n      \"id\": \"note_29a77b4ca6d3\",\n      \"text\": \"凌晨便利店3号冰柜出现异常结霜、短暂出现蜷缩人影、人影消失、柜底拖痕、后门电闸被胶带固定、监控画面跳帧等异常现象；店长老陈在交接时出现并阻止小周乱翻监控。\",\n      \"source_chapter\": \"ch_001\",\n      \"status\": \"active\"\n    }\n  ],\n  \"ledger_notes\": [\n    {\n      \"id\": \"note_bf27bb866dbc\",\n      \"text\": \"小周手机备忘录记录：2:38，3号冰柜结霜异常；小周手机中存有三张冰柜内人影照片，并已存入加密相册；3号冰柜内有一盒被压扁的冰淇淋和一滩正在结冰的水渍；后门电闸被胶带缠三圈固定在“开”的位置。\",\n      \"source_chapter\": \"ch_001\",\n      \"status\": \"active\"\n    }\n  ],\n  \"relationship_notes\": [\n    {\n      \"id\": \"note_8b3fa8fce7af\",\n      \"text\": \"小周与店长老陈为店员与店长关系；老陈在交接时出现，并提醒小周不要乱翻监控；小周对老陈隐瞒了冰柜内看见人影一事。\",\n      \"source_chapter\": \"ch_001\",\n      \"status\": \"active\"\n    }\n  ],\n  \"characters\": {},\n  \"resources\": {},\n  \"relationships\": {},\n  \"open_threads\": {},\n  \"foreshadowing_refs\": {},\n  \"timeline\": [],\n  \"proposed_entities\": {}\n}\n"
+}

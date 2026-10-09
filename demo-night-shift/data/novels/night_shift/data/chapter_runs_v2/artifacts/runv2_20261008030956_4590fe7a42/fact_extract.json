@@ -1,0 +1,198 @@
+{
+  "state_delta": {
+    "schema_version": 1,
+    "chapter_id": "ch_002",
+    "source_revision": null,
+    "operations": [
+      {
+        "op": "append",
+        "collection": "current_state",
+        "target": "",
+        "value": "小周回拨报警电话无实质进展；调取监控确认2:38冰柜结霜、2:39人影出现、2:41人影消失、2:42拖痕出现；发现2:40-2:42有人经过后门内侧停留约40秒但未开门；在夹道道具堆下发现‘守夜人’角色卡（背面手写‘2:40，后门’）；进入隔壁‘入戏沉浸剧场’询问，前台女孩否认有该本但态度异常，并认识老陈；小周收到匿名短信‘别查了’及‘你明天夜班，对吧？’‘2:40，别开3号柜。’；导出监控录像至U盘；发现3号冰柜底部内侧有指甲抠出的划痕；前台女孩隔玻璃按掌后消失。"
+      },
+      {
+        "op": "append",
+        "collection": "ledger",
+        "target": "",
+        "value": "小周获得‘守夜人’角色卡（背面手写‘2:40，后门’）；获得U盘，内含2:30-3:00完整监控录像；手机加密相册新增至6张照片（3张冰柜人影、1张监控截图、1张角色卡、1张后门）；新建加密文件夹命名‘2:40’；发现3号冰柜底部内侧指甲划痕、后门内侧鞋底擦痕延伸约半米后消失、货架底层灰尘上半个模糊脚印；夹道道具堆中有断臂、面具、假血衬衫等旧道具。"
+      },
+      {
+        "op": "append",
+        "collection": "relationships",
+        "target": "",
+        "value": "小周对老陈产生怀疑，认为老陈可能知情并隐瞒（‘老陈知道什么？’）；剧本杀店前台女孩明确认识老陈（‘老陈知道你来这儿吗？’），并警告小周‘有些事，你看见了也当没看见，对谁都好’；前台女孩发匿名短信警告小周，隔玻璃按掌暗示深度介入。"
+      },
+      {
+        "op": "append",
+        "collection": "characters",
+        "target": "",
+        "value": {
+          "name": "小周",
+          "state": "恐惧与执着并存，继续调查",
+          "location": "便利店外街边",
+          "knowledge": [
+            "2:40后门有人停留40秒未开门",
+            "守夜人角色卡存在且背面手写‘2:40，后门’",
+            "剧本杀店前台认识老陈",
+            "匿名短信警告‘2:40，别开3号柜’",
+            "3号冰柜底部有指甲划痕"
+          ]
+        }
+      },
+      {
+        "op": "append",
+        "collection": "characters",
+        "target": "",
+        "value": {
+          "name": "剧本杀店前台女孩",
+          "state": "表面平静但深度介入，发匿名短信警告小周",
+          "location": "入戏沉浸剧场前台",
+          "knowledge": [
+            "认识老陈",
+            "知道‘守夜人’相关",
+            "知道小周明天夜班"
+          ]
+        }
+      },
+      {
+        "op": "append",
+        "collection": "open_threads",
+        "target": "",
+        "value": {
+          "title": "老陈是否知情并隐瞒监控内容",
+          "status": "open",
+          "detail": "老陈交代‘监控别乱翻’，前台女孩认识老陈，小周产生怀疑"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "open_threads",
+        "target": "",
+        "value": {
+          "title": "‘守夜人’角色卡与冰柜人影的关联",
+          "status": "open",
+          "detail": "角色简介‘他在冰柜里睡了很久，直到有人把他叫醒’，背面手写‘2:40，后门’与监控异常时间吻合"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "open_threads",
+        "target": "",
+        "value": {
+          "title": "匿名短信发送者身份及‘别开3号柜’的含义",
+          "status": "open",
+          "detail": "匿名号码发送‘别查了’‘你明天夜班，对吧？’‘2:40，别开3号柜。’"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "foreshadowing_refs",
+        "target": "",
+        "value": {
+          "title": "老陈说‘监控别乱翻，那玩意儿费电’",
+          "status": "planted",
+          "reference": "ch_002 老陈交代小李转述"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "foreshadowing_refs",
+        "target": "",
+        "value": {
+          "title": "前台女孩隔玻璃按掌动作与冰柜呵气/结霜意象呼应",
+          "status": "planted",
+          "reference": "ch_002 小周抬头时女孩手按玻璃，像摸冰柜门"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "foreshadowing_refs",
+        "target": "",
+        "value": {
+          "title": "U盘‘贴着大腿，冰凉冰凉的’与冰柜冷气意象反复呼应",
+          "status": "planted",
+          "reference": "ch_002 章节后段"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "timeline",
+        "target": "",
+        "value": {
+          "id": "event_ch_002_01",
+          "chapter_id": "ch_002",
+          "event": "小周回拨报警电话，接线员称片警会尽快核实",
+          "story_time": "白天"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "timeline",
+        "target": "",
+        "value": {
+          "id": "event_ch_002_02",
+          "chapter_id": "ch_002",
+          "event": "小周调取监控回放，确认2:38-2:42冰柜异常及后门内侧有人停留40秒",
+          "story_time": "白天"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "timeline",
+        "target": "",
+        "value": {
+          "id": "event_ch_002_03",
+          "chapter_id": "ch_002",
+          "event": "小周在夹道发现‘守夜人’角色卡，进入剧本杀店询问，收到匿名短信警告",
+          "story_time": "白天"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "timeline",
+        "target": "",
+        "value": {
+          "id": "event_ch_002_04",
+          "chapter_id": "ch_002",
+          "event": "小周导出监控录像至U盘，发现冰柜底部指甲划痕，前台女孩隔玻璃按掌",
+          "story_time": "傍晚"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "proposed_entities",
+        "target": "",
+        "value": {
+          "name": "剧本杀店前台女孩",
+          "entity_type": "character",
+          "reason": "新登场角色，认识老陈，发匿名短信，隔玻璃按掌，深度介入事件"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "proposed_entities",
+        "target": "",
+        "value": {
+          "name": "入戏沉浸剧场",
+          "entity_type": "place",
+          "reason": "隔壁剧本杀店，与便利店共用后门夹道，前台女孩所在"
+        }
+      },
+      {
+        "op": "append",
+        "collection": "proposed_entities",
+        "target": "",
+        "value": {
+          "name": "小李",
+          "entity_type": "character",
+          "reason": "便利店白班店员，对老陈有顾忌，目睹小周调监控"
+        }
+      }
+    ]
+  },
+  "legacy_updates": {
+    "current_state": "小周回拨报警电话无实质进展；调取监控确认2:38冰柜结霜、2:39人影出现、2:41人影消失、2:42拖痕出现；发现2:40-2:42有人经过后门内侧停留约40秒但未开门；在夹道道具堆下发现‘守夜人’角色卡（背面手写‘2:40，后门’）；进入隔壁‘入戏沉浸剧场’询问，前台女孩否认有该本但态度异常，并认识老陈；小周收到匿名短信‘别查了’及‘你明天夜班，对吧？’‘2:40，别开3号柜。’；导出监控录像至U盘；发现3号冰柜底部内侧有指甲抠出的划痕；前台女孩隔玻璃按掌后消失。",
+    "ledger": "小周获得‘守夜人’角色卡（背面手写‘2:40，后门’）；获得U盘，内含2:30-3:00完整监控录像；手机加密相册新增至6张照片（3张冰柜人影、1张监控截图、1张角色卡、1张后门）；新建加密文件夹命名‘2:40’；发现3号冰柜底部内侧指甲划痕、后门内侧鞋底擦痕延伸约半米后消失、货架底层灰尘上半个模糊脚印；夹道道具堆中有断臂、面具、假血衬衫等旧道具。",
+    "relationships": "小周对老陈产生怀疑，认为老陈可能知情并隐瞒（‘老陈知道什么？’）；剧本杀店前台女孩明确认识老陈（‘老陈知道你来这儿吗？’），并警告小周‘有些事，你看见了也当没看见，对谁都好’；前台女孩发匿名短信警告小周，隔玻璃按掌暗示深度介入。"
+  }
+}

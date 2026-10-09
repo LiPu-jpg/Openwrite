@@ -1,0 +1,47 @@
+story_info:
+  title: 演示作品
+  theme: 主动选择与代价
+  summary: 修表师林舟在祖传钟楼发现异常，被迫在真相与安稳间抉择
+  word_count_estimate: 9000
+arcs:
+- id: arc_001
+  title: 第一篇
+  sections:
+  - sec_001
+  chapters:
+  - ch_001
+  - ch_002
+  - ch_003
+  summary: 林舟因钟楼异响追查祖父留下的秘密，在家族真相与原有安稳之间作出选择。
+  description: ch_001-ch_003
+sections:
+- id: sec_001
+  title: 开头
+  arc_id: arc_001
+  chapters:
+  - ch_001
+  - ch_002
+  - ch_003
+  summary: 林舟在钟楼值夜时察觉钟声异常，并从祖父留下的日志中找到与异常有关的线索。
+chapters:
+- id: ch_001
+  title: 第一章 钟声少了一拍
+  section_id: sec_001
+  summary: 林舟夜修钟楼，第一次听见少掉的一拍，并发现祖父日志里的空白页
+  dramatic_position: 开篇
+  content_focus: 林舟夜修钟楼，第一次听见少掉的一拍，并发现祖父日志里的空白页
+  word_count: 3000
+- id: ch_002
+  title: 第二章 日志里的空白
+  section_id: sec_001
+  summary: 林舟调查日志，接触到另一个家族的后人，开始怀疑祖辈契约
+  dramatic_position: 发展
+  content_focus: 林舟调查日志，接触到另一个家族的后人，开始怀疑祖辈契约
+  word_count: 3000
+- id: ch_003
+  title: 第三章 选择之前
+  section_id: sec_001
+  summary: 林舟在真相与安稳之间做出第一次主动选择
+  dramatic_position: 收束
+  content_focus: 林舟在真相与安稳之间做出第一次主动选择
+  word_count: 3000

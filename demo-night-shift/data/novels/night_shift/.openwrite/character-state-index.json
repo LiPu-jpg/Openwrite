@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "novel_id": "night_shift",
+  "documents": [
+    {
+      "path": "data/manuscript/arc_001/ch_001.md",
+      "size": 3215,
+      "mtime_ns": 1791428840405316476
+    },
+    {
+      "path": "data/manuscript/arc_001/ch_002.md",
+      "size": 9717,
+      "mtime_ns": 1791429027264645684
+    },
+    {
+      "path": "src/characters/lao_chen.md",
+      "size": 299,
+      "mtime_ns": 1791428856414406788
+    },
+    {
+      "path": "src/characters/lin_xiaoman.md",
+      "size": 291,
+      "mtime_ns": 1791428856417033262
+    },
+    {
+      "path": "src/characters/xiao_zhou.md",
+      "size": 482,
+      "mtime_ns": 1791428856411975653
+    },
+    {
+      "path": "src/outline.md",
+      "size": 1089,
+      "mtime_ns": 1791428840401733107
+    },
+    {
+      "path": "src/story/author_intent.md",
+      "size": 329,
+      "mtime_ns": 1791428840356445044
+    },
+    {
+      "path": "src/story/background.md",
+      "size": 424,
+      "mtime_ns": 1791428840395257050
+    },
+    {
+      "path": "src/story/current_focus.md",
+      "size": 297,
+      "mtime_ns": 1791428840358377544
+    },
+    {
+      "path": "src/story/foundation.md",
+      "size": 1225,
+      "mtime_ns": 1791428840395431470
+    },
+    {
+      "path": "src/world/rules.md",
+      "size": 299,
+      "mtime_ns": 1791428840359866618
+    },
+    {
+      "path": "src/world/terminology.md",
+      "size": 227,
+      "mtime_ns": 1791428840360113956
+    },
+    {
+      "path": "src/world/timeline.md",
+      "size": 267,
+      "mtime_ns": 1791428840360048747
+    }
+  ],
+  "records": [
+    {
+      "name": "小周",
+      "field": "位置",
+      "old_state": "便利店外街边",
+      "new_state": "返回便利店并进入隔壁剧本杀店调查",
+      "chapter_id": "ch_002",
+      "chapter_number": 2,
+      "source_kind": "actual",
+      "source_path": "data/manuscript/arc_001/ch_002.md",
+      "line": 129
+    },
+    {
+      "name": "小周",
+      "field": "掌握信息",
+      "old_state": "仅有冰柜人影照片和监控跳帧记录",
+      "new_state": "获得“守夜人”角色卡、后门鞋印线索、剧本杀店员工警告，并导出完整监控录像",
+      "chapter_id": "ch_002",
+      "chapter_number": 2,
+      "source_kind": "actual",
+      "source_path": "data/manuscript/arc_001/ch_002.md",
+      "line": 130
+    },
+    {
+      "name": "小周",
+      "field": "与老陈关系",
+      "old_state": "隐瞒冰柜人影",
+      "new_state": "怀疑老陈知情",
+      "chapter_id": "ch_002",
+      "chapter_number": 2,
+      "source_kind": "actual",
+      "source_path": "data/manuscript/arc_001/ch_002.md",
+      "line": 131
+    },
+    {
+      "name": "小周",
+      "field": "与剧本杀店前台关系",
+      "old_state": "素不相识",
+      "new_state": "被对方警告并监视",
+      "chapter_id": "ch_002",
+      "chapter_number": 2,
+      "source_kind": "actual",
+      "source_path": "data/manuscript/arc_001/ch_002.md",
+      "line": 132
+    },
+    {
+      "name": "剧本杀店前台",
+      "field": "与老陈关系",
+      "old_state": "未提及",
+      "new_state": "认识老陈",
+      "chapter_id": "ch_002",
+      "chapter_number": 2,
+      "source_kind": "actual",
+      "source_path": "data/manuscript/arc_001/ch_002.md",
+      "line": 133
+    }
+  ],
+  "diagnostics": []
+}

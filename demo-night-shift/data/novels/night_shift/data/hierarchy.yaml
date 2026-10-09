@@ -1,0 +1,47 @@
+story_info:
+  title: 夜班便利店
+  theme: 自保式沉默与主动介入的代价
+  summary: 夜班店员小周在冰柜里发现一具"尸体"，追查后发现是剧本杀店的直播道具，但道具手中的真人求救纸条让事件走向失控
+  word_count_estimate: 9000
+arcs:
+- id: arc_001
+  title: 第一篇
+  sections:
+  - sec_001
+  chapters:
+  - ch_001
+  - ch_002
+  - ch_003
+  summary: 小周在夜班中发现冰柜异常，从"多出来的客人"一路追查到自己半年前逃避的那次目击。
+  description: ch_001-ch_003
+sections:
+- id: sec_001
+  title: 夜班
+  arc_id: arc_001
+  chapters:
+  - ch_001
+  - ch_002
+  - ch_003
+  summary: 小周发现、追查并直面自己习惯性的沉默。
+chapters:
+- id: ch_001
+  title: 第一章 多出来的客人
+  section_id: sec_001
+  summary: 凌晨冰柜出现疑似尸体，小周报警后尸体消失，他开始用备忘录记录异常
+  dramatic_position: 开篇
+  content_focus: 凌晨冰柜出现疑似尸体，小周报警后尸体消失，他开始用备忘录记录异常
+  word_count: 3000
+- id: ch_002
+  title: 第二章 监控里的定时访客
+  section_id: sec_001
+  summary: 小周追查监控，发现"尸体"每晚同一时间出现，线索指向隔壁剧本杀店
+  dramatic_position: 发展
+  content_focus: 小周追查监控，发现"尸体"每晚同一时间出现，线索指向隔壁剧本杀店
+  word_count: 3000
+- id: ch_003
+  title: 第三章 道具手里的纸条
+  section_id: sec_001
+  summary: 反转——尸体是剧本杀店直播道具，但小周在道具手里发现真人求救纸条
+  dramatic_position: 收束
+  content_focus: 反转——尸体是剧本杀店直播道具，但小周在道具手里发现真人求救纸条
+  word_count: 3000

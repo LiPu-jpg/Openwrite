@@ -1,0 +1,38 @@
+{
+ "ok": true,
+ "chapter_id": "ch_002",
+ "title": "监控里的定时访客",
+ "word_count": 2538,
+ "draft_path": "/Users/jiaoziang/openjiu/demo-night-shift/data/novels/night_shift/data/manuscript/arc_001/ch_002.md",
+ "truth_updates": {
+  "current_state": "小周回拨报警电话无实质进展；调取监控确认2:38冰柜结霜、2:39人影出现、2:41人影消失、2:42拖痕出现；发现2:40-2:42有人经过后门内侧停留约40秒但未开门；在夹道道具堆下发现‘守夜人’角色卡（背面手写‘2:40，后门’）；进入隔壁‘入戏沉浸剧场’询问，前台女孩否认有该本但态度异常，并认识老陈；小周收到匿名短信‘别查了’及‘你明天夜班，对吧？’‘2:40，别开3号柜。’；导出监控录像至U盘；发现3号冰柜底部内侧有指甲抠出的划痕；前台女孩隔玻璃按掌后消失。",
+  "ledger": "小周获得‘守夜人’角色卡（背面手写‘2:40，后门’）；获得U盘，内含2:30-3:00完整监控录像；手机加密相册新增至6张照片（3张冰柜人影、1张监控截图、1张角色卡、1张后门）；新建加密文件夹命名‘2:40’；发现3号冰柜底部内侧指甲划痕、后门内侧鞋底擦痕延伸约半米后消失、货架底层灰尘上半个模糊脚印；夹道道具堆中有断臂、面具、假血衬衫等旧道具。",
+  "relationships": "小周对老陈产生怀疑，认为老陈可能知情并隐瞒（‘老陈知道什么？’）；剧本杀店前台女孩明确认识老陈（‘老陈知道你来这儿吗？’），并警告小周‘有些事，你看见了也当没看见，对谁都好’；前台女孩发匿名短信警告小周，隔玻璃按掌暗示深度介入。"
+ },
+ "run_id_v2": "runv2_20261008030956_4590fe7a42",
+ "usage": {
+  "completion_tokens": 6177,
+  "prompt_tokens": 7121,
+  "total_tokens": 13298,
+  "prompt_tokens_details": {
+   "audio_tokens": null,
+   "cached_tokens": 384,
+   "text_tokens": null,
+   "image_tokens": null,
+   "video_tokens": null
+  },
+  "prompt_cache_hit_tokens": 1024,
+  "prompt_cache_miss_tokens": 6097,
+  "cost_reported_calls": 0,
+  "usage_calls": 2,
+  "cost_reported": false
+ },
+ "finish_reason": "stop",
+ "model": "deepseek-flash",
+ "provider": "openai",
+ "acceptance": {
+  "operation_id": "accept_20261008031027_45831155a204",
+  "status": "completed",
+  "accepted_revision": "sha256:ccc7327db658eaa32d08e63eb2243bec2a62c90b0c02610f59fdb4157f52b9ed"
+ }
+}

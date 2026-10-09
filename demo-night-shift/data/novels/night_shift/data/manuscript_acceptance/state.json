@@ -1,0 +1,29 @@
+{
+  "schema_version": "openwrite.manuscript-acceptance.v1",
+  "novel_id": "night_shift",
+  "revision": 7,
+  "updated_at": "2026-10-08T03:10:27.301050+00:00",
+  "latest_operation_id": "accept_20261008031027_45831155a204",
+  "chapters": {
+    "ch_001": {
+      "chapter_id": "ch_001",
+      "path": "data/manuscript/arc_001/ch_001.md",
+      "status": "current",
+      "operation_id": "accept_20261008030720_f308914a3d22",
+      "source": "external_editor",
+      "updated_at": "2026-10-08T03:09:56.676937+00:00",
+      "accepted_revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372",
+      "facts_revision": "sha256:4238509eaab1a826015bcf64f51dc10553ec66171110e04d3a94afd1b8f23372"
+    },
+    "ch_002": {
+      "chapter_id": "ch_002",
+      "path": "data/manuscript/arc_001/ch_002.md",
+      "status": "current",
+      "operation_id": "accept_20261008031027_45831155a204",
+      "source": "chapter_write",
+      "updated_at": "2026-10-08T03:10:27.301047+00:00",
+      "accepted_revision": "sha256:ccc7327db658eaa32d08e63eb2243bec2a62c90b0c02610f59fdb4157f52b9ed",
+      "facts_revision": "sha256:ccc7327db658eaa32d08e63eb2243bec2a62c90b0c02610f59fdb4157f52b9ed"
+    }
+  }
+}
