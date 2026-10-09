@@ -125,18 +125,21 @@ class EmbeddingRuntime:
         except ImportError as exc:  # pragma: no cover - dependency contract
             raise EmbeddingRuntimeError("缺少 OpenAI 或 numpy 依赖") from exc
 
-        client = AsyncOpenAI(
-            api_key=self.settings.api_key,
-            base_url=self.settings.base_url.rstrip("/"),
-            timeout=self.settings.timeout_seconds,
-        )
         try:
+            client = AsyncOpenAI(
+                api_key=self.settings.api_key,
+                base_url=self.settings.base_url.rstrip("/"),
+                timeout=self.settings.timeout_seconds,
+            )
             response = await client.embeddings.create(
                 model=self.settings.model,
                 input=texts,
                 encoding_format="float",
             )
         except Exception as exc:
+            # Construction-time failures (e.g. httpx InvalidURL from a bad
+            # NO_PROXY) chain through __cause__ so test_errors can classify
+            # them as local configuration problems.
             raise EmbeddingRuntimeError(f"云端 Embedding 请求失败: {type(exc).__name__}") from exc
         ordered = sorted(response.data, key=lambda item: int(item.index))
         vectors = np.asarray([item.embedding for item in ordered], dtype=np.float32)
@@ -192,13 +195,17 @@ class EmbeddingRuntime:
             )
 
 
-def run_embedding_probe(settings: EmbeddingSettings) -> dict[str, Any]:
-    """Run a provider probe from synchronous Studio and CLI surfaces."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(EmbeddingRuntime(settings).probe())
+PROBE_TIMEOUT_MARGIN_SECONDS = 30
 
+
+def run_embedding_probe(settings: EmbeddingSettings) -> dict[str, Any]:
+    """Run a provider probe from synchronous Studio and CLI surfaces.
+
+    The probe always executes on a daemon thread with a hard overall timeout:
+    a wedged dependency load or a hung provider call must surface as a
+    classifiable :class:`EmbeddingRuntimeError` instead of blocking the caller
+    (and its request thread) forever.
+    """
     result: dict[str, Any] = {}
     error: list[BaseException] = []
 
@@ -210,7 +217,10 @@ def run_embedding_probe(settings: EmbeddingSettings) -> dict[str, Any]:
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
-    thread.join()
+    deadline = max(5, int(settings.timeout_seconds)) + PROBE_TIMEOUT_MARGIN_SECONDS
+    thread.join(deadline)
+    if thread.is_alive():
+        raise EmbeddingRuntimeError(f"Embedding 探测超时（{deadline} 秒无响应）")
     if error:
         raise error[0]
     return result

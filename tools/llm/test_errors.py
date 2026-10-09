@@ -7,7 +7,9 @@ Both Studio connection-test endpoints classify provider failures through
 Classification precedence:
 
 1. Structured signals — provider HTTP status carried on the exception (or its
-   ``__cause__``), ``tools.llm.errors`` exception types, builtin
+   ``__cause__``), local HTTP-client construction errors (httpx
+   ``InvalidURL``/``UnsupportedProtocol``/``InvalidProxy`` — the request never
+   left the process), ``tools.llm.errors`` exception types, builtin
    timeout/connection error types, ``ProviderResponseError`` codes, and
    profile-store error codes.
 2. Message substring matching (last resort, case-insensitive).
@@ -120,6 +122,7 @@ _HTTP_STATUS_TO_KIND: dict[int, str] = {
 }
 
 _MESSAGE_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("invalid port", "invalidurl", "invalid url", "invalid proxy", "unsupported protocol"), "invalid_configuration"),
     (("401", "unauthorized", "authentication", "api key"), "authentication_failed"),
     (("403", "forbidden", "permission"), "permission_denied"),
     (("404", "not found", "model_not_found"), "model_not_found"),
@@ -160,6 +163,30 @@ def _message_kind(text: str) -> str | None:
     return None
 
 
+def _local_client_construction_error(exc: BaseException) -> bool:
+    """True when a local HTTP client failed at construction time.
+
+    A ``NO_PROXY`` entry such as the bracketed IPv6 literal ``[::1]`` (appended
+    for undici) makes httpx raise ``InvalidURL`` while building the client —
+    before any request leaves the process. That is a local configuration
+    problem and must not be reported as a provider rejection. ``__cause__`` is
+    walked because Studio surfaces wrap these failures in ``EmbeddingRuntimeError``.
+    """
+    try:
+        import httpx
+        construction_errors = (httpx.InvalidURL, httpx.UnsupportedProtocol, httpx.InvalidProxy)
+    except ImportError:  # pragma: no cover - dependency contract
+        return False
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, construction_errors):
+            return True
+        current = current.__cause__
+    return False
+
+
 def classify_connection_error(exc: BaseException) -> str:
     """Map a probe failure to one of ``TEST_ERROR_KINDS`` (structured first)."""
     status = _provider_http_status(exc)
@@ -169,6 +196,8 @@ def classify_connection_error(exc: BaseException) -> str:
             return kind
         if 500 <= status < 600:
             return "provider_rejected"
+    if _local_client_construction_error(exc):
+        return "invalid_configuration"
     if isinstance(exc, AuthenticationError):
         return "authentication_failed"
     if isinstance(exc, RateLimitError):
