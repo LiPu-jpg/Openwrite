@@ -66,6 +66,8 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
+`0.2.15` 候选包修复 [#63](https://github.com/LiPu-jpg/Openwrite/issues/63)/[#66](https://github.com/LiPu-jpg/Openwrite/issues/66)（Windows 残留 `project.lock` 永久阻断写作，报错 `[WinError 87]`；Core 5.8.6 自动清理死进程残留锁并带上下文报错）、[#64](https://github.com/LiPu-jpg/Openwrite/issues/64)/[#67](https://github.com/LiPu-jpg/Openwrite/issues/67)（`continuous_write` 单章失败即整队终止、`max_failures` 失效、字数超限丢弃初稿；现在按容错上限续跑并保留超长稿）、[#68](https://github.com/LiPu-jpg/Openwrite/issues/68)（横评进行中详情接口恒 400）和 [#69](https://github.com/LiPu-jpg/Openwrite/issues/69)（推理模型评审输出预算被锁死 4096 导致评审全灭）。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
+
 `0.2.14` 候选包修复 [#60](https://github.com/LiPu-jpg/Openwrite/issues/60) 和 [#61](https://github.com/LiPu-jpg/Openwrite/issues/61)：系统代理下 `NO_PROXY` 含 `[::1]` 不再让所有模型连接测试误报"服务商拒绝了请求"（桥接层消毒 + Core 5.8.5 归类为本地配置错误）；Embedding 连接测试的依赖预热、硬超时与收尾兜底，加上桥接层的健康探活与 stderr 落盘，不再出现"后端活着但不服务、只能重启 dsh"的僵尸态。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
 
 `0.2.13` 修复 [#57](https://github.com/LiPu-jpg/Openwrite/issues/57) 的创作页刷新循环：批注与版本读取不再作为写操作通知刷新，Core 的只读请求也不再增加工作区变更序号。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
@@ -92,6 +94,8 @@ dsh web
 | 导出成稿 | `/export-book` 或「任务 → 导入与导出」 |
 
 已有会话不会自动切换预设。详细操作与工作区规则见 [使用流程](docs/WORKFLOWS.md)。
+
+**界面语言**：面板已内置中文与英文词典，跟随 dsh 语言设置。切换方法：Settings → General → Language → English（选择后存为 `locale.preference`）。注意 Agent 的 persona、技能说明与部分后端状态/报错信息仍以中文为主；Agent 会用你在对话中使用的语言回复。
 
 ## 配置模型
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.15
+
+- 修复 #63/#66：Windows 上残留 `project.lock` 不再永久阻断写章/审稿。Core 5.8.6 用 Windows 正确的进程存活探测（`OpenProcess`/`GetExitCodeProcess`）替换 POSIX 语义的 `os.kill(pid, 0)`（在 Windows 上它会抛 `OSError [WinError 87]` 且未被捕获），死进程持有的残留锁自动判陈旧并清理；无法验证存活时按"初始化宽限后视为陈旧"兜底。锁被占用时的报错现在带上占用者 operation、pid、起始时间与锁文件路径，不再显示误导性的 `[WinError 87] 参数错误`；写章/审稿的阶段标签改由流水线在真正进入生成时上报，文件锁失败不再被误报为"模型生成失败"。
+- 修复 #64/#67：`continuous_write` 单章失败不再整队终止。`max_failures` 连续失败上限按字面语义生效——未达上限时记录该章失败并继续下一章，达到上限才优雅返回 `max_failures_reached`；任务取消仍会立即中止。字数精简重试耗尽后不再丢弃已完成初稿：最后一版正文标记 `length_out_of_range` 保留为草稿（附字数告警），导出前可人工去水或分章。
+- 修复 #68：「模型横评」运行期间详情接口不再恒 400。产物契约 `model_benchmark_v1` 的 `status` 枚举补齐实时态 `running`/`cancelling` 与终态 `cancelled`，进行中的记录与已取消的记录都可以正常读取。
+- 修复 #69：推理模型评审不再因输出预算地板锁死 4096 而全域 `MODEL_OUTPUT_TRUNCATED`。Core 5.8.6 在 usage 中观察到思维链（reasoning tokens）后把评审输出预算地板抬到 16384，安全门同享；截断后先按翻倍预算原批重试一次，仍失败才二分，且二分不再沿用旧地板。
+- #65 部分落地：README 说明界面语言切换（Settings → General → Language，面板已内置英文词典）；Agent persona 增加语言跟随约定（始终用用户对话语言回复）。英文版 persona/skills 与后端信息英文化留待后续版本。
+
 ## 0.2.14
 
 - 修复 #60：桥接层转发前消毒 `NO_PROXY`/`no_proxy`（剥掉会令 httpx 构造即失败的 `[::1]` 类带括号 IPv6 字面量），系统代理场景下模型连接测试不再误报"服务商拒绝了请求"；Core 5.8.5 把 httpx 构造期异常归类为本地配置错误（HTTP 412）。`Studio request failed` 附带底层 `error.cause` 便于诊断。

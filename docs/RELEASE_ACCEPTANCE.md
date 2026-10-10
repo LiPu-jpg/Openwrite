@@ -6,6 +6,18 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.15
+
+修复 #63/#66 Windows 残留 `project.lock` 永久阻断写章/审稿：Core 5.8.6 用 Windows 正确的进程存活探测（`OpenProcess`/`GetExitCodeProcess`）替换 POSIX 语义的 `os.kill(pid, 0)`——后者在 Windows 上被解释为发送 `CTRL_C_EVENT`（值为 0），对死进程抛 `OSError [WinError 87]` 且不被现有捕获分支覆盖，导致残留锁 100% 无法自愈。死进程持有的锁现在自动判陈旧并清理；存活探测本身失败时按"初始化宽限后视为陈旧"兜底，不再卡死写作。锁占用报错携带 operation、pid、起始时间与锁文件路径；写章/审稿不再预置 `model` 阶段标签，文件锁失败不会被误报为"模型生成失败"（阶段由流水线在真正生成时上报）。
+
+修复 #64/#67 `continuous_write` 单章失败即整队终止：`max_failures` 此前只在值为 1 时生效（首次失败 `1 < 2` 直接 `raise`），现在未达上限记录该章失败并继续下一章，达到上限优雅返回 `max_failures_reached`，结果附带 `failed_chapters`；`TaskCancelled` 与取消检查仍会立即中止队列。字数精简重试耗尽后不再丢弃初稿：最后一版正文标记 `length_out_of_range`/`length_warning` 保留为草稿并产生一条字数告警 issue。
+
+修复 #68 横评进行中详情接口恒 400：产物契约 `model_benchmark_v1` 的 `status` 枚举补齐 `running`/`cancelling`/`cancelled`，实时快照与取消终态均可通过校验。
+
+修复 #69 推理模型评审输出预算锁死 4096：观察到 usage 含 reasoning tokens 后评审与安全门的输出预算地板抬到 16384（仍受模型配置与上下文窗上限约束）；截断后先按翻倍预算原批重试一次，仍失败才二分，且二分时不再沿用旧地板。思维链按调用计费，旧逻辑下拆分救不回来。
+
+#65 部分落地：README 记录界面语言切换（Settings → General → Language），persona 增加语言跟随约定。英文 persona/skills 全集与后端信息英文化留待后续。
+
 ## 0.2.14
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.14) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37679578150)验收的同一份包。来源提交 `f62f268bd2c74badc8af56ad4896164c5403def2`，SHA-256 为 `b61b2d98bac0235cb23361b2aa593e287bb47a2db24669c9893ef8e27e173549`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #62](https://github.com/LiPu-jpg/Openwrite/pull/62)，#60、#61 随之关闭。npm `dsh-openwrite@0.2.14` 已发布，`latest` 已更新到 0.2.14；从公共 npm registry 无认证重新下载后，SHA-256 与上述 CI / Release 包一致。
