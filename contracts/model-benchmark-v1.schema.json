@@ -25,7 +25,10 @@
       "enum": [
         "completed",
         "partial",
-        "failed"
+        "failed",
+        "running",
+        "cancelling",
+        "cancelled"
       ]
     },
     "context_hash": {

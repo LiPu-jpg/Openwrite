@@ -513,7 +513,15 @@ def test_reviewer_bisects_a_domain_after_output_truncation():
         "knowledge_boundary",
         "causality_motivation",
     ]
+    # Truncation now retries the same batch with a raised budget once before
+    # bisecting, so the full domain appears twice.
     assert calls == [
+        [
+            "temporal_continuity",
+            "rules_power_numbers",
+            "knowledge_boundary",
+            "causality_motivation",
+        ],
         [
             "temporal_continuity",
             "rules_power_numbers",

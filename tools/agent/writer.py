@@ -128,6 +128,20 @@ class WriterAgent(BaseAgent):
         )
 
         all_issues = validation_issues + state_issues
+        if creative_result.get("length_out_of_range"):
+            from ..post_validator import ValidationViolation
+
+            all_issues = [
+                *all_issues,
+                ValidationViolation(
+                    severity="warning",
+                    rule="length_out_of_range",
+                    description=str(
+                        creative_result.get("length_warning") or "正文字数不在目标区间"
+                    ),
+                    location="可在导出前人工去水或拆分章节",
+                ),
+            ]
 
         return WritingResult(
             chapter_number=chapter_number,
@@ -242,12 +256,27 @@ class WriterAgent(BaseAgent):
             final_response = retry_response
 
         merged_usage = self._merge_usage(*all_usage)
-        parsed = self._parse_creative_output(
-            current_content,
-            chapter_number,
-            merged_usage,
-            target_words=target_words,
-        )
+        try:
+            parsed = self._parse_creative_output(
+                current_content,
+                chapter_number,
+                merged_usage,
+                target_words=target_words,
+            )
+        except Exception as exc:
+            from ..llm.response import ProviderResponseError
+
+            if not isinstance(exc, ProviderResponseError) or exc.code != (
+                "CHAPTER_LENGTH_OUT_OF_RANGE"
+            ):
+                raise
+            # 精简重试已耗尽：保留最后一版正文（去水/分章可由人工处理），
+            # 标记后回流给调用方，而不是丢弃整份初稿。
+            parsed = self._parse_creative_output(
+                current_content, chapter_number, merged_usage
+            )
+            parsed["length_out_of_range"] = True
+            parsed["length_warning"] = str(exc)
         parsed.update(
             {
                 "finish_reason": str(getattr(final_response, "finish_reason", "") or ""),

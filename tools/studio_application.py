@@ -4974,7 +4974,6 @@ class StudioApplication:
         args["_cancel_requested"] = context.cancellation_requested
         context.phase("preparing", "准备章节写作")
         context.checkpoint()
-        context.phase("model", "生成章节草稿")
         try:
             profile = self._operation_profile(
                 "chapter_write",
@@ -4994,7 +4993,6 @@ class StudioApplication:
         )
         context.phase("preparing", "准备章节审稿")
         context.checkpoint()
-        context.phase("model", "执行章节审稿")
         try:
             profile = self._operation_profile(
                 "review",
@@ -5502,14 +5500,16 @@ class StudioApplication:
         except (TypeError, ValueError) as exc:
             raise StudioError("成本上限必须是数字") from exc
         completed = list(payload.get("_already_completed") or [])
+        failed_chapters: list[dict[str, Any]] = []
         already_used = payload.get("_already_used")
         usage = dict(already_used) if isinstance(already_used, dict) else {}
         total_tokens = int(usage.get("total_tokens") or 0)
         total_cost_usd = float(usage.get("cost_usd") or 0)
         consecutive_failures = int(usage.get("consecutive_failures") or 0)
-        remaining = max(0, max_chapters - len(completed))
         stop_reason = "max_chapters_reached"
-        for _ in range(remaining):
+        # 按“已完成章节数”驱动而非固定尝试次数：单章失败不计入章节预算，
+        # 由 consecutive_failures 上限（max_failures）兜底防死循环。
+        while len(completed) < max_chapters:
             context.phase("reading", "读取下一章建议")
             context.checkpoint()
             from tools.chapter_run_v2 import ChapterRunV2Store
@@ -5554,12 +5554,20 @@ class StudioApplication:
                 context.checkpoint()
                 review_result = self._task_review_chapter({"chapter_id": chapter_id}, context)
                 consecutive_failures = 0
-            except Exception:
+            except TaskCancelled:
+                raise
+            except Exception as exc:
+                if context.cancellation_requested():
+                    raise TaskCancelled("任务已取消") from exc
                 consecutive_failures += 1
                 usage["consecutive_failures"] = consecutive_failures
+                failed_chapters.append(
+                    {"chapter_id": chapter_id, "error": str(exc) or exc.__class__.__name__}
+                )
                 context.persist_progress(
                     {
                         "completed_chapters": completed,
+                        "failed_chapters": failed_chapters,
                         "usage": usage,
                         "stop_reason": "chapter_failure",
                     }
@@ -5567,10 +5575,12 @@ class StudioApplication:
                 if consecutive_failures >= max_failures:
                     return {
                         "completed_chapters": completed,
+                        "failed_chapters": failed_chapters,
                         "usage": usage,
                         "stop_reason": "max_failures_reached",
                     }
-                raise
+                # 未达上限：记录该章失败并继续下一章，而不是中止整个队列。
+                continue
             completed.append(
                 {
                     "chapter_id": chapter_id,
@@ -5640,6 +5650,7 @@ class StudioApplication:
                 )
         return {
             "completed_chapters": completed,
+            "failed_chapters": failed_chapters,
             "usage": usage,
             "stop_reason": stop_reason,
         }
