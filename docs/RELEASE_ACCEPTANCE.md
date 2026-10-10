@@ -8,7 +8,7 @@
 
 ## 0.2.18
 
-<!-- TODO: 发布后回填 PR、CI、Release 链接与 SHA -->
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.18) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38059156641)验收的同一份包。来源提交 `6e84c2a`，npm 包 SHA-256 为 `edd510c6d4de58bfa09eb30f8a3b74e5a0e6cf7cf2425bc6fe3681b732c1a196`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 12 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #73](https://github.com/LiPu-jpg/Openwrite/pull/73)。npm `dsh-openwrite@0.2.18` 已发布到官方 registry（registry.npmjs.org），`latest` 已更新到 0.2.18；从官方 registry 无认证重新下载后，SHA-256 与上述 CI 包一致。main CI 首次运行 source-install 因 pnpm `--find-links` 目录瞬时不存在失败，重跑同一提交通过，判定为运行器 flake。
 
 修正 0.2.17 的 `auto:cheapest`：真实 Key 实测发现 OpenRouter 上部分免费模型没有 `:free` 后缀（`inclusionai/ling-3.1-flash` 定价 0/0），会被低价策略选中；免费模型可用性不稳定，Core 5.8.9（native-core `d0a75e30047c28c99af909e1b85b07190abb1fb7`）把零价模型一并排除，`auto:cheapest` 现在落在付费低价模型上。回归测试补充零价排除断言，9/9 通过。
 
