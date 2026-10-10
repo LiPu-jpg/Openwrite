@@ -202,6 +202,89 @@ def test_continuous_write_continues_after_single_chapter_failure(tmp_path: Path)
             app._task_runner.shutdown(wait=True)
 
 
+def test_draft_artifact_persists_length_flags_and_validation_issues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#67 follow-up: length_out_of_range/length_warning and validation issues
+    must survive into the persisted draft artifact, not only the in-memory run."""
+    init_project(tmp_path, "demo")
+    from types import SimpleNamespace
+
+    import tools.agent as agent_module
+    import tools.cli as cli_module
+    import tools.llm as llm_module
+    from tools.post_validator import ValidationViolation
+
+    class FakeWriter:
+        def __init__(self, agent_ctx):
+            self.agent_ctx = agent_ctx
+
+        async def write_chapter(self, **kwargs):
+            return SimpleNamespace(
+                title="第一章",
+                content="正文",
+                word_count=2,
+                state_updates={},
+                chapter_summary="章节摘要",
+                observations="观察",
+                validation_issues=[
+                    ValidationViolation(
+                        severity="warning",
+                        rule="length_out_of_range",
+                        description="正文字数 2 低于目标下限",
+                        location="可在导出前人工去水或拆分章节",
+                    )
+                ],
+                length_out_of_range=True,
+                length_warning="正文字数 2 低于目标下限",
+                token_usage={"total_tokens": 10},
+                finish_reason="stop",
+                model="reported-model",
+                provider="reported-provider",
+            )
+
+    monkeypatch.setattr(agent_module, "WriterAgent", FakeWriter)
+    monkeypatch.setattr(
+        agent_module,
+        "AgentContext",
+        lambda client, model, project_root: SimpleNamespace(
+            client=client, model=model, project_root=project_root
+        ),
+    )
+    monkeypatch.setattr(
+        llm_module.LLMConfig,
+        "from_env",
+        classmethod(lambda cls: SimpleNamespace(model="fake-model")),
+    )
+    monkeypatch.setattr(llm_module, "LLMClient", lambda config: object())
+
+    result = cli_module._exec_write_chapter(
+        tmp_path,
+        {"chapter_id": "ch_001", "target_words": 500},
+    )
+    assert result["ok"] is True, result.get("error")
+
+    artifacts = sorted(
+        (tmp_path / "data" / "novels" / "demo" / "data" / "chapter_runs_v2" / "artifacts").glob(
+            "*/draft.json"
+        )
+    )
+    assert len(artifacts) == 1
+    draft = json.loads(artifacts[0].read_text(encoding="utf-8"))
+    assert draft["length_out_of_range"] is True
+    assert draft["length_warning"]
+    assert draft["validation_issues"], "validation issues must persist into the draft artifact"
+    assert draft["validation_issues"][0]["rule"] == "length_out_of_range"
+
+
+def test_writing_result_length_flags_default_off() -> None:
+    from tools.agent.writer import WritingResult
+
+    result = WritingResult(chapter_number=1, title="t", content="c", word_count=1)
+    assert result.length_out_of_range is False
+    assert result.length_warning == ""
+
+
 def test_continuous_write_max_failures_returns_gracefully(tmp_path: Path) -> None:
     init_project(tmp_path, "demo")
 

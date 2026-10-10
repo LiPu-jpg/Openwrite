@@ -907,6 +907,14 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                         "finish_reason": str(getattr(result, "finish_reason", "") or ""),
                         "model": str(getattr(result, "model", "") or ""),
                         "provider": str(getattr(result, "provider", "") or ""),
+                        "length_out_of_range": bool(
+                            getattr(result, "length_out_of_range", False)
+                        ),
+                        "length_warning": str(getattr(result, "length_warning", "") or ""),
+                        "validation_issues": [
+                            asdict(issue) if is_dataclass(issue) else issue
+                            for issue in (getattr(result, "validation_issues", None) or [])
+                        ],
                     },
                 )
                 run_v2_store.complete_stage(

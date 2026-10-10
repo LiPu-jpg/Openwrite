@@ -46,6 +46,8 @@ class WritingResult:
     state_delta: dict = field(default_factory=dict)
     chapter_summary: str = ""
     validation_issues: list = field(default_factory=list)
+    length_out_of_range: bool = False
+    length_warning: str = ""
     token_usage: dict = field(default_factory=dict)
     finish_reason: str = ""
     model: str = ""
@@ -153,6 +155,8 @@ class WriterAgent(BaseAgent):
             state_delta=settlement_result.get("state_delta", {}),
             chapter_summary=settlement_result["chapter_summary"],
             validation_issues=all_issues,
+            length_out_of_range=bool(creative_result.get("length_out_of_range")),
+            length_warning=str(creative_result.get("length_warning") or ""),
             token_usage=self._merge_usage(
                 creative_result.get("usage", {}),
                 settlement_result.get("usage", {}),
