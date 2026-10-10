@@ -57,7 +57,7 @@
   },
   "wheel": {
     "file": "openwrite-5.8.6-py3-none-any.whl",
-    "sha256": "681a92fe629e345c3d392dc814d6d41f835723784753e975f65de13c59b83e66"
+    "sha256": "87937479f709612ebb1695322da5c4e93acbd02fb88d12f9413188de11ecdaf8"
   },
   "requirements": {
     "file": "requirements.lock",
@@ -66,7 +66,8 @@
   "sources": {
     "core": {
       "repository": "https://github.com/LiPu-jpg/Openwrite",
-      "commit": "3a5da97659ad0be119dbc8e99e96721bc6a266bf"
+      "branch": "native-core",
+      "commit": "6613bf9245ac08a80c9d49d64530b2c443fa7cf9"
     },
     "dog": {
       "repository": "https://github.com/Fun10165/dsh-dog",
