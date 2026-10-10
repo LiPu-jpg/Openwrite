@@ -6,6 +6,9 @@ import json
 import os
 import re
 import tempfile
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -41,6 +44,12 @@ ROUTE_KEYS = (
     "search",
     "research",
 )
+AUTO_SELECT_PREFIX = "auto:"
+_AUTO_SELECT_STRATEGIES = {"cheapest", "popular"}
+_AUTO_SELECT_CACHE_TTL_SECONDS = 3600.0
+_AUTO_SELECT_MIN_CONTEXT_TOKENS = 32000
+_AUTO_SELECT_MIN_MAX_COMPLETION_TOKENS = 4096
+_AUTO_SELECT_EXCLUDED_MARKERS = (":free", ":batch")
 PROFILE_FIELDS = (
     "id",
     "label",
@@ -675,6 +684,13 @@ class ModelProfileStore:
                 f"模型档案 {profile['label']} 缺少 API Key",
                 code="MODEL_CREDENTIAL_MISSING",
             )
+        if str(profile.get("model") or "").startswith(AUTO_SELECT_PREFIX) and not api_key:
+            raise ModelProfileError(
+                f"模型档案 {profile['label']} 的自动选模需要 API Key",
+                code="MODEL_CREDENTIAL_MISSING",
+            )
+        if str(profile.get("model") or "").startswith(AUTO_SELECT_PREFIX):
+            profile = self._resolve_auto_model(profile, api_key)
         return {
             **profile,
             "api_key": api_key,
@@ -707,7 +723,133 @@ class ModelProfileStore:
                 f"模型档案 {profile['label']} 缺少 API Key",
                 code="MODEL_CREDENTIAL_MISSING",
             )
+        if str(profile.get("model") or "").startswith(AUTO_SELECT_PREFIX):
+            profile = self._resolve_auto_model(profile, api_key)
         return {**profile, "api_key": api_key, "operation": operation}
+
+    def _resolve_auto_model(self, profile: dict[str, Any], api_key: str) -> dict[str, Any]:
+        """Resolve an ``auto:<strategy>`` model into a concrete model ID."""
+        strategy = str(profile.get("model") or "")[len(AUTO_SELECT_PREFIX) :].strip().lower()
+        if strategy not in _AUTO_SELECT_STRATEGIES:
+            raise ModelProfileError(
+                f"未知自动选模策略 auto:{strategy}，支持: cheapest / popular",
+                code="INVALID_AUTO_SELECT_STRATEGY",
+            )
+        base_url = str(profile.get("base_url") or "").rstrip("/")
+        host = urlparse(base_url).netloc.lower()
+        if strategy == "popular":
+            if "openrouter.ai" not in host:
+                raise ModelProfileError(
+                    "auto:popular 目前仅支持 OpenRouter（按社区用量自动路由）",
+                    code="AUTO_SELECT_UNSUPPORTED",
+                )
+            return {
+                **profile,
+                "model": "openrouter/auto",
+                "auto_select": {"strategy": "popular", "resolved": "openrouter/auto"},
+            }
+        resolved = self._pick_cheapest_model(base_url, api_key)
+        return {
+            **profile,
+            "model": resolved,
+            "auto_select": {"strategy": "cheapest", "resolved": resolved},
+        }
+
+    def _pick_cheapest_model(self, base_url: str, api_key: str) -> str:
+        models = self._model_catalog(base_url, api_key)
+        best: tuple[float, str] | None = None
+        for item in models:
+            model_id = str(item.get("id") or "")
+            if not model_id or any(marker in model_id for marker in _AUTO_SELECT_EXCLUDED_MARKERS):
+                continue
+            architecture = item.get("architecture") if isinstance(item.get("architecture"), dict) else {}
+            modality = str(architecture.get("modality") or "")
+            if not modality.startswith("text") or "->text" not in modality:
+                continue
+            try:
+                context_length = int(item.get("context_length") or 0)
+            except (TypeError, ValueError):
+                continue
+            if context_length < _AUTO_SELECT_MIN_CONTEXT_TOKENS:
+                continue
+            top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
+            try:
+                max_completion = int(top_provider.get("max_completion_tokens") or 0)
+            except (TypeError, ValueError):
+                max_completion = 0
+            if max_completion and max_completion < _AUTO_SELECT_MIN_MAX_COMPLETION_TOKENS:
+                continue
+            pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
+            try:
+                prompt_price = float(pricing.get("prompt"))
+                completion_price = float(pricing.get("completion"))
+            except (TypeError, ValueError):
+                continue
+            # 负数（如 -1）表示动态定价（openrouter/auto 等），不参与比价。
+            if prompt_price < 0 or completion_price < 0:
+                continue
+            score = prompt_price + completion_price
+            if best is None or score < best[0]:
+                best = (score, model_id)
+        if best is None:
+            raise ModelProfileError(
+                "模型价格目录中没有满足条件的文本对话模型",
+                code="MODEL_CATALOG_EMPTY",
+            )
+        return best[1]
+
+    def _model_catalog(self, base_url: str, api_key: str) -> list[dict[str, Any]]:
+        """Fetch the provider's /models catalog with a one-hour on-disk cache."""
+        cache_path = self.directory / ".model-auto-select-cache.json"
+        now = time.time()
+        cached = self._read_json(cache_path) or {}
+        entry = cached.get(base_url) if isinstance(cached, dict) else None
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("models"), list)
+            and now - float(entry.get("fetched_at") or 0.0) < _AUTO_SELECT_CACHE_TTL_SECONDS
+        ):
+            return [item for item in entry["models"] if isinstance(item, dict)]
+        models: list[dict[str, Any]] | None = None
+        fetch_error: Exception | None = None
+        try:
+            request = urllib.request.Request(
+                base_url + "/models",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read())
+            raw = payload.get("models") or payload.get("data") or []
+            if isinstance(raw, list):
+                models = [item for item in raw if isinstance(item, dict) and item.get("id")]
+        except (OSError, urllib.error.URLError, ValueError) as exc:
+            fetch_error = exc
+        if models:
+            self._write_json_atomic(
+                cache_path,
+                {
+                    **(cached if isinstance(cached, dict) else {}),
+                    base_url: {"fetched_at": now, "models": models},
+                },
+            )
+            return models
+        if isinstance(entry, dict) and isinstance(entry.get("models"), list):
+            return [item for item in entry["models"] if isinstance(item, dict)]
+        raise ModelProfileError(
+            f"拉取模型价格目录失败: {fetch_error}",
+            code="MODEL_CATALOG_UNAVAILABLE",
+        )
+
+    @staticmethod
+    def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+        handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
 
     @staticmethod
     def _profile_metadata(value: dict[str, Any]) -> dict[str, Any]:
