@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.17
+
+- 模型档案新增自动选模：把档案的模型名写成 `auto:cheapest` 或 `auto:popular` 即可。`auto:cheapest` 在每次解析档案时实时拉取服务商的 `/models` 价格目录（缓存一小时），按"文本对话、上下文 ≥32K、最大输出 ≥4K"过滤并排除 `:free`/`:batch`/动态定价条目，自动选用 prompt+completion 总价最低的模型，价格变动会自动跟随；`auto:popular`（OpenRouter）直接路由到官方 `openrouter/auto`，由社区实际用量自动挑选模型。解析结果记录在 `auto_select` 字段里便于溯源，目录拉取失败自动回退到缓存，静态模型档案不受影响（Core 5.8.8）。
+
 ## 0.2.16
 
 - 补漏 #64/#67：字数精简重试耗尽后保留下来的草稿，其 `length_out_of_range`/`length_warning` 标记与后置校验问题（`validation_issues`）现在会持久化进草稿产物（Core 5.8.7）。此前 0.2.15 只覆盖了运行内存态：产物文件里这两个标记为空，导出/审阅侧无法追溯该章曾发生字数越界。
