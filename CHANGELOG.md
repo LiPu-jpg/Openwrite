@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.16
+
+- 补漏 #64/#67：字数精简重试耗尽后保留下来的草稿，其 `length_out_of_range`/`length_warning` 标记与后置校验问题（`validation_issues`）现在会持久化进草稿产物（Core 5.8.7）。此前 0.2.15 只覆盖了运行内存态：产物文件里这两个标记为空，导出/审阅侧无法追溯该章曾发生字数越界。
+
 ## 0.2.15
 
 - 修复 #63/#66：Windows 上残留 `project.lock` 不再永久阻断写章/审稿。Core 5.8.6 用 Windows 正确的进程存活探测（`OpenProcess`/`GetExitCodeProcess`）替换 POSIX 语义的 `os.kill(pid, 0)`（在 Windows 上它会抛 `OSError [WinError 87]` 且未被捕获），死进程持有的残留锁自动判陈旧并清理；无法验证存活时按"初始化宽限后视为陈旧"兜底。锁被占用时的报错现在带上占用者 operation、pid、起始时间与锁文件路径，不再显示误导性的 `[WinError 87] 参数错误`；写章/审稿的阶段标签改由流水线在真正进入生成时上报，文件锁失败不再被误报为"模型生成失败"。

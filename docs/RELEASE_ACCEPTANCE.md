@@ -6,6 +6,14 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.16
+
+<!-- TODO: 发布后回填 PR、CI、Release 链接与 SHA -->
+
+补漏 #64/#67 持久化缺口：E2E 实测发现 0.2.15 对"字数精简重试耗尽后保稿"只覆盖了运行内存态——`WritingResult` 未携带 `length_out_of_range`/`length_warning`，流水线写草稿产物时这两个标记与 `validation_issues` 均丢失，产物里 flags 为空。Core 5.8.7（`61bd75326702dbb0fa657df04aaaa79986369890`）在 `WritingResult` 上补齐两个字段并从 creative 结果填充，草稿产物持久化这两个标记，`validation_issues` 以 dataclasses 序列化落盘；新增草稿产物持久化回归测试与字段默认值测试，相关面 110 项通过。
+
+Core 5.8.7 由 `native-core` 分支干净树 `pip wheel` 构建，manifest 的 `core_version`、`wheel.sha256`、`sources.core.commit` 已同步。
+
 ## 0.2.15
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.15) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38038338548)验收的同一份包。来源提交 `d56b566`，SHA-256 为 `e558078c77c92186f198eea7c1cbaf17fb9f5939f9c2ae0c6953adc6256b36a7`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 12 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #70](https://github.com/LiPu-jpg/Openwrite/pull/70)。npm `dsh-openwrite@0.2.15` 已发布，`latest` 已更新到 0.2.15；从公共 npm registry 无认证重新下载后，SHA-256 与上述 CI / Release 包一致。Core 5.8.6 由 `native-core` 分支 `6613bf9245ac08a80c9d49d64530b2c443fa7cf9` 干净树构建，manifest 的 `sources.core.commit` 已回填。
