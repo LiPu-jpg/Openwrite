@@ -8,15 +8,19 @@
 
 ## 0.2.15
 
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.15) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38038338548)验收的同一份包。来源提交 `d56b566`，SHA-256 为 `e558078c77c92186f198eea7c1cbaf17fb9f5939f9c2ae0c6953adc6256b36a7`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 12 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #70](https://github.com/LiPu-jpg/Openwrite/pull/70)。npm `dsh-openwrite@0.2.15` 已发布，`latest` 已更新到 0.2.15；从公共 npm registry 无认证重新下载后，SHA-256 与上述 CI / Release 包一致。Core 5.8.6 由 `native-core` 分支 `6613bf9245ac08a80c9d49d64530b2c443fa7cf9` 干净树构建，manifest 的 `sources.core.commit` 已回填。
+
 修复 #63/#66 Windows 残留 `project.lock` 永久阻断写章/审稿：Core 5.8.6 用 Windows 正确的进程存活探测（`OpenProcess`/`GetExitCodeProcess`）替换 POSIX 语义的 `os.kill(pid, 0)`——后者在 Windows 上被解释为发送 `CTRL_C_EVENT`（值为 0），对死进程抛 `OSError [WinError 87]` 且不被现有捕获分支覆盖，导致残留锁 100% 无法自愈。死进程持有的锁现在自动判陈旧并清理；存活探测本身失败时按"初始化宽限后视为陈旧"兜底，不再卡死写作。锁占用报错携带 operation、pid、起始时间与锁文件路径；写章/审稿不再预置 `model` 阶段标签，文件锁失败不会被误报为"模型生成失败"（阶段由流水线在真正生成时上报）。
 
-修复 #64/#67 `continuous_write` 单章失败即整队终止：`max_failures` 此前只在值为 1 时生效（首次失败 `1 < 2` 直接 `raise`），现在未达上限记录该章失败并继续下一章，达到上限优雅返回 `max_failures_reached`，结果附带 `failed_chapters`；`TaskCancelled` 与取消检查仍会立即中止队列。字数精简重试耗尽后不再丢弃初稿：最后一版正文标记 `length_out_of_range`/`length_warning` 保留为草稿并产生一条字数告警 issue。
+修复 #64/#67 `continuous_write` 单章失败即整队终止：`max_failures` 此前只在值为 1 时生效（首次失败 `1 < 2` 直接 `raise`），现在循环按已完成章节数驱动，未达上限记录该章失败并继续下一章，达到上限优雅返回 `max_failures_reached`，结果附带 `failed_chapters`；`TaskCancelled` 与取消检查仍会立即中止队列。字数精简重试耗尽后不再丢弃初稿：最后一版正文标记 `length_out_of_range`/`length_warning` 保留为草稿并产生一条字数告警 issue。
 
-修复 #68 横评进行中详情接口恒 400：产物契约 `model_benchmark_v1` 的 `status` 枚举补齐 `running`/`cancelling`/`cancelled`，实时快照与取消终态均可通过校验。
+修复 #68 横评进行中详情接口恒 400：产物契约 `model_benchmark_v1` 的 `status` 枚举补齐 `running`/`cancelling`/`cancelled`（schema 源 + Python/TS 生成物同步，codegen `--check` 通过），实时快照与取消终态均可通过校验。
 
 修复 #69 推理模型评审输出预算锁死 4096：观察到 usage 含 reasoning tokens 后评审与安全门的输出预算地板抬到 16384（仍受模型配置与上下文窗上限约束）；截断后先按翻倍预算原批重试一次，仍失败才二分，且二分时不再沿用旧地板。思维链按调用计费，旧逻辑下拆分救不回来。
 
-#65 部分落地：README 记录界面语言切换（Settings → General → Language），persona 增加语言跟随约定。英文 persona/skills 全集与后端信息英文化留待后续。
+引擎回归：新增 12 项回归测试（锁陈旧清理/占用上下文/宽限兜底、契约实时态、预算地板、continuous_write 容错与上限），`test_managed_runtime`/`test_embedding_runtime`/`test_model_connection_test` 三件套 33/33 通过，相关面 71/72（1 项失败为 native-core 上预存在的 `test_production_write_failure_returns_run_v2_provenance` 漂移，与本版无关）；wheel 由 native-core 干净树 `pip wheel` 构建，顺带补齐 5.8.5 漂移 wheel 缺失的 httpx `InvalidProxy` getattr 容错（7a08855）。
+
+#65 部分落地：README 记录界面语言切换（Settings → General → Language），persona 增加语言跟随约定。英文 persona/skills 全集与后端信息英文化留待后续，issue 保持打开。
 
 ## 0.2.14
 
