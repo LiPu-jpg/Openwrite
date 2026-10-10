@@ -66,6 +66,8 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
+`0.2.16` 候选包补漏 [#64](https://github.com/LiPu-jpg/Openwrite/issues/64)/[#67](https://github.com/LiPu-jpg/Openwrite/issues/67)：字数精简重试耗尽后保稿时，`length_out_of_range`/`length_warning` 标记与校验问题现在随草稿产物持久化（Core 5.8.7），导出/审阅侧可追溯。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
+
 `0.2.15` 候选包修复 [#63](https://github.com/LiPu-jpg/Openwrite/issues/63)/[#66](https://github.com/LiPu-jpg/Openwrite/issues/66)（Windows 残留 `project.lock` 永久阻断写作，报错 `[WinError 87]`；Core 5.8.6 自动清理死进程残留锁并带上下文报错）、[#64](https://github.com/LiPu-jpg/Openwrite/issues/64)/[#67](https://github.com/LiPu-jpg/Openwrite/issues/67)（`continuous_write` 单章失败即整队终止、`max_failures` 失效、字数超限丢弃初稿；现在按容错上限续跑并保留超长稿）、[#68](https://github.com/LiPu-jpg/Openwrite/issues/68)（横评进行中详情接口恒 400）和 [#69](https://github.com/LiPu-jpg/Openwrite/issues/69)（推理模型评审输出预算被锁死 4096 导致评审全灭）。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
 
 `0.2.14` 候选包修复 [#60](https://github.com/LiPu-jpg/Openwrite/issues/60) 和 [#61](https://github.com/LiPu-jpg/Openwrite/issues/61)：系统代理下 `NO_PROXY` 含 `[::1]` 不再让所有模型连接测试误报"服务商拒绝了请求"（桥接层消毒 + Core 5.8.5 归类为本地配置错误）；Embedding 连接测试的依赖预热、硬超时与收尾兜底，加上桥接层的健康探活与 stderr 落盘，不再出现"后端活着但不服务、只能重启 dsh"的僵尸态。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
