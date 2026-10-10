@@ -6,6 +6,14 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.18
+
+<!-- TODO: 发布后回填 PR、CI、Release 链接与 SHA -->
+
+修正 0.2.17 的 `auto:cheapest`：真实 Key 实测发现 OpenRouter 上部分免费模型没有 `:free` 后缀（`inclusionai/ling-3.1-flash` 定价 0/0），会被低价策略选中；免费模型可用性不稳定，Core 5.8.9（native-core `d0a75e30047c28c99af909e1b85b07190abb1fb7`）把零价模型一并排除，`auto:cheapest` 现在落在付费低价模型上。回归测试补充零价排除断言，9/9 通过。
+
+Core 5.8.9 由 `native-core` 分支干净树 `pip wheel` 构建，manifest 三处已回填。
+
 ## 0.2.17
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.17) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38057362486)验收的同一份包。来源提交 `de2cacb`，npm 包 SHA-256 为 `da2a0b2ae264392f7d0f8c5d6c98de08cd0497f8a761bf0c96f9a43ce95771c5`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 12 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #72](https://github.com/LiPu-jpg/Openwrite/pull/72)。npm `dsh-openwrite@0.2.17` 已发布到官方 registry（registry.npmjs.org），`latest` 已更新到 0.2.17；从官方 registry 无认证重新下载后，SHA-256 与上述 CI 包一致。
