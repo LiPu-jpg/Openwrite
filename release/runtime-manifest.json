@@ -3,7 +3,7 @@
   "dsh": "0.1.2-rc.1",
   "uv_version": "0.11.19",
   "python_version": "3.12.13",
-  "core_version": "5.8.5",
+  "core_version": "5.8.6",
   "contract_version": 1,
   "platforms": {
     "darwin-arm64": {
@@ -56,8 +56,8 @@
     }
   },
   "wheel": {
-    "file": "openwrite-5.8.5-py3-none-any.whl",
-    "sha256": "dea490837267b57b4b7f9e417fdf793ef5bf3c096fe8e7f4443d7cfcfc836c1b"
+    "file": "openwrite-5.8.6-py3-none-any.whl",
+    "sha256": "681a92fe629e345c3d392dc814d6d41f835723784753e975f65de13c59b83e66"
   },
   "requirements": {
     "file": "requirements.lock",
