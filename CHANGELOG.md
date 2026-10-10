@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.18
+
+- 修正 0.2.17 的 `auto:cheapest`：零价模型（不限于 `:free` 后缀，如 OpenRouter 上定价 0/0 的模型）不再参与比价，自动落到付费低价模型上——免费模型可用性不稳定，低价策略不应选中它们（Core 5.8.9）。
+
 ## 0.2.17
 
 - 模型档案新增自动选模：把档案的模型名写成 `auto:cheapest` 或 `auto:popular` 即可。`auto:cheapest` 在每次解析档案时实时拉取服务商的 `/models` 价格目录（缓存一小时），按"文本对话、上下文 ≥32K、最大输出 ≥4K"过滤并排除 `:free`/`:batch`/动态定价条目，自动选用 prompt+completion 总价最低的模型，价格变动会自动跟随；`auto:popular`（OpenRouter）直接路由到官方 `openrouter/auto`，由社区实际用量自动挑选模型。解析结果记录在 `auto_select` 字段里便于溯源，目录拉取失败自动回退到缓存，静态模型档案不受影响（Core 5.8.8）。
