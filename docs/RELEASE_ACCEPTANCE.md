@@ -8,7 +8,7 @@
 
 ## 0.2.16
 
-[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.16) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38048767150)验收的同一份包。来源提交 `d490715`，npm 包 SHA-256 为 `d6b0e798a7ad4bffa894b5373b72f080e41254ff23030a58029189e92f5dcf5e`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 12 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #71](https://github.com/LiPu-jpg/Openwrite/pull/71)。
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.16) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38048767150)验收的同一份包。来源提交 `d490715`，npm 包 SHA-256 为 `d6b0e798a7ad4bffa894b5373b72f080e41254ff23030a58029189e92f5dcf5e`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 12 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #71](https://github.com/LiPu-jpg/Openwrite/pull/71)。npm `dsh-openwrite@0.2.16` 已发布到官方 registry（registry.npmjs.org），`latest` 已更新到 0.2.16；从官方 registry 无认证重新下载后，SHA-256 与上述 CI 包一致。
 
 补漏 #64/#67 持久化缺口：E2E 实测发现 0.2.15 对"字数精简重试耗尽后保稿"只覆盖了运行内存态——`WritingResult` 未携带 `length_out_of_range`/`length_warning`，流水线写草稿产物时这两个标记与 `validation_issues` 均丢失，产物里 flags 为空。Core 5.8.7（`61bd75326702dbb0fa657df04aaaa79986369890`）在 `WritingResult` 上补齐两个字段并从 creative 结果填充，草稿产物持久化这两个标记，`validation_issues` 以 dataclasses 序列化落盘；新增草稿产物持久化回归测试与字段默认值测试，相关面 110 项通过。
 
