@@ -66,6 +66,8 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
+`0.2.17` 候选包新增自动选模（Core 5.8.8）：模型档案的模型名写成 `auto:cheapest` 会自动选用服务商价格目录中总价最低且满足上下文/输出要求的模型（目录缓存一小时，价格变动自动跟随），写成 `auto:popular`（OpenRouter）则由官方 `openrouter/auto` 按社区用量自动选模型。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
+
 `0.2.16` 候选包补漏 [#64](https://github.com/LiPu-jpg/Openwrite/issues/64)/[#67](https://github.com/LiPu-jpg/Openwrite/issues/67)：字数精简重试耗尽后保稿时，`length_out_of_range`/`length_warning` 标记与校验问题现在随草稿产物持久化（Core 5.8.7），导出/审阅侧可追溯。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
 
 `0.2.15` 候选包修复 [#63](https://github.com/LiPu-jpg/Openwrite/issues/63)/[#66](https://github.com/LiPu-jpg/Openwrite/issues/66)（Windows 残留 `project.lock` 永久阻断写作，报错 `[WinError 87]`；Core 5.8.6 自动清理死进程残留锁并带上下文报错）、[#64](https://github.com/LiPu-jpg/Openwrite/issues/64)/[#67](https://github.com/LiPu-jpg/Openwrite/issues/67)（`continuous_write` 单章失败即整队终止、`max_failures` 失效、字数超限丢弃初稿；现在按容错上限续跑并保留超长稿）、[#68](https://github.com/LiPu-jpg/Openwrite/issues/68)（横评进行中详情接口恒 400）和 [#69](https://github.com/LiPu-jpg/Openwrite/issues/69)（推理模型评审输出预算被锁死 4096 导致评审全灭）。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。

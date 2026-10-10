@@ -6,6 +6,14 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.17
+
+<!-- TODO: 发布后回填 PR、CI、Release 链接与 SHA -->
+
+新增自动选模（Core 5.8.8，native-core `a7f4d8769de7496cb18b9d6dc38872c60fa5517a`）：档案模型名支持 `auto:cheapest`（实时拉取 `/models` 价格目录，过滤后取总价最低，缓存一小时、失败回退过期缓存）与 `auto:popular`（OpenRouter `openrouter/auto`）。解析在 `resolve`/`resolve_profile` 统一发生，结果写入 `auto_select` 字段；静态模型档案不受影响。新增 9 项回归测试全部通过（比价规则、缓存命中、过期缓存兜底、目录不可用报错、popular 非 OpenRouter 拒绝、未知策略拒绝、静态档案零网络）；档案/连接测试/工作室相关面 227 项通过（2 项失败为 native-core 预存在的 `test_real_litellm_backend_accepts_openwrite_request_shape_without_network` 与 `test_studio_outline_task_uses_planning_snapshot_and_validated_artifact` 漂移，与本版无关）。真实 OpenRouter Key 实测：`auto:popular` 路由到 `qwen/qwen3.8-flash` 返回 200。
+
+Core 5.8.8 由 `native-core` 分支干净树 `pip wheel` 构建，manifest 的 `core_version`、`wheel.sha256`、`sources.core.commit` 已同步。
+
 ## 0.2.16
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.16) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38048767150)验收的同一份包。来源提交 `d490715`，npm 包 SHA-256 为 `d6b0e798a7ad4bffa894b5373b72f080e41254ff23030a58029189e92f5dcf5e`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 12 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #71](https://github.com/LiPu-jpg/Openwrite/pull/71)。npm `dsh-openwrite@0.2.16` 已发布到官方 registry（registry.npmjs.org），`latest` 已更新到 0.2.16；从官方 registry 无认证重新下载后，SHA-256 与上述 CI 包一致。
