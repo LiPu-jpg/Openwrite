@@ -89,6 +89,7 @@ def test_cheapest_picks_lowest_priced_valid_model(
         _model("vendor/good", "0.5", "0.5"),
         _model("vendor/best", "0.1", "0.2"),
         _model("vendor/free:free", "0", "0"),
+        _model("vendor/zero-priced", "0", "0"),
         _model("vendor/batch:batch", "0.01", "0.01"),
         _model("vendor/image", "0.01", "0.01", modality="text+image->image"),
         _model("vendor/tiny-context", "0.01", "0.01", context=8000),

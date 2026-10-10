@@ -785,8 +785,10 @@ class ModelProfileStore:
                 completion_price = float(pricing.get("completion"))
             except (TypeError, ValueError):
                 continue
-            # 负数（如 -1）表示动态定价（openrouter/auto 等），不参与比价。
-            if prompt_price < 0 or completion_price < 0:
+            # 负数（如 -1）表示动态定价（openrouter/auto 等），不参与比价；
+            # 零价模型（不限于 :free 后缀）同样排除——免费模型可用性不稳定，
+            # 低价策略应落在付费模型上。
+            if prompt_price <= 0 or completion_price <= 0:
                 continue
             score = prompt_price + completion_price
             if best is None or score < best[0]:
