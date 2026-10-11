@@ -8,7 +8,7 @@
 
 ## 0.2.19
 
-<!-- TODO: 发布后回填 CI、Release、npm 链接与 SHA -->
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.19) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38167325137) 验收的同一份包。来源提交 `e0c1ab7`，npm 包 SHA-256 为 `97f89586e4c43071ebca67abd5af1df1ae42b637cf6637d4fc26ca31c133d784`。六组原生平台/Node、源码安装与 alpha 兼容共 8 份运行报告、三代宿主客户端 3 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。npm 官方 registry 发布待回填。
 
 修复 [#74](https://github.com/LiPu-jpg/Openwrite/issues/74) 与 [#75](https://github.com/LiPu-jpg/Openwrite/issues/75)，均为插件侧改动，Core 保持 5.8.9（native-core `d0a75e30047c28c99af909e1b85b07190abb1fb7`），wheel 与 requirements.lock 未变。
 
