@@ -1,7 +1,8 @@
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 /** Model-facing DoG tools over the verification-first engine. */
 
-import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { defineTool } from './host-shims.ts'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { JobRegistry } from '@deepseek-ai/dsh-jobs'

@@ -10,7 +10,17 @@ import { realpathSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+import {
+  ToolArgsError,
+  parameterSchemaSpecToJsonSchema,
+  validateJsonSchemaValue,
+  valueSchemaSpecToJsonSchema,
+  type DefineToolOptions,
+  type ParameterSchemaSpec,
+  type ToolDefinition,
+  type ToolRunContext,
+  type ValueSchemaSpec,
+} from '@deepseek-ai/dsh-tools'
 import type { JsonObject, JsonValue, StudioClient, WorkspaceContext } from './client.js'
 import { StudioError } from './client.js'
 import { materializeChapterDelivery } from './dog-delivery.js'
@@ -37,6 +47,129 @@ const JSON_OUTPUT_SCHEMA = {
 
 /** Manuscript chapter ids accepted by OpenWrite (`ch_<digits>`). */
 const CHAPTER_ID_PATTERN = /^ch_\d+$/
+
+/** Short, model-facing description of a received argument value's actual shape. */
+function describeValue(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return `an array of ${value.length} item(s)`
+  if (typeof value === 'string') return 'a string'
+  return `a value of type ${typeof value}`
+}
+
+/**
+ * Parse a JSON string argument once, naming the parameter and the received
+ * type when the text is not valid JSON.
+ */
+function parseJsonArgument(name: string, value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`parameter "${name}" expects a JSON value; received a string that is not valid JSON (${detail})`)
+  }
+}
+
+/**
+ * Normalize arguments for parameters declared `type: 'json'` (and
+ * `type: 'array'` with json items). DSH keeps `json` an annotation-only
+ * schema, so the value reaches the plugin in whatever shape the model
+ * emitted; models that serialize the object/array as a JSON *string* would
+ * otherwise fail the plugin-side object/array checks (GitHub issue #75).
+ */
+function normalizeJsonArguments(parameters: ParameterSchemaSpec, args: Record<string, unknown>): Record<string, unknown> {
+  let normalized: Record<string, unknown> | undefined
+  for (const [name, spec] of Object.entries(parameters)) {
+    const value = args[name]
+    if (value === undefined || spec === null || typeof spec !== 'object') continue
+    const type = (spec as { type?: unknown }).type
+    if (type === 'json' && typeof value === 'string') {
+      normalized ??= { ...args }
+      normalized[name] = parseJsonArgument(name, value)
+    } else if (type === 'array') {
+      const items = (spec as { items?: unknown }).items
+      const itemType = items !== null && typeof items === 'object' ? (items as { type?: unknown }).type : undefined
+      if (itemType !== 'json') continue
+      if (typeof value === 'string') {
+        normalized ??= { ...args }
+        normalized[name] = parseJsonArgument(name, value)
+      } else if (Array.isArray(value) && value.some((item) => typeof item === 'string')) {
+        normalized ??= { ...args }
+        normalized[name] = value.map((item) => (typeof item === 'string' ? parseJsonArgument(`${name}[]`, item) : item))
+      }
+    }
+  }
+  return normalized ?? args
+}
+
+/**
+ * Local `defineTool`: mirrors the host helper (`@deepseek-ai/dsh-tools`
+ * `defineTool`) using the host's own schema compiler and validator, except
+ * every argument flow (execute and the replay presenters) first normalizes
+ * string-typed JSON arguments — see {@link normalizeJsonArguments}.
+ * Normalization must run *before* validation, otherwise an `array` parameter
+ * receiving a JSON string would be rejected by the schema check before the
+ * plugin ever sees it (GitHub issue #75). Centralizing here keeps all
+ * `novel_*` call sites free of per-parameter parsing.
+ */
+function defineTool<const S extends ParameterSchemaSpec, const O extends ValueSchemaSpec>(
+  options: DefineToolOptions<S, O>,
+): ToolDefinition {
+  const userExecute = options.execute
+  const userFinalizeContent = options.finalizeContent
+  const userRender = options.output.render
+  const userPresentationMeta = options.output.presentationMeta
+  const userPresentCall = options.presentCall
+  const userPresentResult = options.presentResult
+  const userIsConcurrencySafe = options.isConcurrencySafe
+  if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0))
+    throw new Error(`defineTool(${options.name}): timeoutMs must be a positive finite number`)
+  const parameters = parameterSchemaSpecToJsonSchema(options.parameters) as unknown as Record<string, unknown>
+  const outputSchema = valueSchemaSpecToJsonSchema(options.output.schema)
+  const normalize = (args: unknown): Record<string, unknown> =>
+    normalizeJsonArguments(options.parameters, objectValue(args))
+  const validate = (args: Record<string, unknown>): string[] =>
+    validateJsonSchemaValue(parameters, args, '')
+  const tool: ToolDefinition = {
+    name: options.name,
+    description: options.description,
+    parameters,
+    output: {
+      schema: outputSchema,
+      render: (args, value) => userRender(args as never, value as never),
+      ...(userPresentationMeta !== undefined
+        ? { presentationMeta: (args: unknown, value: unknown) => userPresentationMeta(args as never, value as never) }
+        : {}),
+    },
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    async execute(args: unknown, exec: ToolRunContext) {
+      const normalized = normalize(args)
+      const violations = validate(normalized)
+      if (violations.length > 0) throw new ToolArgsError(violations)
+      return userExecute(normalized as never, exec)
+    },
+  }
+  if (userFinalizeContent) tool.finalizeContent = (exec, result) => userFinalizeContent(exec, result)
+  if (userPresentCall)
+    tool.presentCall = (args) => {
+      const normalized = normalize(args)
+      if (validate(normalized).length > 0) return undefined
+      return userPresentCall(normalized as never)
+    }
+  if (userPresentResult)
+    tool.presentResult = (args, result) => {
+      const normalized = normalize(args)
+      if (validate(normalized).length > 0) return undefined
+      return userPresentResult(normalized as never, result)
+    }
+  if (userIsConcurrencySafe)
+    tool.isConcurrencySafe = (args) => {
+      const normalized = normalize(args)
+      if (validate(normalized).length > 0) return false
+      return userIsConcurrencySafe(normalized as never)
+    }
+  return tool
+}
 
 /** Resolve a review target: an explicit manuscript path, or a chapter id mapped to `data/manuscript/<id>.md`. */
 function resolveReviewPath(args: { path?: string; chapter_id?: string }): string {
@@ -751,7 +884,10 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     timeoutMs,
     async execute(args, exec) {
       if (args.action === 'preview' && (!Array.isArray(args.edits) || args.edits.length !== 1)) {
-        throw new Error('preview requires exactly one edit so the author can accept or reject each change independently')
+        throw new Error(
+          'preview requires exactly one edit so the author can accept or reject each change independently ' +
+            `(received ${describeValue(args.edits)})`,
+        )
       }
       if (args.action !== 'preview' && !args.preview_token?.trim()) {
         throw new Error(`${args.action} requires preview_token`)
@@ -786,7 +922,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       if (args.action === 'preview') {
         if (!args.change_kind) throw new Error('preview requires change_kind')
         if (args.change === null || typeof args.change !== 'object' || Array.isArray(args.change)) {
-          throw new Error('preview requires one change object')
+          throw new Error(`preview requires one change object (received ${describeValue(args.change)})`)
         }
       } else if (!args.preview_token?.trim()) {
         throw new Error(`${args.action} requires preview_token`)
