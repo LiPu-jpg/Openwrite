@@ -72,7 +72,10 @@
     "dog": {
       "repository": "https://github.com/Fun10165/dsh-dog",
       "tag": "v1.2.0",
-      "commit": "3a442ef4b1a82cc4258a01baf798913c94a99445"
+      "commit": "3a442ef4b1a82cc4258a01baf798913c94a99445",
+      "patches": [
+        "0.2.19: src/host-shims.ts 内置 dshHomePath/defineTool，移除 @deepseek-ai/dsh-home-paths 与 @deepseek-ai/dsh-tools 的运行时导入（#74）"
+      ]
     },
     "cryptography": {
       "package": "cryptography",

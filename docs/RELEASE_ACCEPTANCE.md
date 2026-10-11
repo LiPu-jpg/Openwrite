@@ -6,6 +6,15 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.19
+
+<!-- TODO: 发布后回填 CI、Release、npm 链接与 SHA -->
+
+修复 [#74](https://github.com/LiPu-jpg/Openwrite/issues/74) 与 [#75](https://github.com/LiPu-jpg/Openwrite/issues/75)，均为插件侧改动，Core 保持 5.8.9（native-core `d0a75e30047c28c99af909e1b85b07190abb1fb7`），wheel 与 requirements.lock 未变。
+
+- #74：vendor/dsh-dog 运行时不再裸导入 `@deepseek-ai/dsh-home-paths` 与 `@deepseek-ai/dsh-tools` 两个 peer 宿主包（pnpm 隔离布局下从 vendor 目录不可解析 → openwrite-dog 条目导入失败 → openwriteDog 未注册 → 预设从列表消失）。`dshHomePath` 与 `defineTool` 由新增 `src/host-shims.ts` 自包含实现，行为对齐宿主；构建产物 `lib/index.js` 只导入 node 内置模块与 dependencies 内的 `@deepseek-ai/schemastery`，独立 `import()` 成功。新增 host-shims 单元测试 10 例，dsh-dog 共 60/60 通过。
+- #75：bridge 的 90 个 `novel_*` 工具统一经本地 `defineTool`（复用宿主 `parameterSchemaSpecToJsonSchema`/`valueSchemaSpecToJsonSchema`/`validateJsonSchemaValue`/`ToolArgsError`），在 schema 校验前对 `type: 'json'` 参数（含 array 的 json items）做字符串 `JSON.parse` 归一化；报错带参数名与实际类型。8 项归一化冒烟用例通过；四个宿主符号已核对在 0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 三个受支持宿主中均导出且签名一致。
+
 ## 0.2.18
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.18) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38059156641)验收的同一份包。来源提交 `6e84c2a`，npm 包 SHA-256 为 `edd510c6d4de58bfa09eb30f8a3b74e5a0e6cf7cf2425bc6fe3681b732c1a196`。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 12 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。合并来源 [PR #73](https://github.com/LiPu-jpg/Openwrite/pull/73)。npm `dsh-openwrite@0.2.18` 已发布到官方 registry（registry.npmjs.org），`latest` 已更新到 0.2.18；从官方 registry 无认证重新下载后，SHA-256 与上述 CI 包一致。main CI 首次运行 source-install 因 pnpm `--find-links` 目录瞬时不存在失败，重跑同一提交通过，判定为运行器 flake。

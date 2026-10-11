@@ -66,6 +66,8 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
+`0.2.19` 候选包修复两个加载/工具问题：部分安装下「OpenWrite 创作」预设从列表消失、DoG 工具不可用（dsh-dog 宿主包解析失败，[#74](https://github.com/LiPu-jpg/Openwrite/issues/74)），以及 `novel_*` 工具的对象/数组参数在模型输出 JSON 字符串时预览失败、`data` 字段丢失（[#75](https://github.com/LiPu-jpg/Openwrite/issues/75)）。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
+
 `0.2.18` 候选包修正 `auto:cheapest`（Core 5.8.9）：零价模型不再参与比价，自动落到付费低价模型上。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
 
 `0.2.17` 候选包新增自动选模（Core 5.8.8）：模型档案的模型名写成 `auto:cheapest` 会自动选用服务商价格目录中总价最低且满足上下文/输出要求的模型（目录缓存一小时，价格变动自动跟随），写成 `auto:popular`（OpenRouter）则由官方 `openrouter/auto` 按社区用量自动选模型。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。

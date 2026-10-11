@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.19
+
+- 修复部分安装（pnpm 隔离布局）下「OpenWrite 创作」预设从 agent 预设列表消失、DoG 工具不可用：vendor/dsh-dog 运行时不再裸导入 `@deepseek-ai/dsh-home-paths` 与 `@deepseek-ai/dsh-tools` 两个 peer 宿主包（在该布局下从 vendor 目录不可解析，导致 openwrite-dog 条目导入失败、`openwriteDog` 服务未注册、预设不注册），`dshHomePath` 与 `defineTool` 改为插件内自包含实现，升级/重装后无需再手动补 junction（[#74](https://github.com/LiPu-jpg/Openwrite/issues/74)）。
+- 修复 `novel_*` 工具的对象/数组类参数：模型把 `edits`/`change`/`data` 等 `type: 'json'` 参数输出为 JSON 字符串时，插件在校验前先做 `JSON.parse` 归一化，change-plan 预览/确认门控与 asset `data` 字段恢复可用；参数无法解析或类型不符时报错文案带参数名与实际类型（[#75](https://github.com/LiPu-jpg/Openwrite/issues/75)）。
+
 ## 0.2.18
 
 - 修正 0.2.17 的 `auto:cheapest`：零价模型（不限于 `:free` 后缀，如 OpenRouter 上定价 0/0 的模型）不再参与比价，自动落到付费低价模型上——免费模型可用性不稳定，低价策略不应选中它们（Core 5.8.9）。
