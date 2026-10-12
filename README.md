@@ -29,14 +29,12 @@
 
 ## 快速安装
 
-**0.2.13 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2**。0.2.0-rc.2 已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。默认使用 npm `latest` 渠道；商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
+**0.2.20 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2**。三个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。默认使用 npm `latest` 渠道；商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
 
 npm 包和对应 GitHub Release 使用同一份验收产物。也可安装精确版本的 Release 包：
 
-**0.2.13 的 GitHub 安装包已发布，npm `latest` 暂时仍为 0.2.12，等待本次发布的 2FA 验证后同步发布。** 0.2.12 不包含 #57 的创作页刷新循环修复；请使用下方已发布的 0.2.13 Release 包。
-
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.13/dsh-openwrite-0.2.13.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.20/dsh-openwrite-0.2.20.tgz
 dsh web
 ```
 
@@ -66,7 +64,7 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
-`0.2.20` 候选包捆绑 Core 5.8.10，修复 [#76](https://github.com/LiPu-jpg/Openwrite/issues/76) 的草稿恢复、任务状态、编辑和审稿契约，并补充 [#65](https://github.com/LiPu-jpg/Openwrite/issues/65) 的英文使用支持。行为与范围见 [修复说明](docs/ISSUE_76_REPAIRS.md)。正式可下载版本以 npm `latest` 和 GitHub Release 为准。
+`0.2.20` 捆绑 Core 5.8.10，修复 [#76](https://github.com/LiPu-jpg/Openwrite/issues/76) 的草稿恢复、任务状态、编辑和审稿契约，并补充 [#65](https://github.com/LiPu-jpg/Openwrite/issues/65) 的英文使用支持。行为与范围见 [修复说明](docs/ISSUE_76_REPAIRS.md)。正式可下载版本以 npm `latest` 和 GitHub Release 为准。
 
 `0.2.19` 候选包修复两个加载/工具问题：部分安装下「OpenWrite 创作」预设从列表消失、DoG 工具不可用（dsh-dog 宿主包解析失败，[#74](https://github.com/LiPu-jpg/Openwrite/issues/74)），以及 `novel_*` 工具的对象/数组参数在模型输出 JSON 字符串时预览失败、`data` 字段丢失（[#75](https://github.com/LiPu-jpg/Openwrite/issues/75)）。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
 
@@ -105,7 +103,7 @@ dsh web
 
 已有会话不会自动切换预设。详细操作与工作区规则见 [使用流程](docs/WORKFLOWS.md)。
 
-**界面语言**：面板已内置中文与英文词典，跟随 dsh 语言设置。切换方法：Settings → General → Language → English（选择后存为 `locale.preference`）。注意 Agent 的 persona、技能说明与部分后端状态/报错信息仍以中文为主；Agent 会用你在对话中使用的语言回复。
+**界面语言**：面板已内置中文与英文词典，跟随 dsh 语言设置。切换方法：Settings → General → Language → English（选择后存为 `locale.preference`）。Agent 的 persona 和所有技能入口要求用作者的对话语言回复；运行环境与任务状态提供英文，Studio 报错附带英文说明和稳定错误码。已有作品内容不会自动翻译，正文按作者指定的语言生成。
 
 ## 配置模型
 
