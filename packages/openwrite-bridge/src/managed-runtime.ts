@@ -157,7 +157,7 @@ export async function stopOwnedProcess(child: ChildProcess): Promise<void> {
 
 /** All artifacts and children belong to this instance; author files never enter this tree. */
 export class ManagedRuntime {
-  private state: RuntimeStatus = { phase: 'idle', message: '首次使用将准备写作环境' }
+  private state: RuntimeStatus = { phase: 'idle', message: 'The writing environment will be prepared on first use' }
   private pending?: Promise<BackendConnection>
   private controller?: AbortController
   private child?: ChildProcess
@@ -184,7 +184,7 @@ export class ManagedRuntime {
   }
 
   ensure(): Promise<BackendConnection> {
-    if (this.closed) return Promise.reject(new Error('OpenWrite 已卸载'))
+    if (this.closed) return Promise.reject(new Error('OpenWrite was removed'))
     if (this.connection) return this.verifyConnection(this.connection)
     if (this.pending) return this.pending
     this.allowRevive = true
@@ -196,7 +196,7 @@ export class ManagedRuntime {
     this.controller = controller
     this.pending = this.prepare(controller.signal).catch(error => {
       this.state = { phase: controller.signal.aborted ? 'cancelled' : 'error',
-        message: controller.signal.aborted ? '准备已取消，可重试' : '写作环境未就绪，可重试',
+        message: controller.signal.aborted ? 'Setup was cancelled; retry when ready' : 'The writing environment is not ready; retry setup',
         error: controller.signal.aborted ? undefined : sanitizeDiagnostic(String(error instanceof Error ? error.message : error)) }
       throw error
     }).finally(() => { this.pending = undefined; this.controller = undefined })
@@ -212,7 +212,7 @@ export class ManagedRuntime {
    */
   private async verifyConnection(connection: BackendConnection): Promise<BackendConnection> {
     if (await this.probeHealth(connection)) {
-      if (this.closed) throw new Error('OpenWrite 已卸载')
+      if (this.closed) throw new Error('OpenWrite was removed')
       const current = this.connection
       if (current) return current
       return this.queueRestart()
@@ -222,9 +222,9 @@ export class ManagedRuntime {
     const child = this.child
     this.child = undefined
     if (child) await stopOwnedProcess(child).catch(() => {})
-    if (this.closed) throw new Error('OpenWrite 已卸载')
-    if (!this.allowRevive) throw new Error('准备已取消，可重试')
-    this.update('recovering', '写作后端无响应，正在恢复')
+    if (this.closed) throw new Error('OpenWrite was removed')
+    if (!this.allowRevive) throw new Error('Setup was cancelled; retry when ready')
+    this.update('recovering', 'The writing backend is unresponsive; recovering')
     return this.queueRestart()
   }
 
@@ -258,7 +258,7 @@ export class ManagedRuntime {
       this.child = undefined
     }
     this.connection = undefined
-    this.update('uninstalled', 'OpenWrite 已卸载，作品和配置已保留')
+    this.update('uninstalled', 'OpenWrite was removed; manuscripts and settings were preserved')
   }
 
   private exitDiagnostic(code: number | null, signalName: NodeJS.Signals | null, stderr = ''): string {
@@ -272,17 +272,17 @@ export class ManagedRuntime {
     if (this.closed) return
     const error = this.exitDiagnostic(code, signalName, stderr)
     if (!this.allowRevive) {
-      this.update('cancelled', '准备已取消，可重试', { error })
+      this.update('cancelled', 'Setup was cancelled; retry when ready', { error })
       return
     }
     this.restartAttempts += 1
     if (this.restartAttempts > this.restartLimit) {
       this.allowRevive = false
-      this.update('error', '写作后端多次异常退出，已停止自动恢复，可手动重试', { error })
+      this.update('error', 'The writing backend exited repeatedly; automatic recovery stopped. Retry manually', { error })
       return
     }
     this.recovered = true
-    this.update('recovering', `写作后端异常退出，正在恢复（${this.restartAttempts}/${this.restartLimit}）`, { error })
+    this.update('recovering', `The writing backend exited; recovering (${this.restartAttempts}/${this.restartLimit})`, { error })
     // Auto-recovery has no caller; never let a rejected prepare become an unhandled rejection that kills dsh.
     void this.queueRestart().catch(() => {})
   }
@@ -294,9 +294,9 @@ export class ManagedRuntime {
       const prior = this.pending
       let assigned!: Promise<BackendConnection>
       const chained = prior.then(connection => {
-        if (this.closed) throw new Error('OpenWrite 已卸载')
+        if (this.closed) throw new Error('OpenWrite was removed')
         if (this.live()) return connection
-        if (!this.allowRevive) throw new Error('准备已取消，可重试')
+        if (!this.allowRevive) throw new Error('Setup was cancelled; retry when ready')
         if (this.pending === assigned) this.pending = undefined
         return this.queueRestart()
       }, error => {
@@ -339,15 +339,15 @@ export class ManagedRuntime {
         const diagnostic = sanitizeDiagnostic(String(error instanceof Error ? error.message : error))
         if (this.restartAttempts > this.restartLimit) {
           this.allowRevive = false
-          this.update('error', '写作后端多次异常退出，已停止自动恢复，可手动重试', { error: diagnostic })
+          this.update('error', 'The writing backend exited repeatedly; automatic recovery stopped. Retry manually', { error: diagnostic })
           throw error
         }
-        this.update('recovering', `写作后端异常退出，正在恢复（${this.restartAttempts}/${this.restartLimit}）`, { error: diagnostic })
+        this.update('recovering', `The writing backend exited; recovering (${this.restartAttempts}/${this.restartLimit})`, { error: diagnostic })
       }
     }
-    if (this.closed) throw new Error('OpenWrite 已卸载')
-    this.update('cancelled', '准备已取消，可重试')
-    throw lastError instanceof Error ? lastError : new Error('准备已取消，可重试')
+    if (this.closed) throw new Error('OpenWrite was removed')
+    this.update('cancelled', 'Setup was cancelled; retry when ready')
+    throw lastError instanceof Error ? lastError : new Error('Setup was cancelled; retry when ready')
   }
 
   private async download(item: Download, signal: AbortSignal): Promise<string> {
@@ -356,10 +356,10 @@ export class ManagedRuntime {
     const destination = join(cache, item.sha256)
     if (await sha256(destination).catch(() => '') === item.sha256) return destination
     const partial = destination + '.' + randomUUID() + '.partial'
-    this.update('downloading', '正在下载并校验写作环境')
+    this.update('downloading', 'Downloading and verifying the writing environment')
     try {
       const response = await fetch(item.url, { signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]) })
-      if (!response.ok || !response.body) throw new Error(`下载失败：HTTP ${response.status}`)
+      if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status}`)
       const size = Number(response.headers.get('content-length')) || undefined
       const file = await open(partial, 'wx', 0o600)
       let received = 0
@@ -367,12 +367,12 @@ export class ManagedRuntime {
         for await (const chunk of response.body) {
           signal.throwIfAborted()
           received += chunk.length
-          if (received > 1024 ** 3) throw new Error('下载超过允许大小')
+          if (received > 1024 ** 3) throw new Error('Download exceeds the allowed size')
           await file.write(chunk)
-          this.state = { phase: 'downloading', message: '正在下载并校验写作环境', downloadedBytes: received, totalBytes: size }
+          this.state = { phase: 'downloading', message: 'Downloading and verifying the writing environment', downloadedBytes: received, totalBytes: size }
         }
       } finally { await file.close() }
-      if (await sha256(partial) !== item.sha256) throw new Error('下载校验失败，请重试')
+      if (await sha256(partial) !== item.sha256) throw new Error('Download checksum failed; retry')
       await rename(partial, destination)
       return destination
     } finally { await rm(partial, { force: true }) }
@@ -389,7 +389,7 @@ export class ManagedRuntime {
     if (item.url.endsWith('.zip')) {
       for (const [name, bytes] of Object.entries(unzipSync(await readFile(archive)))) {
         const target = resolve(dir, name)
-        if (isAbsolute(name) || !target.startsWith(dir + sep)) throw new Error('压缩包路径无效')
+        if (isAbsolute(name) || !target.startsWith(dir + sep)) throw new Error('Invalid archive path')
         if (name.endsWith('/')) await mkdir(target, { recursive: true })
         else { await mkdir(dirname(target), { recursive: true }); await writeFile(target, bytes) }
       }
@@ -412,7 +412,7 @@ export class ManagedRuntime {
     try {
       await new Promise<void>((done, reject) => {
         child.once('error', reject)
-        child.once('exit', code => code === 0 ? done() : reject(new Error(`环境准备失败 (${code})：${failure}`)))
+        child.once('exit', code => code === 0 ? done() : reject(new Error(`Environment setup failed (${code})：${failure}`)))
       })
       signal.throwIfAborted()
     } finally { signal.removeEventListener('abort', abort) }
@@ -428,7 +428,7 @@ export class ManagedRuntime {
         })
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ELOCKED') throw error
-        this.update('waiting', '另一个 OpenWrite 正在准备环境，等待完成')
+        this.update('waiting', 'Another OpenWrite instance is preparing the environment; waiting')
         await this.wait(250, undefined, { signal })
       }
     }
@@ -437,15 +437,15 @@ export class ManagedRuntime {
   private async prepare(signal: AbortSignal): Promise<BackendConnection> {
     const manifest = JSON.parse(await readFile(join(this.artifacts, 'runtime-manifest.json'), 'utf8')) as RuntimeManifest
     const platform = manifest.platforms[`${process.platform}-${process.arch}`]
-    if (!platform) throw new Error(`暂不支持 ${process.platform}/${process.arch}`)
-    if (!manifest.wheel || !manifest.requirements) throw new Error('发布包缺少 Core 或依赖校验清单')
+    if (!platform) throw new Error(`Unsupported platform: ${process.platform}/${process.arch}`)
+    if (!manifest.wheel || !manifest.requirements) throw new Error('The package is missing Core or dependency checksums')
     const wheel = join(this.artifacts, manifest.wheel.file)
     const requirements = join(this.artifacts, manifest.requirements.file)
     if (await sha256(wheel) !== manifest.wheel.sha256 || await sha256(requirements) !== manifest.requirements.sha256) {
-      throw new Error('发布包校验失败，请重新安装')
+      throw new Error('Package verification failed; reinstall OpenWrite')
     }
     for (const artifact of manifest.dependency_wheels ?? []) {
-      if (await sha256(join(this.artifacts, artifact.file)) !== artifact.sha256) throw new Error('平台依赖校验失败，请重新安装')
+      if (await sha256(join(this.artifacts, artifact.file)) !== artifact.sha256) throw new Error('Platform dependency verification failed; reinstall OpenWrite')
     }
     await mkdir(this.root, { recursive: true, mode: 0o700 })
     const unlock = await this.lock(signal)
@@ -457,7 +457,7 @@ export class ManagedRuntime {
       if (await readFile(join(destination, '.complete'), 'utf8').catch(() => '') !== generation) {
         const uv = await this.extract(platform.uv, signal)
         const basePython = await this.extract(platform.python, signal)
-        this.update('installing', '正在安装隔离依赖，首次使用可能需要几分钟')
+        this.update('installing', 'Installing isolated dependencies; first use may take several minutes')
         await rm(destination, { recursive: true, force: true })
         try {
           await this.command(uv, ['venv', '--python', basePython, destination], signal)
@@ -469,7 +469,7 @@ export class ManagedRuntime {
         } catch (error) { await rm(destination, { recursive: true, force: true }); throw error }
       }
       signal.throwIfAborted()
-      this.update(this.recovered ? 'recovering' : 'starting', this.recovered ? '正在恢复写作环境' : '正在启动写作环境')
+      this.update(this.recovered ? 'recovering' : 'starting', this.recovered ? 'Recovering the writing environment' : 'Starting the writing environment')
       const connection = await this.start(python, manifest, signal)
       const pending = join(this.root, 'active.' + randomUUID() + '.json')
       try {
@@ -518,9 +518,9 @@ export class ManagedRuntime {
         child.once('error', reject)
         child.once('exit', (code, signalName) => {
           if (started) return
-          reject(new Error(`写作后端在启动时退出 (${code ?? 'none'}/${signalName ?? 'none'})`))
+          reject(new Error(`The writing backend exited during startup (${code ?? 'none'}/${signalName ?? 'none'})`))
         })
-        timer = setTimeout(() => reject(new Error('写作后端启动超时')), 120_000)
+        timer = setTimeout(() => reject(new Error('Writing backend startup timed out')), 120_000)
         lines.on('line', line => {
           try {
             const message = JSON.parse(line)
@@ -542,14 +542,14 @@ export class ManagedRuntime {
       })
       const result = await health.json() as Record<string, unknown>
       if (!health.ok || result.core_version !== manifest.core_version || result.contract_version !== manifest.contract_version) {
-        throw new Error('写作后端版本或接口不匹配，请重新安装')
+        throw new Error('Writing backend version or API mismatch; reinstall OpenWrite')
       }
       this.connection = connection
       started = true
       if (!this.recovered) this.restartAttempts = 0
       this.update('ready', this.recovered
-        ? '写作环境已恢复；进行中的写作或评审任务不会自动重试'
-        : '写作环境已就绪')
+        ? 'The writing environment recovered; in-progress writing and review tasks require an explicit retry'
+        : 'The writing environment is ready')
       return connection
     } catch (error) {
       if (this.generation === generation) {

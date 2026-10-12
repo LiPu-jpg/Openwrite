@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.20
+
+- 修复 #76 的草稿丢失、断点恢复、任务状态、编辑与审稿契约；捆绑 Core 5.8.10。
+- 补充 #65 的作者语言指令、英文运行状态及错误信息、语言切换说明。
+- 新增审稿历史、批量章级元数据、操作恢复说明与职责范围文档，详见 [修复说明](docs/ISSUE_76_REPAIRS.md)。
+
 ## 0.2.19
 
 - 修复部分安装（pnpm 隔离布局）下「OpenWrite 创作」预设从 agent 预设列表消失、DoG 工具不可用：vendor/dsh-dog 运行时不再裸导入 `@deepseek-ai/dsh-home-paths` 与 `@deepseek-ai/dsh-tools` 两个 peer 宿主包（在该布局下从 vendor 目录不可解析，导致 openwrite-dog 条目导入失败、`openwriteDog` 服务未注册、预设不注册），`dshHomePath` 与 `defineTool` 改为插件内自包含实现，升级/重装后无需再手动补 junction（[#74](https://github.com/LiPu-jpg/Openwrite/issues/74)）。

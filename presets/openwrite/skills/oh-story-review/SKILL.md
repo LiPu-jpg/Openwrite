@@ -15,6 +15,8 @@ metadata:
       max_tool_calls: 20
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # Oh Story 商业审稿
 
 先确认审查对象、范围、目标读者和用户要“只诊断”还是“诊断后给修改稿”。默认只输出审查报告，不直接改动正文。

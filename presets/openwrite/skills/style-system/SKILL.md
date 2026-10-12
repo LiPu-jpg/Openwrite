@@ -4,6 +4,8 @@ description: Use when user wants to initialize style, extract reusable writing s
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 风格系统
 
 ## 核心原则

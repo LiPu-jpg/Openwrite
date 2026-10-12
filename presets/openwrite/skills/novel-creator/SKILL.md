@@ -4,6 +4,8 @@ description: Use when user wants to write chapters, generate drafts, or continue
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 小说创作编排
 
 通过 openwrite-bridge 的 `novel_*` 工具写章。不要调用 Python 模块、内置 Writer 类或已废弃的大纲命令。

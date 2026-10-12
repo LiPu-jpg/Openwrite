@@ -1,4 +1,7 @@
 import type { BackendConnection } from './managed-runtime.js'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 /**
  * Shared HTTP client for the OpenWrite Studio action surface.
  *
@@ -48,6 +51,7 @@ export class StudioError extends Error {
   readonly status: number
   readonly code: string
   readonly details: JsonValue
+  requestId: string | null = null
 
   constructor(message: string, status: number, code: string, details: JsonValue = null) {
     super(message)
@@ -118,6 +122,7 @@ export function mutationAffectsState(path: string, body: unknown, headers?: Head
   const declared = headers?.get('X-OpenWrite-Mutated')
   if (declared === '0' || declared === '1') return declared === '1'
   const endpoint = path.split('?')[0]?.replace(/^\/+/, '').replace(/^api\//, '')
+  if (endpoint === 'review/history') return false
   if (endpoint !== 'manuscript-editing') return true
   let payload: unknown = body
   if (Buffer.isBuffer(payload)) payload = payload.toString('utf8')
@@ -235,6 +240,17 @@ export class StudioClient {
       const headers = connection?.token ? { ...(init.headers as Record<string, string>), Authorization: `Bearer ${connection.token}` } : init.headers
       return await fetch(target, { ...init, headers, signal: AbortSignal.any(signals) })
     } catch (error: unknown) {
+      if (this.context?.workspaceRoot) {
+        try {
+          const root = join(this.context.workspaceRoot, '.openwrite', 'transport-errors')
+          await mkdir(root, { recursive: true })
+          await writeFile(join(root, `${randomUUID()}.json`), JSON.stringify({
+            source: 'transport', code: signal?.aborted ? 'REQUEST_ABORTED' : 'NETWORK_ERROR',
+            created_at: new Date().toISOString(), path: url.pathname,
+            tool_name: this.context.toolName ?? '', tool_call_id: this.context.toolCallId ?? '',
+          }))
+        } catch { /* A diagnostic failure must not hide the transport failure. */ }
+      }
       if (signal?.aborted) throw error
       const cause = error instanceof Error ? error.cause : undefined
       const detail = cause instanceof Error ? ` (${cause.message})` : cause === undefined ? '' : ` (${String(cause)})`
@@ -257,10 +273,14 @@ export class StudioClient {
     const body = asJson(parsed)
     if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
       const error = body['error']
-      if (typeof error === 'string' && error.length > 0) {
-        const code = typeof body['code'] === 'string' ? body['code'] : 'STUDIO_ERROR'
-        const details: JsonValue = 'details' in body ? body['details'] : null
-        throw new StudioError(error, response.status, code, details)
+      if (error !== undefined && error !== null && error !== false && error !== '') {
+        const nested = typeof error === 'object' && !Array.isArray(error) ? error : {}
+        const code = typeof body['code'] === 'string' ? body['code'] : typeof nested['code'] === 'string' ? nested['code'] : 'STUDIO_ERROR'
+        const message = typeof body['message'] === 'string' ? body['message'] : typeof error === 'string' ? error : typeof nested['message'] === 'string' ? nested['message'] : JSON.stringify(error)
+        const details: JsonValue = body['details'] ?? nested['details'] ?? null
+        const failure = new StudioError(message, response.status, code, details)
+        failure.requestId = typeof body['request_id'] === 'string' ? body['request_id'] : null
+        throw failure
       }
       // HTTP status remains authoritative even when a proxy or incompatible
       // server sends a success-shaped envelope with an error status.

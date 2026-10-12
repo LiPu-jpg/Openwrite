@@ -4,6 +4,8 @@ description: Use when user wants to check logic consistency, polish style, find 
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 小说审查润色
 
 通过 openwrite-bridge 的 `novel_*` 工具评审与修订。不要调用 Python 审查类或本地 33 维脚本。

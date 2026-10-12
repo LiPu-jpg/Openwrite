@@ -3,6 +3,8 @@ name: review-chapter
 description: 审这一章。Use when the author asks 审这一章, 审查, 检查逻辑, or types /review-chapter. Run six-domain novel_review_chapter; do not rerun review from DoG.
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 审这一章
 
 接到已有 `novel_*`。正式评审是六域累加；37 项只作展开查询。

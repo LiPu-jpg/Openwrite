@@ -4,6 +4,8 @@ description: Use when querying or maintaining novel world entities, character re
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 世界查询系统
 
 把 `data/novels/{novel_id}/src/` 下的人物与世界实体文件作为唯一关系真源。Studio 拓扑和 ReAct 的 `get_world_relations` 必须调用同一个拓扑查询，不维护 `graph.yaml` 或第二套关系数据库。

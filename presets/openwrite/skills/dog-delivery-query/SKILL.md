@@ -4,6 +4,8 @@ description: Query a chapter delivery DoG graph across manuscript, review, revis
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 章节交付 DoG 查询
 
 章节写作、评审和修订工具会生成：

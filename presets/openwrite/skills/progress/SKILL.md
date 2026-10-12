@@ -3,6 +3,8 @@ name: progress
 description: 看进度。Use when the author asks 看进度, 写到哪, 现在哪一章, or types /progress. Read OpenWrite status; do not invent a local workflow store.
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 看进度
 
 接到已有 `novel_*`。不要另建进度文件或阶段机。

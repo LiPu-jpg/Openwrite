@@ -3,6 +3,8 @@ name: canon
 description: 查设定。Use when the author asks 查设定, 人物卡, 世界观, or types /canon. Read registered assets and search; do not create a second lorebook.
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 查设定
 
 接到已有 `novel_*`。人物、地点、世界观以 OpenWrite 资产为准。

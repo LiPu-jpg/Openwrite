@@ -4,6 +4,8 @@ description: Use when user wants to manage foreshadowing (伏笔), track story h
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 伏笔管理系统
 
 管理小说中的伏笔和悬念，确保故事线索连贯。

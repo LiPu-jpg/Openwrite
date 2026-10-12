@@ -4,6 +4,8 @@ description: Use when user wants to validate story consistency, check for plot h
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 真相文件验证系统
 
 验证真相文件与章节内容的一致性，确保故事逻辑连贯。
