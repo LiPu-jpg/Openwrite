@@ -6,6 +6,19 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.20
+
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.20) 与 npm `dsh-openwrite@0.2.20` 已发布，npm `latest` 已更新到 0.2.20。使用[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38296670387) 验收的同一份原始产物，来源提交 `4d54f3c619f853a4243cd60e67ef6c8ba8d336af`，npm 包 SHA-256 为 `486c20fbd36909e32cc6cac1fd1e734872abec53da749c0860f8e5e1d4cf6cda`。六组原生平台/Node、源码安装与 alpha 兼容共 8 份运行报告、三代宿主客户端 3 份报告全部通过；GitHub 四份附件逐一与 CI 原文件比对一致，从官方 npm registry 无认证重新下载后，包字节及 SHA-256 也一致。
+
+修复 [#76](https://github.com/LiPu-jpg/Openwrite/issues/76) 与 [#65](https://github.com/LiPu-jpg/Openwrite/issues/65)，合并来源为引擎 [PR #77](https://github.com/LiPu-jpg/Openwrite/pull/77) 和插件 [PR #78](https://github.com/LiPu-jpg/Openwrite/pull/78)。捆绑 Core 5.8.10，wheel 来源提交 `18a500015f5d5da00f2f4d5ccd2325b084fed24b` 已包含在合并后的 native-core 分支；wheel SHA-256 为 `f121410300c7e7c55d594d0b8d7f4da41f8a17f0dfb5dc3b195e447b618bfd4d`。
+
+- 生成后提交失败保留正文与恢复句柄；恢复提交复用已有草稿。写章返回持久化 task_id，忙碌延后、取消请求与终态分离，传输错误可追踪。
+- 统一字数目标，补齐验收恢复、批量与字段级编辑、精确文本/换行保护、完整审稿覆盖与硬检查、正文结构及推理污染检查、审稿历史。
+- persona 和所有技能入口跟随作者语言；运行环境与任务状态提供英文，Studio 错误附带英文说明和错误码。
+- Core 全套 pytest 1397 passed / 32 skipped，专项回归 21 passed。本地 macOS arm64 真实候选包安装、生命周期及浏览器验收通过；正式包以以上主分支 CI 报告为准。真实模型写作未实测，不计为通过。
+
+恢复步骤与明确的范围见 [修复说明](ISSUE_76_REPAIRS.md)。跨章聚合与逾期伏笔硬阻断按 issue 允许的方案声明职责范围，本版未新增这些功能。
+
 ## 0.2.19
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.19) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38167325137) 验收的同一份包。来源提交 `e0c1ab7`，npm 包 SHA-256 为 `97f89586e4c43071ebca67abd5af1df1ae42b637cf6637d4fc26ca31c133d784`。六组原生平台/Node、源码安装与 alpha 兼容共 8 份运行报告、三代宿主客户端 3 份报告全部通过；Release 四份附件的校验值已与 CI `validated-release` 产物逐一核对。npm `dsh-openwrite@0.2.19` 已发布到官方 registry（registry.npmjs.org），`latest` 已更新到 0.2.19；从官方 registry 无认证重新下载后，SHA-256 与上述 CI 包一致。
