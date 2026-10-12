@@ -188,7 +188,7 @@ def test_writer_rewrites_once_when_first_draft_misses_length_range():
     responses = iter(
         [
             SimpleNamespace(
-                content="# 第一章：钟差\n\n" + "长" * 1300,
+                content="# 第一章：钟差\n\n" + "长" * 1600,
                 usage={"total_tokens": 100},
             ),
             SimpleNamespace(

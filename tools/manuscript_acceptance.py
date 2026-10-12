@@ -31,6 +31,19 @@ from tools.runtime_state import RuntimeStateManager, legacy_updates_to_delta
 
 SCHEMA_VERSION = "openwrite.manuscript-acceptance.v1"
 STAGE_NAMES = ("capture", "invalidate", "analyze", "rebuild", "propagate")
+ACKNOWLEDGE_DOMAINS = {
+    "outline",
+    "foreshadowing",
+    "canon",
+    "chapter_memory",
+    "character_state",
+    "runtime_facts",
+    "review",
+    "plan",
+    "search",
+    "downstream_chapters",
+}
+
 REVIEW_DOMAINS = {"outline", "foreshadowing"}
 
 Analyzer = Callable[[str, str, str, str], dict[str, Any]]
@@ -140,7 +153,10 @@ class ManuscriptAcceptanceService:
         impacts: list[dict[str, Any]] = []
         if latest_id:
             try:
-                impacts = list(self.operation(latest_id).get("impacts") or [])
+                latest = self.operation(latest_id)
+                impacts = (
+                    [] if latest.get("status") == "abandoned" else list(latest.get("impacts") or [])
+                )
             except ManuscriptAcceptanceError:
                 pass
         needs_review = [item for item in impacts if str(item.get("status") or "") == "needs_review"]
@@ -321,7 +337,7 @@ class ManuscriptAcceptanceService:
             raise ManuscriptAcceptanceError("复核确认不能为空", code="CONFIRMATION_REQUIRED")
         operation = self.operation(operation_id)
         requested = {str(item or "").strip() for item in domains}
-        invalid = requested - REVIEW_DOMAINS
+        invalid = requested - ACKNOWLEDGE_DOMAINS
         if invalid:
             raise ManuscriptAcceptanceError(
                 f"不可确认的影响域: {', '.join(sorted(invalid))}", code="INVALID_DOMAIN"
@@ -333,6 +349,37 @@ class ManuscriptAcceptanceService:
         operation["updated_at"] = self._now()
         self._write_operation(operation)
         return operation
+
+    def abandon(self, operation_id: str, *, confirm: bool = False) -> dict[str, Any]:
+        """Release this operation's pending heads while preserving its audit trail."""
+        if not confirm:
+            raise ManuscriptAcceptanceError(
+                "Abandon requires confirm=true", code="CONFIRMATION_REQUIRED"
+            )
+        from tools.project_lock import ProjectWriteLock
+
+        with ProjectWriteLock(self.project_root, self.novel_id, operation="acceptance:abandon"):
+            operation = self.operation(operation_id)
+            if operation.get("status") == "completed":
+                raise ManuscriptAcceptanceError(
+                    "Completed acceptance cannot be abandoned", code="INVALID_OPERATION_STATE"
+                )
+            state = self._state()
+            heads = state.get("chapters") or {}
+            for chapter_id, head in list(heads.items()):
+                if head.get("operation_id") != operation_id:
+                    continue
+                if head.get("accepted_revision"):
+                    head.pop("pending_revision", None)
+                    head["status"] = "current"
+                    head["operation_id"] = ""
+                else:
+                    del heads[chapter_id]
+            state["chapters"] = heads
+            operation.update(status="abandoned", updated_at=self._now())
+            self._write_operation(operation)
+            self._write_state(state)
+            return operation
 
     def record_precomputed(
         self,
@@ -389,9 +436,14 @@ class ManuscriptAcceptanceService:
         expected = str(expected_previous_revision or "")
         if not baseline and recorded_base and expected != recorded_base:
             raise ManuscriptAcceptanceError(
-                "接纳基线已变化，请重新读取",
+                "Acceptance base changed. Inspect the operation; resume it, or explicitly abandon it before retrying. To accept current disk text use external(confirm=true).",
                 code="STALE_ACCEPTED_REVISION",
-                details={"expected": expected, "current": recorded_base},
+                details={
+                    "expected": expected,
+                    "current": recorded_base,
+                    "operation_id": str(existing.get("operation_id") or ""),
+                    "actions": ["resume", "abandon", "external"],
+                },
             )
         now = self._now()
         operation_id = (

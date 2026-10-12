@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 from typing import Any
 
 from tools.task_store import TASK_PHASES, TaskStore, TaskStoreError
@@ -50,7 +50,20 @@ class TaskContext:
             self.task_id,
             phase=phase,
             event="task_phase_changed",
-            details={"note": note},
+            details={
+                "note": note
+                if note.isascii()
+                else {
+                    "queued": "Waiting for execution",
+                    "reading": "Reading project context",
+                    "preparing": "Preparing the request",
+                    "model": "Waiting for model output",
+                    "validating": "Validating the result",
+                    "committing": "Committing the result",
+                    "complete": "Complete",
+                }.get(phase, phase),
+                "original_note": note,
+            },
         )
 
     def cancellation_requested(self) -> bool:
@@ -166,10 +179,31 @@ class PersistentTaskRunner:
             raise TaskStoreError("Task not found")
         if not previous.get("retryable"):
             raise TaskStoreError("Task is not retryable")
-        if previous.get("status") not in {"failed", "cancelled", "interrupted"}:
+        result = self.store.materialize_result(previous)
+        partial_failure = previous.get("status") == "completed" and bool(
+            result.get("failed_chapters")
+        )
+        if (
+            previous.get("status") not in {"failed", "cancelled", "interrupted"}
+            and not partial_failure
+        ):
             raise TaskStoreError("Only failed, cancelled or interrupted tasks can be retried")
         payload = self.store.materialize_input(previous)
         result = self.store.materialize_result(previous)
+        from tools.chapter_run_v2 import ChapterRunV2Store
+
+        runs = ChapterRunV2Store(self.project_root, self.novel_id)
+        if previous.get("type") == "chapter_write":
+            latest = runs.latest_for_chapter(
+                str(previous.get("chapter_id") or payload.get("chapter_id") or "")
+            )
+            if latest and latest.status == "drafted":
+                payload["run_id_v2"] = latest.run_id
+        if previous.get("type") == "continuous_write":
+            payload["_resume_runs"] = {
+                run.chapter_id: run.run_id
+                for run in reversed(runs.list(statuses={"drafted"}, limit=200))
+            }
         if result.get("completed_chapters"):
             payload["_already_completed"] = list(result["completed_chapters"])
         if result.get("usage"):
@@ -226,9 +260,9 @@ class PersistentTaskRunner:
         future.add_done_callback(lambda completed: self._forget(task_id, completed))
 
     def _forget(self, task_id: str, future: Future[Any]) -> None:
-        del future
         with self._lock:
-            self._futures.pop(task_id, None)
+            if self._futures.get(task_id) is future:
+                self._futures.pop(task_id, None)
 
     def _run(self, task_id: str) -> None:
         task = self.store.load(task_id)
@@ -242,7 +276,7 @@ class PersistentTaskRunner:
                 updates={
                     "error": {
                         "code": "TASK_HANDLER_MISSING",
-                        "message": "任务处理器不存在",
+                        "message": "Task handler is unavailable",
                         "recoverable": False,
                         "failed_stage": task.get("phase") or None,
                     }
@@ -261,10 +295,24 @@ class PersistentTaskRunner:
             context.phase_name = "reading"
             context.checkpoint()
             payload = self.store.materialize_input(task)
+            if task.get("type") == "continuous_write":
+                progress = self.store.materialize_result(task)
+                if progress.get("stop_reason") == "deferred":
+                    payload["_already_completed"] = list(progress.get("completed_chapters") or [])
+                    payload["_already_used"] = dict(progress.get("usage") or {})
             result = handler(payload, context)
-            if task.get("type") == "model_benchmark" and isinstance(result, dict) and result.get("status") == "cancelled":
-                self.store.transition(task_id, status="cancelled", phase="complete",
-                                      updates={"result": result, "error": None}, event="task_cancelled")
+            if (
+                task.get("type") == "model_benchmark"
+                and isinstance(result, dict)
+                and result.get("status") == "cancelled"
+            ):
+                self.store.transition(
+                    task_id,
+                    status="cancelled",
+                    phase="complete",
+                    updates={"result": result, "error": None},
+                    event="task_cancelled",
+                )
                 return
             context.checkpoint()
             self.store.transition(
@@ -281,29 +329,43 @@ class PersistentTaskRunner:
                 updates={"result": exc.result, "error": None},
                 event="task_awaiting_confirmation",
             )
-        except TaskCancelled as exc:
+        except TaskCancelled:
             self.store.transition(
                 task_id,
                 status="cancelled",
                 updates={
                     "error": {
                         "code": "TASK_CANCELLED",
-                        "message": str(exc),
+                        "message": "Task cancelled",
                         "recoverable": True,
                     }
                 },
                 event="task_cancelled",
             )
         except Exception as exc:
+            if getattr(exc, "code", "") == "PROJECT_BUSY":
+                self.store.transition(
+                    task_id,
+                    status="pending",
+                    phase="queued",
+                    updates={"error": None, "retry_after_seconds": 2},
+                    event="task_deferred",
+                )
+                Event().wait(2)
+                self._schedule(task_id)
+                return
             self.store.transition(
                 task_id,
                 status="failed",
                 updates={
                     "error": {
                         "code": str(getattr(exc, "code", "TASK_FAILED")),
-                        "message": str(exc),
+                        "message": str(exc)
+                        if str(exc).isascii()
+                        else f"Task failed ({getattr(exc, 'code', 'TASK_FAILED')})",
                         "recoverable": bool(task.get("retryable")),
                         "failed_stage": context.phase_name or None,
+                        **({"details": dict(exc.details)} if getattr(exc, "details", None) else {}),
                     }
                 },
                 event="task_failed",

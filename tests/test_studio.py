@@ -1689,8 +1689,7 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
         versions = _read_json(f"{base}/api/manuscript/versions?chapter=ch_001")
         assert versions["data"]["versions"][0]["label"] == "HTTP 历史"
         preview = _read_json(
-            f"{base}/api/manuscript/versions/{historical.version_id}/compare"
-            "?chapter=ch_001"
+            f"{base}/api/manuscript/versions/{historical.version_id}/compare?chapter=ch_001"
         )
         assert preview["data"]["current"]["revision"] == history.fingerprint(
             chapter.read_text(encoding="utf-8")
@@ -1819,9 +1818,7 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
                 {
                     "action": "preview",
                     "path": document["path"],
-                    "edits": [
-                        {"old_text": "HTTP 保存测试", "new_text": "确认后的 HTTP 修改"}
-                    ],
+                    "edits": [{"old_text": "HTTP 保存测试", "new_text": "确认后的 HTTP 修改"}],
                 }
             ).encode("utf-8"),
             headers={
@@ -1844,7 +1841,7 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
             f"{base}/api/document/change-plan",
             method="POST",
             data=json.dumps(
-                {"action": "apply", "preview_token": planned["preview_token"]}
+                {"action": "apply", "preview_token": planned["preview_token"], "confirm": True}
             ).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
@@ -1868,27 +1865,19 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
         with opener.open(trace_request) as response:
             traces = json.loads(response.read())["data"]["records"]
         applied_trace = next(
-            item for item in traces if item["trace_id"] == applied_plan["operation_trace"]["trace_id"]
+            item
+            for item in traces
+            if item["trace_id"] == applied_plan["operation_trace"]["trace_id"]
         )
         assert applied_trace["request"]["tool_call_id"] == "call_apply"
         assert applied_trace["request"]["root_call_id"] == "call_root"
         assert applied_trace["request"]["tool_name"] == "novel_document_change_plan"
         assert applied_trace["domain_change"]["execution_status"] == "committed"
         assert applied_trace["privacy"]["raw_mutation_values_stored"] is False
-        changed_document = _read_json(
-            f"{base}/api/document?path=src%2Fstory%2Fbackground.md"
-        )
+        changed_document = _read_json(f"{base}/api/document?path=src%2Fstory%2Fbackground.md")
         assert "确认后的 HTTP 修改" in changed_document["content"]
 
-        focus_path = (
-            tmp_path
-            / "data"
-            / "novels"
-            / "demo"
-            / "src"
-            / "story"
-            / "current_focus.md"
-        )
+        focus_path = tmp_path / "data" / "novels" / "demo" / "src" / "story" / "current_focus.md"
         focus_before = focus_path.read_text(encoding="utf-8")
         structured_preview_request = Request(
             f"{base}/api/structured/change-plan",

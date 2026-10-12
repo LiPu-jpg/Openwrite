@@ -153,8 +153,10 @@ def canonical_review_decision(
     source_revision = str(review.get("source_revision") or "")
     current = str(current_source_revision or "")
     freshness = (
-        "current" if source_revision and current and source_revision == current
-        else "stale" if source_revision and current
+        "current"
+        if source_revision and current and source_revision == current
+        else "stale"
+        if source_revision and current
         else "unknown"
     )
     return {
@@ -164,7 +166,7 @@ def canonical_review_decision(
         "coverage": decision["coverage"],
         "gate_status": decision["gate_status"],
         "delivery_status": "stale" if freshness == "stale" else decision["delivery_status"],
-        "production_gate_status": decision["production_gate_status"],
+        "production_gate_status": decision.get("production_gate_status", "disabled_uncalibrated"),
         "freshness_status": freshness,
         "source_revision": source_revision,
         "current_source_revision": current,
@@ -263,9 +265,7 @@ class ReviewStore:
         self.review_dir.mkdir(parents=True, exist_ok=True)
         previous_revisioned = self.load_revisioned(chapter_id)
         previous = previous_revisioned[0] if previous_revisioned is not None else None
-        previous_review_revision = (
-            previous_revisioned[1] if previous_revisioned is not None else ""
-        )
+        previous_review_revision = previous_revisioned[1] if previous_revisioned is not None else ""
         payload = dict(result)
         payload["issue_details"] = normalize_review_issues(
             chapter_id, payload.get("issue_details", [])
@@ -276,29 +276,22 @@ class ReviewStore:
             after_by_id = {str(item["id"]): item for item in payload["issue_details"]}
             payload["issue_delta"] = {
                 "resolved": [
-                    item for issue_id, item in before_by_id.items()
-                    if issue_id not in after_by_id
+                    item for issue_id, item in before_by_id.items() if issue_id not in after_by_id
                 ],
                 "remaining": [
-                    item for issue_id, item in after_by_id.items()
-                    if issue_id in before_by_id
+                    item for issue_id, item in after_by_id.items() if issue_id in before_by_id
                 ],
                 "new": [
-                    item for issue_id, item in after_by_id.items()
-                    if issue_id not in before_by_id
+                    item for issue_id, item in after_by_id.items() if issue_id not in before_by_id
                 ],
             }
-            if not payload.get("stale") or not isinstance(
-                payload.get("revision_history"), list
-            ):
+            if not payload.get("stale") or not isinstance(payload.get("revision_history"), list):
                 payload["revision_history"] = [
                     dict(item)
                     for item in previous.get("revision_history", [])
                     if isinstance(item, dict)
                 ]
-            if not payload.get("stale") or not isinstance(
-                payload.get("revision_closures"), list
-            ):
+            if not payload.get("stale") or not isinstance(payload.get("revision_closures"), list):
                 payload["revision_closures"] = [
                     dict(item)
                     for item in previous.get("revision_closures", [])
@@ -311,9 +304,7 @@ class ReviewStore:
         if review_v2:
             canonical = dict(review_v2)
             canonical["freshness_status"] = (
-                "stale"
-                if payload.get("stale")
-                else "current" if source_revision else "unknown"
+                "stale" if payload.get("stale") else "current" if source_revision else "unknown"
             )
             canonical["source_revision"] = source_revision
             payload["review_v2"] = canonical
@@ -328,14 +319,78 @@ class ReviewStore:
                 payload=payload,
             )
         target = self.path_for(chapter_id)
+        if target.is_file():
+            self._archive(chapter_id, target.read_bytes())
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=self.review_dir,
-            prefix=f".{chapter_id}.", suffix=".tmp", delete=False,
+            mode="w",
+            encoding="utf-8",
+            dir=self.review_dir,
+            prefix=f".{chapter_id}.",
+            suffix=".tmp",
+            delete=False,
         ) as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             temp_path = Path(handle.name)
         temp_path.replace(target)
+        self._archive(chapter_id, target.read_bytes())
         return target
+
+    def _archive(self, chapter_id: str, content: bytes) -> None:
+        self.path_for(chapter_id)  # validate before constructing the history path
+        directory = self.review_dir / "history" / chapter_id
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / (hashlib.sha256(content).hexdigest() + ".json")
+        if not destination.exists():
+            with tempfile.NamedTemporaryFile(mode="wb", dir=directory, delete=False) as handle:
+                handle.write(content)
+                temporary = Path(handle.name)
+            temporary.replace(destination)
+
+    def versions(self, chapter_id: str) -> list[dict[str, Any]]:
+        self.path_for(chapter_id)
+        directory = self.review_dir / "history" / chapter_id
+        result = []
+        for path in directory.glob("*.json"):
+            try:
+                record = json.loads(path.read_bytes())
+            except (OSError, ValueError):
+                continue
+            result.append(
+                {
+                    "revision": "sha256:" + path.stem,
+                    "reviewed_at": record.get("reviewed_at", ""),
+                    "score": review_quality_score(record),
+                    "delivery_status": review_delivery_status(record),
+                    "source_revision": record.get("source_revision", ""),
+                    "issue_count": len(record.get("issue_details") or []),
+                }
+            )
+        return sorted(result, key=lambda item: item["reviewed_at"], reverse=True)
+
+    def compare(self, chapter_id: str, revision: str) -> dict[str, Any]:
+        self.path_for(chapter_id)
+        digest = revision.removeprefix("sha256:")
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ValueError("Invalid review history revision")
+        path = self.review_dir / "history" / chapter_id / f"{digest}.json"
+        before = json.loads(path.read_bytes())
+        after = self.load(chapter_id)
+        if after is None:
+            raise ValueError("Current review not found")
+        return {
+            "chapter_id": chapter_id,
+            "revision": revision,
+            "before": {
+                "score": review_quality_score(before),
+                "delivery_status": review_delivery_status(before),
+                "issues": before.get("issue_details", []),
+            },
+            "after": {
+                "score": review_quality_score(after),
+                "delivery_status": review_delivery_status(after),
+                "issues": after.get("issue_details", []),
+            },
+        }
 
     @staticmethod
     def _close_revision(

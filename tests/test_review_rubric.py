@@ -63,7 +63,7 @@ def test_production_gate_is_disabled_until_human_thresholds_are_calibrated():
         "status": "uncalibrated",
         "production_gate_enabled": False,
     }
-    assert advisory["production_gate_status"] == "disabled_uncalibrated"
+    assert "production_gate_status" not in advisory
 
     with pytest.raises(ValueError, match="requires calibrated human thresholds"):
         aggregate_review(raw, [], production_gate_enabled=True)
@@ -89,7 +89,7 @@ def test_not_applicable_and_inconclusive_do_not_become_zero_quality():
     result = aggregate_review(raw, [])
     assert result["quality_score"] == 100
     assert 0 < result["coverage"] < 1
-    assert result["delivery_status"] == "pass"
+    assert result["delivery_status"] == "inconclusive"
 
 
 def test_blocker_changes_gate_not_quality_score():

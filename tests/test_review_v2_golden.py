@@ -74,7 +74,7 @@ def test_golden_review_cases_have_locatable_positive_evidence_and_expected_score
     assert observed_scores["current_quality"] > observed_scores["corrupted"]
 
 
-def test_golden_dual_track_exposes_legacy_pass_v2_revise_migration_case():
+def test_golden_dual_track_exposes_legacy_pass_v2_inconclusive_migration_case():
     current = next(case for case in _cases() if case["id"] == "current_quality")
     assert current["historical_v1"]["passed"] is True
     result = aggregate_review(
@@ -82,4 +82,4 @@ def test_golden_dual_track_exposes_legacy_pass_v2_revise_migration_case():
         current["issues"],
         gates=current["gates"],
     )
-    assert result["delivery_status"] == "revise"
+    assert result["delivery_status"] == "inconclusive"

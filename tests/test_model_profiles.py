@@ -376,7 +376,7 @@ def test_existing_credential_without_timestamp_does_not_invent_one(tmp_path: Pat
         {saved["credential_ref"]: "pre-upgrade-test-credential"},
     )
 
-    surface_profile = store.surface()["profiles"][0]
+    surface_profile = next(item for item in store.surface()["profiles"] if item["id"] == saved["id"])
 
     assert surface_profile["configured"] is True
     assert "credential_updated_at" not in surface_profile

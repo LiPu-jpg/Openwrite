@@ -587,7 +587,7 @@ def test_reviewer_uses_profile_budget_and_structured_context_compression():
     assert report["target_input_tokens"] > 32_000
 
 
-def test_write_commit_rolls_back_truth_and_draft_when_memory_fails(
+def test_write_commit_rolls_back_truth_and_preserves_draft_when_memory_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     init_project(tmp_path, "demo")
@@ -639,7 +639,8 @@ def test_write_commit_rolls_back_truth_and_draft_when_memory_fails(
 
     assert result["ok"] is False
     assert "memory disk full" in result["error"]
-    assert cli_module._load_chapter(tmp_path, "demo", "ch_001") is None
+    assert cli_module._load_chapter(tmp_path, "demo", "ch_001").endswith("正文")
+    assert result["uncommitted"] and Path(result["draft_path"]).exists()
     assert TruthFilesManager(tmp_path, "demo").load_truth_files().current_state == "写前状态"
     lock_path = tmp_path / "data" / "novels" / "demo" / "data" / "workflows" / "project.lock"
     assert not lock_path.exists()

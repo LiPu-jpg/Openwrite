@@ -1280,7 +1280,10 @@ class StudioApplication:
                     )
                     .to_dict()
                 )
-        return {**result, "workspace": self.workspace()}
+        return {
+            **result,
+            **({"workspace": self.workspace()} if payload.get("include_workspace") else {}),
+        }
 
     def structured_change_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Preview and commit one exact, revision-gated structured domain change."""
@@ -1790,7 +1793,7 @@ class StudioApplication:
                 "文档超过 2 MB，Studio 不直接打开",
                 HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
             )
-        content = path.read_text(encoding="utf-8")
+        content = path.read_bytes().decode("utf-8")
         result = {
             "path": self._relative(path),
             "title": self._document_title(path),
@@ -1830,6 +1833,13 @@ class StudioApplication:
             raise StudioError("文档超过 2 MB，已拒绝保存", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
         if "\x00" in content:
             raise StudioError("文档包含无效字符")
+        if path == self.novel_root / "src" / "outline.md":
+            from tools.outline_tree import OutlineEditError, validate_outline_targets
+
+            try:
+                validate_outline_targets(content)
+            except OutlineEditError as exc:
+                raise StudioError(str(exc), code="INVALID_TARGET_WORDS") from exc
 
         author_version: dict[str, Any] | None = None
         acceptance_operation: dict[str, Any] | None = None
@@ -1842,7 +1852,7 @@ class StudioApplication:
                     operation=f"document_write:{self._relative(path)}",
                 ),
             ):
-                current_content = path.read_text(encoding="utf-8") if path.exists() else None
+                current_content = path.read_bytes().decode("utf-8") if path.exists() else None
                 if current_content is not None and version is not None and not force:
                     current_version = str(path.stat().st_mtime_ns)
                     if current_version != str(version):
@@ -1879,6 +1889,7 @@ class StudioApplication:
                 with tempfile.NamedTemporaryFile(
                     mode="w",
                     encoding="utf-8",
+                    newline="",
                     dir=path.parent,
                     prefix=f".{path.name}.",
                     suffix=".tmp",
@@ -3217,14 +3228,23 @@ class StudioApplication:
                 self.novel_root,
                 operation=str(payload.get("operation") or ""),
                 revision=str(payload.get("revision") or ""),
-                node_id=str(payload.get("node_id") or ""),
+                node_id=str(payload.get("node_id") or payload.get("chapter_id") or ""),
                 title=str(payload.get("title") or ""),
                 summary=str(payload.get("summary") or ""),
                 kind=str(payload.get("kind") or ""),
+                cascade=payload.get("cascade") is not False,
+                metadata=payload.get("metadata"),
+                updates=payload.get("updates"),
             )
         except OutlineEditError as exc:
             status = HTTPStatus.CONFLICT if exc.code == "conflict" else HTTPStatus.BAD_REQUEST
             raise StudioError(str(exc), status) from exc
+        if payload.get("operation") == "get_meta":
+            return {
+                "metadata": edit["metadata"],
+                "revision": payload.get("revision"),
+                "node_id": payload.get("node_id"),
+            }
         saved = self.write_document(
             "src/outline.md",
             str(edit["content"]),
@@ -3241,6 +3261,7 @@ class StudioApplication:
             "message": str(edit["message"]),
             "renumbered": edit.get("renumbered", []),
             "skipped_renumbering": edit.get("skipped_renumbering", []),
+            "metadata": edit.get("metadata", {}),
             "checkpoint": saved.get("checkpoint", {}),
             "mutation_summary": build_mutation_summary(
                 operation=f"outline.{str(payload.get('operation') or 'update')}",
@@ -4336,11 +4357,17 @@ class StudioApplication:
             injected_executor=self._writer_executor,
         )
         try:
-            target_words = int(payload.get("target_words") or 3000)
+            from tools.writing_policy import resolve_target_words
+
+            requested_chapter = str(payload.get("chapter_id") or "").strip()
+            outline = self.outline_structure(requested_chapter)
+            target_policy = resolve_target_words(
+                payload.get("target_words"),
+                (outline.get("recommendation") or {}).get("target_words"),
+            )
+            target_words = target_policy["target_words"]
         except (TypeError, ValueError) as exc:
             raise StudioError("目标字数必须是整数") from exc
-        if not 200 <= target_words <= 12000:
-            raise StudioError("目标字数必须在 200 到 12000 之间")
         guidance = str(payload.get("guidance") or "").strip()
         requested_chapter = str(payload.get("chapter_id") or "").strip()
         outline = self.outline_structure(requested_chapter)
@@ -4354,7 +4381,9 @@ class StudioApplication:
         if requested_chapter:
             if not recommendation or recommendation["chapter_id"] != requested_chapter:
                 raise StudioError("所选章节不在当前大纲中")
-            if recommendation["status"] == "drafted":
+            if recommendation["status"] == "drafted" and not (
+                payload.get("run_id_v2") or payload.get("resume_from_draft")
+            ):
                 raise StudioError("该章节已有正文，请从正文列表打开", HTTPStatus.CONFLICT)
         chapter_id = (
             str(recommendation["chapter_id"]) if isinstance(recommendation, dict) else "next"
@@ -4374,8 +4403,18 @@ class StudioApplication:
                     {
                         "chapter_id": chapter_id,
                         "guidance": guidance,
-                        "target_words": target_words,
+                        **(
+                            {
+                                "target_words": target_words,
+                                "target_words_source": target_policy["target_words_source"],
+                            }
+                            if not (payload.get("run_id_v2") or payload.get("resume_from_draft"))
+                            or payload.get("target_words") is not None
+                            else {}
+                        ),
                         "temperature": float(payload.get("temperature") or 0.7),
+                        **({"run_id_v2": payload["run_id_v2"]} if payload.get("run_id_v2") else {}),
+                        **({"resume_from_draft": True} if payload.get("resume_from_draft") else {}),
                     }
                 )
         except NovelServiceError as exc:
@@ -4423,6 +4462,19 @@ class StudioApplication:
             except (OSError, ValueError):
                 logger.warning("Unable to summarize written chapter path: %s", draft_value)
         return response
+
+    def review_history(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.require_project()
+        chapter_id = str(payload.get("chapter_id") or "")
+        store = ReviewStore(self.project_root, self.novel_id)
+        try:
+            if payload.get("action") == "compare":
+                return store.compare(chapter_id, str(payload.get("revision") or ""))
+            return {"chapter_id": chapter_id, "versions": store.versions(chapter_id)}
+        except (OSError, ValueError) as exc:
+            raise StudioError(
+                str(exc), HTTPStatus.NOT_FOUND, code="REVIEW_HISTORY_NOT_FOUND"
+            ) from exc
 
     def review_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile = self._operation_profile(
@@ -4626,9 +4678,11 @@ class StudioApplication:
             details=exc.details,
         )
 
-    def task_surface(self, limit: int = 100) -> dict[str, Any]:
+    def task_surface(self, limit: int = 100, since: str = "") -> dict[str, Any]:
         try:
             tasks = self._tasks().store.list(limit=limit)
+            if since:
+                tasks = [task for task in tasks if str(task.get("created_at") or "") >= since]
         except (TaskStoreError, ValueError) as exc:
             raise StudioError("任务数量必须是有效整数", code="INVALID_INPUT") from exc
         counts = {
@@ -4765,6 +4819,16 @@ class StudioApplication:
                 },
             }
         )
+
+    def abandon_manuscript_acceptance(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            service = self._manuscript_acceptance()
+            operation = service.abandon(
+                str(payload.get("operation_id") or ""), confirm=payload.get("confirm") is True
+            )
+            return self._manuscript_acceptance_result(service, operation)
+        except ManuscriptAcceptanceError as exc:
+            raise self._translate_manuscript_acceptance_error(exc) from exc
 
     def acknowledge_manuscript_acceptance(self, payload: dict[str, Any]) -> dict[str, Any]:
         domains = payload.get("domains")
@@ -4926,13 +4990,30 @@ class StudioApplication:
         return task
 
     def cancel_task(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        del payload
         try:
             task = self._tasks().store.load(task_id)
             if task is None:
                 raise TaskStoreError("Task not found")
             self._ensure_task_workspace(task)
-            return self._tasks().cancel(task_id)
+            result = self._tasks().cancel(task_id)
+            wait_seconds = min(30.0, max(0.0, float(payload.get("wait_seconds") or 0)))
+            if wait_seconds:
+                import time
+
+                deadline = time.monotonic() + wait_seconds
+                while result.get("status") == "running" and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                    result = self._tasks().store.load(task_id) or result
+            return {
+                **result,
+                "cancel_requested": bool(result.get("cancel_requested")),
+                "cancelled": result.get("status") == "cancelled",
+                "cancellation_status": "cancelled"
+                if result.get("status") == "cancelled"
+                else "requested"
+                if result.get("cancel_requested")
+                else "already_terminal",
+            }
         except TaskStoreError as exc:
             raise self._translate_task_error(exc) from exc
 
@@ -4960,6 +5041,11 @@ class StudioApplication:
 
     def _task_write_chapter(self, payload: dict[str, Any], context: TaskContext) -> dict[str, Any]:
         args = dict(payload)
+
+        recommendation = (
+            self.outline_structure(str(args.get("chapter_id") or "")).get("recommendation") or {}
+        )
+        args.setdefault("chapter_id", recommendation.get("chapter_id") or "next")
         expected_revision = str(args.get("outline_revision") or "")
         if expected_revision:
             outline = self.outline_structure(str(args.get("chapter_id") or ""))
@@ -4980,7 +5066,8 @@ class StudioApplication:
                 injected_executor=self._writer_executor,
             )
             with self._model_context(profile):
-                return self._service().write_chapter(args)
+                result = self._service().write_chapter(args)
+                return result
         except NovelServiceError as exc:
             if exc.code == "TASK_CANCELLED":
                 raise TaskCancelled(str(exc)) from exc
@@ -5537,18 +5624,32 @@ class StudioApplication:
                 break
             outline = self.outline_structure()
             recommendation = outline.get("recommendation")
-            if not isinstance(recommendation, dict) or recommendation.get("status") == "drafted":
+            if not isinstance(recommendation, dict):
                 stop_reason = "outline_gap"
                 break
             chapter_id = str(recommendation.get("chapter_id") or "")
+            resume_id = (payload.get("_resume_runs") or {}).get(chapter_id)
+            if recommendation.get("status") == "drafted" and not resume_id:
+                latest = ChapterRunV2Store(self.project_root, self.novel_id).latest_for_chapter(
+                    chapter_id
+                )
+                if latest and latest.status == "drafted":
+                    resume_id = latest.run_id
+                else:
+                    stop_reason = "outline_gap"
+                    break
             write_payload = {
                 "chapter_id": chapter_id,
                 "guidance": str(payload.get("guidance") or recommendation.get("guidance") or ""),
-                "target_words": int(
-                    payload.get("target_words") or recommendation.get("target_words") or 3000
+                **(
+                    {"target_words": payload["target_words"]}
+                    if payload.get("target_words") is not None
+                    else {}
                 ),
                 "temperature": float(payload.get("temperature") or 0.7),
             }
+            if resume_id:
+                write_payload["run_id_v2"] = resume_id
             try:
                 write_result = self._task_write_chapter(write_payload, context)
                 context.checkpoint()
@@ -5559,10 +5660,25 @@ class StudioApplication:
             except Exception as exc:
                 if context.cancellation_requested():
                     raise TaskCancelled("任务已取消") from exc
+                if getattr(exc, "code", "") == "PROJECT_BUSY":
+                    context.persist_progress(
+                        {
+                            "completed_chapters": completed,
+                            "failed_chapters": failed_chapters,
+                            "usage": usage,
+                            "stop_reason": "deferred",
+                        }
+                    )
+                    raise
                 consecutive_failures += 1
                 usage["consecutive_failures"] = consecutive_failures
                 failed_chapters.append(
-                    {"chapter_id": chapter_id, "error": str(exc) or exc.__class__.__name__}
+                    {
+                        "chapter_id": chapter_id,
+                        "error": str(exc) or exc.__class__.__name__,
+                        "code": str(getattr(exc, "code", "TASK_FAILED")),
+                        **dict(getattr(exc, "details", {}) or {}),
+                    }
                 )
                 context.persist_progress(
                     {

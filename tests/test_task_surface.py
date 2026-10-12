@@ -101,7 +101,7 @@ def test_new_records_are_v1_and_surface_is_self_describing(tmp_path: Path):
     app = StudioApplication(tmp_path, writer_executor=_writer)
     try:
         created = app.create_task(
-            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 10}}
+            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 200}}
         )
         deadline = time.monotonic() + 3
         surface = app.task_surface()
@@ -151,7 +151,7 @@ def test_failed_stage_records_phase_at_failure_time(tmp_path: Path):
         failed = _wait_for(runner.store, task["task_id"], "failed")
         error = failed["error"]
         assert error["code"] == "TASK_FAILED"
-        assert error["message"] == "模型超时"
+        assert error["message"] == "Task failed (TASK_FAILED)"
         assert error["recoverable"] is True
         assert error["failed_stage"] == "model"
     finally:
@@ -210,7 +210,7 @@ def test_retry_and_confirm_reject_invalid_states(tmp_path: Path):
     app = StudioApplication(tmp_path, writer_executor=_writer)
     try:
         created = app.create_task(
-            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 10}}
+            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 200}}
         )
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:

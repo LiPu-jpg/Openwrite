@@ -190,7 +190,7 @@ class ReviewerAgent(BaseAgent):
         # Deterministic matches are signals for the dedicated gate call, not an
         # automatic policy block by themselves.
         sensitive_issues = self._check_sensitive_words(content)
-        gate_enabled = dimensions is None or any(item in GATE_CHECK_IDS for item in dimensions)
+        gate_enabled = True
         gate_result: dict = {"id": "safety", "status": "pass", "findings": []}
         if gate_enabled:
             try:
@@ -221,13 +221,25 @@ class ReviewerAgent(BaseAgent):
                 for item in dimensions
                 if isinstance(item, int) and item in self.DIMENSION_MAP
             }
-            all_issues = [issue for issue in all_issues if issue.dimension in selected]
+            all_issues = [
+                issue
+                for issue in all_issues
+                if issue.dimension in selected
+                or issue.dimension in GATE_CHECK_IDS
+                or issue.category == "structure"
+            ]
 
         issue_payloads = [self._issue_payload(issue) for issue in all_issues]
         review_v2 = aggregate_review(
             domain_results,
             issue_payloads,
-            domains=domains,
+            domains=domains
+            if context.get("review_form") == "outline"
+            else attach_optional_criteria(
+                selected_domains(None),
+                form=context.get("review_form") or context.get("form"),
+                chapter_id=context.get("chapter_id"),
+            ),
             gates=[gate_result] if gate_enabled else [],
             quality_threshold=float(context.get("quality_threshold") or 70),
             min_coverage=float(context.get("min_review_coverage") or 0.80),
@@ -237,6 +249,17 @@ class ReviewerAgent(BaseAgent):
             ),
         )
         review_v2["strict"] = bool(strict)
+        review_v2["check_scope"] = (
+            "outline" if context.get("review_form") == "outline" else "chapter"
+        )
+        if (
+            dimensions is not None
+            and review_v2["check_scope"] == "chapter"
+            and not set(self.DIMENSION_MAP).issubset(dimensions)
+        ):
+            review_v2["partial_review"] = True
+            if review_v2["delivery_status"] == "pass":
+                review_v2["delivery_status"] = "inconclusive"
         review_v2["requested_dimensions"] = (
             list(dimensions) if dimensions is not None else list(self.DIMENSION_MAP)
         )
@@ -580,18 +603,33 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
     def _rule_based_check(self, content: str, target_words: int = 0) -> list[ReviewIssue]:
         """基于规则的检查（零 LLM 成本）"""
         issues = []
+        first = content.lstrip("\ufeff\r\n ").splitlines()[0] if content.strip() else ""
+        if not re.match(r"^#\s+\S", first) or re.search(
+            r"<(?:think|analysis|reasoning)\b", content, re.I
+        ):
+            issues.append(
+                ReviewIssue(
+                    severity="critical",
+                    category="structure",
+                    description="Manuscript must start with a chapter heading and contain no model reasoning blocks",
+                    suggestion="Remove the reasoning/preamble and restore the chapter heading",
+                    dimension=27,
+                )
+            )
 
         if target_words > 0:
-            actual_words = len(re.findall(r"[\u4e00-\u9fff]", content))
-            minimum_words = int(target_words * 0.7)
-            maximum_words = int(target_words * 1.3)
+            from ..novel_workspace import count_writing_units
+
+            actual_words = count_writing_units("\n".join(content.splitlines()[1:]))
+            minimum_words = int(target_words * 0.8)
+            maximum_words = int(target_words * 1.5)
             if actual_words < minimum_words or actual_words > maximum_words:
                 issues.append(
                     ReviewIssue(
                         severity="warning",
                         category="目标字数偏差",
                         description=(
-                            f"正文约{actual_words}个中文字符，目标为{target_words}，偏差超过30%"
+                            f"正文约{actual_words}个中文字符，目标为{target_words}，不在 -20%/+50% 区间"
                         ),
                         suggestion="删减重复动作与支线，或补足关键场景，使篇幅回到目标区间",
                         dimension=7,

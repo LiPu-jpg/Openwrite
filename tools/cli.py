@@ -716,7 +716,6 @@ def _cmd_write(args) -> int:
             {
                 "chapter_id": chapter,
                 "guidance": "",
-                "target_words": 0,
                 "temperature": args.temperature,
                 "run_id_v2": str(getattr(args, "resume_run", "") or ""),
             }

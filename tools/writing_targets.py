@@ -16,7 +16,7 @@ DEFAULT_WRITING_TARGETS: dict[str, int] = {
 
 WRITING_TARGET_LIMITS: dict[str, tuple[int, int]] = {
     "book_words": (10_000, 5_000_000),
-    "chapter_words": (200, 12_000),
+    "chapter_words": (200, 50_000),
     "outline_volume_words": (100, 5_000),
     "outline_act_words": (80, 3_000),
     "outline_section_words": (50, 2_000),

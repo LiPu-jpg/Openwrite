@@ -288,6 +288,11 @@ def test_lightrag_manifest_tracks_incremental_insert_update_and_delete(tmp_path:
 
 
 def test_local_vector_configuration_needs_no_chat_api_key(monkeypatch):
+    # This test supplies its embedding configuration instead of reading user preferences.
+    monkeypatch.setattr("tools.model_profiles.ModelProfileStore.resolve_embedding", lambda self: {
+        "provider": "local", "model": "BAAI/bge-small-zh-v1.5", "dimension": 512,
+        "max_tokens": 512, "api_key": "", "base_url": "",
+    })
     for name in (
         "LLM_API_KEY",
         "OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER",
@@ -319,6 +324,11 @@ def test_local_vector_configuration_needs_no_chat_api_key(monkeypatch):
 def test_search_configuration_uses_search_chat_route_and_reuses_vector_workspace(
     monkeypatch,
 ):
+    # This test supplies its embedding configuration instead of reading user preferences.
+    monkeypatch.setattr("tools.model_profiles.ModelProfileStore.resolve_embedding", lambda self: {
+        "provider": "local", "model": "BAAI/bge-small-zh-v1.5", "dimension": 512,
+        "max_tokens": 512, "api_key": "", "base_url": "",
+    })
     for name in (
         "LLM_API_KEY",
         "OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER",
