@@ -101,6 +101,10 @@ class ChapterRunV2Store:
         limit: int = 50,
         since: str = "",
     ) -> list[ChapterRunV2Manifest]:
+        if since:
+            cutoff = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            since = (cutoff.replace(tzinfo=timezone.utc) if cutoff.tzinfo is None
+                     else cutoff.astimezone(timezone.utc)).isoformat()
         if not self.root.is_dir():
             return []
         result: list[ChapterRunV2Manifest] = []

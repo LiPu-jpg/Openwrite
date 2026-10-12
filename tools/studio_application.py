@@ -4682,6 +4682,9 @@ class StudioApplication:
         try:
             tasks = self._tasks().store.list(limit=limit)
             if since:
+                cutoff = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                since = (cutoff.replace(tzinfo=timezone.utc) if cutoff.tzinfo is None
+                         else cutoff.astimezone(timezone.utc)).isoformat()
                 tasks = [task for task in tasks if str(task.get("created_at") or "") >= since]
         except (TaskStoreError, ValueError) as exc:
             raise StudioError("任务数量必须是有效整数", code="INVALID_INPUT") from exc

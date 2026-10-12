@@ -495,3 +495,24 @@ def test_english_heading_is_preserved_and_unstructured_reasoning_is_rejected():
         writer._parse_creative_output(
             "I should think about the plot first.\nThe letter arrived.", 1, {}
         )
+
+
+def test_since_queries_compare_instants_across_timezone_offsets(novel):
+    from tools.project_registry import ProjectRegistry
+    from tools.studio_application import StudioApplication
+    project, _ = novel
+    runs = ChapterRunV2Store(project, 'demo')
+    run = runs.create('ch_001')
+    run.created_at = '2026-10-12T23:30:00+00:00'
+    runs.save(run)
+    assert [item.run_id for item in runs.list(since='2026-10-13T07:00:00+08:00')] == [run.run_id]
+    assert not runs.list(since='2026-10-13T08:00:00+08:00')
+    app = StudioApplication(project, project_registry=ProjectRegistry(project / 'registry.yaml', allow_ephemeral=True))
+    try:
+        store = app._tasks().store
+        task = store.create('chapter_write', {'chapter_id': 'ch_001'})
+        store.transition(task['task_id'], updates={'created_at': run.created_at})
+        assert len(app.task_surface(since='2026-10-13T07:00:00+08:00')['tasks']) == 1
+        assert not app.task_surface(since='2026-10-13T08:00:00+08:00')['tasks']
+    finally:
+        app._task_runner.shutdown(wait=True)
