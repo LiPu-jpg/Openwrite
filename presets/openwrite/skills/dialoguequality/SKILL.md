@@ -4,6 +4,8 @@ description: Use when user wants to analyze dialogue style, extract speech patte
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 对话质量系统
 
 用于分析角色对白、提取说话习惯、检查角色声音是否区分明显，以及识别 AI 味对话问题。

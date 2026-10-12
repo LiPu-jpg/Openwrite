@@ -4,6 +4,8 @@ description: Query an existing hierarchical OpenWrite review-v2 artifact through
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 分层评审 DoG 查询
 
 这个 Skill 只查询 OpenWrite 已物化的 review-v2 artifact。OpenWrite 的

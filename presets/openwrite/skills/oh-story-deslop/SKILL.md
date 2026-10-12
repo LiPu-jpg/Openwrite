@@ -15,6 +15,8 @@ metadata:
       max_tool_calls: 20
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # Oh Story 去 AI 味
 
 把 AI 味视为读感和叙事功能问题，不把词表命中当作错误。先确认用户要扫描、局部示范还是全文精修；默认先报告问题和样例，不擅自覆盖正文。

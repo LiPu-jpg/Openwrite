@@ -15,6 +15,8 @@ metadata:
       max_tool_calls: 20
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # Oh Story 长篇写作
 
 先读取当前作品状态和用户本轮目标，再选择开书、补纲、写指定章、续写或修订。裸调用时只诊断所处阶段并给出下一步，不自动生成正文。

@@ -3,6 +3,8 @@ name: foreshadow
 description: 查伏笔。Use when the author asks 查伏笔, 待回收, 超期伏笔, or types /foreshadow. Read chapter obligations and continuity; do not keep a second foreshadow store.
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 查伏笔
 
 接到已有 `novel_*`。伏笔真源是 OpenWrite DAG 与章节工作简报。

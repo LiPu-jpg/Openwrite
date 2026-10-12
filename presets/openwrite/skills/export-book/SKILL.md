@@ -3,6 +3,8 @@ name: export-book
 description: 导出。Use when the author asks 导出, 备份, 出书, EPUB, or types /export-book. Preflight first; never use the host /export session-log command for the manuscript.
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 导出
 
 接到已有 `novel_*`。成稿导出与会话日志下载不是同一条命令。

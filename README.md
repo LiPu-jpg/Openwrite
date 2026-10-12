@@ -66,6 +66,8 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
+`0.2.20` 候选包捆绑 Core 5.8.10，修复 [#76](https://github.com/LiPu-jpg/Openwrite/issues/76) 的草稿恢复、任务状态、编辑和审稿契约，并补充 [#65](https://github.com/LiPu-jpg/Openwrite/issues/65) 的英文使用支持。行为与范围见 [修复说明](docs/ISSUE_76_REPAIRS.md)。正式可下载版本以 npm `latest` 和 GitHub Release 为准。
+
 `0.2.19` 候选包修复两个加载/工具问题：部分安装下「OpenWrite 创作」预设从列表消失、DoG 工具不可用（dsh-dog 宿主包解析失败，[#74](https://github.com/LiPu-jpg/Openwrite/issues/74)），以及 `novel_*` 工具的对象/数组参数在模型输出 JSON 字符串时预览失败、`data` 字段丢失（[#75](https://github.com/LiPu-jpg/Openwrite/issues/75)）。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
 
 `0.2.18` 候选包修正 `auto:cheapest`（Core 5.8.9）：零价模型不再参与比价，自动落到付费低价模型上。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
@@ -167,3 +169,18 @@ conductor/                 连续写章、评审与修订编排
 Logo 基于 OpenWrite `native-core` 分支，已调整深浅主题配色；基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，图谱集成使用 [dsh-dog](https://github.com/Fun10165/dsh-dog)。
 
 生态目录：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) · [社区插件市场](https://dshtui.com/plugins/)。OpenWrite 当前面向 DeepSeek Harness 的 `web` profile，使用 `dsh web` 打开创作工作台；尚未验证 dsh-TUI 界面兼容性。
+
+## Language / 语言
+
+In dsh, choose **Settings → General → Language → English** (`locale.preference`).
+The OpenWrite panel follows the host language. The writing agent and slash-command
+help follow your conversation language; manuscripts, outlines and assets retain
+their existing language. You can say “Please write and review this novel in English.”
+The bundled Chinese skill files are procedural instructions, not an output-language
+restriction. Runtime setup messages use English. Backend failures include stable
+`code`, English `message`, `request_id`, and the original diagnostic text.
+
+在 dsh 的 **设置 → 通用 → 语言 → English** 切换面板语言。Agent 的回复和命令帮助跟随
+当前对话语言；正文与资产遵循作品已有语言，除非作者要求翻译。
+
+任务恢复、编辑确认及审稿职责范围见 [可靠性修复说明](docs/ISSUE_76_REPAIRS.md)。

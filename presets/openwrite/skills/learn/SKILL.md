@@ -3,6 +3,8 @@ name: learn
 description: 写法记忆。Use when the author asks 记住写法, 成功钩子, 作者偏好, or types /learn. Store style, hooks, and preferences as Workspace-scoped OpenWrite assets; do not create a second memory store.
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 写法记忆
 
 接到已有 `novel_*`。风格、成功钩子和作者偏好是当前 Workspace 作品资产，不是会话本地文件，也不是第二套 RAG / lorebook。

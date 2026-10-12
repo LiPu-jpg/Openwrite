@@ -3,6 +3,8 @@ name: revise-span
 description: 改这段。Use when the author asks 改这段, 扩写, 缩写, 去 AI 味, 按审稿改, or types /revise-span. Stage revision hunks; never PUT the manuscript.
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 改这段
 
 接到已有 `novel_*`。改稿只走修订提案，不直接整章覆盖。

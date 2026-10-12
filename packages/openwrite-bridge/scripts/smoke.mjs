@@ -114,10 +114,8 @@ assert.match(
 const documentPlanTool = registered.find(tool => tool.name === 'novel_document_change_plan')
 assert.ok(documentPlanTool, 'document change plan tool is registered')
 await assert.rejects(
-  () => documentPlanTool.execute({ action: 'preview', path: 'src/story/background.md', edits: [
-    { old_text: 'a', new_text: 'b' }, { old_text: 'c', new_text: 'd' },
-  ] }, { signal: new AbortController().signal }),
-  /exactly one edit/,
+  () => documentPlanTool.execute({ action: 'preview', path: 'src/story/background.md', edits: [] }, { signal: new AbortController().signal }),
+  /between 1 and 50 edits/,
 )
 await assert.rejects(
   () => documentPlanTool.execute({ action: 'apply' }, { signal: new AbortController().signal }),
@@ -1190,6 +1188,58 @@ assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
     await client.putJson('/api/document', { content: 'saved' })
     assert.equal(changes.length, 6, 'document saves still notify')
   } finally { globalThis.fetch = savedFetch }
+}
+
+// Issue #76: durable async writes, batched previews, recoverable structured errors.
+{
+  const saved = globalThis.fetch
+  const requests = []
+  const run = { ...exec, name: 'novel_write_chapter' }
+  const write = registered.find(tool => tool.name === 'novel_write_chapter')
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ url: String(url), body: JSON.parse(init.body ?? '{}') })
+    return new Response(JSON.stringify({ ok: true, data: { task_id: 'tsk_accepted' } }), { status: 200 })
+  }
+  try {
+    assert.equal((await write.execute({ chapter_id: 'ch_001', run_id_v2: 'runv2_saved' }, run)).task_id, 'tsk_accepted')
+    assert.equal(new URL(requests[0].url).pathname, '/api/tasks')
+    assert.equal(requests[0].body.type, 'chapter_write')
+    assert.equal(requests[0].body.input.run_id_v2, 'runv2_saved')
+    assert.equal('target_words' in requests[0].body.input, false, 'omitted target must reach the outline resolver')
+    await documentPlanTool.execute({ action: 'preview', path: 'src/outline.md', edits: [
+      { old_text: 'first', new_text: 'one' }, { old_text: 'second', new_text: 'two' },
+    ] }, run)
+    assert.equal(requests[1].body.edits.length, 2)
+    await assert.rejects(() => documentPlanTool.execute({ action: 'apply', preview_token: 'token', confirm: false }, run), /confirm: true/)
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      error: { code: 'STALE_ACCEPTED_REVISION', message: 'Reconcile the pending operation', details: { operation_id: 'accept_1' } },
+      request_id: 'req_example',
+    }), { status: 409 })
+    await assert.rejects(() => write.execute({}, run), error => {
+      const payload = JSON.parse(error.message)
+      assert.equal(payload.code, 'STALE_ACCEPTED_REVISION')
+      assert.equal(payload.details.operation_id, 'accept_1')
+      assert.equal(payload.request_id, 'req_example')
+      assert.equal(error.message.includes('[object Object]'), false)
+      return true
+    })
+    globalThis.fetch = async () => { throw new Error('fetch failed') }
+    await assert.rejects(() => write.execute({}, run), error => {
+      const payload = JSON.parse(error.message)
+      assert.equal(payload.code, 'NETWORK_ERROR')
+      assert.match(payload.recovery, /List recent tasks/)
+      return true
+    })
+    const { readdir } = await import('node:fs/promises')
+    const logs = await readdir(join(wsRootA, '.openwrite', 'transport-errors'))
+    assert.ok(logs.length)
+    const records = await Promise.all(logs.map(async name => JSON.parse(await readFile(join(wsRootA, '.openwrite', 'transport-errors', name), 'utf8'))))
+    const metadata = records.find(record => record.path === '/api/tasks')
+    assert.ok(metadata)
+    assert.equal(metadata.source, 'transport')
+    assert.equal(metadata.path, '/api/tasks')
+    assert.equal('Authorization' in metadata, false)
+  } finally { globalThis.fetch = saved }
 }
 
 await root.fiber.dispose()

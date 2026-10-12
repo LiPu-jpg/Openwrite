@@ -15,6 +15,8 @@ metadata:
       max_tool_calls: 20
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # Oh Story 长篇市场研究
 
 把榜单当作有偏差的市场样本，不把排名本身当作选题答案。先确认平台、榜单口径、目标读者、题材范围、采样日期和作者自身优势。

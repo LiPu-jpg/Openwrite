@@ -67,19 +67,19 @@ export function apply(ctx: Context, config: Config) {
     kind: 'exact', path: '/studio-panel/runtime', handler: async (req, res) => {
       const respond = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(data)) }
       const rejection = authorizeRequest(req.headers)
-      if (rejection !== undefined) { respond(rejection, { error: 'dsh browser authentication required' }); return }
-      if (req.method === 'GET') { respond(200, runtime?.status() ?? { phase: 'ready', message: '使用外部写作环境' }); return }
-      if (req.method !== 'POST' || req.headers['x-openwrite-studio'] !== '1') { respond(405, { error: '操作不允许' }); return }
+      if (rejection !== undefined) { respond(rejection, { error: 'dsh browser authentication required', message: 'dsh browser authentication required', code: 'AUTHENTICATION_REQUIRED' }); return }
+      if (req.method === 'GET') { respond(200, runtime?.status() ?? { phase: 'ready', message: 'Using an external writing environment' }); return }
+      if (req.method !== 'POST' || req.headers['x-openwrite-studio'] !== '1') { respond(405, { error: 'Method not allowed', message: 'Method not allowed', code: 'METHOD_NOT_ALLOWED' }); return }
       const chunks: Buffer[] = []
       let size = 0
-      for await (const chunk of req) { size += chunk.length; if (size > 1024) { respond(413, { error: '请求过大' }); return }; chunks.push(Buffer.from(chunk)) }
+      for await (const chunk of req) { size += chunk.length; if (size > 1024) { respond(413, { error: 'Request too large', message: 'Request too large', code: 'REQUEST_TOO_LARGE' }); return }; chunks.push(Buffer.from(chunk)) }
       try {
         const action = JSON.parse(Buffer.concat(chunks).toString()).action
         if (action === 'cancel') await runtime?.cancel()
         else if (action === 'prepare' || action === 'retry') void runtime?.ensure().catch(() => {})
-        else { respond(400, { error: '未知操作' }); return }
+        else { respond(400, { error: 'Unknown action', message: 'Unknown action', code: 'INVALID_ACTION' }); return }
         respond(202, runtime?.status() ?? { phase: 'ready' })
-      } catch { respond(400, { error: '请求无效' }) }
+      } catch { respond(400, { error: 'Invalid request', message: 'Invalid request', code: 'INVALID_INPUT' }) }
     },
   }), 'openwrite: runtime controls'))
   ctx.inject(['webServer'], webCtx => domain.registerWebRoutes(webCtx))

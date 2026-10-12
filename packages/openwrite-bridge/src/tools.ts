@@ -146,7 +146,16 @@ function defineTool<const S extends ParameterSchemaSpec, const O extends ValueSc
       const normalized = normalize(args)
       const violations = validate(normalized)
       if (violations.length > 0) throw new ToolArgsError(violations)
-      return userExecute(normalized as never, exec)
+      try {
+        return await userExecute(normalized as never, exec)
+      } catch (error) {
+        if (!(error instanceof StudioError) || error.code.startsWith('WORKSPACE_')) throw error
+        error.message = JSON.stringify({ code: error.code, message: error.message,
+          status: error.status, details: error.details, request_id: error.requestId,
+          recovery: error.code === 'NETWORK_ERROR' ? 'List recent tasks and chapter runs before resubmitting; the server may have accepted the request.' : null,
+        })
+        throw error
+      }
     },
   }
   if (userFinalizeContent) tool.finalizeContent = (exec, result) => userFinalizeContent(exec, result)
@@ -561,9 +570,14 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'rejects the edit with a conflict if the outline changed in between. ' +
       'Operations: "rename" (node_id + title), "update_summary" (node_id + summary), ' +
       '"add_child" (node_id = parent, + title/summary/kind), "add_after" (node_id = sibling, + title/summary/kind), ' +
-      '"delete" (node_id).',
+      '"delete" (node_id, cascade=false keeps children), "promote" (remove a container), and ' +
+      '"get_meta"/"set_meta" (chapter metadata, optionally updates[] for a batch).',
     parameters: {
-      operation: { type: 'string', required: true, enum: ['rename', 'update_summary', 'add_child', 'add_after', 'delete'], description: 'The structural operation to apply.' },
+      operation: { type: 'string', required: true, enum: ['rename', 'update_summary', 'add_child', 'add_after', 'delete', 'promote', 'get_meta', 'set_meta'], description: 'The structural operation to apply.' },
+      cascade: { type: 'boolean', description: 'For delete, false removes only the container and keeps children and chapter IDs.' },
+      metadata: { type: 'json', description: 'Field object for set_meta; use target_words, beats, hooks or characters.' },
+      chapter_id: { type: 'string', description: 'Chapter ID alias for node_id in get_meta/set_meta.' },
+      updates: { type: 'json', description: 'Batch of 1-50 {chapter_id, metadata} objects for set_meta, or {chapter_id} for get_meta; one revision guards the whole batch.' },
       revision: { type: 'string', required: true, description: 'The outline revision fingerprint from a fresh novel_outline_read call.' },
       node_id: { type: 'string', description: 'Target node id (parent for add_child, sibling for add_after); not needed for add_child at root.' },
       title: { type: 'string', description: 'Node title (rename / add_child / add_after).' },
@@ -578,6 +592,10 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       if (args.node_id !== undefined) body['node_id'] = args.node_id
       if (args.title !== undefined) body['title'] = args.title
       if (args.summary !== undefined) body['summary'] = args.summary
+      if (args.cascade !== undefined) body['cascade'] = args.cascade
+      if (args.metadata !== undefined) body['metadata'] = args.metadata
+      if (args.chapter_id !== undefined) body['chapter_id'] = args.chapter_id
+      if (args.updates !== undefined) body['updates'] = args.updates
       if (args.kind !== undefined) body['kind'] = args.kind
       return await client.postJson('/api/outline/edit', body, exec.signal)
     },
@@ -702,11 +720,13 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
   ctx.tools.register(defineTool({
     name: 'novel_write_chapter',
     description:
-      'Write a chapter with OpenWrite (LONG-RUNNING, may take several minutes). Omit chapter_id to write ' +
+      'Queue a chapter write and immediately return a durable task_id. Poll novel_task_get for progress/result. Omit chapter_id to write ' +
       'the outline-recommended next chapter; a given chapter_id must match the current recommendation. ' +
       'Preview context first with novel_context_preview and consult novel_outline_read for the recommendation.',
     parameters: {
-      target_words: { type: 'integer', description: 'Target word count, 200-12000 (default 3000).' },
+      run_id_v2: { type: 'string', description: 'Resume this completed draft without generating it again.' },
+      resume_from_draft: { type: 'boolean', description: 'Resume the latest uncommitted draft for this chapter.' },
+      target_words: { type: 'integer', description: 'Target word count, 200-50000. When omitted use the outline target, then default 3000.' },
       guidance: { type: 'string', description: 'Writing guidance for this chapter (plot beats, tone, POV notes).' },
       chapter_id: { type: 'string', description: 'Chapter id to write; must equal the current outline recommendation. Omit for the next chapter.' },
       temperature: { type: 'number', description: 'Sampling temperature (default 0.7).' },
@@ -716,25 +736,19 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     timeoutMs,
     async execute(args, exec) {
       const client = clientFor(exec)
-      const targetWords = args.target_words ?? 3000
-      if (!Number.isInteger(targetWords) || targetWords < 200 || targetWords > 12000) {
-        throw new Error(`target_words must be an integer between 200 and 12000, got ${String(args.target_words)}`)
+      const targetWords = args.target_words
+      if (targetWords !== undefined && (!Number.isInteger(targetWords) || targetWords < 200 || targetWords > 50000)) {
+        throw new Error(`target_words must be an integer between 200 and 50000, got ${String(args.target_words)}`)
       }
-      const body: JsonObject = { target_words: targetWords, guidance: args.guidance ?? '' }
+      const body: JsonObject = { guidance: args.guidance ?? '' }
+      if (targetWords !== undefined) body['target_words'] = targetWords
+      if (args.run_id_v2 !== undefined) body['run_id_v2'] = args.run_id_v2
+      if (args.resume_from_draft !== undefined) body['resume_from_draft'] = args.resume_from_draft
       const chapterId = args.chapter_id?.trim()
       if (chapterId) body['chapter_id'] = chapterId
       if (args.temperature !== undefined) body['temperature'] = args.temperature
       if (args.outline_revision !== undefined) body['outline_revision'] = args.outline_revision
-      const response = await client.postJson('/api/write', body, exec.signal)
-      const writeValue = objectValue(response)
-      const writeResult = objectValue(writeValue['result'] ?? response)
-      const writtenChapterId = chapterId || String(writeResult['chapter_id'] ?? '')
-      try {
-        const dogDelivery = await deliveryForResponse(client, response, writtenChapterId, exec.signal)
-        return { ...objectValue(response), dog_delivery: dogDelivery }
-      } catch (error) {
-        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
-      }
+      return await client.postJson('/api/tasks', { type: 'chapter_write', input: body }, exec.signal)
     },
   }))
 
@@ -744,6 +758,8 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'Run OpenWrite\'s multi-dimensional review on a drafted manuscript chapter (LONG-RUNNING). ' +
       'Pass either the manuscript path (e.g. "data/manuscript/ch_0007.md") or a chapter_id like "ch_0007".',
     parameters: {
+      action: { type: 'string', enum: ['review', 'versions', 'compare'], description: 'Default review; versions lists saved reviews, compare compares a historical revision with the current review.' },
+      revision: { type: 'string', description: 'Historical review revision for compare.' },
       path: { type: 'string', description: 'Manuscript path relative to the novel data root. Takes precedence over chapter_id.' },
       chapter_id: { type: 'string', description: 'Chapter id (ch_<digits>), resolved client-side to data/manuscript/<id>.md.' },
       strict: { type: 'boolean', description: 'Enable strict review mode (default false).' },
@@ -754,6 +770,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     timeoutMs,
     async execute(args, exec) {
       const client = clientFor(exec)
+      if (args.action === 'versions' || args.action === 'compare') return await client.postJson('/api/review/history', { action: args.action, chapter_id: reviewChapterId(args), revision: args.revision ?? '' }, exec.signal)
       if (args.dimensions !== undefined && args.dimensions.some(value => !Number.isInteger(value) || value < 1 || value > 37)) {
         throw new Error('dimensions must contain only integers from 1 to 37')
       }
@@ -871,11 +888,12 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     description:
       'Stage and review revision-gated changes to an existing novel document. Use action "preview" with path and edits ' +
       'to receive an immutable preview_token and real before/after summary. Use "apply" only after author acceptance, ' +
-      'passing only that token; "reject" discards it, "retry" rebuilds it against the current source, and "undo" safely ' +
+      'passing that token and confirm: true; "reject" discards it, "retry" rebuilds it against the current source, and "undo" safely ' +
       'applies an undo_preview_token returned by a prior apply. Each edit uses old_text/new_text or unique start_text/' +
       'end_text/new_text anchors. The server rechecks the source revision and writes exactly the stored preview.',
     parameters: {
       action: { type: 'string', required: true, enum: ['preview', 'apply', 'reject', 'retry', 'undo'], description: 'Plan lifecycle action.' },
+      confirm: { type: 'boolean', description: 'Required true for apply and undo after author acceptance.' },
       path: { type: 'string', description: 'Existing document path for preview, relative to the novel root.' },
       edits: { type: 'json', description: 'Preview edits: [{old_text,new_text}] or [{start_text,end_text,new_text}].' },
       preview_token: { type: 'string', description: 'Immutable preview or undo token for apply/reject/retry/undo.' },
@@ -883,17 +901,19 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
     async execute(args, exec) {
-      if (args.action === 'preview' && (!Array.isArray(args.edits) || args.edits.length !== 1)) {
+      if (args.action === 'preview' && (!Array.isArray(args.edits) || (args.edits.length < 1 || args.edits.length > 50))) {
         throw new Error(
-          'preview requires exactly one edit so the author can accept or reject each change independently ' +
+          'preview requires between 1 and 50 edits ' +
             `(received ${describeValue(args.edits)})`,
         )
       }
       if (args.action !== 'preview' && !args.preview_token?.trim()) {
         throw new Error(`${args.action} requires preview_token`)
       }
+      if (['apply', 'undo'].includes(args.action) && args.confirm !== true) throw new Error('apply/undo requires confirm: true')
       const client = clientFor(exec)
       const body: JsonObject = { action: args.action }
+      if (args.confirm !== undefined) body['confirm'] = args.confirm
       if (args.path !== undefined) body['path'] = args.path
       if (args.edits !== undefined) body['edits'] = args.edits
       if (args.preview_token !== undefined) body['preview_token'] = args.preview_token
@@ -1329,6 +1349,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     name: 'novel_tasks_list',
     description: 'List background tasks (queued/running/finished AI jobs) with per-status counts.',
     parameters: {
+      since: { type: 'string', description: 'ISO timestamp filter for requests whose response was lost.' },
       limit: { type: 'integer', description: 'Maximum number of tasks (server default 100).' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
@@ -1337,6 +1358,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     async execute(args, exec) {
       const client = clientFor(exec)
       const params: Record<string, string> = {}
+      if (args.since !== undefined) params['since'] = args.since
       if (args.limit !== undefined) params['limit'] = String(args.limit)
       return await client.getJson('/api/tasks', params, exec.signal)
     },
@@ -1436,8 +1458,9 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
 
   ctx.tools.register(defineTool({
     name: 'novel_task_cancel',
-    description: 'Cancel a queued or running background task. Cancellation is permanent for that task; retry with novel_task_retry if the type supports it.',
+    description: 'Request cancellation of a queued or running task. Check cancelled and cancellation_status for the actual outcome; poll novel_task_get while cancellation is requested.',
     parameters: {
+      wait_seconds: { type: 'number', description: 'Wait up to 30 seconds for actual cancellation; running model calls may finish later.' },
       task_id: { type: 'string', required: true, description: 'Task id (tsk_*).' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
@@ -1445,7 +1468,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     async execute(args, exec) {
       const client = clientFor(exec)
       if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
-      return await client.postJson(`/api/tasks/${encodeURIComponent(args.task_id)}/cancel`, {}, exec.signal)
+      return await client.postJson(`/api/tasks/${encodeURIComponent(args.task_id)}/cancel`, { wait_seconds: args.wait_seconds ?? 0 }, exec.signal)
     },
   }))
 
@@ -1902,7 +1925,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     name: 'novel_writing_targets',
     description:
       'Immediate compatibility write for targets the author has already authorized exactly; otherwise use ' +
-      'novel_structured_change_plan. Update the project writing targets. Ranges: book_words 10000-5000000, chapter_words 200-12000, ' +
+      'novel_structured_change_plan. Update the project writing targets. Ranges: book_words 10000-5000000, chapter_words 200-50000, ' +
       'outline_volume_words 100-5000, outline_act_words 80-3000, outline_section_words 50-2000, ' +
       'outline_chapter_words 30-1000. Omitted fields keep their current values.',
     parameters: {
@@ -1973,11 +1996,12 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'confirm: true), "cancel" (run_id + revision, optional reason). All mutating actions are revision-gated: ' +
       'pass the run\'s current revision from a list/get call.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['list', 'get', 'record_intervention', 'update_intervention', 'cancel'], description: 'The chapter-run operation.' },
+      action: { type: 'string', required: true, enum: ['list', 'get', 'record_intervention', 'update_intervention', 'cancel', 'archive'], description: 'The chapter-run operation.' },
       run_id: { type: 'string', description: 'Run id (required for get/record_intervention/update_intervention/cancel).' },
       revision: { type: 'string', description: 'Current run revision (required for mutating actions).' },
       chapter_id: { type: 'string', description: 'Chapter filter for list.' },
       statuses: { type: 'array', items: { type: 'string' }, description: 'Status filter for list.' },
+      since: { type: 'string', description: 'ISO timestamp filter for recent runs.' },
       limit: { type: 'integer', description: 'List limit (default 20).' },
       scope: { type: 'string', description: 'Intervention scope (default "chapter").' },
       risk: { type: 'string', description: 'Intervention risk level (default "medium").' },
@@ -1998,7 +2022,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     async execute(args, exec) {
       const client = clientFor(exec)
       const body: JsonObject = { action: args.action }
-      for (const key of ['run_id', 'revision', 'chapter_id', 'statuses', 'limit', 'scope', 'risk', 'request', 'affected_items', 'rewrite_required', 'intervention_id', 'state', 'facts_revision', 'impact', 'proposal', 'confirm', 'reason'] as const) {
+      for (const key of ['run_id', 'revision', 'chapter_id', 'statuses', 'since', 'limit', 'scope', 'risk', 'request', 'affected_items', 'rewrite_required', 'intervention_id', 'state', 'facts_revision', 'impact', 'proposal', 'confirm', 'reason'] as const) {
         const value = args[key]
         if (value !== undefined) body[key] = value
       }
@@ -2115,11 +2139,11 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     description:
       'Reconcile the canonical manuscript acceptance ledger. Actions: "baseline" (accept current text as the ' +
       'initial baseline), "external" (accept a detected external edit), "resume" (continue a durable incomplete ' +
-      'operation), and "acknowledge" (record that the author reviewed the completed acceptance and impacts). ' +
+      'operation), "abandon" (release a stale operation without deleting prose), and "acknowledge" (record that the author reviewed the completed acceptance and impacts). ' +
       'Each action is mapped to the corresponding OpenWrite acceptance endpoint. Baseline, external, and ' +
       'acknowledge are confirmation-gated by the server.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['baseline', 'external', 'resume', 'acknowledge'], description: 'The reconciliation action.' },
+      action: { type: 'string', required: true, enum: ['baseline', 'external', 'resume', 'acknowledge', 'abandon'], description: 'The reconciliation action.' },
       chapter_id: { type: 'string', description: 'Optional chapter id (ch_<digits>); omit for the project-level operation.' },
       operation_id: { type: 'string', description: 'Durable operation id to resume or acknowledge.' },
       domains: { type: 'array', items: { type: 'string' }, description: 'Affected domains to acknowledge or retry; acknowledge defaults to outline and foreshadowing.' },

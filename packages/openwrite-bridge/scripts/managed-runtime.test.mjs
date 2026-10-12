@@ -38,12 +38,12 @@ test('untrusted local wheel fails before creating an environment; old active gen
   await writeFile(join(artifacts, 'core.whl'), 'tampered')
   await writeFile(join(artifacts, 'runtime-manifest.json'), JSON.stringify({ platforms: { [`${process.platform}-${process.arch}`]: {} }, wheel: { file: 'core.whl', sha256: '0'.repeat(64) }, requirements: { file: 'requirements.lock', sha256: '0'.repeat(64) } }))
   const runtime = new ManagedRuntime(root, artifacts)
-  await assert.rejects(runtime.ensure(), /校验失败/)
+  await assert.rejects(runtime.ensure(), /verification failed/)
   assert.equal(runtime.status().phase, 'error')
   assert.equal(await readFile(join(root, 'active.json'), 'utf8'), '{"generation":"old"}')
   assert.equal((await readdir(root)).includes('environments'), false)
   await runtime.dispose()
-  await assert.rejects(runtime.ensure(), /卸载/)
+  await assert.rejects(runtime.ensure(), /removed/)
 })
 
 test('interrupted downloads remove partial files; retry verifies and reuses the cache', async t => {
@@ -263,14 +263,14 @@ test('ready managed child auto-restarts with backoff; cap leaves a retryable err
   crash.value = 'after-ready'
   await stopOwnedProcess(runtime.child)
   const recovering = await waitPhase(runtime, 'recovering')
-  assert.match(recovering.message, /正在恢复/)
+  assert.match(recovering.message, /recovering/i)
   assert.match(recovering.error ?? '', /exit 7|signal/)
   const recovered = await waitPhase(runtime, 'ready')
-  assert.match(recovered.message, /不会自动重试/)
+  assert.match(recovered.message, /explicit retry/)
   assert.doesNotMatch(recovered.message, /任务恢复成功|写作任务已恢复/)
   assert.ok(delays.includes(11) || delays.includes(22))
   await waitPhase(runtime, 'error', 12_000)
-  assert.match(runtime.status().message, /手动重试/)
+  assert.match(runtime.status().message, /Retry manually/)
   assert.match(runtime.status().error ?? '', /exit 7|signal/)
   crash.value = ''
   const retried = await runtime.ensure()
@@ -307,7 +307,7 @@ test('cancel, dispose and a stale child exit do not revive or clobber a newer co
   await runtime.dispose()
   await new Promise(resolve => setTimeout(resolve, 50))
   assert.equal(recorded.filter(item => item.args.includes('tools.managed_runtime')).length, spawnsBeforeDispose)
-  await assert.rejects(runtime.ensure(), /卸载/)
+  await assert.rejects(runtime.ensure(), /removed/)
   assert.notEqual(a.baseUrl, b.baseUrl)
 })
 
@@ -449,7 +449,7 @@ test('in-flight generate is not replayed when the managed child is recovered', a
   await waitPhase(runtime, 'ready')
   assert.ok(await hungFailure)
   assert.equal((await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length, 1)
-  assert.match(runtime.status().message, /不会自动重试|已就绪/)
+  assert.match(runtime.status().message, /explicit retry|is ready/)
   assert.doesNotMatch(runtime.status().message, /任务恢复成功/)
 })
 
@@ -487,7 +487,7 @@ test('recovery start failures retry up to the cap without an unhandled rejection
   await waitPhase(runtime, 'error')
   await new Promise(resolve => setTimeout(resolve, 50))
   assert.equal(seen.length, 0)
-  assert.match(runtime.status().message, /手动重试/)
+  assert.match(runtime.status().message, /Retry manually/)
   assert.equal(runtime.status().phase, 'error')
 })
 

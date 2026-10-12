@@ -4,6 +4,8 @@ description: Query a smart-import DoG graph after a novel has been split into ch
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 拆书导入 DoG 验收
 
 `conductor/smart_import.py` 完成导入后会生成 `dog-graph.json`。这张图只验收导入

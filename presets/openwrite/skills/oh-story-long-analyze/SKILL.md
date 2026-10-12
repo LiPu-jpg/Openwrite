@@ -15,6 +15,8 @@ metadata:
       max_tool_calls: 20
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # Oh Story 长篇拆解
 
 把拆解视为只读、转化性的文学分析。先确认材料来源、用户有权使用的范围、章节边界和期望深度；材料不完整时标注限制，不用常识补齐原作事实。

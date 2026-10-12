@@ -4,6 +4,8 @@ description: Use when user wants to check writing progress, manage workflow stag
 user-invocable: false
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 工作流管理
 
 跟踪写章 → 评审 → 修订 → 应用 → 复评 → 交付。全部状态来自 OpenWrite 任务与章节工作简报，不要虚构本地阶段机，也不要调用已废弃的工作流命令。

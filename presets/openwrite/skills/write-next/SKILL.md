@@ -3,6 +3,8 @@ name: write-next
 description: 写下一章。Use when the author asks 写下一章, 续写, 生成章节, or types /write-next. Preview context then call novel_write_chapter; never overwrite existing prose.
 ---
 
+Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
+
 # 写下一章
 
 接到已有 `novel_*`。已有正文不得覆盖。

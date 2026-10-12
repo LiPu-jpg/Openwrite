@@ -46,6 +46,8 @@ const WRITABLE_PATHS = new Set([
   'manuscript/acceptance/external',
   'manuscript/acceptance/reconcile',
   'manuscript/acceptance/ack',
+  'manuscript/acceptance/abandon',
+  'review/history',
   'project/init',
   'project/metadata',
   'model',
