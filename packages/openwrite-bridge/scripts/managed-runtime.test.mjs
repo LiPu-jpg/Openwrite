@@ -267,7 +267,7 @@ test('ready managed child auto-restarts with backoff; cap leaves a retryable err
   assert.match(recovering.error ?? '', /exit 7|signal/)
   const recovered = await waitPhase(runtime, 'ready')
   assert.match(recovered.message, /explicit retry/)
-  assert.doesNotMatch(recovered.message, /任务恢复成功|写作任务已恢复/)
+  assert.doesNotMatch(recovered.message, /(?:writing|review) tasks? (?:were |was )?(?:recovered|resumed)/i)
   assert.ok(delays.includes(11) || delays.includes(22))
   await waitPhase(runtime, 'error', 12_000)
   assert.match(runtime.status().message, /Retry manually/)
@@ -449,8 +449,8 @@ test('in-flight generate is not replayed when the managed child is recovered', a
   await waitPhase(runtime, 'ready')
   assert.ok(await hungFailure)
   assert.equal((await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length, 1)
-  assert.match(runtime.status().message, /explicit retry|is ready/)
-  assert.doesNotMatch(runtime.status().message, /任务恢复成功/)
+  assert.match(runtime.status().message, /in-progress writing and review tasks require an explicit retry/)
+  assert.doesNotMatch(runtime.status().message, /(?:writing|review) tasks? (?:were |was )?(?:recovered|resumed)/i)
 })
 
 test('recovery start failures retry up to the cap without an unhandled rejection', async t => {
