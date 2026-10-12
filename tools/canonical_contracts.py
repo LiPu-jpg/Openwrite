@@ -35,7 +35,6 @@ CONTRACT_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "coverage",
         "gate_status",
         "delivery_status",
-        "production_gate_status",
     ),
     DELIVERY_SCHEMA_VERSION: ("schemaVersion", "recordType", "chapterId", "stages"),
     MODEL_PROFILE_SCHEMA_VERSION: ("id", "label", "provider", "model", "configured"),
@@ -72,7 +71,10 @@ def validate_review_v2(value: Any) -> dict[str, Any]:
     if review["delivery_status"] not in DELIVERY_STATUSES:
         raise ValueError("invalid review delivery_status")
     allowed_production = DELIVERY_STATUSES | {"disabled", "disabled_uncalibrated"}
-    if review["production_gate_status"] not in allowed_production:
+    if (
+        "production_gate_status" in review
+        and review["production_gate_status"] not in allowed_production
+    ):
         raise ValueError("invalid review production_gate_status")
     coverage = review["coverage"]
     if (

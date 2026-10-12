@@ -443,7 +443,16 @@ def aggregate_review(
     )
     if blocked:
         delivery_status = "blocked"
-    elif gate_inconclusive or coverage < min_coverage or quality_score is None:
+    elif (
+        gate_inconclusive
+        or coverage < min_coverage
+        or quality_score is None
+        or any(
+            criterion["status"] == "inconclusive"
+            for domain in normalized_domains
+            for criterion in domain["criteria"]
+        )
+    ):
         delivery_status = "inconclusive"
     elif quality_score >= quality_threshold:
         delivery_status = "pass"
@@ -471,7 +480,7 @@ def aggregate_review(
             "status": normalized_calibration,
             "production_gate_enabled": bool(production_gate_enabled),
         },
-        "production_gate_status": production_gate_status,
+        **({"production_gate_status": production_gate_status} if production_gate_enabled else {}),
         "gate_status": gate_status,
         "delivery_status": delivery_status,
         "domains": normalized_domains,

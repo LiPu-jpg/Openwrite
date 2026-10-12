@@ -86,9 +86,7 @@ class ContextBuilder:
         MAX_OUTPUT_TOKENS = max(256, int(os.getenv("LLM_MAX_TOKENS", "24000")))
     except ValueError:
         MAX_OUTPUT_TOKENS = 24000
-    MAX_TOKENS = ContextBudgetPolicy(
-        CONTEXT_WINDOW_TOKENS, MAX_OUTPUT_TOKENS
-    ).input_budget_tokens
+    MAX_TOKENS = ContextBudgetPolicy(CONTEXT_WINDOW_TOKENS, MAX_OUTPUT_TOKENS).input_budget_tokens
     COMPRESSION_STRATEGY = "staircase-proportional-v3"
 
     def __init__(
@@ -179,9 +177,7 @@ class ContextBuilder:
 
         # 3. 加载出场角色
         active_characters = self._get_active_characters(chapter_id, hierarchy)
-        character_states = self._get_inline_character_states(
-            active_characters, chapter_id
-        )
+        character_states = self._get_inline_character_states(active_characters, chapter_id)
 
         # 4. 加载伏笔状态
         foreshadowing = self._get_foreshadowing_state(chapter_id)
@@ -197,15 +193,13 @@ class ContextBuilder:
 
         # 8. 提取章节目标 + 戏剧位置
         chapter_goals: List[str] = []
-        target_words = 6000
+        target_words = 3000
         emotion_arc = ""
         dramatic_context: Dict[str, str] = {}
         if current_chapter:
             chapter_goals = current_chapter.goals
             target_words = (
-                current_chapter.word_count_target
-                or current_chapter.estimated_words
-                or 6000
+                current_chapter.word_count_target or current_chapter.estimated_words or 3000
             )
             emotion_arc = current_chapter.emotional_arc or ""
 
@@ -257,9 +251,7 @@ class ContextBuilder:
             target_words=target_words,
             emotion_arc=emotion_arc,
             dramatic_context=dramatic_context,
-            scene_context=build_scene_context(
-                self.project_root, self.novel_id, chapter_id
-            ),
+            scene_context=build_scene_context(self.project_root, self.novel_id, chapter_id),
             current_state=truth.current_state,
             foreshadowing_summary=pending_hooks_str,
             ledger=truth.ledger,

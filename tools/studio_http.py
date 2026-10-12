@@ -95,18 +95,34 @@ POST_ROUTES = {
     "/api/chapter/delete-batch": StudioPostRoute("delete_chapters_batch"),
     "/api/outline/edit": StudioPostRoute("edit_outline_structure"),
     "/api/review": StudioPostRoute("review_chapter"),
+    "/api/review/history": StudioPostRoute("review_history", read_only=True),
     "/api/revisions/selection": StudioPostRoute("create_selection_revision", envelope=True),
     "/api/revisions/from-review": StudioPostRoute("create_review_revision", envelope=True),
     "/api/assets": StudioPostRoute("create_asset", envelope=True),
     "/api/assets/update": StudioPostRoute("update_asset", envelope=True),
-    "/api/assets/package/preview": StudioPostRoute("asset_package_preview", envelope=True, read_only=True),
+    "/api/assets/package/preview": StudioPostRoute(
+        "asset_package_preview", envelope=True, read_only=True
+    ),
     "/api/assets/package/import": StudioPostRoute("import_asset_package", envelope=True),
     "/api/tasks": StudioPostRoute("create_task", envelope=True),
     "/api/benchmarks": StudioPostRoute("create_benchmark", envelope=True),
     "/api/sync": StudioPostRoute("sync_project", accepts_payload=False),
     "/api/document/create": StudioPostRoute("create_document"),
-    "/api/document/change-plan": StudioPostRoute("document_change_plan", envelope=True, read_only_actions=frozenset({"preview"}), default_action="preview"),
-    "/api/structured/change-plan": StudioPostRoute("structured_change_plan", envelope=True, read_only_actions=frozenset({"preview"}), default_action="preview"),
+    "/api/document/change-plan": StudioPostRoute(
+        "document_change_plan",
+        envelope=True,
+        read_only_actions=frozenset({"preview"}),
+        default_action="preview",
+    ),
+    "/api/manuscript/acceptance/abandon": StudioPostRoute(
+        "abandon_manuscript_acceptance", envelope=True
+    ),
+    "/api/structured/change-plan": StudioPostRoute(
+        "structured_change_plan",
+        envelope=True,
+        read_only_actions=frozenset({"preview"}),
+        default_action="preview",
+    ),
     "/api/import": StudioPostRoute("import_text"),
     "/api/import/preview": StudioPostRoute("preview_import", read_only=True),
     "/api/manuscript-imports/prepare": StudioPostRoute("prepare_manuscript_import", envelope=True),
@@ -125,12 +141,8 @@ POST_ROUTES = {
     "/api/project-archives/restore": StudioPostRoute("restore_project_archive", envelope=True),
     "/api/foreshadowing": StudioPostRoute("manage_foreshadowing"),
     "/api/reading-order/move": StudioPostRoute("move_reading_order", envelope=True),
-    "/api/scenes/migration/apply": StudioPostRoute(
-        "apply_scene_migration", envelope=True
-    ),
-    "/api/scenes/migration/rollback": StudioPostRoute(
-        "rollback_scene_migration", envelope=True
-    ),
+    "/api/scenes/migration/apply": StudioPostRoute("apply_scene_migration", envelope=True),
+    "/api/scenes/migration/rollback": StudioPostRoute("rollback_scene_migration", envelope=True),
     "/api/scenes/metadata": StudioPostRoute("update_scene_metadata", envelope=True),
     "/api/scenes/move": StudioPostRoute("move_scene", envelope=True),
     "/api/chat": StudioPostRoute("chat_turn"),
@@ -393,9 +405,7 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/reading-order":
                 self.app.require_project()
-                self._json(
-                    studio_success_payload(self.app.reading_order(), self.request_id)
-                )
+                self._json(studio_success_payload(self.app.reading_order(), self.request_id))
                 return
             if parsed.path == "/api/reading-packet":
                 self.app.require_project()
@@ -408,23 +418,17 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                         "连续阅读窗口必须是整数",
                         code="READING_PACKET_RANGE_INVALID",
                     ) from exc
-                result = self.app.reading_packet(
-                    params.get("document_id", [""])[0], before, after
-                )
+                result = self.app.reading_packet(params.get("document_id", [""])[0], before, after)
                 self._json(studio_success_payload(result, self.request_id))
                 return
             if parsed.path == "/api/scenes":
                 self.app.require_project()
-                self._json(
-                    studio_success_payload(self.app.scene_structure(), self.request_id)
-                )
+                self._json(studio_success_payload(self.app.scene_structure(), self.request_id))
                 return
             if parsed.path == "/api/scenes/migration-preview":
                 self.app.require_project()
                 self._json(
-                    studio_success_payload(
-                        self.app.scene_migration_preview(), self.request_id
-                    )
+                    studio_success_payload(self.app.scene_migration_preview(), self.request_id)
                 )
                 return
             chapter_scenes_match = re.fullmatch(
@@ -435,9 +439,7 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 self.app.require_project()
                 self._json(
                     studio_success_payload(
-                        self.app.chapter_scenes(
-                            chapter_scenes_match.group("chapter_id")
-                        ),
+                        self.app.chapter_scenes(chapter_scenes_match.group("chapter_id")),
                         self.request_id,
                     )
                 )
@@ -552,7 +554,9 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                     limit = int(raw_limit)
                 except ValueError as exc:
                     raise StudioError("任务数量必须是整数", code="INVALID_INPUT") from exc
-                result = self.app.task_surface(limit)
+                result = self.app.task_surface(
+                    limit, since=parse_qs(parsed.query).get("since", [""])[0]
+                )
                 self._json(studio_success_payload(result, self.request_id))
                 return
             task_match = re.fullmatch(

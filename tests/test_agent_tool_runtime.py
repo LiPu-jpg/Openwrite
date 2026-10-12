@@ -716,16 +716,14 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
     assert applied["mutation_summary"]["source_revision"].startswith("sha256:")
     assert applied["mutation_summary"]["result_revision"].startswith("sha256:")
     assert applied["undo_preview_token"]
-    assert "新动机：查清幽都转轮府与回响异动的关联。" in hero.read_text(
-        encoding="utf-8"
-    )
+    assert "新动机：查清幽都转轮府与回响异动的关联。" in hero.read_text(encoding="utf-8")
     reused = executors["edit_project_document"](
         {"preview_token": preview["preview_token"], "confirm": True}
     )
     assert reused["error"] == "document_preview_invalid"
 
     undone = executors["edit_project_document"](
-        {"action": "undo", "preview_token": applied["undo_preview_token"]}
+        {"action": "undo", "preview_token": applied["undo_preview_token"], "confirm": True}
     )
     assert undone["ok"] is True
     assert undone["applied"] is True
@@ -762,18 +760,19 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
     )
     assert rejected["status"] == "rejected"
     rejected_apply = executors["edit_project_document"](
-        {"action": "apply", "preview_token": retried["preview_token"]}
+        {"action": "apply", "preview_token": retried["preview_token"], "confirm": True}
     )
     assert rejected_apply["error"] == "document_preview_invalid"
 
     quote_document = novel_root / "src" / "world" / "quote_rules.md"
     quote_document.write_text(
-        '守门人说：“门后的名字不能写错。”\n下一条规则保持不变。\n',
+        "守门人说：“门后的名字不能写错。”\n下一条规则保持不变。\n",
         encoding="utf-8",
     )
     normalized_preview = executors["edit_project_document"](
         {
             "path": "src/world/quote_rules.md",
+            "faithful": False,
             "edits": [
                 {
                     "old_text": '守门人说：  "门后的名字不能写错。"',
@@ -789,12 +788,13 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
 
     ambiguous_quotes = novel_root / "src" / "world" / "ambiguous_quotes.md"
     ambiguous_quotes.write_text(
-        '“这句话足够长且出现两次。”\n“这句话足够长且出现两次。”\n',
+        "“这句话足够长且出现两次。”\n“这句话足够长且出现两次。”\n",
         encoding="utf-8",
     )
     ambiguous_normalized = executors["edit_project_document"](
         {
             "path": "src/world/ambiguous_quotes.md",
+            "faithful": False,
             "edits": [
                 {
                     "old_text": '"这句话足够长且出现两次。"',
@@ -857,6 +857,7 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
     automatic_preview = executors["edit_project_document"](
         {
             "path": "src/world/automatic_range.md",
+            "faithful": False,
             "edits": [
                 {
                     "old_text": inaccurate_long_text,
@@ -870,20 +871,17 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
     assert automatic_preview["edits"][0]["automatic"] is True
     assert automatic_preview["edits"][0]["anchor_chars"] == 12
 
-    folded_ambiguous_document = (
-        novel_root / "src" / "world" / "folded_ambiguous_range.md"
-    )
+    folded_ambiguous_document = novel_root / "src" / "world" / "folded_ambiguous_range.md"
     repeated_start = "S" * 48
     unique_end = "E" * 48
     folded_ambiguous_document.write_text(
-        f"{repeated_start}{'甲' * 60}\n"
-        f"{repeated_start}{'乙' * 60}\n"
-        f"{'丙' * 60}{unique_end}\n",
+        f"{repeated_start}{'甲' * 60}\n{repeated_start}{'乙' * 60}\n{'丙' * 60}{unique_end}\n",
         encoding="utf-8",
     )
     folded_ambiguous = executors["edit_project_document"](
         {
             "path": "src/world/folded_ambiguous_range.md",
+            "faithful": False,
             "edits": [
                 {
                     "old_text": (
@@ -920,9 +918,7 @@ summary = "沈烛在回响中逐渐掌握的感知能力。"
     assert ambiguous["error"] == "ambiguous_text_range"
     assert "不应写入" not in ambiguous_document.read_text(encoding="utf-8")
 
-    candidates = executors["search_relation_targets"](
-        {"query": "沈烛 出身 能力", "limit": 10}
-    )
+    candidates = executors["search_relation_targets"]({"query": "沈烛 出身 能力", "limit": 10})
     candidate_ids = {candidate["id"] for candidate in candidates["candidates"]}
     assert {"hero", "birth_city", "echo_ability"}.issubset(candidate_ids)
 

@@ -133,7 +133,12 @@ def _collection_item_hint(hint: str) -> str:
 
 
 def _py_literal(values: list[Any]) -> str:
-    parts = ["None" if value is None else json.dumps(value, ensure_ascii=False) for value in values]
+    parts = [
+        repr(value)
+        if value is None or isinstance(value, bool)
+        else json.dumps(value, ensure_ascii=False)
+        for value in values
+    ]
     return "Literal[" + ", ".join(parts) + "]"
 
 

@@ -99,13 +99,20 @@ class ChapterRunV2Store:
         chapter_id: str = "",
         statuses: set[str] | None = None,
         limit: int = 50,
+        since: str = "",
     ) -> list[ChapterRunV2Manifest]:
+        if since:
+            cutoff = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            since = (cutoff.replace(tzinfo=timezone.utc) if cutoff.tzinfo is None
+                     else cutoff.astimezone(timezone.utc)).isoformat()
         if not self.root.is_dir():
             return []
         result: list[ChapterRunV2Manifest] = []
         for path in self.root.glob("runv2_*.json"):
             manifest = self.load(path.stem)
             if manifest is None:
+                continue
+            if manifest.archived or since and manifest.created_at < since:
                 continue
             if chapter_id and manifest.chapter_id != chapter_id:
                 continue
@@ -275,6 +282,9 @@ class ChapterRunV2Store:
         return manifest
 
     def assert_accepts_result(self, manifest: ChapterRunV2Manifest) -> None:
+        current = self.load(manifest.run_id)
+        if current and current.cancel_requested:
+            manifest.cancel_requested = True
         if manifest.cancel_requested or manifest.status == "cancelled":
             raise ChapterRunV2Error("运行已取消，拒绝晚到模型结果", code="LATE_RESULT_REJECTED")
 
@@ -453,6 +463,9 @@ class ChapterRunV2Store:
 
     def save(self, manifest: ChapterRunV2Manifest) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
+        existing = self.load(manifest.run_id)
+        if existing and existing.cancel_requested:
+            manifest.cancel_requested = True
         target = self.path_for(manifest.run_id)
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -583,6 +596,7 @@ def chapter_run_v2_action(
             chapter_id=str(payload.get("chapter_id") or ""),
             statuses=statuses,
             limit=int(payload.get("limit") or 20),
+            since=str(payload.get("since") or ""),
         )
         return {
             "runs": [store.payload(run) for run in runs],
@@ -599,6 +613,14 @@ def chapter_run_v2_action(
         return store.payload(manifest)
 
     store.require_revision(manifest, str(payload.get("revision") or ""))
+    if action == "archive":
+        if any(stage.status == "running" for stage in manifest.stages.values()):
+            raise ChapterRunV2Error(
+                "Cannot archive a running stage; cancel and wait first", code="RUN_ACTIVE"
+            )
+        manifest.archived = True
+        store.save(manifest)
+        return {"run": store.payload(manifest), "archived": True}
     if action in {"record_intervention", "intervene"}:
         intervention = store.add_intervention(
             manifest,
@@ -646,6 +668,13 @@ def chapter_run_v2_action(
                 ),
             }
         store.request_cancel(manifest, reason=str(payload.get("reason") or "user_cancelled"))
-        store.finalize_cancel(manifest)
-        return {"run": store.payload(manifest), "cancelled": True}
+        active = any(stage.status == "running" for stage in manifest.stages.values())
+        if not active:
+            store.finalize_cancel(manifest)
+        return {
+            "run": store.payload(manifest),
+            "cancelled": not active,
+            "cancel_requested": True,
+            "cancellation_status": "requested" if active else "cancelled",
+        }
     raise ChapterRunV2Error(f"未知 Chapter Run V2 操作: {action}", code="INVALID_RUN_ACTION")

@@ -9,19 +9,59 @@
     "quality_score",
     "coverage",
     "gate_status",
-    "delivery_status",
-    "production_gate_status"
+    "delivery_status"
   ],
   "additionalProperties": true,
   "properties": {
-    "schema_version": {"const": "openwrite.review.v2"},
-    "execution_status": {"enum": ["completed", "partial", "failed"]},
-    "quality_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
-    "gate_status": {"enum": ["pass", "blocked", "inconclusive"]},
-    "delivery_status": {"enum": ["pass", "revise", "blocked", "inconclusive", "stale"]},
+    "schema_version": {
+      "const": "openwrite.review.v2"
+    },
+    "execution_status": {
+      "enum": [
+        "completed",
+        "partial",
+        "failed"
+      ]
+    },
+    "quality_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "coverage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "gate_status": {
+      "enum": [
+        "pass",
+        "blocked",
+        "inconclusive"
+      ]
+    },
+    "delivery_status": {
+      "enum": [
+        "pass",
+        "revise",
+        "blocked",
+        "inconclusive",
+        "stale"
+      ]
+    },
     "production_gate_status": {
-      "enum": ["pass", "revise", "blocked", "inconclusive", "stale", "disabled", "disabled_uncalibrated"]
+      "enum": [
+        "pass",
+        "revise",
+        "blocked",
+        "inconclusive",
+        "stale",
+        "disabled",
+        "disabled_uncalibrated"
+      ]
     }
   }
 }

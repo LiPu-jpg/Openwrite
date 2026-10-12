@@ -216,15 +216,15 @@ class WriterAgent(BaseAgent):
 
         # 长度不达标时循环反馈字数差让模型自纠（最多 3 次续写）
         minimum_words = max(1, int(target_words * 0.8))
-        maximum_words = max(minimum_words, int(target_words * 1.2))
+        maximum_words = max(minimum_words, int(target_words * 1.5))
         current_content = response.content
         final_response = response
         all_usage = [first_usage]
 
         for attempt in range(3):
-            word_count = self._parse_creative_output(
-                current_content, chapter_number, {}
-            )["word_count"]
+            word_count = self._parse_creative_output(current_content, chapter_number, {})[
+                "word_count"
+            ]
             if minimum_words <= word_count <= maximum_words:
                 break
             comparison = "低于" if word_count < minimum_words else "超过"
@@ -276,9 +276,7 @@ class WriterAgent(BaseAgent):
                 raise
             # 精简重试已耗尽：保留最后一版正文（去水/分章可由人工处理），
             # 标记后回流给调用方，而不是丢弃整份初稿。
-            parsed = self._parse_creative_output(
-                current_content, chapter_number, merged_usage
-            )
+            parsed = self._parse_creative_output(current_content, chapter_number, merged_usage)
             parsed["length_out_of_range"] = True
             parsed["length_warning"] = str(exc)
         parsed.update(
@@ -337,7 +335,7 @@ class WriterAgent(BaseAgent):
         # 章节信息
         parts.append(f"# 第{chapter_number}章写作任务\n")
         minimum_words = max(1, int(target_words * 0.8))
-        maximum_words = max(minimum_words, int(target_words * 1.2))
+        maximum_words = max(minimum_words, int(target_words * 1.5))
         parts.append(
             f"目标字数：约{target_words}字；正文必须控制在"
             f"{minimum_words}-{maximum_words}字内（中文字符与外文单词，"
@@ -444,32 +442,56 @@ class WriterAgent(BaseAgent):
         if not str(content or "").strip():
             raise RuntimeError("empty model reply")
 
+        content = re.sub(
+            r"<(?:think|analysis|reasoning)\b[^>]*>.*?</(?:think|analysis|reasoning)>",
+            "",
+            content,
+            flags=re.I | re.S,
+        ).strip()
+        if re.search(r"<(?:think|analysis|reasoning)\b", content, re.I):
+            from ..llm.response import ProviderResponseError
+
+            raise ProviderResponseError(
+                "MANUSCRIPT_STRUCTURE_INVALID", "Unclosed reasoning block in model output"
+            )
+
         # 尝试提取标题
         title_match = re.search(
             r"^#{1,6}\s*第\s*[0-9零〇一二三四五六七八九十百千两]+\s*章"
-            r"\s*[:：\-—]?\s*(.*?)\s*$",
+            r"\s*[:：\-—]?\s*(.*?)\s*$|^#{1,6}\s*Chapter\s+[\dIVXLC]+\s*[:：\-—]?\s*(.*?)\s*$",
             content,
             re.MULTILINE,
         )
         if title_match:
-            title = title_match.group(1).strip() or f"第{chapter_number}章"
+            if content[: title_match.start()].strip():
+                from ..llm.response import ProviderResponseError
+
+                raise ProviderResponseError(
+                    "MANUSCRIPT_STRUCTURE_INVALID", "Unexpected preamble before chapter heading"
+                )
+            title = (title_match.group(1) or "").strip() or f"第{chapter_number}章"
+            if title_match.group(2) is not None:
+                title = title_match.group(0).lstrip("# ").strip()
             body = content[title_match.end() :].strip()
         else:
-            title = f"第{chapter_number}章"
-            body = content.strip()
+            from ..llm.response import ProviderResponseError
+
+            raise ProviderResponseError(
+                "MANUSCRIPT_STRUCTURE_INVALID", "Model output must begin with a chapter heading"
+            )
 
         body = normalize_character_state_annotation_fences(body).strip()
         word_count = count_writing_units(body)
         if target_words > 0:
             minimum_words = max(1, int(target_words * 0.8))
-            maximum_words = max(minimum_words, int(target_words * 1.2))
+            maximum_words = max(minimum_words, int(target_words * 1.5))
             if word_count < minimum_words or word_count > maximum_words:
                 from ..llm.response import ProviderResponseError
 
                 raise ProviderResponseError(
                     "CHAPTER_LENGTH_OUT_OF_RANGE",
                     f"正文约 {word_count} 字（不含标题和内联批注），不在目标区间 "
-                    f"{minimum_words}-{maximum_words} 内",
+                    f"{minimum_words}-{maximum_words} 内; suggested_target_words={max(200, int(word_count / 1.5) + 1)}",
                 )
 
         return {

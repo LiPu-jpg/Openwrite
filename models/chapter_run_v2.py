@@ -59,9 +59,9 @@ class ChapterRunV2Manifest(BaseModel):
     run_id: str
     novel_id: str
     chapter_id: str
-    status: Literal[
-        "running", "drafted", "committed", "reviewed", "failed", "cancelled"
-    ] = "running"
+    status: Literal["running", "drafted", "committed", "reviewed", "failed", "cancelled"] = (
+        "running"
+    )
     created_at: str
     updated_at: str
     requested_target_words: int = 0
@@ -74,3 +74,6 @@ class ChapterRunV2Manifest(BaseModel):
     interventions: tuple[InterventionV1, ...] = ()
     stop_reason: str = ""
     cancel_requested: bool = False
+    archived: bool = False
+    requested_model: str = ""
+    target_words_source: str = ""

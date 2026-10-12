@@ -28,6 +28,7 @@ class RuntimeDiagnosticsService:
         "foreshadowing",
         "outline",
         "runtime_skills",
+        "transport",
     )
 
     def __init__(self, project_root: Path, novel_id: str) -> None:
@@ -45,6 +46,7 @@ class RuntimeDiagnosticsService:
         findings.extend(self._context_findings())
         findings.extend(self._timeline_findings())
         findings.extend(self._skill_findings())
+        findings.extend(self._transport_findings())
         payload = [item.model_dump(mode="json") for item in findings]
         revision = self._hash(payload)
         return RuntimeDiagnosticReportV1(
@@ -55,6 +57,62 @@ class RuntimeDiagnosticsService:
             sources=self.SOURCES,
             findings=tuple(findings),
         )
+
+    def _transport_findings(self) -> list[RuntimeDiagnosticFindingV1]:
+        from tools.chapter_run_v2 import ChapterRunV2Store
+
+        findings = []
+        root = self.project_root / ".openwrite" / "transport-errors"
+        if root.is_dir():
+            paths = sorted(
+                root.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+            )[:20]
+            for path in paths:
+                try:
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                findings.append(
+                    self._finding(
+                        "transport_error",
+                        "warning",
+                        "Tool transport failed",
+                        "The backend may already have accepted this request. Inspect recent tasks/runs before submitting again.",
+                        [str(record.get("tool_call_id") or path.stem)],
+                        [
+                            ("transport", "code", record.get("code")),
+                            ("transport", "path", record.get("path")),
+                            ("transport", "created_at", record.get("created_at")),
+                        ],
+                        "open_tasks",
+                        {},
+                    )
+                )
+        from tools.task_store import TaskStore
+
+        tasks = TaskStore(self.project_root, self.novel_id).list(limit=500)
+        for run in ChapterRunV2Store(self.project_root, self.novel_id).list(
+            statuses={"running"}, limit=100
+        ):
+            if not any(stage.status == "running" for stage in run.stages.values()):
+                continue
+            if not any(
+                task.get("status") == "running" and task.get("chapter_id") in {"", run.chapter_id}
+                for task in tasks
+            ):
+                findings.append(
+                    self._finding(
+                        "orphan_chapter_run",
+                        "warning",
+                        "Chapter run has no active task",
+                        "This may be a synchronous request that disconnected. Inspect the run and lock owner before retrying.",
+                        [run.chapter_id, run.run_id],
+                        [("transport", "run_id", run.run_id)],
+                        "open_chapter_run",
+                        {"run_id": run.run_id},
+                    )
+                )
+        return findings
 
     def _task_findings(self, stuck_minutes: int) -> list[RuntimeDiagnosticFindingV1]:
         from tools.task_store import TaskStore
@@ -82,10 +140,14 @@ class RuntimeDiagnosticsService:
                         {"task_id": task.get("task_id")},
                     )
                 )
-        failed = [task for task in tasks if task.get("status") == "failed"]
+        failed = [
+            task
+            for task in tasks
+            if task.get("status") == "failed"
+            and (task.get("error") or {}).get("code") != "PROJECT_BUSY"
+        ]
         groups = Counter(
-            (str(task.get("type") or ""), str(task.get("chapter_id") or ""))
-            for task in failed
+            (str(task.get("type") or ""), str(task.get("chapter_id") or "")) for task in failed
         )
         for (task_type, chapter_id), count in groups.items():
             if count < 2:
@@ -133,7 +195,7 @@ class RuntimeDiagnosticsService:
                         {"run_id": run.run_id},
                     )
                 )
-            if stale:
+            if stale and run.status == "running":
                 findings.append(
                     self._finding(
                         "chapter_stage_stale",

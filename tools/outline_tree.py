@@ -101,6 +101,9 @@ def mutate_outline_structure(
     title: str = "",
     summary: str = "",
     kind: str = "",
+    cascade: bool = True,
+    metadata: dict[str, Any] | None = None,
+    updates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Prepare one revision-checked, local structural edit to ``outline.md``.
 
@@ -123,10 +126,94 @@ def mutate_outline_structure(
     target = by_id.get(node_id)
     operation = str(operation or "").strip()
     kind = str(kind or "").strip()
-    lines = outline_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    lines = outline_path.read_bytes().decode("utf-8").splitlines(keepends=True)
     selection_hint: dict[str, Any] = {}
 
-    if operation == "rename":
+    if operation in {"get_meta", "set_meta"}:
+        batch = updates if updates is not None else [{"node_id": node_id, "metadata": metadata}]
+        if (
+            not isinstance(batch, list)
+            or not 1 <= len(batch) <= 50
+            or any(not isinstance(item, dict) for item in batch)
+        ):
+            raise OutlineEditError("Metadata updates must contain 1-50 chapter objects")
+        targets = [str(item.get("node_id") or item.get("chapter_id") or "") for item in batch]
+        if len(set(targets)) != len(targets) or any(key not in by_id for key in targets):
+            raise OutlineEditError("Metadata chapters must exist and be unique")
+        results = {}
+        # Work backwards so edits do not shift subsequent chapter line offsets.
+        for item in sorted(
+            batch,
+            key=lambda entry: int(
+                by_id[str(entry.get("node_id") or entry.get("chapter_id"))]["line"]
+            ),
+            reverse=True,
+        ):
+            target = _editable_target(
+                by_id.get(str(item.get("node_id") or item.get("chapter_id") or ""))
+            )
+            metadata = item.get("metadata")
+            if target["kind"] != "chapter":
+                raise OutlineEditError("Metadata actions require a chapter node")
+            start = int(target["line"])
+            end = _direct_body_end(lines, start)
+            body = "".join(lines[start:end])
+            labels = {
+                "target_words": "预估字数",
+                "beats": "节拍",
+                "hooks": "悬念",
+                "characters": "涉及人物",
+            }
+            values: dict[str, Any] = {}
+            for key, label in labels.items():
+                match = re.search(rf"^>\s*{label}\s*[:：]\s*(.*?)\s*$", body, re.M)
+                if match:
+                    values[key] = (
+                        int(match.group(1).replace(",", ""))
+                        if key == "target_words"
+                        else match.group(1)
+                    )
+            if operation == "set_meta":
+                if not isinstance(metadata, dict) or not metadata or set(metadata) - set(labels):
+                    raise OutlineEditError("metadata requires supported chapter fields")
+                for key, value in metadata.items():
+                    if key == "target_words":
+                        from tools.writing_policy import resolve_target_words
+
+                        value = resolve_target_words(value)["target_words"]
+                    elif not isinstance(value, str) or "\n" in value or "\r" in value:
+                        raise OutlineEditError("Metadata text must be a single line")
+                    pattern = rf"^>\s*{labels[key]}\s*[:：].*$"
+                    replacement = f"> {labels[key]}: {value}"
+                    if re.search(pattern, body, re.M):
+                        body = re.sub(pattern, lambda _match: replacement, body, flags=re.M)
+                    else:
+                        body = body.rstrip("\r\n") + "\n" + replacement + "\n\n"
+                    values[key] = value
+                lines[start:end] = body.splitlines(keepends=True)
+            results[target["id"]] = values
+        validate_outline_targets("".join(lines))
+        return {
+            "content": "".join(lines),
+            "metadata": results if updates is not None else values,
+            "message": "Chapter metadata read"
+            if operation == "get_meta"
+            else "Chapter metadata updated",
+            "selection_hint": {"kind": "chapter", "title": target["title"], "line": target["line"]},
+        }
+    elif operation == "promote" or operation == "delete" and not cascade:
+        target = _editable_target(target)
+        if target["kind"] == "chapter":
+            raise OutlineEditError("Use cascade=true to delete a chapter")
+        # Retain heading levels: levels identify node kinds in this format.
+        # The tree attaches surviving children to their nearest ancestor.
+        start = int(target["line"]) - 1
+        end = _direct_body_end(lines, start + 1)
+        del lines[start:end]
+        selection_hint = {"parent_id": target.get("parent_id", "")}
+        renumbered, skipped = [], []
+        message = "Container removed; child chapter IDs and prose preserved"
+    elif operation == "rename":
         target = _editable_target(target)
         clean_title = _validate_title(title, target["kind"])
         if target["kind"] == "chapter":
@@ -150,7 +237,13 @@ def mutate_outline_structure(
         clean_summary = _validate_summary(summary)
         start = int(target["line"])
         end = _direct_body_end(lines, start)
-        summary_start, summary_end = _direct_summary_span(lines, start, end)
+        # A complete node body replaces its metadata too. A prose-only synopsis
+        # updates only prose and retains execution metadata for existing clients.
+        summary_start, summary_end = (
+            (start, end)
+            if any(_is_structured_outline_line(line) for line in clean_summary.splitlines())
+            else _direct_summary_span(lines, start, end)
+        )
         lines[summary_start:summary_end] = _summary_block(
             clean_summary,
             has_following=summary_end < len(lines),
@@ -226,13 +319,34 @@ def mutate_outline_structure(
     else:
         raise OutlineEditError("不支持的大纲编辑操作")
 
+    updated = "".join(lines)
+    validate_outline_targets(updated)
     return {
-        "content": "".join(lines),
+        "content": updated,
         "message": message,
         "selection_hint": selection_hint,
         "renumbered": renumbered if operation == "delete" else [],
         "skipped_renumbering": skipped if operation == "delete" else [],
     }
+
+
+def validate_outline_targets(content: str) -> None:
+    """Validate chapter targets without applying chapter limits to volume totals."""
+    in_chapter = False
+    for line in content.splitlines():
+        heading = HEADING_RE.match(line.strip())
+        if heading:
+            in_chapter = len(heading.group(1)) == 4
+        if not in_chapter:
+            continue
+        match = re.search(r"(?:预估字数|目标字数|target_words)\s*[:：]\s*([^\s]+)", line, re.I)
+        if match:
+            from tools.writing_policy import resolve_target_words
+
+            try:
+                resolve_target_words(int(match.group(1).replace(",", "")))
+            except ValueError as exc:
+                raise OutlineEditError(str(exc)) from exc
 
 
 def _parse_tree(
@@ -702,7 +816,9 @@ def _explicit_chapter_target(content: str) -> int:
     if not match:
         return 0
     value = int(match.group(1).replace(",", ""))
-    return value if 200 <= value <= 12_000 else 0
+    from tools.writing_policy import MIN_TARGET_WORDS, MAX_TARGET_WORDS
+
+    return value if MIN_TARGET_WORDS <= value <= MAX_TARGET_WORDS else 0
 
 
 def _canonical_chapter_id(value: str) -> str:

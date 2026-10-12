@@ -234,7 +234,7 @@ def test_ab_roots_are_isolated(tmp_path: Path, opener):
             base,
             "POST",
             "/api/tasks",
-            {"type": "chapter_write", "input": {"chapter_id": "ch_002", "target_words": 10}},
+            {"type": "chapter_write", "input": {"chapter_id": "ch_002", "target_words": 200}},
             {**WRITE_HEADERS, **_context_headers(root_a)},
         )
         assert status == 200, created
@@ -507,7 +507,7 @@ def test_task_records_are_pinned_to_their_root(tmp_path: Path, opener):
             base,
             "POST",
             "/api/tasks",
-            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 10}},
+            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 200}},
             {**WRITE_HEADERS, **headers_a},
         )
         assert status == 200, created
@@ -613,7 +613,7 @@ def test_task_mutation_routes_reject_foreign_roots(tmp_path: Path, opener):
             base,
             "POST",
             "/api/tasks",
-            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 10}},
+            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 200}},
             {**WRITE_HEADERS, **headers_a},
         )
         assert status == 200, created

@@ -139,14 +139,17 @@ def test_metadata_cannot_satisfy_writer_minimum_length():
 
 def test_writer_length_retry_uses_same_reader_count_as_final_parse():
     writer = WriterAgent.__new__(WriterAgent)
-    responses = iter([
-        SimpleNamespace(
-            content="# 第一章：标题也不是正文\n\n" + "文" * 79
-            + f"\n```text\n{STATE}\n```",
-            usage={"total_tokens": 10},
-        ),
-        SimpleNamespace(content="文" * 100 + f"\n{STATE}", usage={"total_tokens": 20}),
-    ])
+    responses = iter(
+        [
+            SimpleNamespace(
+                content="# 第一章：标题也不是正文\n\n" + "文" * 79 + f"\n```text\n{STATE}\n```",
+                usage={"total_tokens": 10},
+            ),
+            SimpleNamespace(
+                content="# 第一章 修订\n\n" + "文" * 100 + f"\n{STATE}", usage={"total_tokens": 20}
+            ),
+        ]
+    )
     calls = []
 
     def chat(*, messages, **kwargs):

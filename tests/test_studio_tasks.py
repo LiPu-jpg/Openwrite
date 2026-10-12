@@ -493,13 +493,13 @@ def test_studio_task_error_dto_carries_code_and_recoverable_without_extras(tmp_p
             opener,
             base,
             "/api/tasks",
-            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 10}},
+            {"type": "chapter_write", "input": {"chapter_id": "ch_001", "target_words": 200}},
         )
         assert status == 200, created
         failed = _wait_http_task(opener, base, created["data"]["task_id"], {"failed"})
         error = failed["error"]
         assert error["code"] == "TASK_FAILED"
-        assert error["message"] == "模型超时"
+        assert error["message"] == "Task failed (TASK_FAILED)"
         assert error["recoverable"] is True
         # The wire error carries only the documented fields: no stack traces,
         # environment dumps, or other secret-bearing material.

@@ -530,9 +530,13 @@ class NovelApplicationService:
         manifest = build_context_manifest(self.novel_root, manifest_packet)
         manifest["generation_budget"] = dict(getattr(generation, "compression", {}) or {})
         manifest["retrieval"] = dict(generation.semantic_retrieval)
+        from tools.writing_policy import resolve_target_words
+
+        target_policy = resolve_target_words(outline=packet.get("target_words"))
         result = {
+            **target_policy,
             "chapter_id": target,
-            "target_words": int(packet.get("target_words") or 0),
+            "target_words": target_policy["target_words"],
             "characters": list((packet.get("character_documents") or {}).keys()),
             "markdown": str(packet.get("outline") or ""),
             "character_states": generation.character_states,
@@ -607,7 +611,26 @@ class NovelApplicationService:
             acceptance.require_current(chapter_id)
         except ManuscriptAcceptanceError as exc:
             raise NovelServiceError(str(exc), code=exc.code, details=exc.details) from exc
-        if any(
+        resume_id = str(payload.get("run_id_v2") or "").strip()
+        if payload.get("resume_from_draft") and not resume_id:
+            from tools.chapter_run_v2 import ChapterRunV2Store
+
+            latest = ChapterRunV2Store(self.project_root, self.novel_id).latest_for_chapter(
+                chapter_id
+            )
+            if latest and latest.status == "drafted":
+                resume_id = latest.run_id
+            else:
+                raise NovelServiceError("No resumable draft found", code="RUN_NOT_RESUMABLE")
+        if resume_id:
+            from tools.chapter_run_v2 import ChapterRunV2Store
+
+            run = ChapterRunV2Store(self.project_root, self.novel_id).load(resume_id)
+            if not run or run.chapter_id != chapter_id or run.status != "drafted":
+                raise NovelServiceError(
+                    "Run is not a resumable draft for this chapter", code="RUN_NOT_RESUMABLE"
+                )
+        if not resume_id and any(
             path.is_file()
             for path in (self.novel_root / "data" / "manuscript").glob(f"**/{chapter_id}.md")
         ):
@@ -616,22 +639,48 @@ class NovelApplicationService:
                 code="CHAPTER_ALREADY_EXISTS",
             )
         args = dict(payload)
+        if resume_id:
+            args["run_id_v2"] = resume_id
         args["chapter_id"] = chapter_id
         args.setdefault("context_packet", self.assemble_packet(chapter_id))
         args["guidance"] = str(args.get("guidance") or "").strip()
-        args["target_words"] = self._positive_int(args.get("target_words"))
+        from tools.writing_policy import resolve_target_words
+
+        target_policy = resolve_target_words(
+            args.get("target_words"), args["context_packet"].get("target_words")
+        )
+        if resume_id:
+            if (
+                args.get("target_words") is not None
+                and target_policy["target_words"] != run.effective_target_words
+            ):
+                raise NovelServiceError(
+                    "Resume must reuse the draft target length", code="RUN_TARGET_MISMATCH"
+                )
+            target_policy = resolve_target_words(run.effective_target_words)
+            target_policy["target_words_source"] = run.target_words_source or "explicit"
+        args["target_words"] = target_policy["target_words"]
+        args["target_words_source"] = str(
+            args.get("target_words_source") or target_policy["target_words_source"]
+        )
+        target_policy["target_words_source"] = args["target_words_source"]
         temperature = args.get("temperature")
         args["temperature"] = float(
             0.7 if temperature is None or temperature == "" else temperature
         )
         executor = self._writer_executor or self._default_writer_executor
         if not self._task_lock.acquire(blocking=False):
-            raise NovelServiceError("已有写作或审稿任务正在运行", code="PROJECT_BUSY")
+            raise NovelServiceError(
+                "Project is busy; this request is deferred",
+                code="PROJECT_BUSY",
+                details={"retry_after_seconds": 2},
+            )
         try:
             result = executor(self.project_root, args)
         finally:
             self._task_lock.release()
         self._ensure_ok(result, fallback="写作失败")
+        result.update(target_policy)
         if self._writer_executor is not None:
             self._record_write_lifecycle(chapter_id, result)
         from tools.operation_trace import summarize_context_packet
@@ -1105,6 +1154,9 @@ class NovelApplicationService:
         raise NovelServiceError(
             str(result.get("error") or fallback),
             code=str(result.get("code") or "OPERATION_FAILED"),
+            details={
+                key: value for key, value in result.items() if key not in {"ok", "error", "code"}
+            },
         )
 
     @staticmethod

@@ -17,7 +17,6 @@ import yaml
 from tools.novel_service import NovelApplicationService, NovelServiceError
 from tools.project_lock import ProjectBusyError, ProjectWriteLock
 from tools.text_range import (
-    normalized_text_spans,
     select_folded_range_anchors,
     select_normalized_text_span,
 )
@@ -623,7 +622,7 @@ def _read_project_document(
     if isinstance(path_result, dict):
         return path_result
     path, relative = path_result
-    content = path.read_text(encoding="utf-8")
+    content = path.read_bytes().decode("utf-8")
     content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
     revision = content_hash[:16]
     try:
@@ -646,7 +645,21 @@ def _edit_project_document(
     project_root: Path, novel_id: str, args: dict[str, Any]
 ) -> dict[str, Any]:
     action = str(args.get("action") or "").strip().lower()
-    confirm = bool(args.get("confirm")) or action in {"apply", "undo"}
+    confirm = args.get("confirm") is True
+    if action in {"apply", "undo"} and not confirm:
+        return {
+            "ok": False,
+            "applied": False,
+            "error": "CONFIRMATION_REQUIRED",
+            "message": "apply/undo requires confirm=true",
+        }
+    if action in {"apply", "undo"} and not args.get("preview_token"):
+        return {
+            "ok": False,
+            "applied": False,
+            "error": "document_preview_invalid",
+            "message": "apply/undo requires preview_token",
+        }
     if not action:
         action = "apply" if confirm else "preview"
     if action not in {"preview", "apply", "reject", "retry", "undo"}:
@@ -686,11 +699,12 @@ def _edit_project_document(
             "action": "preview",
             "path": stored_preview["path"],
             "edits": stored_preview["edits"],
+            "faithful": stored_preview.get("faithful", True),
         }
         confirm = False
     if confirm and preview_token:
-        stored_preview, stored_preview_path, preview_error = (
-            _load_document_edit_preview(project_root, novel_id, preview_token)
+        stored_preview, stored_preview_path, preview_error = _load_document_edit_preview(
+            project_root, novel_id, preview_token
         )
         if preview_error:
             return {
@@ -705,6 +719,7 @@ def _edit_project_document(
             "edits": stored_preview["edits"],
             "revision": stored_preview["revision"],
             "confirmed_result_revision": stored_preview.get("result_revision", ""),
+            "faithful": stored_preview.get("faithful", True),
         }
 
     path_result = _resolve_project_document(project_root, novel_id, args)
@@ -716,11 +731,9 @@ def _edit_project_document(
         return {"ok": False, "error": "edits 不能为空"}
     if len(edits) > 50:
         return {"ok": False, "error": "单次最多编辑 50 个片段"}
-    original = path.read_text(encoding="utf-8")
+    original = path.read_bytes().decode("utf-8")
     revision = hashlib.sha256(original.encode("utf-8")).hexdigest()[:16]
-    if confirm and str(
-        args.get("revision") or args.get("base_revision") or ""
-    ).strip() != revision:
+    if confirm and str(args.get("revision") or args.get("base_revision") or "").strip() != revision:
         return {
             "ok": False,
             "applied": False,
@@ -735,8 +748,8 @@ def _edit_project_document(
     for index, edit in enumerate(edits):
         if not isinstance(edit, dict):
             return {"ok": False, "error": f"第 {index + 1} 个修改不是对象"}
-        start_text = str(edit.get("start_text") or "").strip()
-        end_text = str(edit.get("end_text") or "").strip()
+        start_text = str(edit.get("start_text") or "")
+        end_text = str(edit.get("end_text") or "")
         old_text = str(edit.get("old_text") or "")
         new_text = str(edit.get("new_text") or "")
         replace_all = bool(edit.get("replace_all"))
@@ -809,6 +822,18 @@ def _edit_project_document(
                 },
             }
         occurrences = revised.count(old_text)
+        if occurrences == 0 and args.get("faithful", True):
+            return {
+                "ok": False,
+                "error": "old_text_not_found",
+                "message": "Exact old_text not found; reread the current bytes",
+                "revision": revision,
+                "details": {
+                    "field_path": f"$.edits[{index}].old_text",
+                    "retry_revision": revision,
+                    **_document_edit_diagnostics(revised, old_text),
+                },
+            }
         if occurrences == 0:
             normalized_selection = select_normalized_text_span(revised, old_text)
             if normalized_selection["ok"]:
@@ -820,9 +845,7 @@ def _edit_project_document(
                         "index": index + 1,
                         "mode": "normalized_text",
                         "automatic": True,
-                        "normalizations": normalized_selection["details"][
-                            "normalizations"
-                        ],
+                        "normalizations": normalized_selection["details"]["normalizations"],
                         "replacements": 1,
                         "replace_all": False,
                     }
@@ -886,8 +909,7 @@ def _edit_project_document(
                     "ok": False,
                     "error": anchor_selection["error"],
                     "message": (
-                        f"第 {index + 1} 个长 old_text 自动定位失败："
-                        f"{anchor_selection['message']}"
+                        f"第 {index + 1} 个长 old_text 自动定位失败：{anchor_selection['message']}"
                     ),
                     "revision": revision,
                     "details": {
@@ -901,9 +923,7 @@ def _edit_project_document(
                 diagnostics["suggested_old_text"] = ""
                 diagnostics["suggested_old_text_truncated"] = False
                 diagnostics.update(
-                    dict(anchor_selection.get("details") or {})
-                    if anchor_selection
-                    else {}
+                    dict(anchor_selection.get("details") or {}) if anchor_selection else {}
                 )
             if long_text:
                 failure_message = (
@@ -916,9 +936,7 @@ def _edit_project_document(
                     "请使用 details.suggested_old_text 返回的准确原文重试。"
                 )
             else:
-                failure_message = (
-                    f"第 {index + 1} 个 old_text 不存在，请重新读取文件。"
-                )
+                failure_message = f"第 {index + 1} 个 old_text 不存在，请重新读取文件。"
             return {
                 "ok": False,
                 "error": "old_text_not_found",
@@ -949,6 +967,18 @@ def _edit_project_document(
                 "replace_all": replace_all,
             }
         )
+    if relative == "src/outline.md":
+        from tools.outline_tree import OutlineEditError, validate_outline_targets
+
+        try:
+            validate_outline_targets(revised)
+        except OutlineEditError as exc:
+            return {
+                "ok": False,
+                "applied": False,
+                "error": "INVALID_TARGET_WORDS",
+                "message": str(exc),
+            }
     diff = "".join(
         difflib.unified_diff(
             original.splitlines(keepends=True),
@@ -965,7 +995,12 @@ def _edit_project_document(
         "revision": revision,
         "edit_count": len(applied),
         "edits": applied,
-        "diff": diff,
+        "diff": diff[:16000],
+        "diff_truncated": len(diff) > 16000,
+        "normalizations": {
+            "count": sum(1 for item in applied if item.get("automatic")),
+            "kinds": sorted({item["mode"] for item in applied if item.get("automatic")}),
+        },
         "next_action": "用户确认后仅传 preview_token，并设置 confirm=true",
     }
     from tools.mutation_summary import build_mutation_summary, document_entity_kind
@@ -1002,6 +1037,7 @@ def _edit_project_document(
                 revision,
                 edits,
                 predicted_revision,
+                faithful=args.get("faithful", True),
             )
             if stored_preview_path is not None:
                 stored_preview_path.unlink(missing_ok=True)
@@ -1015,6 +1051,7 @@ def _edit_project_document(
         mode="w",
         encoding="utf-8",
         dir=path.parent,
+        newline="",
         prefix=f".{path.name}.",
         suffix=".tmp",
         delete=False,
@@ -1027,25 +1064,27 @@ def _edit_project_document(
         re.fullmatch(r"ch_\d+", path.stem)
     )
     try:
-        if is_manuscript:
-            from tools.manuscript_acceptance import (
-                ManuscriptAcceptanceError,
-                ManuscriptAcceptanceService,
-            )
+        with ProjectWriteLock(project_root, novel_id, operation=f"document_change_plan:{relative}"):
+            if path.read_bytes().decode("utf-8") != original:
+                temporary.unlink(missing_ok=True)
+                return {
+                    "ok": False,
+                    "applied": False,
+                    "error": "document_revision_conflict",
+                    "message": "Document changed; reread and preview again",
+                }
+            os.replace(temporary, path)
+            if is_manuscript:
+                from tools.manuscript_acceptance import (
+                    ManuscriptAcceptanceError,
+                    ManuscriptAcceptanceService,
+                )
 
-            with ProjectWriteLock(
-                project_root,
-                novel_id,
-                operation=f"document_change_plan:{relative}",
-            ):
-                os.replace(temporary, path)
                 try:
                     acceptance = ManuscriptAcceptanceService(
                         project_root, novel_id
                     ).start_acceptance(
-                        path.stem,
-                        source="agent",
-                        expected_previous_revision=source_revision,
+                        path.stem, source="agent", expected_previous_revision=source_revision
                     )
                 except ManuscriptAcceptanceError as exc:
                     acceptance_error = {
@@ -1053,8 +1092,6 @@ def _edit_project_document(
                         "code": exc.code,
                         "message": str(exc),
                     }
-        else:
-            os.replace(temporary, path)
     except ProjectBusyError as exc:
         temporary.unlink(missing_ok=True)
         return {
@@ -1063,6 +1100,13 @@ def _edit_project_document(
             "blocked": True,
             "error": "PROJECT_BUSY",
             "message": str(exc),
+        }
+    if path.read_bytes() != revised.encode("utf-8"):
+        return {
+            "ok": False,
+            "applied": True,
+            "error": "DOCUMENT_WRITE_VERIFICATION_FAILED",
+            "message": "Written bytes differ from the accepted preview",
         }
     result_revision = hashlib.sha256(revised.encode("utf-8")).hexdigest()
     undo_preview_token = _save_document_edit_preview(
@@ -1098,9 +1142,7 @@ def _edit_project_document(
         result["acceptance"] = {
             "operation_id": str(acceptance.get("operation_id") or ""),
             "status": str(acceptance.get("status") or "pending"),
-            "accepted_revision": str(
-                acceptance.get("expected_previous_revision") or ""
-            ),
+            "accepted_revision": str(acceptance.get("expected_previous_revision") or ""),
             "current_revision": f"sha256:{result_revision}",
             "message": "正文已保存，关联事实待更新",
         }
@@ -1125,8 +1167,8 @@ def _replace_document_text_range(
     end_text: str,
     new_text: str,
 ) -> dict[str, Any]:
-    start_anchor = str(start_text or "").strip()
-    end_anchor = str(end_text or "").strip()
+    start_anchor = str(start_text or "")
+    end_anchor = str(end_text or "")
     if not start_anchor or not end_anchor:
         return {
             "ok": False,
@@ -1134,8 +1176,19 @@ def _replace_document_text_range(
             "message": "范围替换需要同时提供 start_text 和 end_text。",
             "details": {},
         }
-    start_spans = normalized_text_spans(source, start_anchor)
-    end_spans = normalized_text_spans(source, end_anchor)
+    start_spans = [
+        (match.start(), match.end()) for match in re.finditer(re.escape(start_anchor), source)
+    ]
+    end_spans = [
+        (match.start(), match.end()) for match in re.finditer(re.escape(end_anchor), source)
+    ]
+    if len(start_spans) > 1 or len(end_spans) > 1:
+        return {
+            "ok": False,
+            "error": "ambiguous_text_range",
+            "message": "Each range anchor must be unique",
+            "details": {"start_occurrences": len(start_spans), "end_occurrences": len(end_spans)},
+        }
     if not start_spans or not end_spans:
         missing = []
         if not start_spans:
@@ -1176,8 +1229,7 @@ def _replace_document_text_range(
             "ok": False,
             "error": "ambiguous_text_range",
             "message": (
-                f"首尾锚点组合成 {len(ranges)} 个可能范围；"
-                "请增加锚点文字，直到只定位一处。"
+                f"首尾锚点组合成 {len(ranges)} 个可能范围；请增加锚点文字，直到只定位一处。"
             ),
             "details": {
                 "range_count": len(ranges),
@@ -1289,6 +1341,7 @@ def _document_edit_preview_record(
     revision: str,
     edits: list[Any],
     result_revision: str = "",
+    faithful: bool = True,
 ) -> dict[str, Any]:
     record = {
         "schema_version": 2 if result_revision else 1,
@@ -1299,6 +1352,8 @@ def _document_edit_preview_record(
     }
     if result_revision:
         record["result_revision"] = result_revision
+    if not faithful:
+        record["faithful"] = False
     return record
 
 
@@ -1319,9 +1374,10 @@ def _save_document_edit_preview(
     revision: str,
     edits: list[Any],
     result_revision: str = "",
+    faithful: bool = True,
 ) -> str:
     record = _document_edit_preview_record(
-        novel_id, path, revision, edits, result_revision
+        novel_id, path, revision, edits, result_revision, faithful
     )
     token = _document_edit_preview_token(record)
     preview_root = _document_edit_preview_root(project_root, novel_id)
@@ -1378,6 +1434,7 @@ def _load_document_edit_preview(
         raw["revision"],
         edits,
         str(raw.get("result_revision") or ""),
+        raw.get("faithful", True),
     )
     if _document_edit_preview_token(record) != preview_token:
         return {}, None, "文档预览凭据校验失败，请重新预览。"

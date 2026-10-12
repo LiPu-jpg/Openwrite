@@ -87,8 +87,23 @@ def studio_success_payload(data: Any, request_id: str) -> dict[str, Any]:
 
 def studio_error_payload(error: StudioError, request_id: str) -> dict[str, Any]:
     """Preserve the legacy error string while exposing the new error contract."""
+    messages = {
+        "PROJECT_BUSY": "Project is busy; wait or retry the queued task",
+        "DOCUMENT_CONFLICT": "Document changed; reread and preview again",
+        "CONFIRMATION_REQUIRED": "Explicit confirmation is required",
+        "NOT_FOUND": "Requested resource was not found",
+        "INVALID_INPUT": "Invalid input",
+        "INVALID_PROJECT": "Open a valid OpenWrite project first",
+    }
+    original = str(error)
+    message = (
+        messages.get(error.code, f"Request failed ({error.code}, HTTP {int(error.status)})")
+        if any("\u3400" <= char <= "\u9fff" for char in original)
+        else original
+    )
     return {
-        "error": str(error),
+        "error": original,
+        "message": message,
         "code": error.code,
         "recoverable": error.recoverable,
         "details": error.details,
@@ -98,7 +113,8 @@ def studio_error_payload(error: StudioError, request_id: str) -> dict[str, Any]:
 
 def internal_error_payload(request_id: str) -> dict[str, Any]:
     return {
-        "error": "Studio 内部错误",
+        "error": "Internal Studio error",
+        "message": "Internal Studio error",
         "code": "INTERNAL_ERROR",
         "recoverable": False,
         "details": {},
