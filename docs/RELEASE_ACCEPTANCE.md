@@ -6,6 +6,16 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.21
+
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.21) 与 npm `dsh-openwrite@0.2.21` 已发布，npm `latest` 已更新到 0.2.21。使用[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38444848871) 验收的原始产物，来源提交 `4e5f88aac8b14c2402c509b2282810cc85840129`，npm 包 SHA-256 为 `b53e3638308185b5890207bc01806641a966620915b99102f5cb35c462b1daee`。8 份安装报告与 3 份宿主客户端报告全部通过；GitHub 四份附件逐一与 CI 原文件比对一致，官方 npm registry 无认证下载包的字节与 SHA-256 也一致。
+
+修复 [#79](https://github.com/LiPu-jpg/Openwrite/issues/79)，合并来源 [PR #80](https://github.com/LiPu-jpg/Openwrite/pull/80)。Windows Desktop 宿主目录接口失败后，插件使用桌面公开的系统目录选择通道；侧栏进入和工作台内所有目录选择共用入口。宿主取消不触发第二个对话框，桌面取消不创建作品/会话，手填路径跳过选择器，没有桌面能力时保留原始错误。Core 保持 5.8.10，wheel 与 requirements.lock 未变。
+
+`npm run check:plugin` 全部通过（298 项组件测试）。新增回归直接对正式 0.2.20 客户端复现同一错误，修复后的客户端通过；从本版主分支 CI 包提取客户端执行相同回归也通过。正式发布构建在打包前执行该回归。回归覆盖宿主优先、两种取消、首次进入、共享入口、缺失/无效桌面能力、桌面对话框失败和手填路径。
+
+本版原生 Windows 安装与浏览器检查运行在 Web profile；Windows Electron 系统文件夹对话框的实机复测未计为通过。目录通道的名称与返回契约已对照桌面上游源码，安装指南补充排查及手填路径方式。升级后需关闭并重新打开 DSH Desktop，重新加载客户端。真实模型调用为 0。
+
 ## 0.2.20
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.20) 与 npm `dsh-openwrite@0.2.20` 已发布，npm `latest` 已更新到 0.2.20。使用[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38296670387) 验收的同一份原始产物，来源提交 `4d54f3c619f853a4243cd60e67ef6c8ba8d336af`，npm 包 SHA-256 为 `486c20fbd36909e32cc6cac1fd1e734872abec53da749c0860f8e5e1d4cf6cda`。六组原生平台/Node、源码安装与 alpha 兼容共 8 份运行报告、三代宿主客户端 3 份报告全部通过；GitHub 四份附件逐一与 CI 原文件比对一致，从官方 npm registry 无认证重新下载后，包字节及 SHA-256 也一致。
