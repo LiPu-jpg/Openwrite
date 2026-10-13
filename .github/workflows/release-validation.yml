@@ -31,6 +31,7 @@ jobs:
       - run: npm --prefix vendor/dsh-dog run typecheck
       - run: npm run doctor
       - run: npm run test:managed
+      - run: npm --prefix packages/studio-panel run smoke
       - run: node --test scripts/preset-lifecycle.test.mjs scripts/maintenance.test.mjs
       - run: npm run test:components
       - run: npm --prefix vendor/dsh-dog test

@@ -93,6 +93,20 @@ function* install(ctx: Context): Generator<() => void> {
   }
   yield ctx.effect(() => ctx.sessions.list.subscribe(activatePending), 'openwrite: activate opened workbench')
 
+  const pickDirectoryCompat = async (): Promise<string | null> => {
+    try {
+      return await ctx.uiWorkspace.pickDirectory()
+    } catch (cause) {
+      // Windows Desktop can compose a browse-only host picker while exposing
+      // its Electron directory dialog through this client capability.
+      const desktopPick = (globalThis as typeof globalThis & {
+        __DSH_DESKTOP_PICK_DIRECTORY__?: () => Promise<string | null>
+      }).__DSH_DESKTOP_PICK_DIRECTORY__
+      if (typeof desktopPick !== 'function') throw cause
+      return await desktopPick()
+    }
+  }
+
   const workspaceServices: StudioPanelInjected['workspaces'] = {
     list: ctx.workspaces.list,
     create: input => ctx.workspaces.create(input),
@@ -101,7 +115,7 @@ function* install(ctx: Context): Generator<() => void> {
     insertBefore: (id, before) => ctx.workspaces.insertBefore(id, before),
     archiveSession: id => ctx.workspaces.archiveSession(id),
     insertSessionBefore: (id, session, before) => ctx.workspaces.insertSessionBefore(id, session, before),
-    pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
+    pickDirectory: pickDirectoryCompat,
     connectWorkspace: async id => {
       const sessionId = await ctx.uiWorkspace.connectWorkspace(id)
       const result = await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
@@ -139,7 +153,7 @@ function* install(ctx: Context): Generator<() => void> {
   yield injectSlot('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'openwrite.launch', order: 10,
     inject: () => ({ openWorkspace: async (path?: string) => {
-      const selected = path?.trim() || await ctx.uiWorkspace.pickDirectory()
+      const selected = path?.trim() || await workspaceServices.pickDirectory()
       if (selected === null) return false
       const workspace = await ctx.workspaces.create({ path: selected })
       const sessionId = await ctx.sessions.create({ workspaceId: workspace.workspaceId })
