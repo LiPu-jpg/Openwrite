@@ -2,6 +2,12 @@
 
 安装已发布的版本；可下载产物、SHA-256 和实际平台结果以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准。验收方法见 [验收报告](RELEASE_ACCEPTANCE.md)。
 
+## Windows Desktop 目录选择
+
+若留空作品目录并点击“选择目录并进入”时出现 `directoryPicker.pick needs the native capability; the composed picker serves "browse"`，这是桌面宿主组合的目录选择能力与其接口要求不一致。OpenWrite 0.2.21 在宿主接口失败后调用桌面公开的 `__DSH_DESKTOP_PICK_DIRECTORY__`，覆盖侧栏进入、作品绑定、新建与恢复目录选择。取消目录对话框不会创建作品或会话；手填绝对路径仍可直接进入。
+
+没有桌面选择通道的宿主会保留原始错误。此时可在同一个输入框填写作品的完整绝对路径，例如 `A:\AI\我的小说`，点击“进入作品”。升级插件后需要停止并重新启动 dsh，使客户端重新加载。
+
 ## 标准安装
 
 本次锁定 dsh `0.1.2-rc.1`，Node 24 为完整验收基线；Node 22.19 / 26 做兼容检查。安装不自动升级 dsh。先执行 `dsh --version` 核对宿主。

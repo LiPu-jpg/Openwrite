@@ -243,6 +243,73 @@ try {
   assert.deepEqual(calls.map(call => call[0]), ['workspace', 'preset', 'open', 'activate'])
   assert.deepEqual(calls[0], ['workspace', '/isolated-writing-workspace'])
   assert.deepEqual(calls[3], ['activate', 'launch-session', 'openwrite.creation'])
+
+  // Issue #79: exercise the shipped client, including the empty launcher and
+  // the shared picker injected into every workbench/workspace-binding flow.
+  const openWorkspace = launcher.options.inject().openWorkspace
+  const picker = views[0].options.inject().workspaces.pickDirectory
+  for (const view of views) assert.equal(view.options.inject().workspaces.pickDirectory, picker)
+  const newWork = registrations.find(entry => entry.options.name === 'conversation.input.left')
+  assert.equal(newWork.options.inject().workspaces.pickDirectory, picker)
+  const previousDesktopPicker = Object.getOwnPropertyDescriptor(globalThis, '__DSH_DESKTOP_PICK_DIRECTORY__')
+  const unavailable = Object.assign(new Error('directoryPicker.pick needs the native capability; the composed picker serves "browse"'), { code: 'directory-picker/unavailable' })
+  const windowsPath = String.raw`A:\AI\中文作品`
+  let nativeCalls = 0
+  let desktopCalls = 0
+  let nativeResult = '/native/workspace'
+  let desktopResult = windowsPath
+  let nativeFailure
+  let desktopFailure
+  fakeClientCtx.uiWorkspace.pickDirectory = async () => {
+    nativeCalls++
+    if (nativeFailure) throw nativeFailure
+    return nativeResult
+  }
+  const desktopPick = async () => {
+    desktopCalls++
+    if (desktopFailure) throw desktopFailure
+    return desktopResult
+  }
+  globalThis.__DSH_DESKTOP_PICK_DIRECTORY__ = desktopPick
+  try {
+    assert.equal(await picker(), '/native/workspace')
+    assert.equal(desktopCalls, 0, 'working native picker is preferred')
+    nativeResult = null
+    const beforeCancel = calls.length
+    assert.equal(await openWorkspace(), false)
+    assert.equal(desktopCalls, 0, 'native cancellation must not open another dialog')
+    assert.equal(calls.length, beforeCancel, 'cancellation creates no workspace or session')
+
+    nativeFailure = unavailable
+    const beforeFallback = calls.length
+    assert.equal(await openWorkspace('   '), true)
+    assert.deepEqual(calls[beforeFallback], ['workspace', windowsPath])
+    assert.equal(desktopCalls, 1, 'the blank launcher uses the desktop fallback once')
+    assert.equal(await picker(), windowsPath, 'workbench flows share the same fallback')
+    assert.equal(desktopCalls, 2)
+
+    desktopResult = null
+    const beforeDesktopCancel = calls.length
+    assert.equal(await picker(), null)
+    assert.equal(await openWorkspace(), false)
+    assert.equal(calls.length, beforeDesktopCancel, 'desktop cancellation creates no workspace or session')
+
+    delete globalThis.__DSH_DESKTOP_PICK_DIRECTORY__
+    await assert.rejects(picker(), error => error === unavailable)
+    await assert.rejects(openWorkspace(), error => error === unavailable)
+    globalThis.__DSH_DESKTOP_PICK_DIRECTORY__ = 'not a capability'
+    await assert.rejects(picker(), error => error === unavailable)
+    globalThis.__DSH_DESKTOP_PICK_DIRECTORY__ = desktopPick
+    desktopFailure = new Error('desktop dialog failed')
+    await assert.rejects(picker(), error => error === desktopFailure)
+
+    const beforeManual = [nativeCalls, desktopCalls]
+    assert.equal(await openWorkspace('  A:\\AI\\explicit-workspace  '), true)
+    assert.deepEqual([nativeCalls, desktopCalls], beforeManual, 'an explicit path skips both pickers')
+  } finally {
+    if (previousDesktopPicker) Object.defineProperty(globalThis, '__DSH_DESKTOP_PICK_DIRECTORY__', previousDesktopPicker)
+    else delete globalThis.__DSH_DESKTOP_PICK_DIRECTORY__
+  }
 } finally {
   for (const dispose of presetDisposers) await dispose()
   if (previousHome === undefined) delete process.env.DSH_HOME
