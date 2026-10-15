@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 .DS_Store
+.venv/
+.pytest_cache/
+.coverage
+.env
+.env.*
+!.env.example
+
+openjiuwen_docs
