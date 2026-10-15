@@ -9,3 +9,13 @@ __pycache__/
 !.env.example
 
 openjiuwen_docs
+
+*.synctex.gz
+
+# Keep the shared LaTeX build recipe even when .vscode is globally ignored.
+!.vscode/
+.vscode/*
+!.vscode/settings.json
+competition_docs/01_project_intro.tex
+
+main.pdf

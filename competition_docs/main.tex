@@ -1,0 +1,56 @@
+\newcommand{\AuthorName}{刘楷 \vspace{0.65em} 焦子昂}
+\newcommand{\SchoolName}{哈尔滨工业大学(深圳)}
+\documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
+\usepackage[margin=23mm,headheight=15pt]{geometry}
+\usepackage{amsmath,booktabs,tabularx,longtable,array,enumitem}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{fancyhdr}
+\usepackage{needspace}
+\usepackage{xurl}
+\usepackage[unicode,colorlinks=true,linkcolor=MidnightBlue,urlcolor=MidnightBlue,citecolor=MidnightBlue]{hyperref}
+\hypersetup{pdftitle={OpenWrite ：基于 openJiuwen 的长篇小说协作智能体},pdfauthor={\AuthorName},pdfsubject={项目简介、应用场景说明与技术方案}}
+\definecolor{Accent}{HTML}{234E70}
+\definecolor{Muted}{HTML}{52616B}
+\ctexset{section={format=\Large\bfseries\color{Accent},beforeskip=1.4ex,afterskip=0.9ex},subsection={format=\large\bfseries,beforeskip=1.3ex,afterskip=0.7ex}}
+\setlength{\parskip}{0.4em}
+\setlength{\emergencystretch}{2em}
+\setcounter{tocdepth}{2}
+\setcounter{secnumdepth}{2}
+\widowpenalty=10000
+\clubpenalty=10000
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\setlist{nosep,leftmargin=2em,topsep=0.4em}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{Muted}OpenWrite }
+\fancyhead[R]{\small\color{Muted}openJiuwen智能体创新大赛}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\newcommand{\code}[1]{\texttt{\nolinkurl{#1}}}
+\newcommand{\sourcecode}[2]{\href{#1}{\nolinkurl{#2}}}
+\begin{document}
+\begin{center}
+  {\LARGE\bfseries\color{Accent}OpenWrite}\par\vspace{0.35em}
+  {\large 基于 openJiuwen 的长篇小说协作智能体}\par\vspace{0.65em}
+  \begin{tabular}{rl}
+    作者名称： & \underline{\makebox[7cm][c]{\AuthorName}} \\
+    学校： & \underline{\makebox[7cm][c]{\SchoolName}}
+  \end{tabular}\par\vspace{0.65em}
+  {\small 方案日期：2026 年 10 月 15 日}
+\end{center}
+\vspace{0.4em}
+\noindent\textbf{方案定位：}以作者为主导，将规划、写作、独立审稿与受控修订组织为可持续运行的 Agent 团队，形成自动化编写流程，让长篇创作中的故事事实、质量证据和版本变更始终有据可查。
+
+\begingroup
+\small
+\setlength{\parskip}{0pt}
+\tableofcontents
+\endgroup
+\clearpage
+\input{01_project_intro.tex}
+\input{02_application_scenarios.tex}
+\clearpage
+\input{03_technical_solution.tex}
+\clearpage
+\end{document}

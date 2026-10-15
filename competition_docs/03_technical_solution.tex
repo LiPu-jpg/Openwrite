@@ -1,0 +1,116 @@
+% !TeX root = main.tex
+\section{技术方案}
+
+\subsection{总体架构与迁移边界}
+
+方案拟采用“Agent 团队运行、流程编排、领域服务执行、作品资产持久化”的分层结构。DeepSeek Harness 插件版本通过桥接层将会话工具和工作台接到 Studio HTTP 领域接口；迁移后由 JiuwenSwarm 承担团队运行，MCP 桥接既有 Python 服务，继续使用 OpenWrite 的数据模型与写入约定。
+
+\noindent\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.23\textwidth}Y@{}}
+\toprule
+层次 & 主要组件 & 职责与数据边界 \\
+\midrule
+作者交互 & JiuwenSwarm 会话；后续工作台适配 & 提交意图、查看阶段与产物、预览变更、批准或拒绝 \\
+团队运行 & Leader-Agent 与六个 AI 工作角色 & 分配任务、加载角色方法与可用 Skills、调用工具、提交结构化结果 \\
+确定性编排 & SwarmFlow 与 Swarm Skill & 规定阶段、并行汇合、异常分支、修订上限和预算策略 \\
+能力接入 & \code{openwrite-mcp} & 显式传递项目标识与参数，封装读取、提案、接纳和导出服务 \\
+领域内核 & \code{tools/}、\code{models/} & 装配上下文、管理评审、版本冲突、事实结算 \\
+作品存储 & 作者选择的小说项目目录 & 保存正典、正文、人物状态、伏笔及版本上下文 \\
+\bottomrule
+\end{tabularx}
+
+迁移包含运行宿主、角色与技能、编排和工具协议的调整；领域内核按既有模块复用。原有前端依赖 dsh 的会话槽位、工作区服务和状态同步机制，需按新宿主接口适配；首期以可运行的创作交付，后续再补齐编辑体验。
+
+\Needspace{20\baselineskip}
+\subsection{Agent 角色设计与权限分工}
+
+Leader-Agent 负责派发与汇总，确定性的质量计算交给领域代码。下表列出六个 AI 工作角色。
+
+\noindent\begin{tabularx}{\textwidth}{@{}p{0.25\textwidth}YY@{}}
+\toprule
+角色 & 输入与任务 & 输出与约束 \\
+\midrule
+Planner-Agent & 创作意图、世界观、近期重点；组织人物、世界与章纲 & 小说上下文与世界观；定稿进入作者确认 \\
+Writer-Agent & 已确认章纲、统一上下文包、字数与题材约束 & 章节候选稿及状态变化候选；设定变更另行提案 \\
+Fact-Review-Agent & 本章正文、人物时态、真相与伏笔 & 连贯与逻辑、事实与资料两域证据 \\
+Plot-Review-Agent & 本章正文、大纲承诺、场景结构 & 情节与承诺、节奏与场景两域证据 \\
+Prose-Review-Agent & 本章正文、人物卡、风格依据 & 角色与关系、文风与表达两域证据 \\
+Revision-Agent & 已定位问题、作者选择、正文基线 & 结构化修订提案、差异与影响说明 \\
+\bottomrule
+\end{tabularx}
+
+Review-Agent 使用独立调用上下文，使用同一正文快照和各自所需信息；Writer-Agent 的生成过程不作为评审依据。角色工具权限遵循任务需要，评审阶段以读取为主，持久化则由控制器调用领域写入服务。Skills 保存审稿方法、写作风格和事实核对步骤；权限仍由工具与服务端实施。
+
+\subsection{单章协作流程}
+
+\begin{enumerate}
+  \item \textbf{预检与检查基线。}解析目标作品与章节，核对事实、依赖和待处理的伏笔；读取当前大纲、正文版本与评审蓝图，形成可追踪的任务输入。
+  \item \textbf{规划与作者定稿。}Planner-Agent 整理本章目标、人物动机与伏笔窗口。涉及正式设定或大纲变化时，展示候选和差异，获得作者决定后提交。
+  \item \textbf{装配上下文并写作。}由 \code{ChapterAssemblerV2} 提供 canonical context packet，包含作者意图、近期重点、分层大纲摘要、前章正文、人物与世界观、写作风格等。Writer-Agent 生成候选稿，版本冲突或输入不完整时暂停写入。
+  \item \textbf{并行审稿。}三名 Review-Agent 并行产出结果，所有产物标明正文版本、rubric 版本与证据。
+  \item \textbf{聚合与修订。}程序调用聚合逻辑，分别展示质量分、覆盖率与交付建议。Revision-Agent 针对作者选中的问题生成提案；作者预览并批准后才应用，方案限制自动修订不超过两轮，超限保留问题转人工处理。
+  \item \textbf{复评、接纳与交付。}修改后旧评审失效，检查正文与评审版本是否一致；完成必要复评及事实重建，输出正文、证据、修订与待办。导出前调用领域预检与导出服务。
+\end{enumerate}
+
+已有脚本支持按未通过处理，并组织定向复评。迁移目标进一步要求：根据正文差异和领域影响范围确定复评集合；当修改触及人物、时间线或跨域依赖时扩大复评，无法证明影响局限时执行全量评审，防止沿用另一正文版本的结论。
+
+\subsection{证据评审与确定性聚合}
+
+沿用 \code{review-dag-framework.v1} 蓝图：根节点、上下文节点、六个质量域节点、聚合节点与 37 个历史检查叶子，共 47 个节点。37 项用于细粒度查询与兼容；评审 DAG 描述证据和依赖。三名 Review-Agent 的证据输出须转换为项目认可的 criterion 结构。
+
+质量计算复用 \code{tools/review_rubric.py} 的既有实现。记 $E$ 为状态为 \code{evaluated} 的准则集合，$P$ 为适用准则集合，$e_i$ 为实得分，$m_i$ 为对应满分，则：
+\[
+ Q=100\,\frac{\sum_{i\in E}e_i}{\sum_{i\in E}m_i},\qquad
+ C=\frac{\sum_{i\in E}m_i}{\sum_{i\in P}m_i}.
+\]
+得分须有证据；未适用项不进入分母，无法判断的项降低覆盖率。没有可计分结果时，质量分为空并呈现执行失败；无适用计分项时，覆盖率沿用内核约定。
+
+团队统一读取 \code{execution_status}、\code{quality_score}、\code{coverage}、\code{gate_status}、\code{delivery_status} 与 \code{production_gate_status}。当前内核的 70 分与 80\% 覆盖率为尚未人工校准的建议阈值；“建议通过”须与作者批准、可发布状态分别呈现。
+
+实现中需校验 schema、域归属、评分范围、证据定位和正文版本；对 \code{None}、缺字段、非有限数值或部分失败标记为不可判定或执行失败，按预算重新生成结果或移交作者处理。
+
+\subsection{作品状态、写入与人工确认}
+
+小说上下文状态保存在领域资产中。Agent 对话记忆可辅助理解任务；人物事实、伏笔状态和正文变更则通过专门服务接纳。框架记忆或上下文压缩结果只能作为候选信息来源。
+
+持久化延续既有版本与写锁机制，并在迁移中补齐以下闭环：
+\begin{itemize}
+  \item \textbf{变更预览与批准绑定。}将批准关联到具体项目、章节、提案、源 revision 和差异。作者拒绝则停止该写入；批准后正文或资产发生变化，则重新预览并确认。
+  \item \textbf{受控提交。}修订经 \code{RevisionService} 应用，并重验版本。新稿件通过接纳状态检查、事实重建与复核后，纳入后续创作依据。
+  \item \textbf{状态传播。}修改正文后将关联评审标记为过期，按接纳流程重建或复核章节记忆、人物状态、真相与规划并显式展示尚未处理的影响。
+  \item \textbf{副作用控制。}任务恢复绑定同一项目、章节、产物版本及 operation ID。重试前先读取已提交状态，防止重复写作、重复接纳与重复导出。
+\end{itemize}
+
+当前工作流通过 approval 参数和 gate payload 表达人工交接。迁移需将“待批准、拒绝、过期批准失效”与服务端记录贯通；若采用框架的 \code{human} 或 \code{human_session}，须先验证等待、拒绝和恢复语义，再声明支持持久化审批。
+
+\subsection{MCP、异步执行与运行可观测性}
+
+当前 \code{openwrite-mcp/server.py} 静态定义了 25 个 MCP 工具，涉及上下文、大纲、评审蓝图、伏笔、修订、接纳、写章与导出等工具入口。典型调用包括：
+
+\noindent\begin{tabularx}{\textwidth}{@{}p{0.20\textwidth}Y@{}}
+\toprule
+任务 & 已有 MCP 入口示例 \\
+\midrule
+准备写作依据 & \code{get_outline}、\code{get_context_packet}、\code{get_truth} \\
+章节写作 & \code{write_chapter} \\
+审稿与核对 & \code{get_review_framework}、\code{get_chapter_foreshadowing}、\code{review_chapter} \\
+外部稿接纳 & \code{save_external_chapter}、\code{manuscript_status}、\code{accept_manuscript}、\code{resume_acceptance}、\code{acknowledge_impacts} \\
+修订与成书 & \code{list_revision_proposals}、\code{apply_revision_proposal}、\code{reject_revision_proposal}、\code{export_book} \\
+\bottomrule
+\end{tabularx}
+
+本地接入采用 stdio MCP，在 \code{mcp.servers} 显式指定解释器、脚本、工作目录、环境和超时；\code{OPENWRITE_CORE} 指向引擎检出，工具的 \code{project_root} 指向小说项目，运行时 workspace 单独管理。标准输出仅用于协议，日志写入标准错误；凭据通过现有配置注入，日志。
+
+部分引擎入口内部使用 \code{asyncio.run}，当前 MCP 层通过 \code{asyncio.to_thread} 调用。后续保留线程桥接或统一异步调用链，并对取消做专门验证：停止等待不会自动终止线程。沿用原 conductor 的任务思路，长操作需关联服务端任务，取消后先核对任务终态与写锁，再允许重试。
+
+观测记录计划贯通团队 run ID、任务与操作 ID、项目和章节、正文 revision、rubric 版本、各域状态、作者决定及耗时和 token 使用。失败记录区分模型调用失败、工具参数错误、版本冲突与证据不足，便于重现问题和展示真实 Agent 调用链。
+
+\subsection{实施计划、验收与可复现交付}
+
+\begin{enumerate}
+  \item \textbf{运行组合。}核对实际 Python、Swarm 安装物、Core commit 与锁文件。阅读包中的 Core 与 Swarm release 并非已验证组合，且 Swarm 标签、源码包名与依赖 commit 存在差异；先形成可复现版本记录，再完成 MCP 发现与只读调用。
+  \item \textbf{对齐团队协议。}将角色 schema、证据、独立硬门禁与权威聚合逻辑贯通，验证输出缺失、超时、预算耗尽、部分失败及两轮修订上限；补齐与当前工具签名一致的 Skills 依赖。
+  \item \textbf{验证写入与恢复。}覆盖批准与拒绝、批准过期、重复请求、并发修改、执行失败和重入。先完成单章接纳与复评，再扩展多章连续写作及旧稿导入工具。
+  \item \textbf{完成真实示范。}选取规划、续写、错误检出、修订拒绝与批准、冲突和恢复等操作，记录版本、真实框架轨迹及领域产物，并创作展示 \textbf{Demo}。
+\end{enumerate}
+
+验收同时检查工程正确性与创作效果。前者覆盖版本、写入与恢复契约；后者采用经授权章节和人工标注，与相同模型、任务及预算下的统一 Agent 基线比较。公开样本量、缺失结果、检出与误报率、证据有效率、修订采纳率、总耗时和实际成本。
