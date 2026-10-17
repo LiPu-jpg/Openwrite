@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -37,6 +37,8 @@ export const DEFAULT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000]
 
 /** Budget for the per-request liveness probe of a previously-ready backend. */
 const HEALTH_PROBE_TIMEOUT_MS = 1_500
+/** A download with no progress for this long is cut and retried on the next source. */
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000
 /** The backend stderr log on disk keeps only the newest chunk. */
 const STDERR_LOG_LIMIT = 64 * 1024
 
@@ -86,6 +88,13 @@ const ALLOWED_ENV = new Set([
   'LANG', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES', 'LANGUAGE', 'TZ',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
   'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
+  // Package-index overrides let authors on restricted networks point the
+  // installer at a mirror (OpenWrite issue #82). uv reads UV_* variables only;
+  // PIP_* covers pip itself. UV_NO_CONFIG stays set so stray config files
+  // cannot change the locked dependency set — environment variables still
+  // apply, which is exactly the supported escape hatch.
+  'UV_DEFAULT_INDEX', 'UV_INDEX_URL', 'UV_INDEX', 'UV_HTTP_TIMEOUT',
+  'PIP_INDEX_URL', 'PIP_EXTRA_INDEX_URL', 'PIP_TRUSTED_HOST', 'PIP_DEFAULT_TIMEOUT',
 ])
 
 export async function sha256(file: string): Promise<string> {
@@ -355,27 +364,83 @@ export class ManagedRuntime {
     await mkdir(cache, { recursive: true })
     const destination = join(cache, item.sha256)
     if (await sha256(destination).catch(() => '') === item.sha256) return destination
+    // A host killed mid-download leaves .partial fragments that are never
+    // resumed (observed in OpenWrite issue #82); clear them before starting.
+    for (const entry of await readdir(cache)) if (entry.endsWith('.partial')) await rm(join(cache, entry), { force: true })
     const partial = destination + '.' + randomUUID() + '.partial'
     this.update('downloading', 'Downloading and verifying the writing environment')
     try {
-      const response = await fetch(item.url, { signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]) })
-      if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status}`)
+      await this.downloadInto(item, partial, signal)
+      await rename(partial, destination)
+      return destination
+    } finally { await rm(partial, { force: true }) }
+  }
+
+  /**
+   * Restricted networks throttle single connections to GitHub releases to a
+   * few dozen KB/s, so a fixed total timeout can never finish a 23 MB runtime
+   * archive (OpenWrite issue #82). Try the origin first, then optional mirror
+   * prefixes; every candidate is verified against the manifest checksum, so a
+   * mirror cannot substitute content. OPENWRITE_DOWNLOAD_MIRRORS overrides the
+   * prefix list (empty disables mirrors); the slow-start window uses
+   * OPENWRITE_DOWNLOAD_SLOW_MS / OPENWRITE_DOWNLOAD_SLOW_BYTES.
+   */
+  private async downloadInto(item: Download, partial: string, signal: AbortSignal): Promise<void> {
+    const grace = Number(process.env['OPENWRITE_DOWNLOAD_SLOW_MS'] ?? 12_000)
+    const threshold = Number(process.env['OPENWRITE_DOWNLOAD_SLOW_BYTES'] ?? 524_288)
+    const prefixes = (process.env['OPENWRITE_DOWNLOAD_MIRRORS'] ?? 'https://gh-proxy.com/')
+      .split(',').map(prefix => prefix.trim()).filter(Boolean)
+    const candidates = [item.url, ...prefixes.map(prefix => prefix + item.url)]
+    const failures: string[] = []
+    for (const candidate of candidates) {
+      signal.throwIfAborted()
+      try {
+        await this.downloadFrom(candidate, partial, signal, grace, threshold)
+        if (await sha256(partial) !== item.sha256) throw new Error('checksum mismatch')
+        return
+      } catch (error) {
+        signal.throwIfAborted()
+        let host = candidate
+        try { host = new URL(candidate).host } catch { /* keep the raw candidate */ }
+        failures.push(`${host}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    throw new Error(`Download failed (${failures.join('; ')}); retry`)
+  }
+
+  /**
+   * One download attempt against a single source. A source that stays below
+   * the byte threshold through the grace window is abandoned for the next
+   * candidate, and a transfer that stops progressing is cut by an idle
+   * timeout — there is deliberately no total-duration cap.
+   */
+  private async downloadFrom(url: string, partial: string, signal: AbortSignal, grace: number, threshold: number): Promise<void> {
+    const controller = new AbortController()
+    const started = Date.now()
+    let received = 0
+    let lastChunkAt = started
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastChunkAt > DOWNLOAD_IDLE_TIMEOUT_MS)
+        controller.abort(new Error(`stalled (no data for ${DOWNLOAD_IDLE_TIMEOUT_MS}ms)`))
+      else if (received < threshold && Date.now() - started > grace)
+        controller.abort(new Error(`too slow (${received} of ${threshold} bytes within ${grace}ms)`))
+    }, 250)
+    try {
+      const response = await fetch(url, { signal: AbortSignal.any([signal, controller.signal]) })
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
       const size = Number(response.headers.get('content-length')) || undefined
-      const file = await open(partial, 'wx', 0o600)
-      let received = 0
+      const file = await open(partial, 'w', 0o600)
       try {
         for await (const chunk of response.body) {
           signal.throwIfAborted()
           received += chunk.length
+          lastChunkAt = Date.now()
           if (received > 1024 ** 3) throw new Error('Download exceeds the allowed size')
           await file.write(chunk)
           this.state = { phase: 'downloading', message: 'Downloading and verifying the writing environment', downloadedBytes: received, totalBytes: size }
         }
       } finally { await file.close() }
-      if (await sha256(partial) !== item.sha256) throw new Error('Download checksum failed; retry')
-      await rename(partial, destination)
-      return destination
-    } finally { await rm(partial, { force: true }) }
+    } finally { clearInterval(watchdog) }
   }
 
   private async extract(item: Download, signal: AbortSignal): Promise<string> {

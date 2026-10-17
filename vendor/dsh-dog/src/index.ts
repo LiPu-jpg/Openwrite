@@ -323,8 +323,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (reason?.kind !== 'interrupted') return
     void captureInterruptedTurn(repository, session, event as { readonly seq: number; readonly time: number }).catch(() => undefined)
   })
-  // The authenticated RPC channel needs the Web carrier; the bundle also
-  // declares it on Connection's origin context for 0.2's service shadowing.
+  // The authenticated RPC channel needs the Web carrier; declare it here, on
+  // this plugin's own injection, instead of patching the shared connection
+  // row — per-key bundle patches would replace that row's inject wholesale
+  // and break any other bundle that extends it (OpenWrite issue #81).
   ctx.inject(['connection', 'webServer'], (connectionCtx) => {
     connectionCtx.effect(() => connectionCtx.connection.rpc.handle(
       DOG_DEBUG_RPC_CHANNEL,

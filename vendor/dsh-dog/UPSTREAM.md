@@ -19,7 +19,8 @@ OpenWrite compatibility changes:
   uses the portable tar library instead of a required system tar executable.
 
 - The debugger starts without a global tool catalog. Its authenticated RPC
-  channel retains the Web carrier dependency on the Connection origin context.
+  channel declares the Web carrier dependency on its own plugin injection; the
+  shared connection row is no longer patched, so other bundles can extend it.
 - DSH 0.2 entry-local SettingsForms replace the old standalone settings section;
   volatile concurrency values are read through their live references.
 - Invocation navigation uses uiWorkspace and confirms main-view retention on 0.2;

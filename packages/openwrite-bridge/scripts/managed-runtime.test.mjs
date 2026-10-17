@@ -68,6 +68,59 @@ test('interrupted downloads remove partial files; retry verifies and reuses the 
   assert.equal(calls, 2)
 })
 
+test('slow origins fall back to a mirror; checksums still gate the result', async t => {
+  const root = await fixture(t)
+  const payload = Buffer.alloc(64 * 1024, 9)
+  let originCalls = 0
+  const origin = createServer((_req, res) => {
+    originCalls++
+    res.writeHead(200, { 'content-length': payload.length })
+    res.write(payload.subarray(0, 16)) // trickle, then go silent: below the slow threshold
+  })
+  let mirrorCalls = 0
+  const mirror = createServer((_req, res) => {
+    mirrorCalls++
+    res.writeHead(200, { 'content-length': payload.length })
+    res.end(payload)
+  })
+  await new Promise(done => origin.listen(0, '127.0.0.1', done))
+  await new Promise(done => mirror.listen(0, '127.0.0.1', done))
+  t.after(() => { origin.closeAllConnections(); origin.close(); mirror.closeAllConnections(); mirror.close() })
+  const previous = {
+    OPENWRITE_DOWNLOAD_SLOW_MS: process.env.OPENWRITE_DOWNLOAD_SLOW_MS,
+    OPENWRITE_DOWNLOAD_MIRRORS: process.env.OPENWRITE_DOWNLOAD_MIRRORS,
+  }
+  process.env.OPENWRITE_DOWNLOAD_SLOW_MS = '50'
+  process.env.OPENWRITE_DOWNLOAD_MIRRORS = `http://127.0.0.1:${mirror.address().port}/`
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+  const item = { url: `http://127.0.0.1:${origin.address().port}/uv.zip`, sha256: createHash('sha256').update(payload).digest('hex'), executable: 'uv' }
+  const runtime = new ManagedRuntime(root, root)
+  const path = await runtime.download(item, new AbortController().signal)
+  assert.deepEqual(await readFile(path), payload)
+  assert.equal(originCalls, 1)
+  assert.equal(mirrorCalls, 1)
+})
+
+test('package index overrides pass the child env allowlist; credentials still do not', () => {
+  const env = buildChildEnv({
+    UV_DEFAULT_INDEX: 'https://pypi.tuna.tsinghua.edu.cn/simple',
+    UV_INDEX_URL: 'https://mirrors.aliyun.com/pypi/simple/',
+    PIP_INDEX_URL: 'https://pypi.tuna.tsinghua.edu.cn/simple',
+    PIP_TRUSTED_HOST: 'pypi.tuna.tsinghua.edu.cn',
+    UV_HTTP_TIMEOUT: '120',
+  })
+  assert.equal(env.UV_DEFAULT_INDEX, 'https://pypi.tuna.tsinghua.edu.cn/simple')
+  assert.equal(env.UV_INDEX_URL, 'https://mirrors.aliyun.com/pypi/simple/')
+  assert.equal(env.PIP_INDEX_URL, 'https://pypi.tuna.tsinghua.edu.cn/simple')
+  assert.equal(env.PIP_TRUSTED_HOST, 'pypi.tuna.tsinghua.edu.cn')
+  assert.equal(env.UV_HTTP_TIMEOUT, '120')
+})
+
 test('owned process stops and diagnostics conceal credential-bearing errors', async () => {
   const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { detached: process.platform !== 'win32', stdio: 'ignore' })
   await new Promise((done, reject) => { child.once('spawn', done); child.once('error', reject) })
