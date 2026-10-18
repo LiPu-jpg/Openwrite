@@ -6,6 +6,10 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.22
+
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.22) 与 npm `dsh-openwrite@0.2.22` 已发布，npm `latest` 已更新到 0.2.22。使用[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39084916927) 验收的原始产物，来源提交 `58209eabbaf0be1f54f562eab4bb5ca12a46bc57`，npm 包 SHA-256 为 `2f20f5e2326707d65119d549b08382dd2e83af481ac60e6ac6f1ee668b446683`。8 份安装报告与 3 份宿主客户端报告全部通过；GitHub 四份附件逐一与 CI 原文件比对一致，官方 npm registry 无认证下载包的字节与 SHA-256 也一致。修复 [#81](https://github.com/LiPu-jpg/Openwrite/issues/81)（bundle patch 覆写核心 connection 行与其他 bundle 冲突导致整机无法启动；DoG 调试通道改由插件自托管于 Web 载体）与 [#82](https://github.com/LiPu-jpg/Openwrite/issues/82)（受限网络下运行时下载必然超时、依赖索引不可换源）。两个 issue 的报告者均已随 issue 关闭获得修复说明。
+
 ## 0.2.21
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.21) 与 npm `dsh-openwrite@0.2.21` 已发布，npm `latest` 已更新到 0.2.21。使用[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/38444848871) 验收的原始产物，来源提交 `4e5f88aac8b14c2402c509b2282810cc85840129`，npm 包 SHA-256 为 `b53e3638308185b5890207bc01806641a966620915b99102f5cb35c462b1daee`。8 份安装报告与 3 份宿主客户端报告全部通过；GitHub 四份附件逐一与 CI 原文件比对一致，官方 npm registry 无认证下载包的字节与 SHA-256 也一致。
