@@ -2,7 +2,7 @@
 
 ## 0.2.22
 
-- 修复与 dsh-vision-router 等同台 bundle 共存时整机无法启动的问题（[#81](https://github.com/LiPu-jpg/Openwrite/issues/81)）：bundle patch 不再覆写核心 `connection` 行的 `inject`——include patch 逐顶层键赋值，覆写会丢掉其他 bundle 追加的服务（如 `visionRouterWebConnectionReady`），导致必需的 `connection` 插件激活失败。DoG 调试 RPC 通道的 Web 载体依赖改为在插件自身注入上声明（`ctx.inject(['connection', 'webServer'])`），核心行保持宿主原样。
+- 修复与 dsh-vision-router 等同台 bundle 共存时整机无法启动的问题（[#81](https://github.com/LiPu-jpg/Openwrite/issues/81)）：bundle patch 不再覆写核心 `connection` 行的 `inject`——include patch 逐顶层键赋值，覆写会丢掉其他 bundle 追加的服务（如 `visionRouterWebConnectionReady`），导致必需的 `connection` 插件激活失败。DoG 调试 RPC 通道改为插件自己在 Web 载体上注册 `/dog-rpc` 路由（0.2 宿主的 Connection 通用通道注册需要 connection 自身上下文持有 `webServer`，而共享 `/api` 通道已被宿主 Typert 网关占用）：准入沿用 Connection 的 trusted-host 围栏与浏览器鉴权，线信封与 Connection 保持一致，浏览器侧传输不变。
 - 修复受限网络下「准备写作环境」必然失败或极慢的问题（[#82](https://github.com/LiPu-jpg/Openwrite/issues/82)）：
   - 运行时下载从「10 分钟总时长上限」改为「慢源看门狗 + 30 秒无数据空闲超时」：宽限期内达不到阈值字节即切换候选源（默认回退 `gh-proxy.com` 镜像前缀，`OPENWRITE_DOWNLOAD_MIRRORS` 可覆盖、置空可禁用），下载内容仍按 manifest 校验 sha256，慢和断流都能被区分并给出逐源诊断；启动前清理上次强杀残留的 `.partial` 碎片。
   - 依赖安装放开索引源自救通道：子进程环境白名单新增 `UV_DEFAULT_INDEX`/`UV_INDEX_URL`/`UV_INDEX`/`UV_HTTP_TIMEOUT` 与 `PIP_*` 索引变量（`UV_NO_CONFIG=1` 保留以锁死依赖集，环境变量仍然生效），受限网络用户现在可以自行指向镜像源。

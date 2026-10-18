@@ -3,6 +3,7 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import type { } from '@deepseek-ai/dsh-client-connection'
+import type { } from '@deepseek-ai/dsh-host-webserver'
 import { runOwnedScript } from './owned-script.ts'
 import { fileURLToPath } from 'node:url'
 import { dshHomePath } from './host-shims.ts'
@@ -18,7 +19,7 @@ import { mkdir } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { DogEngine, resolveScriptPath } from './core.ts'
-import { DOG_DEBUG_RPC_CHANNEL, createDogDebugRpcHandler } from './debug.ts'
+import { DOG_DEBUG_RPC_CHANNEL, createDogDebugRpcHandler, serveDogDebugRpc } from './debug.ts'
 import { loadSchemaSet } from './schema.ts'
 import { DogRepository } from './storage.ts'
 import { createDogDelegateAgentTool, createDogTools } from './tools.ts'
@@ -323,15 +324,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (reason?.kind !== 'interrupted') return
     void captureInterruptedTurn(repository, session, event as { readonly seq: number; readonly time: number }).catch(() => undefined)
   })
-  // The authenticated RPC channel needs the Web carrier; declare it here, on
-  // this plugin's own injection, instead of patching the shared connection
-  // row — per-key bundle patches would replace that row's inject wholesale
-  // and break any other bundle that extends it (OpenWrite issue #81).
-  ctx.inject(['connection', 'webServer'], (connectionCtx) => {
-    connectionCtx.effect(() => connectionCtx.connection.rpc.handle(
-      DOG_DEBUG_RPC_CHANNEL,
-      debugHandler,
-    ), 'dog: trusted debugger RPC')
+  // The authenticated debugger channel is served by this plugin directly on
+  // the Web carrier. Connection's generic channel registry mounts routes
+  // through the Connection plugin's own context, which only sees `webServer`
+  // when a bundle patch injects it into the shared connection row — and
+  // per-key patch semantics make any such patch clobber other bundles
+  // (OpenWrite issue #81); the shared `/api` channel belongs to the host's
+  // Typert gateway. Admission reuses Connection's trusted-host fence and
+  // browser authentication, and the wire envelope mirrors Connection's, so
+  // the browser transport is unchanged.
+  ctx.inject(['connection', 'webServer'], (c) => {
+    c.effect(() => c.webServer.register({
+      kind: 'prefix',
+      path: DOG_DEBUG_RPC_CHANNEL,
+      handler: async (req, res) => {
+        const rejection = c.connection.requestRejection({ headers: req.headers })
+        if (rejection !== undefined) {
+          res.writeHead(rejection)
+          res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+          return
+        }
+        await serveDogDebugRpc(req, res, debugHandler)
+      },
+    }), 'dog: trusted debugger RPC')
   })
 }
 

@@ -1,11 +1,12 @@
 /** Read-only debugger snapshots and lazy runtime context over DSH Connection RPC. */
 
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type { CompiledGraph, GoalRuntimeTrace } from './model.ts'
 import type { DogRepository } from './storage.ts'
 
 export * from './debug-contract.ts'
-import { DOG_DEBUG_SNAPSHOT_ENDPOINT, DOG_RUNTIME_TRACE_ENDPOINT } from './debug-contract.ts'
+import { DOG_DEBUG_RPC_CHANNEL, DOG_DEBUG_SNAPSHOT_ENDPOINT, DOG_RUNTIME_TRACE_ENDPOINT } from './debug-contract.ts'
 import type { DogDebugGraphRevision, DogDebugSnapshot } from './debug-contract.ts'
 const MAX_RUNTIME_EVENTS_PER_GOAL = 64
 
@@ -65,6 +66,7 @@ export async function buildGoalRuntimeTrace(
 
 /** Register this handler on the trusted-host Connection channel, never as an unauthenticated raw HTTP route. */
 export function createDogDebugRpcHandler(repository: DogRepository): ConnectionRpcHandler {
+
   return async (endpoint, payload, signal) => {
     try {
       signal.throwIfAborted()
@@ -84,6 +86,64 @@ export function createDogDebugRpcHandler(repository: DogRepository): ConnectionR
       return internalError(messageOf(error))
     }
   }
+}
+
+const DOG_DEBUG_BODY_LIMIT = 8 * 1024 * 1024
+const ENDPOINT_SEGMENT = /^[A-Za-z0-9_$.-]+$/
+
+/**
+ * Serve the debugger RPC channel directly on the Web carrier. Connection's
+ * generic channel registry (`rpc.handle`) mounts its HTTP route through the
+ * Connection plugin's own context, which only sees `webServer` when a bundle
+ * patch injects it into the shared connection row — and per-key patch
+ * semantics make any such patch clobber other bundles (OpenWrite issue #81);
+ * the shared `/api` channel is already claimed by the host's Typert gateway.
+ * The wire envelope mirrors Connection's (`client-request`/`server-response`)
+ * so the browser side keeps using its stock `connection.rpc.call`; admission
+ * at the route reuses Connection's trusted-host fence and browser
+ * authentication, so the channel stays exactly as protected as a native one.
+ */
+export async function serveDogDebugRpc(req: IncomingMessage, res: ServerResponse, handler: ConnectionRpcHandler): Promise<void> {
+  const respond = (status: number, body: unknown) => {
+    res.writeHead(status, { 'content-type': 'application/json' })
+    res.end(typeof body === 'string' ? body : JSON.stringify(body))
+  }
+  const endpoint = dogDebugEndpointOf(req.url ?? '')
+  if (endpoint === undefined || req.method !== 'POST') { respond(404, 'not found'); return }
+  if (((req.headers['content-type'] ?? '').split(';', 1)[0] ?? '').trim().toLowerCase() !== 'application/json') {
+    respond(415, 'content type must be application/json')
+    return
+  }
+  let raw = ''
+  let size = 0
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length
+    if (size > DOG_DEBUG_BODY_LIMIT) { respond(413, 'request too large'); return }
+    raw += chunk
+  }
+  let body: Record<string, unknown>
+  try { body = JSON.parse(raw) } catch { respond(400, 'body is not JSON'); return }
+  const rpcId = typeof body?.rpcId === 'string' ? body.rpcId : 'invalid-request'
+  if (body?.type !== 'client-request' || body.method !== endpoint) {
+    respond(200, { type: 'server-response', rpcId, result: { ok: false, error: { code: 'gateway/bad-request', message: 'invalid client-request message', details: {} } } })
+    return
+  }
+  const controller = new AbortController()
+  req.on('close', () => controller.abort())
+  try {
+    const result = await handler(endpoint, body.payload, controller.signal)
+    respond(200, { type: 'server-response', rpcId, result })
+  } catch (error) {
+    respond(500, `handler failure: ${String(error)}`)
+  }
+}
+
+function dogDebugEndpointOf(url: string): string | undefined {
+  const pathname = url.split('?', 1)[0] ?? ''
+  if (!pathname.startsWith(`${DOG_DEBUG_RPC_CHANNEL}/`)) return undefined
+  const endpoint = pathname.slice(DOG_DEBUG_RPC_CHANNEL.length + 1)
+  if (endpoint.split('/').some(segment => segment === '' || segment === '.' || segment === '..' || !ENDPOINT_SEGMENT.test(segment))) return undefined
+  return endpoint
 }
 
 function compareRevisions(left: DogDebugGraphRevision, right: DogDebugGraphRevision): number {
