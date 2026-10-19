@@ -1,0 +1,89 @@
+<mxfile host="Electron">
+  <diagram id="UDacdju8mADJ8yxQEIdP" name="第 1 页">
+    <mxGraphModel dx="1203" dy="661" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1120" pageHeight="572" background="#FFFFFF" math="0" shadow="0" adaptiveColors="auto">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="author" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF2EE;strokeColor=#C00000;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=1;spacing=8;" value="作者负责给出&lt;br&gt;创作目标与批准" vertex="1">
+          <mxGeometry height="64" width="200" x="20" as="geometry" />
+        </mxCell>
+        <mxCell id="team" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#EDF3FF;strokeColor=#175CFE;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=1;spacing=8;" value="JiuwenSwarm 团队运行&lt;br&gt;Leader-Agent 派发任务、加载角色与工具" vertex="1">
+          <mxGeometry height="64" width="500" x="280" as="geometry" />
+        </mxCell>
+        <mxCell id="skills" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F4F2FF;strokeColor=#9B8DC8;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=0;spacing=8;" value="领域 Skills&lt;br&gt;写作、审稿、伏笔方法" vertex="1">
+          <mxGeometry height="64" width="260" x="840" as="geometry" />
+        </mxCell>
+        <mxCell id="planner" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B7C9E9;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=0;spacing=8;" value="Planner-Agent&lt;br&gt;人物、世界与章纲" vertex="1">
+          <mxGeometry height="76" width="180" x="20" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="writer" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B7C9E9;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=0;spacing=8;" value="Writer-Agent&lt;br&gt;依据统一上下文写作" vertex="1">
+          <mxGeometry height="76" width="200" x="245" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="review" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#EDF3FF;strokeColor=#175CFE;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=17.3;fontStyle=1;spacing=8;" value="Fact-Review-Agent：连贯 / 事实&lt;br&gt;Plot-Review-Agent：情节 / 节奏&lt;br&gt;Prose-Review-Agent：角色 / 文风" vertex="1">
+          <mxGeometry height="96" width="350" x="490" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="revision" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B7C9E9;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=0;spacing=8;" value="Revision-Agent&lt;br&gt;提案与定向复评" vertex="1">
+          <mxGeometry height="76" width="215" x="885" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="flow" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#EDF3FF;strokeColor=#175CFE;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=1;spacing=8;" value="SwarmFlow 编排：阶段推进、并行汇合、结果聚合、最多两轮修订" vertex="1">
+          <mxGeometry height="56" width="1080" x="20" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="mcp" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F2F7F7;strokeColor=#659B93;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=1;spacing=8;" value="openwrite-mcp：上下文查询、章节写审、修订提案、稿件接纳、成书导出" vertex="1">
+          <mxGeometry height="56" width="1080" x="20" y="354" as="geometry" />
+        </mxCell>
+        <mxCell id="context" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F7F8FA;strokeColor=#AAB4C3;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=1;spacing=8;" value="OpenWrite 领域内核&lt;br&gt;上下文装配、评审&lt;br&gt;truth 与伏笔 DAG" vertex="1">
+          <mxGeometry height="90" width="300" x="20" y="462" as="geometry" />
+        </mxCell>
+        <mxCell id="contracts" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF2EE;strokeColor=#C00000;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=1;spacing=8;" value="领域写入服务&lt;br&gt;作者确认、版本重验、影响复核&lt;br&gt;项目写锁与操作状态" vertex="1">
+          <mxGeometry height="90" width="350" x="385" y="462" as="geometry" />
+        </mxCell>
+        <mxCell id="assets" parent="1" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F7F8FA;strokeColor=#AAB4C3;fontColor=#20344E;fontFamily=Microsoft YaHei;fontSize=20;fontStyle=1;spacing=8;" value="小说项目资产&lt;br&gt;正文、大纲、人物与世界状态&lt;br&gt;、版本与导出产物" vertex="1">
+          <mxGeometry height="90" width="300" x="800" y="462" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" edge="1" parent="1" source="author" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="team">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="skills" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="team">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="team" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="flow">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="530" y="90" />
+              <mxPoint x="530" y="90" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="planner" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="writer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="writer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="review">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="review" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="revision">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="flow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="review">
+          <mxGeometry relative="1" x="0.1732" as="geometry">
+            <Array as="points">
+              <mxPoint x="530" y="188" />
+              <mxPoint x="665" y="188" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="review" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="mcp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="mcp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="contracts">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="mcp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="context">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="contracts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#587292;strokeWidth=2;endArrow=block;endFill=1;" target="assets">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

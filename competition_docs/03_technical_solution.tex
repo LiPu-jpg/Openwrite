@@ -3,7 +3,7 @@
 
 \subsection{总体架构与迁移边界}
 
-方案拟采用“Agent 团队运行、流程编排、领域服务执行、作品资产持久化”的分层结构。DeepSeek Harness 插件版本通过桥接层将会话工具和工作台接到 Studio HTTP 领域接口；迁移后由 JiuwenSwarm 承担团队运行，MCP 桥接既有 Python 服务，继续使用 OpenWrite 的数据模型与写入约定。
+方案拟采用“Agent 团队运行、流程编排、领域服务执行、作品资源持久化”的分层结构。DeepSeek Harness 插件版本通过桥接层将会话工具和工作台接到 Studio HTTP 领域接口；迁移后由 JiuwenSwarm 承担团队运行，MCP 桥接既有 Python 服务，继续使用 OpenWrite 的数据模型与写入约定。
 
 \noindent\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.23\textwidth}Y@{}}
 \toprule
@@ -70,11 +70,11 @@ Review-Agent 使用独立调用上下文，使用同一正文快照和各自所�
 
 \subsection{作品状态、写入与人工确认}
 
-小说上下文状态保存在领域资产中。Agent 对话记忆可辅助理解任务；人物事实、伏笔状态和正文变更则通过专门服务接纳。框架记忆或上下文压缩结果只能作为候选信息来源。
+小说上下文状态保存在领域资源中。Agent 对话记忆可辅助理解任务；人物事实、伏笔状态和正文变更则通过专门服务接纳。框架记忆或上下文压缩结果只能作为候选信息来源。
 
 持久化延续既有版本与写锁机制，并在迁移中补齐以下闭环：
 \begin{itemize}
-  \item \textbf{变更预览与批准绑定。}将批准关联到具体项目、章节、提案、源 revision 和差异。作者拒绝则停止该写入；批准后正文或资产发生变化，则重新预览并确认。
+  \item \textbf{变更预览与批准绑定。}将批准关联到具体项目、章节、提案、源 revision 和差异。作者拒绝则停止该写入；批准后正文或资源发生变化，则重新预览并确认。
   \item \textbf{受控提交。}修订经 \code{RevisionService} 应用，并重验版本。新稿件通过接纳状态检查、事实重建与复核后，纳入后续创作依据。
   \item \textbf{状态传播。}修改正文后将关联评审标记为过期，按接纳流程重建或复核章节记忆、人物状态、真相与规划并显式展示尚未处理的影响。
   \item \textbf{副作用控制。}任务恢复绑定同一项目、章节、产物版本及 operation ID。重试前先读取已提交状态，防止重复写作、重复接纳与重复导出。
