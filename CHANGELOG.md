@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.23
+
+- 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：声明并验证精确宿主 dsh `0.2.1-rc.2`。根包与内嵌子包（`@dsh-novel/openwrite-bridge`、`@dsh-novel/studio-panel`、`@dsh-external/dsh-dog`）的 `peerDependencies`、`dsh.compatibility.dsh` 与 `dshReleases` 同步加入 `0.2.1-rc.2`；宿主安装和激活不再以“plugin does not support the DSH version in use”拒绝，也不需要版本豁免或手工编辑 `compatibility.json`。宿主闸门读取的是 `@deepseek-ai/dsh-*` peer 范围（`dsh.compatibility` 只是展示元数据），因此只改后者无效；实测 0.2.1-rc.2 的宿主 API 未发现破坏性变更，失败原因是版本门槛。
+- 客户端验收脚本适配 0.2.1 的首次启动界面（可关闭的凭据提示、侧栏 `OpenWrite` 入口），并在 `0.2.1-rc.2` 上完成 Web 启动、预设选择、工作台三页签、DoG 面板与其他插件共存的实机验证；`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过。发布工作流新增精确 `0.2.1-rc.2` 的客户端验收矩阵。
+- Core 保持 5.8.10，模型、作品数据和依赖清单没有变更。
+
 ## 0.2.22
 
 - 修复与 dsh-vision-router 等同台 bundle 共存时整机无法启动的问题（[#81](https://github.com/LiPu-jpg/Openwrite/issues/81)）：bundle patch 不再覆写核心 `connection` 行的 `inject`——include patch 逐顶层键赋值，覆写会丢掉其他 bundle 追加的服务（如 `visionRouterWebConnectionReady`），导致必需的 `connection` 插件激活失败。DoG 调试 RPC 通道改为插件自己在 Web 载体上注册 `/dog-rpc` 路由（0.2 宿主的 Connection 通用通道注册需要 connection 自身上下文持有 `webServer`，而共享 `/api` 通道已被宿主 Typert 网关占用）：准入沿用 Connection 的 trusted-host 围栏与浏览器鉴权，线信封与 Connection 保持一致，浏览器侧传输不变。

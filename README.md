@@ -10,7 +10,7 @@
 <p align="center">在 DeepSeek Harness 中规划、写作、审稿和管理长篇小说。</p>
 
 <p align="center">
-  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.1.2--rc.1-2563eb" alt="dsh 0.1.2-rc.1"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.2.1--rc.2-2563eb" alt="dsh 0.2.1-rc.2"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node-%E2%89%A522.19-15803d" alt="Node >= 22.19"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0f766e" alt="Apache-2.0"></a>
   <a href="https://dsh-plugin.org/plugins/lipu-jpg/openwrite"><img src="https://dsh-plugin.org/badges/listed.svg" alt="Listed on dsh-plugin.org"></a>
@@ -29,12 +29,12 @@
 
 ## 快速安装
 
-**0.2.21 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2**。三个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。默认使用 npm `latest` 渠道；商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
+**0.2.23 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2**。四个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。默认使用 npm `latest` 渠道；商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
 
 npm 包和对应 GitHub Release 使用同一份验收产物。也可安装精确版本的 Release 包：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.21/dsh-openwrite-0.2.21.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.23/dsh-openwrite-0.2.23.tgz
 dsh web
 ```
 
@@ -64,6 +64,8 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
+`0.2.23` 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的兼容声明加入精确宿主 `0.2.1-rc.2`，安装和激活不再被宿主版本闸门拒绝，无需版本豁免或手工编辑 `compatibility.json`。已在 `0.2.1-rc.2` 完成 Web 客户端验收（启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存），`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过；Windows Electron 桌面端未实机复测。升级后停止并重新启动 dsh，再刷新浏览器页面。
+
 `0.2.21` 修复 [#79](https://github.com/LiPu-jpg/Openwrite/issues/79) 的 Windows Desktop 目录选择：宿主接口失败后使用桌面提供的系统文件夹对话框，覆盖侧栏进入与工作台内目录选择。Core 保持 5.8.10。排查与手填路径方式见 [安装指南](docs/INSTALL.md#windows-desktop-目录选择)。
 
 `0.2.20` 捆绑 Core 5.8.10，修复 [#76](https://github.com/LiPu-jpg/Openwrite/issues/76) 的草稿恢复、任务状态、编辑和审稿契约，并补充 [#65](https://github.com/LiPu-jpg/Openwrite/issues/65) 的英文使用支持。行为与范围见 [修复说明](docs/ISSUE_76_REPAIRS.md)。正式可下载版本以 npm `latest` 和 GitHub Release 为准。
@@ -86,7 +88,7 @@ dsh web
 
 `0.2.11` 修复 [#45](https://github.com/LiPu-jpg/Openwrite/issues/45)，适配精确宿主版本 `0.2.0-rc.2`：工作台兼容新的 turn-tail list 槽位，DoG 调试面板使用新的 `sessionStatus`；根包和所有子包的兼容声明同步更新。已验证 0.2.0-rc.2 的 Web 客户端启动、OpenWrite 入口、DoG 面板及其他插件共存；Windows Electron 桌面端恢复链路尚未实机复测。
 
-**`dsh-openwrite@0.2.10` 不包含这项修复，请升级到 `0.2.21` 的 GitHub Release 包。** 不要通过给旧子包授权来代替升级：`dsh-openwrite` 的版本豁免不会覆盖 `@dsh-novel/studio-panel@<ver>` 和 `@dsh-external/dsh-dog@<ver>`，而旧客户端在 0.2.0-rc.2 上激活失败可能触发桌面端的 profile 恢复。
+**`dsh-openwrite@0.2.10` 不包含这项修复，请升级到 `0.2.23` 或更高的已验收版本。** 不要通过给旧子包授权来代替升级：`dsh-openwrite` 的版本豁免不会覆盖 `@dsh-novel/studio-panel@<ver>` 和 `@dsh-external/dsh-dog@<ver>`，而旧客户端在 0.2 宿主上激活失败可能触发桌面端的 profile 恢复。
 
 若已发生恢复，先关闭桌面端并备份当前 profile，再从自己的 `cordis.patch.yml.bak-*` 备份恢复 patch，同时恢复原 `package.json` 的 `dsh.profile.bundles` 列表。安装包和作品目录通常仍在；不要用出厂模板覆盖其他插件配置。详细排查见 [安装指南](docs/INSTALL.md#dsh-02-客户端兼容排查)。
 

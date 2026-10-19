@@ -6,6 +6,14 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.23（候选）
+
+修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的 `peerDependencies`、`dsh.compatibility.dsh` 和 `dshReleases` 加入精确宿主 `0.2.1-rc.2`。宿主版本闸门读取的是 dsh peer 范围，因此只修改展示用的 `dsh.compatibility` 不能让旧包通过；本版四个包同步声明后，安装与激活均不需要版本豁免。
+
+本机 macOS arm64 / Node v24.15 已使用官方 registry 的精确 `@deepseek-ai/dsh@0.2.1-rc.2` 完成候选包验证：tarball 经 pnpm 安装进隔离 profile，宿主启动不再出现 `incompatible with dsh` / `skipping profile bundle`；浏览器中两个客户端入口激活，OpenWrite 入口和作品启动器可用。`client-boot-smoke` 在 `0.2.1-rc.2` 上通过版本闸门、预设选择、工作台三页签、DoG 面板与其他插件共存检查；`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过。真实模型调用为 0。
+
+完整六平台/Node、源码安装、CI 产物及 npm 发布尚未由本提交的 `Release artifact validation` 运行确认。在这些报告和同字节产物通过前，0.2.23 只作为候选版本，不计为已发布；Windows Electron 桌面端原生启动与恢复仍须对应平台实机验收。
+
 ## 0.2.22
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.22) 与 npm `dsh-openwrite@0.2.22` 已发布，npm `latest` 已更新到 0.2.22。使用[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39084916927) 验收的原始产物，来源提交 `58209eabbaf0be1f54f562eab4bb5ca12a46bc57`，npm 包 SHA-256 为 `2f20f5e2326707d65119d549b08382dd2e83af481ac60e6ac6f1ee668b446683`。8 份安装报告与 3 份宿主客户端报告全部通过；GitHub 四份附件逐一与 CI 原文件比对一致，官方 npm registry 无认证下载包的字节与 SHA-256 也一致。修复 [#81](https://github.com/LiPu-jpg/Openwrite/issues/81)（bundle patch 覆写核心 connection 行与其他 bundle 冲突导致整机无法启动；DoG 调试通道改由插件自托管于 Web 载体）与 [#82](https://github.com/LiPu-jpg/Openwrite/issues/82)（受限网络下运行时下载必然超时、依赖索引不可换源）。两个 issue 的报告者均已随 issue 关闭获得修复说明。

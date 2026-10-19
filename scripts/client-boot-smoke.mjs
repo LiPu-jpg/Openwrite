@@ -91,10 +91,20 @@ try {
   page.on('console', message => { if (message.type() === 'error' && !message.text().includes('status of 428 (Precondition Required)')) errors.push(message.text()) })
   await page.goto(login)
   await page.getByRole('button', { name: /^(Continue|继续)$/ }).click()
+  // 0.2.0 asks for a model next; 0.2.1 lands straight in a dismissible
+  // credential prompt. Neither path may reach a model in this test.
   const configureLater = page.getByRole('button', { name: /^(Configure later|稍后配置)$/ })
-  await configureLater.waitFor()
-  if (await configureLater.isVisible()) await configureLater.click()
-  await page.getByRole('button', { name: /^(Open OpenWrite|打开 OpenWrite)$/ }).waitFor()
+  await configureLater.first().waitFor({ timeout: 3000 }).catch(() => {})
+  if (await configureLater.first().isVisible().catch(() => false)) await configureLater.first().click()
+  const getStarted = page.getByRole('dialog').filter({ hasText: /^(?:Get started|开始使用)/ })
+  await getStarted.first().waitFor({ timeout: 3000 }).catch(() => {})
+  if (await getStarted.first().isVisible().catch(() => false)) {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+    if (await getStarted.first().isVisible().catch(() => false)) await getStarted.first().locator('button').first().click()
+  }
+  const launcher = page.getByRole('button', { name: /^(?:Open OpenWrite|OpenWrite|打开 OpenWrite)$/ }).first()
+  await launcher.waitFor()
   const entries = await page.evaluate(() => window.__DSH_BOOT__.entries.map(entry => entry.id))
   for (const id of expected) assert.ok(entries.includes(id), `${id}: missing client boot entry`)
   const hostServices = await page.evaluate(async () => (await fetch('/openwrite-coexist-fixture')).json())
@@ -108,7 +118,7 @@ try {
     status: 428, contentType: 'application/json',
     body: JSON.stringify({ code: 'WORKSPACE_NOT_INITIALIZED', error: 'Project not initialized' }),
   }))
-  try { await page.getByRole('button', { name: /^(Open OpenWrite|打开 OpenWrite)$/ }).click({ timeout: 5000 }) }
+  try { await launcher.click({ timeout: 5000 }) }
   catch (error) { console.error('UI before launcher:', await page.locator('body').innerText()); throw error }
   const launch = page.getByRole('dialog').filter({ has: page.getByLabel('作品目录', { exact: true }) })
   await mkdir(join(temporary, 'novel'))
