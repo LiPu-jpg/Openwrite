@@ -6,13 +6,13 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
-## 0.2.23（候选）
+## 0.2.23
 
-修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的 `peerDependencies`、`dsh.compatibility.dsh` 和 `dshReleases` 加入精确宿主 `0.2.1-rc.2`。宿主版本闸门读取的是 dsh peer 范围，因此只修改展示用的 `dsh.compatibility` 不能让旧包通过；本版四个包同步声明后，安装与激活均不需要版本豁免。
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.23) 与 npm `dsh-openwrite@0.2.23` 已发布，npm `latest` 已更新到 0.2.23。使用[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39219394324) 验收的原始产物，来源提交 `341408b80075fe4cc429f30a3327bcbdf2e69903`，npm 包 SHA-256 为 `8eb13e3de31b2144f1d5a57094abff38951c0329058520c96331aed03c735470`。8 份安装/源码报告与 4 份宿主客户端报告（含精确 `0.2.1-rc.2`）全部通过；GitHub 四份附件逐一与 CI 原文件比对一致，官方 npm registry 无认证下载包的字节与 SHA-256 也一致。
 
-本机 macOS arm64 / Node v24.15 已使用官方 registry 的精确 `@deepseek-ai/dsh@0.2.1-rc.2` 完成候选包验证：tarball 经 pnpm 安装进隔离 profile，宿主启动不再出现 `incompatible with dsh` / `skipping profile bundle`；浏览器中两个客户端入口激活，OpenWrite 入口和作品启动器可用。`client-boot-smoke` 在 `0.2.1-rc.2` 上通过版本闸门、预设选择、工作台三页签、DoG 面板与其他插件共存检查；`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过。真实模型调用为 0。
+修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的 `peerDependencies`、`dsh.compatibility.dsh` 和 `dshReleases` 加入精确宿主 `0.2.1-rc.2`。宿主版本闸门读取的是 dsh peer 范围，因此只修改展示用的 `dsh.compatibility` 不能让旧包通过；本版四个包同步声明后，安装与激活均不需要版本豁免。发布矩阵新增 `0.2.1-rc.2` 客户端契约，并与 `0.1.2-rc.1`、`0.1.5-alpha.1`、`0.2.0-rc.2` 一起通过。
 
-完整六平台/Node、源码安装、CI 产物及 npm 发布尚未由本提交的 `Release artifact validation` 运行确认。在这些报告和同字节产物通过前，0.2.23 只作为候选版本，不计为已发布；Windows Electron 桌面端原生启动与恢复仍须对应平台实机验收。
+本机 macOS arm64 / Node v24.15 另使用官方 registry 的精确 `@deepseek-ai/dsh@0.2.1-rc.2` 完成安装级复验：tarball 经 pnpm 安装进隔离 profile，宿主启动不再出现 `incompatible with dsh` / `skipping profile bundle`；浏览器中两个客户端入口激活，OpenWrite 入口和作品启动器可用。真实模型调用为 0。Windows Electron 桌面端原生启动与恢复仍须对应平台实机验收，本版未计为通过。
 
 ## 0.2.22
 

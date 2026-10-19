@@ -64,7 +64,7 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
-`0.2.23` 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的兼容声明加入精确宿主 `0.2.1-rc.2`，安装和激活不再被宿主版本闸门拒绝，无需版本豁免或手工编辑 `compatibility.json`。已在 `0.2.1-rc.2` 完成 Web 客户端验收（启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存），`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过；Windows Electron 桌面端未实机复测。升级后停止并重新启动 dsh，再刷新浏览器页面。
+`0.2.23` 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的兼容声明加入精确宿主 `0.2.1-rc.2`，安装和激活不再被宿主版本闸门拒绝，无需版本豁免或手工编辑 `compatibility.json`。已在 `0.2.1-rc.2` 完成 Web 客户端验收（启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存），`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过；Windows Electron 桌面端未实机复测。npm `latest` 已更新到 0.2.23，GitHub Release 已发布，完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#023)。升级后停止并重新启动 dsh，再刷新浏览器页面。
 
 `0.2.21` 修复 [#79](https://github.com/LiPu-jpg/Openwrite/issues/79) 的 Windows Desktop 目录选择：宿主接口失败后使用桌面提供的系统文件夹对话框，覆盖侧栏进入与工作台内目录选择。Core 保持 5.8.10。排查与手填路径方式见 [安装指南](docs/INSTALL.md#windows-desktop-目录选择)。
 
