@@ -2098,7 +2098,8 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
   ctx.tools.register(defineTool({
     name: 'novel_manuscript_edit_action',
     description:
-      'Chapter version snapshots and annotations. Actions: "versions" (chapter_id), "version" (chapter_id + ' +
+      'Chapter snapshots, annotations and saved drafts. Actions: "drafts" (list recoverable uncommitted prose), ' +
+      '"restore_draft" (run_id_v2 + revision + confirm: true; copy the exact saved bytes without generation, then reconcile facts). Other actions: "versions" (chapter_id), "version" (chapter_id + ' +
       'version_id — returns the snapshot content), "checkpoint" (chapter_id, optional label — save a snapshot), ' +
       '"compare" (chapter_id + version_id — preview current-to-snapshot differences without writing), ' +
       '"restore" (chapter_id + version_id + revision — REVERTS the chapter to a snapshot; revision-gated and ' +
@@ -2106,8 +2107,9 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'revision + quote + note, optional start_hint/end_hint and color amber|rose|sky|lime|violet), ' +
       '"resolve_annotation" (chapter_id + annotation_id).',
     parameters: {
-      action: { type: 'string', required: true, enum: ['versions', 'version', 'compare', 'checkpoint', 'restore', 'annotations', 'annotate', 'resolve_annotation'], description: 'The manuscript-editing operation.' },
-      chapter_id: { type: 'string', required: true, description: 'Chapter id (ch_<digits>).' },
+      action: { type: 'string', required: true, enum: ['drafts', 'restore_draft', 'versions', 'version', 'compare', 'checkpoint', 'restore', 'annotations', 'annotate', 'resolve_annotation'], description: 'The manuscript-editing operation.' },
+      chapter_id: { type: 'string', description: 'Chapter id (ch_<digits>), required except for drafts/restore_draft.' },
+      run_id_v2: { type: 'string', description: 'Saved run id from drafts (restore_draft).' },
       version_id: { type: 'string', description: 'Snapshot id (version/restore).' },
       label: { type: 'string', description: 'Snapshot label (checkpoint).' },
       revision: { type: 'string', description: 'Current chapter revision (restore/annotate).' },
@@ -2121,10 +2123,17 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: (args) => args.action === 'versions' || args.action === 'version' || args.action === 'compare' || args.action === 'annotations',
+    isConcurrencySafe: (args) => args.action === 'drafts' || args.action === 'versions' || args.action === 'version' || args.action === 'compare' || args.action === 'annotations',
     async execute(args, exec) {
       const client = clientFor(exec)
-      if (!CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
+      if (args.action === 'drafts') return await client.getJson('/api/manuscript/drafts', {}, exec.signal)
+      if (args.action === 'restore_draft') {
+        if (!args.run_id_v2) throw new Error('run_id_v2 is required; list drafts first')
+        return await client.postJson('/api/manuscript/drafts/restore', {
+          run_id_v2: args.run_id_v2, expected_revision: args.revision ?? '', confirm: args.confirm === true,
+        }, exec.signal)
+      }
+      if (!args.chapter_id || !CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
       const body: JsonObject = { action: args.action, chapter_id: args.chapter_id }
       for (const key of ['version_id', 'label', 'revision', 'confirm', 'quote', 'note', 'start_hint', 'end_hint', 'color', 'annotation_id'] as const) {
         const value = args[key]

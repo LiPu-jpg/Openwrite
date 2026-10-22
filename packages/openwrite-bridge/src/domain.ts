@@ -42,6 +42,7 @@ const WRITABLE_PATHS = new Set([
   'document/change-plan',
   'structured/change-plan',
   'manuscript-editing',
+  'manuscript/drafts/restore',
   'manuscript/acceptance/baseline',
   'manuscript/acceptance/external',
   'manuscript/acceptance/reconcile',
@@ -112,7 +113,7 @@ async function readBody(req: ProxyRequest): Promise<Buffer> {
 function resourceForPath(path: string): string {
   if (path.startsWith('/api/manuscript-imports')) return 'tasks'
   if (path.startsWith('/api/project-archives')) return 'workspace'
-  if (path.startsWith('/api/document') || path.startsWith('/api/write') || path.startsWith('/api/manuscript/acceptance')) return 'manuscript'
+  if (path.startsWith('/api/document') || path.startsWith('/api/write') || path.startsWith('/api/manuscript/')) return 'manuscript'
   if (path.startsWith('/api/outline')) return 'outline'
   if (path.startsWith('/api/scenes')) return 'outline'
   if (path.startsWith('/api/assets')) return 'assets'
