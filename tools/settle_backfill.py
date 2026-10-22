@@ -25,6 +25,9 @@ idempotent (``only_missing`` skips chapters that already have memory).
 
 from __future__ import annotations
 
+from tools.llm import long_generation_stream
+from tools.novel_workspace import count_writing_units
+
 import asyncio
 import re
 from pathlib import Path
@@ -113,7 +116,8 @@ def _strip_yaml_fence(text: str) -> str:
 
 def _parse_settle_yaml(text: str) -> dict[str, Any]:
     """Parse the compact settle YAML; raises ValueError when unusable."""
-    raw = yaml.safe_load(_strip_yaml_fence(text))
+    fenced = re.search(r"```(?:yaml|yml|json)?\s*\n(.*?)```", str(text), re.S)
+    raw = yaml.safe_load(fenced.group(1) if fenced else _strip_yaml_fence(text))
     if not isinstance(raw, dict):
         raise ValueError("settle output is not a mapping")
     out: dict[str, Any] = {}
@@ -147,6 +151,8 @@ def _compact_settle(
     title: str,
     content: str,
     truth_context: str,
+    *,
+    strict: bool = False,
 ) -> dict[str, Any]:
     """One compact LLM call: observations + legacy state deltas + summary."""
     from tools.llm import Message
@@ -170,13 +176,18 @@ def _compact_settle(
         f"当前运行态摘要（只读参考，不要照抄）：\n{truth_context}\n\n"
         "请输出上述 YAML。"
     )
+    if strict:
+        user += "\n上一次结构无效。只输出 YAML mapping，必须包含 chapter_summary；不要解释或围栏。"
     response = client.chat(
         messages=[Message("system", system), Message("user", user)],
-        temperature=0.2,
+        temperature=0.0 if strict else 0.2,
         max_tokens=3200,
-        stream=False,
+        stream=long_generation_stream(),
         operation="settle_backfill",
     )
+    from tools.llm.response import classify_response
+
+    classify_response(response.content, finish_reason=getattr(response, "finish_reason", ""))
     return _parse_settle_yaml(response.content)
 
 
@@ -219,6 +230,7 @@ def analyze_existing_chapter(
     else:
         result = call()
     return {
+        "degraded": bool(result.get("degraded")),
         "chapter_summary": str(result.get("chapter_summary") or ""),
         "observations": str(result.get("observations") or ""),
         "legacy_updates": {
@@ -243,14 +255,22 @@ async def _settle_one(
     content: str,
     truth_context: str,
 ) -> dict[str, Any]:
-    """Compact settle with one retry; raises if both attempts fail."""
-    try:
-        return _compact_settle(client, chapter_id, title, content, truth_context)
-    except Exception:
-        # Retry with a trimmed body (transient truncation / noisy prose can
-        # push the model off YAML); shorter input usually steadies it.
-        trimmed = content[:4000]
-        return _compact_settle(client, chapter_id, title, trimmed, truth_context)
+    """Retry structured-output errors twice, then retain an explicit degraded recap."""
+    from tools.llm.response import ProviderResponseError
+
+    for attempt in range(3):
+        try:
+            return _compact_settle(
+                client, chapter_id, title, content, truth_context, strict=attempt > 0
+            )
+        except (ValueError, yaml.YAMLError, ProviderResponseError):
+            if attempt == 2:
+                return {
+                    "chapter_summary": _degraded_summary(content),
+                    "observations": _DEGRADED_MARK,
+                    "degraded": True,
+                }
+    raise AssertionError("unreachable")
 
 
 def run(
@@ -372,14 +392,14 @@ def run(
                     chapter_id=chapter_id,
                     title=title,
                     summary=summary,
-                    word_count=len(content),
+                    word_count=count_writing_units(content),
                     observations=observations,
                     token_usage={},
                 )
-                applied.append(
+                (degraded if settled.get("degraded") else applied).append(
                     {
                         "chapter_id": chapter_id,
-                        "word_count": len(content),
+                        "word_count": count_writing_units(content),
                         "notes": bool(effective_delta or updates),
                         "fallback": bool(fallback),
                     }
@@ -396,7 +416,7 @@ def run(
                     chapter_id=chapter_id,
                     title=title,
                     summary=summary or _degraded_summary(content),
-                    word_count=len(content),
+                    word_count=count_writing_units(content),
                     observations=observations or _DEGRADED_MARK,
                     token_usage={},
                 )
@@ -411,7 +431,7 @@ def run(
                     chapter_id=chapter_id,
                     title=title,
                     summary=_degraded_summary(content),
-                    word_count=len(content),
+                    word_count=count_writing_units(content),
                     observations=_DEGRADED_MARK,
                     token_usage={},
                 )

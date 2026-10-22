@@ -90,7 +90,8 @@ POST_ROUTES = {
     "/api/project/delete": StudioPostRoute("delete_project", requires_project=False),
     "/api/project/metadata": StudioPostRoute("update_project_metadata"),
     "/api/project/writing-targets": StudioPostRoute("update_writing_targets"),
-    "/api/write": StudioPostRoute("write_next_chapter"),
+    "/api/write": StudioPostRoute("submit_write_chapter"),
+    "/api/manuscript/drafts/restore": StudioPostRoute("restore_manuscript_draft", envelope=True),
     "/api/chapter/delete": StudioPostRoute("delete_chapter"),
     "/api/chapter/delete-batch": StudioPostRoute("delete_chapters_batch"),
     "/api/outline/edit": StudioPostRoute("edit_outline_structure"),
@@ -214,6 +215,63 @@ def resolve_post_route(path: str) -> tuple[StudioPostRoute | None, dict[str, str
     return None, {}
 
 
+GET_ROUTE_PATTERNS = [
+    "/api/benchmarks/(?P<run_id>bench_[A-Za-z0-9_-]+)",
+    "/api/research/reports/(?P<report_id>[A-Za-z0-9][A-Za-z0-9_-]{0,100})",
+    "/api/chapters/(?P<chapter_id>ch_\\d+)/scenes",
+    "/api/chapters/(?P<chapter_id>ch_\\d+)/work-brief",
+    "/api/reference-library/(?P<source_id>[A-Za-z0-9][A-Za-z0-9_-]{1,63})",
+    "/api/assets/(?P<kind>character|world|progression)/(?P<asset_id>[A-Za-z0-9][A-Za-z0-9_.-]{0,79})",
+    "/api/manuscript/versions/(?P<version_id>ver_[A-Za-z0-9_-]{8,80})/compare",
+    "/api/tasks/(?P<task_id>tsk_[A-Za-z0-9_-]+)",
+    "/api/revisions/(?P<proposal_id>rev_[A-Za-z0-9_-]+)",
+    "/api/manuscript-imports/(?P<import_id>import_[A-Za-z0-9_-]{12,80})",
+    "/api/project-archives/(?P<archive_id>owa_[0-9a-f]{24})/download",
+    "/api/project-archives/(?P<archive_id>owa_[0-9a-f]{24})",
+]
+
+GET_ROUTES = frozenset(
+    [
+        "/api/agent/activity",
+        "/api/agents",
+        "/api/assets",
+        "/api/assets/package/export",
+        "/api/benchmarks",
+        "/api/benchmarks/options",
+        "/api/context",
+        "/api/continuity",
+        "/api/document",
+        "/api/diagnostics",
+        "/api/dog/graphs",
+        "/api/export",
+        "/api/export/preflight",
+        "/api/health",
+        "/api/manuscript-imports",
+        "/api/manuscript/acceptance",
+        "/api/manuscript/drafts",
+        "/api/manuscript/versions",
+        "/api/model/embedding",
+        "/api/model/profiles",
+        "/api/outline",
+        "/api/project-archives",
+        "/api/project-archives/preflight",
+        "/api/project/list",
+        "/api/reading-order",
+        "/api/reading-packet",
+        "/api/research",
+        "/api/review/framework",
+        "/api/revisions",
+        "/api/scenes",
+        "/api/scenes/migration-preview",
+        "/api/search",
+        "/api/tasks",
+        "/api/traces",
+        "/api/workspace",
+        "/api/workspace/context",
+    ]
+)
+
+
 class StudioRequestHandler(SimpleHTTPRequestHandler):
     server_version = "OpenWriteStudio/5.8"
 
@@ -263,10 +321,48 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
             self._request_id = value
         return cast(str, value)
 
+    def _check_route_method(self) -> None:
+        path = urlparse(self.path).path
+        if not path.startswith("/api/"):
+            return
+        methods: list[str] = []
+        if path in GET_ROUTES or any(re.fullmatch(pattern, path) for pattern in GET_ROUTE_PATTERNS):
+            methods.append("GET")
+        if resolve_post_route(path)[0] is not None:
+            methods.append("POST")
+        if path == "/api/document":
+            methods.append("PUT")
+        if not methods:
+            raise StudioError("Unknown API route", HTTPStatus.NOT_FOUND, code="ROUTE_NOT_FOUND")
+        if self.command not in methods:
+            raise StudioError(
+                "Method not allowed",
+                HTTPStatus.METHOD_NOT_ALLOWED,
+                code="METHOD_NOT_ALLOWED",
+                details={"allow": ", ".join(methods)},
+            )
+
+    def do_HEAD(self) -> None:
+        self._unsupported_method()
+
+    def do_DELETE(self) -> None:
+        self._unsupported_method()
+
+    def do_PATCH(self) -> None:
+        self._unsupported_method()
+
+    def _unsupported_method(self) -> None:
+        try:
+            self._require_instance_auth()
+            self._check_route_method()
+        except StudioError as exc:
+            self._handle_studio_error(exc)
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         try:
             self._require_instance_auth()
+            self._check_route_method()
             self._resolve_context(allow_uninitialized=True)
             if self._context is not None and not self.app.initialized:
                 allowed_uninitialized = {
@@ -529,6 +625,16 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 result = self.app.list_manuscript_versions(chapter_id)
                 self._json(studio_success_payload(result, self.request_id))
                 return
+            if parsed.path == "/api/diagnostics":
+                params = {key: values[0] for key, values in parse_qs(parsed.query).items()}
+                self._json(
+                    studio_success_payload(self.app.runtime_diagnostics(params), self.request_id)
+                )
+                return
+            if parsed.path == "/api/manuscript/drafts":
+                self.app.require_project()
+                self._json(studio_success_payload(self.app.manuscript_drafts(), self.request_id))
+                return
             if parsed.path == "/api/manuscript/acceptance":
                 self.app.require_project()
                 result = self.app.manuscript_acceptance()
@@ -703,6 +809,7 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
     def do_PUT(self) -> None:
         try:
             self._require_write_header()
+            self._check_route_method()
             self._resolve_context()
             if urlparse(self.path).path != "/api/document":
                 raise StudioError("接口不存在", HTTPStatus.NOT_FOUND, code="ROUTE_NOT_FOUND")
@@ -738,7 +845,14 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
+            self.log_message(
+                "request_started %s %s request_id=%s",
+                self.command,
+                urlparse(self.path).path,
+                self.request_id,
+            )
             self._require_write_header()
+            self._check_route_method()
             route = urlparse(self.path).path
             self._resolve_context(allow_uninitialized=(route == "/api/project/init"))
             payload = self._body_json()
@@ -931,6 +1045,8 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
         self._security_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("X-Request-ID", self.request_id)
+        if status == HTTPStatus.METHOD_NOT_ALLOWED:
+            self.send_header("Allow", str(payload.get("details", {}).get("allow", "")))
         if mutated is not None:
             self.send_header("X-OpenWrite-Mutated", "1" if mutated else "0")
         self.send_header("Content-Length", str(len(body)))

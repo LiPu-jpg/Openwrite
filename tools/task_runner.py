@@ -12,7 +12,9 @@ from tools.task_store import TASK_PHASES, TaskStore, TaskStoreError
 
 
 class TaskCancelled(RuntimeError):
-    pass
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details or {}
 
 
 class TaskAwaitingConfirmation(RuntimeError):
@@ -64,6 +66,14 @@ class TaskContext:
                 }.get(phase, phase),
                 "original_note": note,
             },
+        )
+
+    def stage(self, stage: str, run_id: str = "") -> None:
+        self.store.transition(
+            self.task_id,
+            updates={"stage": stage, "run_id_v2": run_id},
+            event="task_stage_changed",
+            details={"stage": stage, "run_id_v2": run_id},
         )
 
     def cancellation_requested(self) -> bool:
@@ -329,7 +339,7 @@ class PersistentTaskRunner:
                 updates={"result": exc.result, "error": None},
                 event="task_awaiting_confirmation",
             )
-        except TaskCancelled:
+        except TaskCancelled as exc:
             self.store.transition(
                 task_id,
                 status="cancelled",
@@ -338,6 +348,7 @@ class PersistentTaskRunner:
                         "code": "TASK_CANCELLED",
                         "message": "Task cancelled",
                         "recoverable": True,
+                        "details": exc.details,
                     }
                 },
                 event="task_cancelled",

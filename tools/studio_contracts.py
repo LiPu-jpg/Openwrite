@@ -107,6 +107,11 @@ def studio_error_payload(error: StudioError, request_id: str) -> dict[str, Any]:
         "code": error.code,
         "recoverable": error.recoverable,
         "details": error.details,
+        **{
+            key: error.details[key]
+            for key in ("run_id_v2", "draft_artifact", "draft_path", "uncommitted")
+            if key in error.details
+        },
         "request_id": request_id,
     }
 

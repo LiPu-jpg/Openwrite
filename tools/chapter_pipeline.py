@@ -657,10 +657,55 @@ def _task_phase(args: dict[str, Any], phase: str, note: str = "") -> None:
         callback(phase, note)
 
 
-def _raise_if_task_cancelled(args: dict[str, Any]) -> None:
+def _task_stage(args: dict[str, Any], stage: str, run_id: str = "") -> None:
+    lock = args.get("_project_write_lock")
+    if lock is not None:
+        lock.heartbeat(stage)
+    callback = args.get("_task_stage")
+    if callable(callback):
+        callback(stage, run_id)
+
+
+def _raise_if_task_cancelled(args: dict[str, Any], *, partial_content: str = "") -> None:
     callback = args.get("_cancel_requested")
     if callable(callback) and callback():
-        raise _TaskCancellationRequested("任务已取消，模型结果未提交")
+        error = _TaskCancellationRequested("任务已取消，模型结果未提交")
+        error.partial_content = partial_content
+        raise error
+
+
+def _preserve_failed_draft(
+    project_root: Path,
+    novel_id: str,
+    chapter_id: str,
+    store: Any,
+    manifest: Any,
+    *,
+    partial_content: str = "",
+) -> dict[str, Any]:
+    if manifest is None:
+        return {"run_id_v2": "", "draft_artifact": "", "draft_path": "", "uncommitted": False}
+    recovery = store.root / "artifacts" / manifest.run_id / "uncommitted.md"
+    if partial_content and not recovery.exists():
+        _atomic_write(recovery, partial_content.encode("utf-8"))
+    draft = manifest.stages["draft"]
+    if draft.status == "completed" and not recovery.exists():
+        saved = store.read_artifact(draft.artifact)
+        _atomic_write(recovery, f"# {saved['title']}\n\n{saved['content']}".encode("utf-8"))
+    available = recovery.is_file()
+    if available:
+        _atomic_write(
+            _chapter_path(project_root, novel_id, chapter_id).with_suffix(".uncommitted.json"),
+            json.dumps(
+                {"status": "uncommitted", "run_id_v2": manifest.run_id, "draft_path": str(recovery)}
+            ).encode("utf-8"),
+        )
+    return {
+        "run_id_v2": manifest.run_id,
+        "draft_artifact": draft.artifact,
+        "draft_path": str(recovery) if available else "",
+        "uncommitted": available,
+    }
 
 
 def _load_resumable_writer_result(store: Any, manifest: Any) -> SimpleNamespace:
@@ -752,7 +797,10 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
         }
     run_v2_active_stage = ""
     try:
-        with ProjectWriteLock(project_root, novel_id, operation=f"write:{chapter_id}"):
+        with ProjectWriteLock(
+            project_root, novel_id, operation=f"write:{chapter_id}"
+        ) as write_lock:
+            args["_project_write_lock"] = write_lock
             _task_phase(args, "reading", "读取章节上下文")
             _raise_if_task_cancelled(args)
             active_stage = "context_assembly"
@@ -782,9 +830,8 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             from tools.model_profiles import active_model_profile
 
             profile = active_model_profile() or {}
-            writer = WriterAgent(
-                AgentContext(LLMClient(llm_config), llm_config.model, str(project_root))
-            )
+            agent_context = AgentContext(LLMClient(llm_config), llm_config.model, str(project_root))
+            writer = WriterAgent(agent_context)
             writer_payload = build_writer_payload(
                 context=context,
                 truth=truth,
@@ -865,6 +912,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     )
                 writer_payload = stored_context
             run_v2_active_stage = "context"
+            _task_stage(args, "context", run_v2_manifest.run_id)
             if run_v2_manifest.stages["context"].status != "completed":
                 run_v2_store.start_stage(
                     run_v2_manifest,
@@ -885,6 +933,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     artifact=context_artifact,
                 )
             run_v2_active_stage = "plan"
+            _task_stage(args, "plan", run_v2_manifest.run_id)
             if run_v2_manifest.stages["plan"].status != "completed":
                 run_v2_store.start_stage(
                     run_v2_manifest,
@@ -902,6 +951,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     },
                 )
             run_v2_active_stage = "draft"
+            _task_stage(args, "draft", run_v2_manifest.run_id)
             if run_v2_manifest.stages["draft"].status == "completed":
                 result = _load_resumable_writer_result(run_v2_store, run_v2_manifest)
             else:
@@ -910,6 +960,17 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     "draft",
                     prompt_version="writer-creative-v1",
                     model_profile=str(profile.get("id") or getattr(llm_config, "model", "")),
+                )
+                agent_context.on_stage = lambda stage: _task_stage(
+                    args, stage, run_v2_manifest.run_id
+                )
+                agent_context.on_draft = lambda draft: _preserve_failed_draft(
+                    project_root,
+                    novel_id,
+                    chapter_id,
+                    run_v2_store,
+                    run_v2_manifest,
+                    partial_content=f"# {draft['title']}\n\n{draft['content']}",
                 )
                 _task_phase(args, "model", "生成章节草稿")
                 result = asyncio.run(
@@ -921,7 +982,9 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     )
                 )
                 _task_phase(args, "validating", "校验模型结果")
-                _raise_if_task_cancelled(args)
+                _raise_if_task_cancelled(
+                    args, partial_content=f"# {result.title}\n\n{result.content}"
+                )
                 run_v2_store.assert_accepts_result(run_v2_manifest)
                 draft_artifact = run_v2_store.write_artifact(
                     run_v2_manifest,
@@ -972,6 +1035,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 if isinstance(item, dict) and str(item.get("name") or "").strip()
             ]
             run_v2_active_stage = "fact_extract"
+            _task_stage(args, "fact_extract", run_v2_manifest.run_id)
             if run_v2_manifest.stages["fact_extract"].status != "completed":
                 run_v2_store.start_stage(
                     run_v2_manifest,
@@ -999,6 +1063,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 _task_phase(args, "committing", "原子提交章节与运行态")
                 _save_chapter(project_root, novel_id, chapter_id, result.title, result.content)
                 run_v2_active_stage = "settle"
+                _task_stage(args, "settle", run_v2_manifest.run_id)
                 run_v2_store.start_stage(
                     run_v2_manifest,
                     "settle",
@@ -1028,6 +1093,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     token_usage=dict(getattr(result, "token_usage", {}) or {}),
                 )
                 run_v2_active_stage = "validate"
+                _task_stage(args, "validate", run_v2_manifest.run_id)
                 run_v2_store.start_stage(
                     run_v2_manifest,
                     "validate",
@@ -1045,6 +1111,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     },
                 )
                 run_v2_active_stage = "commit"
+                _task_stage(args, "commit", run_v2_manifest.run_id)
                 run_v2_store.start_stage(run_v2_manifest, "commit")
                 scheduler.complete_stage(
                     workflow,
@@ -1122,6 +1189,9 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     )
                 raise
             draft_path.with_suffix(".uncommitted.json").unlink(missing_ok=True)
+            (run_v2_store.root / "artifacts" / run_v2_manifest.run_id / "uncommitted.md").unlink(
+                missing_ok=True
+            )
             response_payload = {
                 "ok": True,
                 "chapter_id": chapter_id,
@@ -1171,6 +1241,14 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             "chapter_id": chapter_id,
             "error": str(exc),
             "code": "TASK_CANCELLED",
+            **_preserve_failed_draft(
+                project_root,
+                novel_id,
+                chapter_id,
+                run_v2_store,
+                run_v2_manifest,
+                partial_content=str(getattr(exc, "partial_content", "") or ""),
+            ),
         }
     except ProjectBusyError as exc:
         return {
@@ -1207,30 +1285,18 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 pass
         if active_stage:
             scheduler.fail_stage(workflow, active_stage, str(exc))
-        if run_v2_manifest and run_v2_manifest.stages["draft"].status == "completed":
-            recovery_path = (
-                run_v2_store.root / "artifacts" / run_v2_manifest.run_id / "uncommitted.md"
-            )
-            if not recovery_path.exists():
-                saved_draft = run_v2_store.read_artifact(run_v2_manifest.stages["draft"].artifact)
-                _atomic_write(
-                    recovery_path,
-                    f"# {saved_draft['title']}\n\n{saved_draft['content']}".encode("utf-8"),
-                )
         return {
             "ok": False,
             "chapter_id": chapter_id,
             "error": str(exc),
             "code": code,
-            "run_id_v2": run_v2_manifest.run_id if run_v2_manifest else "",
-            "draft_artifact": run_v2_manifest.stages["draft"].artifact if run_v2_manifest else "",
-            "draft_path": str(
-                run_v2_store.root / "artifacts" / run_v2_manifest.run_id / "uncommitted.md"
-            )
-            if run_v2_manifest and run_v2_manifest.stages["draft"].status == "completed"
-            else "",
-            "uncommitted": bool(
-                run_v2_manifest and run_v2_manifest.stages["draft"].status == "completed"
+            **_preserve_failed_draft(
+                project_root,
+                novel_id,
+                chapter_id,
+                run_v2_store,
+                run_v2_manifest,
+                partial_content=str(getattr(exc, "partial_content", "") or ""),
             ),
         }
 
@@ -1476,6 +1542,14 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
             "chapter_id": chapter_id,
             "error": str(exc),
             "code": "TASK_CANCELLED",
+            **_preserve_failed_draft(
+                project_root,
+                novel_id,
+                chapter_id,
+                run_v2_store,
+                run_v2_manifest,
+                partial_content=str(getattr(exc, "partial_content", "") or ""),
+            ),
         }
     except ProjectBusyError as exc:
         return {

@@ -106,9 +106,13 @@ class WriterAgent(BaseAgent):
             target_words=target_words,
         )
 
+        on_draft = getattr(self.ctx, "on_draft", None)
+        if callable(on_draft):
+            on_draft(creative_result)
+
         self.log.info(
             f"Phase 2: state settlement for chapter {chapter_number} "
-            f"({creative_result['word_count']} chars)"
+            f"({creative_result['word_count']} writing units)"
         )
 
         # ── Phase 1.5: 后置验证（零 LLM 成本）─
@@ -214,9 +218,10 @@ class WriterAgent(BaseAgent):
             ):
                 raise
 
-        # 长度不达标时循环反馈字数差让模型自纠（最多 3 次续写）
-        minimum_words = max(1, int(target_words * 0.8))
-        maximum_words = max(minimum_words, int(target_words * 1.5))
+        # Two bounded edits precede the single full-prose fallback.
+        from ..writing_policy import chapter_word_bounds
+
+        minimum_words, _, maximum_words = chapter_word_bounds(target_words)
         current_content = response.content
         final_response = response
         all_usage = [first_usage]
@@ -239,8 +244,14 @@ class WriterAgent(BaseAgent):
                 f"目标区间 {minimum_words}-{maximum_words}。请{action}"
                 f"正文至 {target_words} 字左右：保留既定情节与章末悬念，"
                 f"{detail}。"
-                "只输出章节标题和完整正文，不要解释。"
             )
+            if attempt < 2:
+                hint += (
+                    '\n先做定点修改，保留未改段落。只返回 JSON：{"edits": [{"old": "原文中唯一的连续片段", "new": "扩写或精简后的片段"}]}。'
+                    "每个 old 必须逐字引用且仅出现一次；不得返回完整章节。"
+                )
+            else:
+                hint += "只输出章节标题和完整正文，不要解释。"
             getattr(self, "log", logger).info(
                 f"Length retry #{attempt + 1}: {word_count} writing units "
                 f"(target {minimum_words}-{maximum_words})"
@@ -256,7 +267,30 @@ class WriterAgent(BaseAgent):
             )
             if retry_response.usage:
                 all_usage.append(retry_response.usage)
-            current_content = retry_response.content
+            if attempt < 2:
+                try:
+                    from ..llm.response import load_structured_mapping, ProviderResponseError
+
+                    edits = load_structured_mapping(retry_response.content).get("edits")
+                    candidate = current_content
+                    if not isinstance(edits, list) or not edits:
+                        raise ValueError("No length edits")
+                    for item in edits:
+                        old, new = item["old"], item["new"]
+                        if (
+                            not isinstance(old, str)
+                            or not isinstance(new, str)
+                            or not old
+                            or candidate.count(old) != 1
+                        ):
+                            raise ValueError("Length edit is not uniquely anchored")
+                        candidate = candidate.replace(old, new, 1)
+                    self._parse_creative_output(candidate, chapter_number, {})
+                    current_content = candidate
+                except (ValueError, KeyError, TypeError, ProviderResponseError):
+                    continue
+            else:
+                current_content = retry_response.content
             final_response = retry_response
 
         merged_usage = self._merge_usage(*all_usage)
@@ -334,8 +368,9 @@ class WriterAgent(BaseAgent):
 
         # 章节信息
         parts.append(f"# 第{chapter_number}章写作任务\n")
-        minimum_words = max(1, int(target_words * 0.8))
-        maximum_words = max(minimum_words, int(target_words * 1.5))
+        from ..writing_policy import chapter_word_bounds
+
+        minimum_words, _, maximum_words = chapter_word_bounds(target_words)
         parts.append(
             f"目标字数：约{target_words}字；正文必须控制在"
             f"{minimum_words}-{maximum_words}字内（中文字符与外文单词，"
@@ -457,8 +492,8 @@ class WriterAgent(BaseAgent):
 
         # 尝试提取标题
         title_match = re.search(
-            r"^#{1,6}\s*第\s*[0-9零〇一二三四五六七八九十百千两]+\s*章"
-            r"\s*[:：\-—]?\s*(.*?)\s*$|^#{1,6}\s*Chapter\s+[\dIVXLC]+\s*[:：\-—]?\s*(.*?)\s*$",
+            r"^#{1,6}[ \t]*第[ \t]*[0-9零〇一二三四五六七八九十百千两]+[ \t]*章"
+            r"[ \t]*[:：\-—]?[ \t]*(.*?)[ \t]*$|^#{1,6}[ \t]*Chapter[ \t]+[\dIVXLC]+[ \t]*[:：\-—]?[ \t]*(.*?)[ \t]*$",
             content,
             re.MULTILINE,
         )
@@ -483,8 +518,9 @@ class WriterAgent(BaseAgent):
         body = normalize_character_state_annotation_fences(body).strip()
         word_count = count_writing_units(body)
         if target_words > 0:
-            minimum_words = max(1, int(target_words * 0.8))
-            maximum_words = max(minimum_words, int(target_words * 1.5))
+            from ..writing_policy import chapter_word_bounds
+
+            minimum_words, _, maximum_words = chapter_word_bounds(target_words)
             if word_count < minimum_words or word_count > maximum_words:
                 from ..llm.response import ProviderResponseError
 
@@ -509,6 +545,9 @@ class WriterAgent(BaseAgent):
         content: str,
     ) -> dict:
         """Phase 2: 状态结算"""
+        on_stage = getattr(getattr(self, "ctx", None), "on_stage", None)
+        if callable(on_stage):
+            on_stage("fact_extract")
         # 2a. Observer: 提取事实
         observation_result = await self._observe_facts(
             context=context,
@@ -518,6 +557,8 @@ class WriterAgent(BaseAgent):
         )
         observations = observation_result["content"]
 
+        if callable(on_stage):
+            on_stage("settle")
         # 2b. Settler: 合并状态
         settlement = await self._settle(
             context=context,

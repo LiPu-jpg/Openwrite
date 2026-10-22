@@ -45,7 +45,11 @@ def classify_response(
     text = str(content or "").strip()
     finish = str(finish_reason or "").lower()
     if finish in {"length", "max_tokens", "incomplete"}:
-        raise ProviderResponseError("MODEL_OUTPUT_TRUNCATED", "模型输出因长度限制被截断")
+        error = ProviderResponseError(
+            "MODEL_OUTPUT_TRUNCATED", "Model output was truncated or the stream was interrupted"
+        )
+        error.partial_content = str(content or "")
+        raise error
     if not text and str(reasoning or "").strip():
         raise ProviderResponseError("MODEL_REASONING_ONLY", "模型只返回了推理内容，没有最终答案")
     if require_content and not text:

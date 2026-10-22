@@ -27,6 +27,7 @@ from uuid import uuid4
 
 from models.runtime_state import RuntimeState, RuntimeStateDelta
 from tools.chapter_memory import ChapterMemoryStore
+from tools.novel_workspace import count_writing_units
 from tools.runtime_state import RuntimeStateManager, legacy_updates_to_delta
 
 SCHEMA_VERSION = "openwrite.manuscript-acceptance.v1"
@@ -138,7 +139,7 @@ class ManuscriptAcceptanceService:
                 {
                     "chapter_id": chapter_id,
                     "path": str(head.get("path") or ""),
-                    "status": "external_change",
+                    "status": "missing",
                     "current_revision": "",
                     "accepted_revision": str(head.get("accepted_revision") or ""),
                     "facts_revision": str(head.get("facts_revision") or ""),
@@ -175,6 +176,12 @@ class ManuscriptAcceptanceService:
             "novel_id": self.novel_id,
             "status": status,
             "blocking": status != "current",
+            "revision": int(state.get("revision") or 0),
+            "warnings": [
+                {"code": "CHAPTER_FILE_MISSING", "chapter_id": item["chapter_id"]}
+                for item in chapters
+                if item["status"] == "missing"
+            ],
             "chapters": chapters,
             "latest_operation_id": latest_id,
             "impacts": impacts,
@@ -291,7 +298,7 @@ class ManuscriptAcceptanceService:
         operation = self.operation(operation_id)
         if operation["status"] == "completed":
             return operation
-        if operation["status"] == "stale":
+        if operation["status"] in {"stale", "abandoned"}:
             raise ManuscriptAcceptanceError(
                 "接纳操作的正文已变化，请从当前正文创建新操作",
                 code="ACCEPTED_SOURCE_CHANGED",
@@ -381,6 +388,52 @@ class ManuscriptAcceptanceService:
             self._write_state(state)
             return operation
 
+    def forget(self, chapter_id: str, *, reason: str = "chapter_deleted") -> dict[str, Any]:
+        """Remove a deleted chapter head, retaining a durable deletion audit.
+
+        The caller holds the project write lock. Historical pending operations
+        are made unresumable so that they cannot reintroduce deleted facts.
+        """
+        clean = self._chapter_id(chapter_id)
+        state = self._state()
+        previous = state.setdefault("chapters", {}).pop(clean, {})
+        for path in self.operations_dir.glob("accept_*.json"):
+            operation = self._read_json(path) or {}
+            if clean in operation.get("affected_chapters", []) and operation.get("status") not in {
+                "completed",
+                "abandoned",
+            }:
+                operation.update(status="abandoned", updated_at=self._now(), reason=reason)
+                self._write_operation(operation)
+        now = self._now()
+        operation_id = (
+            f"accept_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:12]}"
+        )
+        operation = {
+            "schema_version": SCHEMA_VERSION,
+            "operation_id": operation_id,
+            "novel_id": self.novel_id,
+            "chapter_id": clean,
+            "affected_chapters": [clean],
+            "source": reason,
+            "status": "completed",
+            "created_at": now,
+            "updated_at": now,
+            "completed_at": now,
+            "previous_head": previous,
+            "impacts": [],
+            "frozen_chapters": [],
+        }
+        self._write_operation(operation)
+        self.fact_path(clean).unlink(missing_ok=True)
+        state.update(
+            latest_operation_id=operation_id,
+            updated_at=now,
+            revision=int(state.get("revision") or 0) + 1,
+        )
+        self._write_state(state)
+        return operation
+
     def record_precomputed(
         self,
         chapter_id: str,
@@ -441,6 +494,8 @@ class ManuscriptAcceptanceService:
                 details={
                     "expected": expected,
                     "current": recorded_base,
+                    "recorded_base": recorded_base,
+                    "head_path_exists": any(cid == first for cid, _ in self._chapters()),
                     "operation_id": str(existing.get("operation_id") or ""),
                     "actions": ["resume", "abandon", "external"],
                 },
@@ -898,7 +953,8 @@ class ManuscriptAcceptanceService:
             "source_revision": source_revision,
             "chapter_summary": str(result.get("chapter_summary") or "").strip(),
             "observations": str(result.get("observations") or "").strip(),
-            "word_count": max(0, len(self._split_chapter(chapter_id, full_content)[1])),
+            "word_count": count_writing_units(full_content),
+            "degraded": bool(result.get("degraded")),
             "state_delta": dict(result.get("state_delta") or {}),
             "legacy_updates": dict(
                 result.get("legacy_updates") or result.get("state_updates") or {}

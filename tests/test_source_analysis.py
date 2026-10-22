@@ -136,7 +136,9 @@ def test_source_snapshot_preserves_crlf_without_trailing_newline(tmp_path: Path)
     assert service.analyze("reference_crlf", analyzer=_analyzer)["ok"] is True
 
 
-def test_deepseek_flash_source_analysis_disables_thinking(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("stream", ["0", "1"])
+def test_deepseek_flash_source_analysis_disables_thinking(monkeypatch, tmp_path: Path, stream):
+    monkeypatch.setenv("OW_AGENT_STREAM", stream)
     service = _service(tmp_path)
     service.prepare(
         "reference_flash",
@@ -156,7 +158,7 @@ def test_deepseek_flash_source_analysis_disables_thinking(monkeypatch, tmp_path:
             assert received_config is config
 
         def chat(self, messages, **kwargs):
-            assert messages and kwargs["stream"] is False
+            assert messages and kwargs["stream"] is (stream == "1")
             return SimpleNamespace(
                 content='{"summary":"测试摘要","findings":[]}',
                 model="deepseek-v4-flash",

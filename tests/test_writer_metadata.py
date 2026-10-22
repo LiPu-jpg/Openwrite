@@ -146,7 +146,8 @@ def test_writer_length_retry_uses_same_reader_count_as_final_parse():
                 usage={"total_tokens": 10},
             ),
             SimpleNamespace(
-                content="# 第一章 修订\n\n" + "文" * 100 + f"\n{STATE}", usage={"total_tokens": 20}
+                content='{"edits": [{"old": "' + "文" * 79 + '", "new": "' + "文" * 100 + '"}]}',
+                usage={"total_tokens": 20},
             ),
         ]
     )
