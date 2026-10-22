@@ -24,7 +24,7 @@ const readActions: Record<string, readonly string[]> = {
   novel_chapter_run_action: ['list', 'get'],
   novel_rolling_plan_action: ['list', 'get'],
   novel_narrative_forecast_action: ['list', 'get'],
-  novel_manuscript_edit_action: ['versions', 'version', 'compare', 'annotations'],
+  novel_manuscript_edit_action: ['drafts', 'versions', 'version', 'compare', 'annotations'],
   novel_source_action: ['status_v2', 'profile_v2'],
   novel_reference_library_action: ['list', 'status', 'profile'],
   novel_runtime_skill_action: ['list', 'diagnose', 'resolve'],

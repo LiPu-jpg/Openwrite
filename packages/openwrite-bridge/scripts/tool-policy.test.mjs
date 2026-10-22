@@ -22,6 +22,8 @@ test('every registered novel tool has a conservative effect; mixed actions do no
   assert.equal(novelEffect('novel_export', {}), 'write')
   assert.equal(novelEffect('novel_task_retry', {}), 'generate')
   assert.equal(novelEffect('novel_task_cancel', {}), 'write')
+  assert.equal(novelEffect('novel_manuscript_edit_action', { action: 'drafts' }), 'read')
+  assert.equal(novelEffect('novel_manuscript_edit_action', { action: 'restore_draft' }), 'write')
 })
 
 test('host write policy and plan state independently gate generation and changes', () => {
@@ -100,4 +102,28 @@ test('stale revision is returned as CONFLICT and does not look like success', as
     () => tools.find(tool => tool.name === 'novel_outline_edit').execute({ operation: 'rename', revision: 'stale-rev' }, exec),
     error => error instanceof StudioError && error.status === 409 && error.code === 'CONFLICT',
   )
+})
+
+test('saved drafts can be listed and explicitly restored through the existing editing tool', async t => {
+  const workspace = await mkdtemp(join(tmpdir(), 'openwrite-drafts-ws-'))
+  t.after(() => rm(workspace, { recursive: true, force: true }))
+  const requests = []
+  t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
+    requests.push({ path: new URL(url).pathname, method: init.method, body: init.body && JSON.parse(init.body) })
+    return new Response(JSON.stringify({ ok: true, data: { drafts: [], requires_reconcile: true } }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })
+  })
+  const client = new StudioClient({ baseUrl: 'http://127.0.0.1:9', timeoutMs: 1_000 }).scoped({ workspaceRoot: workspace })
+  const tools = []
+  registerNovelTools({ tools: { register: tool => tools.push(tool) } }, () => client, { timeoutMs: 1_000, outputDir: join(workspace, 'out') })
+  const tool = tools.find(tool => tool.name === 'novel_manuscript_edit_action')
+  const exec = { signal: new AbortController().signal, name: tool.name, callId: 'drafts', agent: { session: { header: { cwd: workspace } } } }
+  await tool.execute({ action: 'drafts' }, exec)
+  await tool.execute({ action: 'restore_draft', run_id_v2: 'runv2_saved', revision: 'sha256:current', confirm: true }, exec)
+  assert.equal(requests[0].path, '/api/manuscript/drafts')
+  assert.equal(requests[0].method, 'GET')
+  assert.deepEqual(requests[1], { path: '/api/manuscript/drafts/restore', method: 'POST', body: {
+    run_id_v2: 'runv2_saved', expected_revision: 'sha256:current', confirm: true,
+  } })
 })
