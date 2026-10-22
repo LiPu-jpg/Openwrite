@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import TracebackType
+from threading import Event, Thread, RLock
 from uuid import uuid4
 
 
@@ -73,6 +74,10 @@ class ProjectWriteLock:
         self.initialization_grace_seconds = initialization_grace_seconds
         self.token = uuid4().hex
         self.acquired = False
+        self.stage = "starting"
+        self._stop = Event()
+        self._heartbeat_thread: Thread | None = None
+        self._heartbeat_lock = RLock()
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,12 +95,17 @@ class ProjectWriteLock:
                 "pid": os.getpid(),
                 "operation": self.operation,
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "heartbeat_at": datetime.now(timezone.utc).isoformat(),
+                "stage": self.stage,
             }
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, ensure_ascii=False)
                 handle.flush()
                 os.fsync(handle.fileno())
             self.acquired = True
+            self._stop.clear()
+            self._heartbeat_thread = Thread(target=self._heartbeat_loop, daemon=True)
+            self._heartbeat_thread.start()
             return
         raise ProjectBusyError(f"项目锁无法恢复：{self.path}（持有者仍存活且未超时）")
 
@@ -106,12 +116,37 @@ class ProjectWriteLock:
         return (
             f"项目正由另一个进程执行：{operation}"
             f"（pid={pid}，起始 {created_at}，锁文件 {self.path}）"
-            f"；如确认该任务已终止，可删除锁文件后重试"
+            f"；阶段 {owner.get('stage') or 'unknown'}，最近心跳 {owner.get('heartbeat_at') or created_at}；请在任务列表查看进度或取消，终止的进程锁会自动回收"
         )
+
+    def _heartbeat_loop(self) -> None:
+        while not self._stop.wait(15):
+            try:
+                self.heartbeat()
+            except OSError:
+                # Failed monitoring must not release a live writer's exclusion.
+                continue
+
+    def heartbeat(self, stage: str = "") -> None:
+        from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+        with self._heartbeat_lock:
+            if not self.acquired:
+                return
+            owner = self._read_owner()
+            if owner.get("token") != self.token:
+                return
+            if stage:
+                self.stage = stage
+            owner.update(heartbeat_at=datetime.now(timezone.utc).isoformat(), stage=self.stage)
+            ManuscriptAcceptanceService._atomic_json(self.path, owner)
 
     def release(self) -> None:
         if not self.acquired:
             return
+        self._stop.set()
+        if self._heartbeat_thread is not None:
+            self._heartbeat_thread.join(timeout=1)
         owner = self._read_owner()
         if owner.get("token") == self.token:
             self.path.unlink(missing_ok=True)
@@ -121,8 +156,6 @@ class ProjectWriteLock:
         try:
             age = time.time() - self.path.stat().st_mtime
         except OSError:
-            return True
-        if age > self.stale_after_seconds:
             return True
         owner = self._read_owner()
         raw_pid = owner.get("pid")
@@ -140,7 +173,7 @@ class ProjectWriteLock:
             # 无法验证持有者存活 ⇒ 按陈旧处理（受初始化宽限约束），
             # 宁可误清理也不要让残留锁卡死写作。
             return age > self.initialization_grace_seconds
-        return not alive
+        return not alive or (not owner.get("heartbeat_at") and age > self.stale_after_seconds)
 
     def _read_owner(self) -> dict[str, object]:
         try:

@@ -621,15 +621,16 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
             from ..novel_workspace import count_writing_units
 
             actual_words = count_writing_units("\n".join(content.splitlines()[1:]))
-            minimum_words = int(target_words * 0.8)
-            maximum_words = int(target_words * 1.5)
+            from ..writing_policy import chapter_word_bounds
+
+            minimum_words, _, maximum_words = chapter_word_bounds(target_words)
             if actual_words < minimum_words or actual_words > maximum_words:
                 issues.append(
                     ReviewIssue(
                         severity="warning",
                         category="目标字数偏差",
                         description=(
-                            f"正文约{actual_words}个中文字符，目标为{target_words}，不在 -20%/+50% 区间"
+                            f"正文约{actual_words}个写作单位，目标为{target_words}，不在 -20%/+50% 区间"
                         ),
                         suggestion="删减重复动作与支线，或补足关键场景，使篇幅回到目标区间",
                         dimension=7,

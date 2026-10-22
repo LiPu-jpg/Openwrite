@@ -463,7 +463,7 @@ def test_studio_task_routes_fail_closed_on_unknown_ids(tmp_path: Path):
         # does not exist (404 fail closed, no task data crosses).
         status, payload = _get_task_http(opener, base, "not-a-task")
         assert status == 404
-        assert payload["code"] == "STATIC_ASSET_NOT_FOUND"
+        assert payload["code"] == "ROUTE_NOT_FOUND"
         for verb in ("cancel", "retry", "confirm"):
             status, payload = _post_task(opener, base, f"/api/tasks/not-a-task/{verb}", {})
             assert status == 404, (verb, payload)

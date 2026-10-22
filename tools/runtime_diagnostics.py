@@ -36,7 +36,17 @@ class RuntimeDiagnosticsService:
         self.novel_id = str(novel_id)
         self.novel_root = self.project_root / "data" / "novels" / self.novel_id
 
-    def run(self, *, stuck_minutes: int = 30) -> RuntimeDiagnosticReportV1:
+    def run(
+        self, *, stuck_minutes: int = 30, window_hours: float = 24, since: str = ""
+    ) -> RuntimeDiagnosticReportV1:
+        self._since = (
+            self._date(since)
+            if since
+            else datetime.now(timezone.utc) - timedelta(hours=max(0, window_hours))
+        )
+        if self._since is None:
+            raise ValueError("since must be an ISO timestamp")
+        self._historical: Counter[str] = Counter()
         findings: list[RuntimeDiagnosticFindingV1] = []
         findings.extend(self._task_findings(stuck_minutes))
         findings.extend(self._run_findings())
@@ -56,6 +66,7 @@ class RuntimeDiagnosticsService:
             revision=revision,
             sources=self.SOURCES,
             findings=tuple(findings),
+            historical_counts=dict(self._historical),
         )
 
     def _transport_findings(self) -> list[RuntimeDiagnosticFindingV1]:
@@ -71,6 +82,12 @@ class RuntimeDiagnosticsService:
                 try:
                     record = json.loads(path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
+                    continue
+                created = self._date(record.get("created_at"))
+                if created is None:
+                    created = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+                if created < self._since:
+                    self._historical["transport_error"] += 1
                     continue
                 findings.append(
                     self._finding(
@@ -140,9 +157,27 @@ class RuntimeDiagnosticsService:
                         {"task_id": task.get("task_id")},
                     )
                 )
+        latest_success: dict[tuple[str, str], str] = {}
+        for task in tasks:
+            if task.get("status") == "completed":
+                key = (str(task.get("type") or ""), str(task.get("chapter_id") or ""))
+                latest_success[key] = max(
+                    latest_success.get(key, ""), str(task.get("updated_at") or "")
+                )
+        recent = []
+        for task in tasks:
+            updated = self._date(task.get("updated_at"))
+            key = (str(task.get("type") or ""), str(task.get("chapter_id") or ""))
+            if updated and updated < self._since:
+                if task.get("status") == "failed":
+                    self._historical["failed_task"] += 1
+                continue
+            if str(task.get("updated_at") or "") <= latest_success.get(key, ""):
+                continue
+            recent.append(task)
         failed = [
             task
-            for task in tasks
+            for task in recent
             if task.get("status") == "failed"
             and (task.get("error") or {}).get("code") != "PROJECT_BUSY"
         ]
@@ -159,7 +194,29 @@ class RuntimeDiagnosticsService:
                     "同一工作连续失败",
                     "相同任务与章节至少失败两次，应先查看最后错误和输入 revision。",
                     [item for item in (task_type, chapter_id) if item],
-                    [("tasks", "failure_count", count)],
+                    [
+                        ("tasks", "failure_count", count),
+                        (
+                            "tasks",
+                            "first_seen",
+                            min(
+                                str(task.get("updated_at") or "")
+                                for task in failed
+                                if (task.get("type"), task.get("chapter_id"))
+                                == (task_type, chapter_id)
+                            ),
+                        ),
+                        (
+                            "tasks",
+                            "last_seen",
+                            max(
+                                str(task.get("updated_at") or "")
+                                for task in failed
+                                if (task.get("type"), task.get("chapter_id"))
+                                == (task_type, chapter_id)
+                            ),
+                        ),
+                    ],
                     "open_diagnostics",
                     {"task_type": task_type, "chapter_id": chapter_id},
                 )
@@ -172,6 +229,10 @@ class RuntimeDiagnosticsService:
         store = ChapterRunV2Store(self.project_root, self.novel_id)
         findings: list[RuntimeDiagnosticFindingV1] = []
         for run in store.list(limit=100):
+            updated = self._date(run.updated_at)
+            if updated and updated < self._since:
+                self._historical["chapter_run"] += 1
+                continue
             failed = [name for name, stage in run.stages.items() if stage.status == "failed"]
             stale = [name for name, stage in run.stages.items() if stage.status == "stale"]
             if failed:
@@ -450,7 +511,14 @@ class RuntimeDiagnosticsService:
         params: dict[str, Any],
     ) -> RuntimeDiagnosticFindingV1:
         identity = self._hash([code, affected, evidence])
+        timestamps = [
+            str(value)
+            for _, key, value in evidence
+            if key in {"first_seen", "last_seen", "created_at", "updated_at"} and self._date(value)
+        ]
         return RuntimeDiagnosticFindingV1(
+            first_seen=min(timestamps, default=""),
+            last_seen=max(timestamps, default=""),
             finding_id=f"finding_{identity.split(':', 1)[-1][:16]}",
             code=code,
             severity=severity,  # type: ignore[arg-type]

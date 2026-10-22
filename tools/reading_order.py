@@ -515,6 +515,31 @@ class ReadingOrderService:
         documents: list[dict[str, Any]],
         issues: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        present = {str(item["chapter_id"]) for item in documents if item["status"] != "missing"}
+        missing = {
+            str(item.get("chapter_id") or "")
+            for item in issues
+            if item["code"] == "MISSING_CHAPTER_FILE"
+        }
+        numbers = sorted(self._chapter_number(cid) for cid in present)
+        inferred = (
+            {f"ch_{n:03d}" for n in range(numbers[0], numbers[-1] + 1)} - present
+            if numbers
+            else set()
+        )
+        from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+        inferred.update(
+            item["chapter_id"]
+            for item in ManuscriptAcceptanceService(self.project_root, self.novel_id).inspect()[
+                "chapters"
+            ]
+            if item["status"] == "missing"
+        )
+        for chapter_id in sorted(inferred - missing, key=self._chapter_number):
+            issues.append(
+                self._issue("MISSING_CHAPTER_FILE", blocking=False, chapter_id=chapter_id)
+            )
         occurrences: dict[str, int] = defaultdict(int)
         for index, document in enumerate(documents):
             document_id = str(document["document_id"])

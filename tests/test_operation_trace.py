@@ -179,7 +179,20 @@ def test_http_write_trace_links_dsh_call_context_packet_model_and_committed_chap
         )
         with build_opener(ProxyHandler({})).open(request) as response:
             written = json.loads(response.read())
-        reference = written["operation_trace"]
+        import time
+
+        for _ in range(300):
+            request = Request(
+                f"{base}/api/tasks/{written['task_id']}",
+                headers={"X-OpenWrite-Workspace-Root": str(tmp_path)},
+            )
+            with build_opener(ProxyHandler({})).open(request) as response:
+                task = json.loads(response.read())["data"]["task"]
+            if task["status"] in {"completed", "failed"}:
+                break
+            time.sleep(0.01)
+        assert task["status"] == "completed", task.get("error")
+        reference = task["result"]["operation_trace"]
         assert reference["model_call_count"] == 1
         trace_file = tmp_path / "data" / "novels" / "demo" / reference["path"]
         raw = trace_file.read_text(encoding="utf-8")

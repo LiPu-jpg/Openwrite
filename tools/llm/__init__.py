@@ -19,7 +19,16 @@ from .errors import (
     RateLimitError,
 )
 
+import os
+
+
+def long_generation_stream() -> bool:
+    """Use the same switch for long prose and structured generation."""
+    return os.getenv("OW_AGENT_STREAM", "1") == "1"
+
+
 __all__ = [
+    "long_generation_stream",
     "LLMClient",
     "LLMConfig",
     "LLMResponse",

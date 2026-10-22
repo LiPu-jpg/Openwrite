@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tools.llm import long_generation_stream
+
 import difflib
 import hashlib
 import json
@@ -732,7 +734,7 @@ class SourceAnalysisService:
         response = client.chat(
             [Message("system", system), Message("user", user)],
             temperature=0.2,
-            stream=False,
+            stream=long_generation_stream(),
         )
         classify_response(
             response.content,

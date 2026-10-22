@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tools.llm import long_generation_stream
+
 import json
 import logging
 import re
@@ -171,7 +173,7 @@ class SourcePackService:
                         Message("user", f"请分析以下文本片段：\n\n{chunk_text}"),
                     ],
                     temperature=0.3,
-                    stream=False,
+                    stream=long_generation_stream(),
                 )
                 findings = self._parse_findings(response.content)
             except Exception as exc:

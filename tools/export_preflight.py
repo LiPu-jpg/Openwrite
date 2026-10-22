@@ -72,15 +72,16 @@ class ExportPreflightService:
             for chapter_id, items in by_id.items()
             if len(items) > 1
         }
-        numbers = sorted({int(item["number"]) for item in chapters})
-        missing = (
-            [
-                f"ch_{number:03d}"
-                for number in range(numbers[0], numbers[-1] + 1)
-                if number not in numbers
-            ]
-            if numbers
-            else []
+        from tools.reading_order import ReadingOrderService
+
+        reading = ReadingOrderService(self.project_root, self.novel_id).surface()
+        missing = sorted(
+            {
+                str(item["chapter_id"])
+                for item in reading["issues"]
+                if item["code"] == "MISSING_CHAPTER_FILE"
+            },
+            key=self._chapter_number,
         )
         empty = [item["chapter_id"] for item in chapters if item["empty"]]
         review = self._review_status(chapters, duplicates)

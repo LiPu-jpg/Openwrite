@@ -27,6 +27,8 @@ class RuntimeDiagnosticFindingV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     finding_id: str
+    first_seen: str = ""
+    last_seen: str = ""
     code: str
     severity: Literal["info", "warning", "error", "blocker"]
     summary: str
@@ -47,6 +49,7 @@ class RuntimeDiagnosticReportV1(BaseModel):
     redacted: Literal[True] = True
     sources: tuple[str, ...]
     findings: tuple[RuntimeDiagnosticFindingV1, ...]
+    historical_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class RollingPlanCandidateV1(BaseModel):

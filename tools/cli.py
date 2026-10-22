@@ -526,6 +526,8 @@ def _add_run_command(subparsers):
 def _add_diagnose_command(subparsers):
     parser = subparsers.add_parser("diagnose", help="运行统一项目诊断")
     parser.add_argument("--stuck-minutes", type=int, default=30)
+    parser.add_argument("--window", type=float, default=24, help="Diagnostic event window in hours")
+    parser.add_argument("--since", default="", help="ISO timestamp overriding --window")
 
 
 def _add_planning_command(subparsers):
@@ -1175,7 +1177,7 @@ def _cmd_diagnose(args) -> int:
         logger.error("未找到有效的 novel_config.yaml")
         return 1
     report = RuntimeDiagnosticsService(Path.cwd(), novel_id).run(
-        stuck_minutes=args.stuck_minutes
+        stuck_minutes=args.stuck_minutes, window_hours=args.window, since=args.since
     )
     print(report.model_dump_json(indent=2))
     return 0

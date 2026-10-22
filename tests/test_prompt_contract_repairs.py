@@ -183,7 +183,7 @@ def test_writer_observer_receives_full_chapter_and_length_is_enforced():
     assert raised.value.code == "CHAPTER_LENGTH_OUT_OF_RANGE"
 
 
-def test_writer_rewrites_once_when_first_draft_misses_length_range():
+def test_writer_trims_once_with_anchored_edit_when_first_draft_misses_length_range():
     writer = WriterAgent.__new__(WriterAgent)
     responses = iter(
         [
@@ -192,7 +192,7 @@ def test_writer_rewrites_once_when_first_draft_misses_length_range():
                 usage={"total_tokens": 100},
             ),
             SimpleNamespace(
-                content="# 第一章：钟差\n\n" + "准" * 1000,
+                content='{"edits": [{"old": "' + "长" * 1600 + '", "new": "' + "准" * 1000 + '"}]}',
                 usage={"total_tokens": 80},
             ),
         ]

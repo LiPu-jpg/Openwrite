@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tools.llm import long_generation_stream
+
 import difflib
 import hashlib
 import json
@@ -629,7 +631,7 @@ class RevisionService:
                 Message("user", user_prompt),
             ],
             temperature=0.45,
-            stream=False,
+            stream=long_generation_stream(),
         )
         return self._parse_generation(response.content)
 

@@ -210,8 +210,8 @@ class LLMConfig:
     context_tokens: int = 64000
     stream: bool = True
     api_format: APIFormat = "chat"
-    timeout_seconds: float = 120.0
-    max_retries: int = 3
+    timeout_seconds: float = 300.0
+    max_retries: int = 1
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -238,8 +238,10 @@ class LLMConfig:
                 context_tokens=int(profile.get("context_tokens") or 64000),
                 stream=os.getenv("LLM_STREAM", "true").lower() == "true",
                 api_format=_api_format(profile.get("api_format")),
-                timeout_seconds=float(profile.get("timeout_seconds") or 120),
-                max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
+                timeout_seconds=float(
+                    os.getenv("OW_LLM_TIMEOUT") or profile.get("timeout_seconds") or 300
+                ),
+                max_retries=int(os.getenv("LLM_MAX_RETRIES", "1")),
                 extra={"thinking_modes": dict(profile.get("thinking_modes") or {})},
             )
         return cls(
@@ -252,8 +254,10 @@ class LLMConfig:
             context_tokens=int(os.getenv("OPENWRITE_CONTEXT_TOKENS", "64000")),
             stream=os.getenv("LLM_STREAM", "true").lower() == "true",
             api_format=_api_format(os.getenv("LLM_API_FORMAT", "chat")),
-            timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "120")),
-            max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
+            timeout_seconds=float(
+                os.getenv("OW_LLM_TIMEOUT") or os.getenv("LLM_TIMEOUT_SECONDS", "300")
+            ),
+            max_retries=int(os.getenv("LLM_MAX_RETRIES", "1")),
         )
 
     @staticmethod
@@ -503,6 +507,8 @@ class LLMClient:
                 "stream": stream,
             }
         )
+        if stream:
+            params["timeout"] = self._stream_timeout()
         params.update(self._request_extra(operation))
         response = self._call(responses, params)
         if stream:
@@ -517,6 +523,14 @@ class LLMClient:
             model=str(_value(response, "model", self.config.model) or self.config.model),
             provider=self.config.provider,
             finish_reason=str(_value(response, "status", "") or ""),
+        )
+
+    def _stream_timeout(self) -> Any:
+        import httpx
+
+        seconds = self.config.timeout_seconds
+        return httpx.Timeout(
+            None, read=seconds, connect=min(30.0, seconds), write=seconds, pool=seconds
         )
 
     def _base_params(self) -> dict[str, Any]:
@@ -550,6 +564,8 @@ class LLMClient:
                 "stream": stream,
             }
         )
+        if stream:
+            params["timeout"] = self._stream_timeout()
         if tools:
             params["tools"] = tools
         params.update(self._request_extra(operation))
@@ -948,7 +964,7 @@ class LLMClient:
                 )
         except Exception as exc:
             partial = "".join(chunks)
-            if len(partial) > 100:
+            if partial:
                 logger.warning("Stream interrupted: %s; returning partial content", exc)
                 return LLMResponse(
                     content=partial,

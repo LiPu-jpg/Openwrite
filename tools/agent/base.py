@@ -12,7 +12,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Callable
 
-from ..llm import LLMClient, LLMConfig, LLMResponse, Message
+from ..llm import LLMClient, LLMResponse, Message, long_generation_stream
 from ..llm.errors import LLMWrappedError
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ class BaseAgent(ABC):
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
-                "stream": False,
+                "stream": long_generation_stream(),
                 "on_progress": self.ctx.on_progress,
             }
             if operation:

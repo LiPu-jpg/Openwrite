@@ -305,6 +305,7 @@ class StudioApplication:
         model_calls: list[dict[str, Any]] | None = None,
         status: str = "completed",
         error_code: str = "",
+        request_origin: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Persist one privacy-bounded request trace and attach its reference."""
 
@@ -320,6 +321,10 @@ class StudioApplication:
             "root_call_id": str(getattr(current, "root_call_id", "") or ""),
             "tool_name": str(getattr(current, "tool_name", "") or ""),
         }
+        if request_origin:
+            request_context.update(
+                {key: str(request_origin.get(key) or "") for key in request_context}
+            )
         should_record = bool(
             request_context["tool_call_id"]
             or response.get("mutation_summary")
@@ -1130,7 +1135,11 @@ class StudioApplication:
         options = payload if isinstance(payload, dict) else {}
         return (
             RuntimeDiagnosticsService(self.project_root, self.novel_id)
-            .run(stuck_minutes=int(options.get("stuck_minutes") or 30))
+            .run(
+                stuck_minutes=int(options.get("stuck_minutes") or 30),
+                window_hours=float(options.get("window_hours", 24)),
+                since=str(options.get("since") or ""),
+            )
             .model_dump(mode="json")
         )
 
@@ -2021,7 +2030,10 @@ class StudioApplication:
         previous_chapter = chapters[-2].chapter_id if len(chapters) > 1 else ""
         checkpoint_path = path.resolve().relative_to(self.project_root).as_posix()
 
-        with self._write_lock:
+        with (
+            self._write_lock,
+            ProjectWriteLock(self.project_root, self.novel_id, operation=f"delete:{chapter_id}"),
+        ):
             if not path.is_file() or str(expected_version) != str(path.stat().st_mtime_ns):
                 raise StudioError("正文已变化，请重新载入后再删除", HTTPStatus.CONFLICT)
             git_checkpoint = GitCheckpointManager(self.project_root).checkpoint(
@@ -2031,6 +2043,11 @@ class StudioApplication:
                 chapter_id,
                 reason="manual",
                 label="Studio 删除前自动备份",
+            )
+            from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+            deletion = ManuscriptAcceptanceService(self.project_root, self.novel_id).forget(
+                chapter_id
             )
             path.unlink()
             ChapterMemoryStore(self.project_root, self.novel_id).delete(chapter_id)
@@ -2062,6 +2079,18 @@ class StudioApplication:
                 )
                 runtime_restored = True
 
+            from tools.chapter_lifecycle import archive_chapter_artifacts
+
+            archive_path = archive_chapter_artifacts(
+                self.novel_root, chapter_id, deletion["operation_id"]
+            )
+            path.with_suffix(".uncommitted.json").unlink(missing_ok=True)
+            backup = backup.model_copy(
+                update={
+                    "content_file": f"{archive_path}/manuscript_versions/{chapter_id}/{Path(backup.content_file).name}"
+                }
+            )
+
             state_store = BookStateStore(self.project_root, self.novel_id)
             state = state_store.load_or_create()
             state.current_chapter = previous_chapter
@@ -2091,6 +2120,8 @@ class StudioApplication:
             "chapter_id": chapter_id,
             "previous_chapter": previous_chapter,
             "backup": backup.model_dump(mode="json"),
+            "archive_path": archive_path,
+            "deletion_operation_id": deletion["operation_id"],
             "runtime_restored": runtime_restored,
             "checkpoint": git_checkpoint.to_dict(),
             "workspace": self.workspace(),
@@ -4351,6 +4382,96 @@ class StudioApplication:
             }.get(exc.code, HTTPStatus.BAD_GATEWAY)
             raise StudioError(str(exc), status, code=exc.code) from exc
 
+    def submit_write_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.create_task({"type": "chapter_write", "input": payload})
+
+    def manuscript_drafts(self) -> dict[str, Any]:
+        from tools.chapter_lifecycle import list_drafts
+
+        self.require_project()
+        return {"drafts": list_drafts(self.project_root, self.novel_id)}
+
+    def restore_manuscript_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.chapter_pipeline import _chapter_path, _atomic_write
+        from tools.manuscript_acceptance import ManuscriptAcceptanceService
+        from tools.manuscript_editing import ManuscriptVersionStore
+        from tools.project_lock import ProjectWriteLock
+
+        self.require_project()
+        if payload.get("confirm") is not True:
+            raise StudioError("Restore requires confirm=true", code="CONFIRMATION_REQUIRED")
+        draft = next(
+            (
+                item
+                for item in self.manuscript_drafts()["drafts"]
+                if item["run_id_v2"] == payload.get("run_id_v2")
+            ),
+            None,
+        )
+        if not draft or not draft["restorable"]:
+            raise StudioError(
+                "Draft not found or no longer restorable",
+                HTTPStatus.NOT_FOUND,
+                code="RUN_NOT_RESUMABLE",
+            )
+        chapter_id = draft["chapter_id"]
+        with ProjectWriteLock(
+            self.project_root, self.novel_id, operation=f"draft_restore:{chapter_id}"
+        ):
+            matches = list((self.novel_root / "data" / "manuscript").rglob(f"{chapter_id}.md"))
+            if len(matches) > 1:
+                raise StudioError(
+                    "Duplicate chapter paths", HTTPStatus.CONFLICT, code="DOCUMENT_CONFLICT"
+                )
+            path = (
+                matches[0]
+                if matches
+                else _chapter_path(self.project_root, self.novel_id, chapter_id)
+            )
+            previous = path.read_text(encoding="utf-8") if path.is_file() else ""
+            expected = ManuscriptAcceptanceService.fingerprint(previous) if path.is_file() else ""
+            if str(payload.get("expected_revision") or "") != expected:
+                raise StudioError(
+                    "Chapter changed; reread before restoring",
+                    HTTPStatus.CONFLICT,
+                    code="DOCUMENT_CONFLICT",
+                )
+            source = Path(draft["draft_path"])
+            frozen = source.read_bytes()
+            content = frozen.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            if ManuscriptAcceptanceService.fingerprint(content) != draft["draft_revision"]:
+                raise StudioError("Draft changed", HTTPStatus.CONFLICT, code="DOCUMENT_CONFLICT")
+            if path.is_file():
+                ManuscriptVersionStore(self.project_root, self.novel_id).checkpoint(
+                    chapter_id, reason="manual", label="Before draft restore"
+                )
+            _atomic_write(path, frozen)
+            acceptance = ManuscriptAcceptanceService(self.project_root, self.novel_id)
+            # Crash recovery can leave a head for a missing file. Explicit restore
+            # starts from that recorded base and still requires fact reconciliation.
+            state_head = acceptance._state().get("chapters", {}).get(chapter_id, {})
+            operation = acceptance.start_acceptance(
+                chapter_id,
+                source="history_restore",
+                expected_previous_revision=str(
+                    state_head.get("pending_revision") or state_head.get("accepted_revision") or ""
+                ),
+                source_run_id=draft["run_id_v2"],
+            )
+            path.with_suffix(".uncommitted.json").unlink(missing_ok=True)
+            acceptance._atomic_json(
+                source.parent / "restored.json", {"operation_id": operation["operation_id"]}
+            )
+        return {
+            "ok": True,
+            "chapter_id": chapter_id,
+            "run_id_v2": draft["run_id_v2"],
+            "draft_path": str(path),
+            "operation": operation,
+            "acceptance": acceptance.inspect(),
+            "requires_reconcile": True,
+        }
+
     def write_next_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile = self._operation_profile(
             "chapter_write",
@@ -4413,6 +4534,11 @@ class StudioApplication:
                             else {}
                         ),
                         "temperature": float(payload.get("temperature") or 0.7),
+                        **{
+                            key: payload[key]
+                            for key in ("_task_stage", "_task_phase", "_cancel_requested")
+                            if key in payload
+                        },
                         **({"run_id_v2": payload["run_id_v2"]} if payload.get("run_id_v2") else {}),
                         **({"resume_from_draft": True} if payload.get("resume_from_draft") else {}),
                     }
@@ -4968,6 +5094,21 @@ class StudioApplication:
                 "research": "research",
             }[task_type]
             self._operation_profile(operation, injected_executor=injected)
+        manager = getattr(self, "_workspace_manager", None)
+        current = manager.current_request_context() if manager else None
+        task_input = {
+            **task_input,
+            "_trace_request": {
+                key: str(getattr(current, key, "") or "")
+                for key in (
+                    "workspace_id",
+                    "session_id",
+                    "tool_call_id",
+                    "root_call_id",
+                    "tool_name",
+                )
+            },
+        }
         chapter_id = str(
             task_input.get("chapter_id")
             or self._chapter_id_from_document(str(task_input.get("path") or ""))
@@ -5059,21 +5200,31 @@ class StudioApplication:
                     code="DOCUMENT_CONFLICT",
                     recoverable=True,
                 )
+        args["_task_stage"] = context.stage
         args["_task_phase"] = context.progress_callback
         args["_cancel_requested"] = context.cancellation_requested
         context.phase("preparing", "准备章节写作")
         context.checkpoint()
         try:
-            profile = self._operation_profile(
-                "chapter_write",
-                injected_executor=self._writer_executor,
+            from tools.operation_trace import capture_operation_trace
+
+            with capture_operation_trace() as collector:
+                response = self.write_next_chapter(args)
+            response = self.record_operation_trace(
+                route="/api/write",
+                request_id=context.task_id,
+                payload=payload,
+                response=response,
+                model_calls=collector.model_calls,
+                request_origin=payload.get("_trace_request"),
             )
-            with self._model_context(profile):
-                result = self._service().write_chapter(args)
-                return result
-        except NovelServiceError as exc:
+            result = response["result"]
+            if response.get("operation_trace"):
+                result["operation_trace"] = response["operation_trace"]
+            return result
+        except (NovelServiceError, StudioError) as exc:
             if exc.code == "TASK_CANCELLED":
-                raise TaskCancelled(str(exc)) from exc
+                raise TaskCancelled(str(exc), details=getattr(exc, "details", {})) from exc
             raise
 
     def _task_review_chapter(self, payload: dict[str, Any], context: TaskContext) -> dict[str, Any]:
@@ -5100,9 +5251,9 @@ class StudioApplication:
                     task_phase=context.progress_callback,
                     cancel_requested=context.cancellation_requested,
                 )
-        except NovelServiceError as exc:
+        except (NovelServiceError, StudioError) as exc:
             if exc.code == "TASK_CANCELLED":
-                raise TaskCancelled(str(exc)) from exc
+                raise TaskCancelled(str(exc), details=getattr(exc, "details", {})) from exc
             raise
         return {
             **result,
@@ -5204,6 +5355,9 @@ class StudioApplication:
         return {
             "operation_id": operation_id,
             "operation": completed,
+            "degraded": any(
+                item.get("degraded") for item in completed.get("analysis_results", {}).values()
+            ),
             "acceptance": service.inspect(),
         }
 

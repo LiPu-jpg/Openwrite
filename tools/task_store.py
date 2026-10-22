@@ -88,6 +88,24 @@ def normalize_task_record(raw: Mapping[str, Any]) -> dict[str, Any]:
         "completed_at",
     ):
         record.setdefault(key, None)
+    record["finished_at"] = record.get("completed_at")
+    started, finished = record.get("started_at"), record.get("finished_at")
+    try:
+        record["duration_ms"] = (
+            max(
+                1,
+                int(
+                    (
+                        datetime.fromisoformat(str(finished)) - datetime.fromisoformat(str(started))
+                    ).total_seconds()
+                    * 1000
+                ),
+            )
+            if started and finished
+            else None
+        )
+    except (TypeError, ValueError):
+        record["duration_ms"] = None
     return record
 
 
@@ -271,6 +289,7 @@ class TaskStore:
                     task["started_at"] = now
                 if status in {"completed", "failed", "cancelled", "interrupted"}:
                     task["completed_at"] = now
+                    task["finished_at"] = now
             if phase is not None:
                 task["phase"] = phase
             if updates:
