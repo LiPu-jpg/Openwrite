@@ -1,6 +1,6 @@
 # Core 5.8.11：写作与恢复修复
 
-插件 0.2.24 / Core 5.8.11 修复 #88–#95，已发布到 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24)；分发状态和完整验收见 [发布验收](RELEASE_ACCEPTANCE.md#024)。测试使用假模型和隔离目录，不调用付费模型。
+插件 0.2.24 / Core 5.8.11 修复 #88–#95，已发布到 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 与 [npm](https://www.npmjs.com/package/dsh-openwrite/v/0.2.24)；分发状态和完整验收见 [发布验收](RELEASE_ACCEPTANCE.md#024)。测试使用假模型和隔离目录，不调用付费模型。
 
 | Issue | 行为 |
 | --- | --- |

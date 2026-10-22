@@ -31,7 +31,7 @@
 
 **0.2.24 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2**。四个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
 
-0.2.24 已发布到 GitHub Release，npm 发布等待认证完成，npm `latest` 暂为 0.2.23。现在安装 0.2.24 请使用精确版本的 Release 包：
+npm `dsh-openwrite@0.2.24` 与对应 GitHub Release 均已发布，`latest` 已更新到 0.2.24，使用同一份验收产物。也可安装精确版本的 Release 包：
 
 ```sh
 dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.24/dsh-openwrite-0.2.24.tgz
@@ -64,9 +64,9 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
-`0.2.24`（Core 5.8.11）修复 [#88–#95](docs/ISSUES_88_95.md)：删章验收账本、结算降级、长文本流式生成、后台写章进度、统一字数门限、草稿发现与恢复及诊断/路由语义。[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 已发布，完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#024)。升级后停止并重新启动 dsh，再刷新浏览器页面。
+`0.2.24`（Core 5.8.11）修复 [#88–#95](docs/ISSUES_88_95.md)：删章验收账本、结算降级、长文本流式生成、后台写章进度、统一字数门限、草稿发现与恢复及诊断/路由语义。[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 与 [npm](https://www.npmjs.com/package/dsh-openwrite/v/0.2.24) 均已发布，完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#024)。升级后停止并重新启动 dsh，再刷新浏览器页面。
 
-`0.2.23` 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的兼容声明加入精确宿主 `0.2.1-rc.2`，安装和激活不再被宿主版本闸门拒绝，无需版本豁免或手工编辑 `compatibility.json`。已在 `0.2.1-rc.2` 完成 Web 客户端验收（启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存），`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过；Windows Electron 桌面端未实机复测。npm `latest` 已更新到 0.2.23，GitHub Release 已发布，完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#023)。升级后停止并重新启动 dsh，再刷新浏览器页面。
+`0.2.23` 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的兼容声明加入精确宿主 `0.2.1-rc.2`，安装和激活不再被宿主版本闸门拒绝，无需版本豁免或手工编辑 `compatibility.json`。已在 `0.2.1-rc.2` 完成 Web 客户端验收（启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存），`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过；Windows Electron 桌面端未实机复测。该版本完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#023)。升级后停止并重新启动 dsh，再刷新浏览器页面。
 
 `0.2.21` 修复 [#79](https://github.com/LiPu-jpg/Openwrite/issues/79) 的 Windows Desktop 目录选择：宿主接口失败后使用桌面提供的系统文件夹对话框，覆盖侧栏进入与工作台内目录选择。Core 保持 5.8.10。排查与手填路径方式见 [安装指南](docs/INSTALL.md#windows-desktop-目录选择)。
 

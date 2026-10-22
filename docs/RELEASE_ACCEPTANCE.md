@@ -8,7 +8,7 @@
 
 ## 0.2.24
 
-[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 已发布，npm 发布等待认证完成，npm `latest` 暂为 0.2.23。直接使用[完整发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39716542888) 验收通过的原始产物，未重新打包。来源提交 `d16623c6b0d2a84d45dffe23c24e641df790175f`，源码 tree `e0b2fd0647114e46e6fd188f4fb32b13fadc6b3d` 与主分支合并提交 `32166de6a3f66d8ebb2e3b5bd3912c1c1236f07b` 一致。npm 格式安装包 SHA-256 为 `a9fb766e8277b0f7dfecd9ea2284720512583e766e82515b70a529c967aa0170`。
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 与 [npm `dsh-openwrite@0.2.24`](https://www.npmjs.com/package/dsh-openwrite/v/0.2.24) 均已发布，npm `latest` 已更新到 0.2.24。直接使用[完整发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39716542888) 验收通过的原始产物，未重新打包。来源提交 `d16623c6b0d2a84d45dffe23c24e641df790175f`，源码 tree `e0b2fd0647114e46e6fd188f4fb32b13fadc6b3d` 与主分支合并提交 `32166de6a3f66d8ebb2e3b5bd3912c1c1236f07b` 一致。npm 包 SHA-256 为 `a9fb766e8277b0f7dfecd9ea2284720512583e766e82515b70a529c967aa0170`；从官方 registry 无认证重新下载后，包字节、SHA-1、SHA-512 integrity 与 CI 产物和 registry 元数据均一致。
 
 8 份原生安装/源码报告与 4 份客户端契约报告全部通过，覆盖 Linux、macOS arm64/x64、Windows、Node 22.19/24/26、源码安装、alpha 兼容与精确宿主 `0.1.2-rc.1` / `0.1.5-alpha.1` / `0.2.0-rc.2` / `0.2.1-rc.2`。GitHub 四份公开附件重新下载后均与 CI 原文件逐字节一致；合并后的[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39717124199) 也已通过。源码安装命令的超时从两分钟调整为五分钟，保留原有成功条件，并补充退出状态、信号和错误码诊断。
 
