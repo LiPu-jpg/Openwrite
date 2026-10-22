@@ -1,6 +1,6 @@
 # Core 5.8.11：写作与恢复修复
 
-本地候选修复 #88–#95；不代表已发布到 npm 或 GitHub Release。测试使用假模型和隔离目录，不调用付费模型。
+插件 0.2.24 / Core 5.8.11 修复 #88–#95，已发布到 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24)；分发状态和完整验收见 [发布验收](RELEASE_ACCEPTANCE.md#024)。测试使用假模型和隔离目录，不调用付费模型。
 
 | Issue | 行为 |
 | --- | --- |
@@ -31,10 +31,10 @@
 
 `novel_manuscript_edit_action(action="drafts")` 列出未提交草稿；`action="restore_draft"` 传 `run_id_v2`、`confirm: true`，覆盖已有正文时用 `revision` 传当前正文 SHA。工具将其映射到 Core 的 `expected_revision`。恢复属于本地写入操作；不会按生成任务执行。随后使用现有验收调和工具处理返回的 operation。
 
-#86、#87 的精确宿主 `0.2.1-rc.2` 声明已经包含在 0.2.23，本候选继续保留该兼容范围。
+#86、#87 的精确宿主 `0.2.1-rc.2` 声明已经包含在 0.2.23，本版继续保留该兼容范围。
 
 插件验证：`npm run check:plugin` 通过（构建、doctor、36 项生命周期检查、预设与双 profile、bridge/panel smoke、14 项 epoch、298 项组件）；`npm run test:managed` 23 项通过，跨仓库 contracts 通过。
 
-核心全量 pytest：1409 passed、32 skipped；新 wheel 另做打包内容与针对性回归检查。候选版本为插件 0.2.24 / Core 5.8.11，未发布。
+核心全量 pytest：1409 passed、32 skipped；新 wheel 另做打包内容与针对性回归检查。发布版本为插件 0.2.24 / Core 5.8.11。
 
-新 wheel 解包后隔离导入并执行针对性回归：11 passed。源码草稿 PR：[#96](https://github.com/LiPu-jpg/Openwrite/pull/96)。
+新 wheel 解包后隔离导入并执行针对性回归：11 passed。已合并核心 [PR #96](https://github.com/LiPu-jpg/Openwrite/pull/96) 与插件 [PR #97](https://github.com/LiPu-jpg/Openwrite/pull/97)。

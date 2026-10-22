@@ -6,6 +6,16 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.24
+
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 已发布，npm 发布等待认证完成，npm `latest` 暂为 0.2.23。直接使用[完整发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39716542888) 验收通过的原始产物，未重新打包。来源提交 `d16623c6b0d2a84d45dffe23c24e641df790175f`，源码 tree `e0b2fd0647114e46e6fd188f4fb32b13fadc6b3d` 与主分支合并提交 `32166de6a3f66d8ebb2e3b5bd3912c1c1236f07b` 一致。npm 格式安装包 SHA-256 为 `a9fb766e8277b0f7dfecd9ea2284720512583e766e82515b70a529c967aa0170`。
+
+8 份原生安装/源码报告与 4 份客户端契约报告全部通过，覆盖 Linux、macOS arm64/x64、Windows、Node 22.19/24/26、源码安装、alpha 兼容与精确宿主 `0.1.2-rc.1` / `0.1.5-alpha.1` / `0.2.0-rc.2` / `0.2.1-rc.2`。GitHub 四份公开附件重新下载后均与 CI 原文件逐字节一致；合并后的[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39717124199) 也已通过。源码安装命令的超时从两分钟调整为五分钟，保留原有成功条件，并补充退出状态、信号和错误码诊断。
+
+修复 #88–#95，合并核心 [PR #96](https://github.com/LiPu-jpg/Openwrite/pull/96) 与插件 [PR #97](https://github.com/LiPu-jpg/Openwrite/pull/97)。捆绑 Core 5.8.11，wheel 来源提交 `596709e3f4bbe4eab7ce59513c9f36c4390ad367` 已包含在 `native-core` 分支，wheel SHA-256 为 `7937914eee6b99cd64fee2ead96a5e6d63e807acae0a610c1c4abf863e814188`。行为与草稿恢复步骤见[修复说明](ISSUES_88_95.md)。
+
+核心全量 pytest：1409 passed、32 skipped；wheel 解包后隔离回归：11 passed。插件构建、doctor、生命周期、双 profile、预设、bridge/panel smoke、14 项 epoch、298 项组件、23 项受管理运行时检查及跨仓库 contracts 通过。真实服务商连续请求与 Windows Electron 实机验收未运行，不计入通过。
+
 ## 0.2.23
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.23) 与 npm `dsh-openwrite@0.2.23` 已发布，npm `latest` 已更新到 0.2.23。使用[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39219394324) 验收的原始产物，来源提交 `341408b80075fe4cc429f30a3327bcbdf2e69903`，npm 包 SHA-256 为 `8eb13e3de31b2144f1d5a57094abff38951c0329058520c96331aed03c735470`。8 份安装/源码报告与 4 份宿主客户端报告（含精确 `0.2.1-rc.2`）全部通过；GitHub 四份附件逐一与 CI 原文件比对一致，官方 npm registry 无认证下载包的字节与 SHA-256 也一致。
