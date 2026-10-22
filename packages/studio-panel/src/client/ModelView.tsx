@@ -144,6 +144,19 @@ const errorText = (cause: unknown) =>
     : cause instanceof Error
       ? cause.message
       : String(cause);
+
+const testErrorText = (cause: unknown, t: Props["t"]): string => {
+  const base = errorText(cause);
+  if (!(cause instanceof StudioApiError)) return base;
+  switch (cause.code) {
+    case "MODEL_TEST_INVALID_RESPONSE":
+      return `${base} ${t("models.test.invalidResponseHint")}`;
+    case "MODEL_TEST_UNSUPPORTED_PARAMETER":
+      return `${base} ${t("models.test.unsupportedHint")}`;
+    default:
+      return base;
+  }
+};
 const marker = (
   t: Props["t"],
   record: ModelTestRecordDto | null,
@@ -411,8 +424,12 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
         : { id: embedding.id, label: embedding.label, provider: embedding.provider, model: embedding.model, base_url: embedding.base_url, dimension: Number(embedding.dimension), max_tokens: Number(embedding.max_tokens), api_key: embedding.api_key };
       if (!target.api_key) delete target.api_key;
       const result = parseConnectionTestResult(await postStudioApi(kind === "chat" ? "/model/test" : "/model/embedding/test", target));
-      outcome = { text: `${kind === "chat" ? t("models.chatOk") : t("models.embeddingOk")} · ${result.latency_ms === null ? "—" : `${Math.round(result.latency_ms)} ms`}`, bad: false };
-    } catch (cause) { outcome = { text: errorText(cause), bad: true }; }
+      const vectorInfo = kind === "embedding" && result.dimension !== null
+        ? ` · ${t("models.vectorDimension")}: ${Math.round(result.dimension)}`
+          + (result.vectors !== null ? ` · ${t("models.vectorCount")}: ${Math.round(result.vectors)}` : "")
+        : "";
+      outcome = { text: `${kind === "chat" ? t("models.chatOk") : t("models.embeddingOk")} · ${result.latency_ms === null ? "—" : `${Math.round(result.latency_ms)} ms`}${vectorInfo}`, bad: false };
+    } catch (cause) { outcome = { text: testErrorText(cause, t), bad: true }; }
     // Probing a draft must not save it, erase it, or clear its entered key.
     await load({ preserveChat: true, preserveEmbedding: true, preserveRoutes: true });
     if (mounted.current) setNotice(outcome);
@@ -890,25 +907,30 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                 </div>
               </fieldset>
               <fieldset className={css.modelGroup} disabled={!!busy}>
-                <legend className={css.modelGroupTitle}>Vector parameters</legend>
+                <legend className={css.modelGroupTitle}>{t("models.vectorParameters")}</legend>
                 <div className={css.modelFormGrid}>
-                <label>
-                  Dimension
-                  <input
-                    type="number"
-                    value={embedding.dimension}
-                    onChange={(e) => setEmbed("dimension", e.target.value)}
-                  />
-                </label>
-                <label>
-                  Max tokens
-                  <input
-                    type="number"
-                    value={embedding.max_tokens}
-                    onChange={(e) => setEmbed("max_tokens", e.target.value)}
-                  />
-                </label>
+                  <label>
+                    {t("models.vectorDimension")}
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={embedding.dimension}
+                      onChange={(e) => setEmbed("dimension", e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    {t("models.vectorMaxTokens")}
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={embedding.max_tokens}
+                      onChange={(e) => setEmbed("max_tokens", e.target.value)}
+                    />
+                  </label>
                 </div>
+                <p className={css.modelHint}>{t("models.vectorDimensionsHint")}</p>
               </fieldset>
               <fieldset className={css.modelGroup} disabled={!!busy}>
                 <legend className={css.modelGroupTitle}>{t('models.group.credentials')}</legend>

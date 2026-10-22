@@ -982,6 +982,13 @@ export type StudioPanelKey =
   | 'models.save'
   | 'models.chatTest'
   | 'models.embeddingTest'
+  | 'models.vectorParameters'
+  | 'models.vectorDimension'
+  | 'models.vectorMaxTokens'
+  | 'models.vectorCount'
+  | 'models.vectorDimensionsHint'
+  | 'models.test.invalidResponseHint'
+  | 'models.test.unsupportedHint'
   | 'models.delete'
   | 'models.delete.confirm'
   | 'models.delete.blocked'
@@ -2115,6 +2122,13 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.save': '保存档案',
   'models.chatTest': '聊天测试',
   'models.embeddingTest': 'Embedding 测试',
+  'models.vectorParameters': '向量参数',
+  'models.vectorDimension': '向量维度',
+  'models.vectorMaxTokens': '文本 Token 上限',
+  'models.vectorCount': '返回向量数',
+  'models.vectorDimensionsHint': '云端模型会请求指定 dimensions 维度；不支持该参数的服务商将回退到默认维度，并检查实际返回是否匹配。修改维度后需要重新构建已有向量索引。',
+  'models.test.invalidResponseHint': '请核对实际维度、响应向量数量以及服务商对 dimensions 参数的支持情况。',
+  'models.test.unsupportedHint': '请检查服务商支持的模型参数和请求格式。',
   'models.delete': '删除档案',
   'models.delete.confirm': '确认删除',
   'models.delete.blocked': '删除受阻',
@@ -3294,6 +3308,13 @@ export const en: Record<StudioPanelKey, string> = {
   'models.save': 'Save profile',
   'models.chatTest': 'Chat test',
   'models.embeddingTest': 'Embedding test',
+  'models.vectorParameters': 'Vector parameters',
+  'models.vectorDimension': 'Vector dimensions',
+  'models.vectorMaxTokens': 'Text token limit',
+  'models.vectorCount': 'Returned vectors',
+  'models.vectorDimensionsHint': 'Cloud models request the configured dimensions. Providers rejecting this field fall back to their native vector size, which is still checked. Rebuild existing vector indexes when changing dimensions.',
+  'models.test.invalidResponseHint': 'Check the actual dimensions, vector count and provider support for the dimensions parameter.',
+  'models.test.unsupportedHint': 'Check the provider-supported model parameters and request format.',
   'models.delete': 'Delete profile',
   'models.delete.confirm': 'Confirm delete',
   'models.delete.blocked': 'Deletion blocked',

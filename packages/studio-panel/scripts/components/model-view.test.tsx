@@ -165,7 +165,7 @@ describe('ModelView independent Embedding contracts', () => {
     const { container } = await openEmbedding(api)
     expect((screen.getByLabelText('models.id') as HTMLInputElement).value).toBe('embed-a')
     expect((screen.getByLabelText('models.id') as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByLabelText('Dimension') as HTMLInputElement).value).toBe('1536')
+    expect((screen.getByLabelText('models.vectorDimension') as HTMLInputElement).value).toBe('1536')
     expect(passwordInputs(container)[0]!.value).toBe('')
     expect(container.innerHTML).not.toContain(FAKE_CREDENTIAL)
     expect(container.innerHTML).not.toContain('private-reference')
@@ -204,7 +204,7 @@ describe('ModelView independent Embedding contracts', () => {
     fireEvent.change(screen.getByLabelText('models.id'), { target: { value: 'embed-c' } })
     fireEvent.change(screen.getByLabelText('models.label'), { target: { value: 'Embedding C' } })
     fireEvent.change(screen.getByLabelText('models.embeddingModel'), { target: { value: 'fake-embed-c' } })
-    fireEvent.change(screen.getByLabelText('Dimension'), { target: { value: '1024' } })
+    fireEvent.change(screen.getByLabelText('models.vectorDimension'), { target: { value: '1024' } })
     fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
     await screen.findByRole('button', { name: /Embedding C/ })
     const [path, body] = api.postStudioApi.mock.calls[0] as [string, Record<string, unknown>]
@@ -310,14 +310,14 @@ describe('ModelView independent Embedding contracts', () => {
   it('blocks invalid embedding sizes and missing model before saving', async () => {
     const api = makeEmbeddingApi()
     await openEmbedding(api)
-    fireEvent.change(screen.getByLabelText('Dimension'), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText('models.vectorDimension'), { target: { value: '0' } })
     fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
     expect(screen.getByText('models.validation.positive')).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('Dimension'), { target: { value: '1536' } })
-    fireEvent.change(screen.getByLabelText('Max tokens'), { target: { value: '1.5' } })
+    fireEvent.change(screen.getByLabelText('models.vectorDimension'), { target: { value: '1536' } })
+    fireEvent.change(screen.getByLabelText('models.vectorMaxTokens'), { target: { value: '1.5' } })
     fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
     expect(screen.getByText('models.validation.positive')).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('Max tokens'), { target: { value: '8192' } })
+    fireEvent.change(screen.getByLabelText('models.vectorMaxTokens'), { target: { value: '8192' } })
     fireEvent.change(screen.getByLabelText('models.embeddingModel'), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
     expect(screen.getByText('models.validation.required')).toBeTruthy()
@@ -645,6 +645,30 @@ describe('ModelView workbench (M2b)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'models.embeddingTest' }))
     await waitFor(() => expect(container.textContent).toContain('MODEL_TEST_AUTH'))
     // The failure text is the contract code plus message, never a secret.
+    expect(container.textContent).not.toContain(FAKE_CREDENTIAL)
+  })
+
+  it('shows returned vector dimensions and an actionable mismatch diagnostic', async () => {
+    let shouldFail = false
+    const api = makeApi({
+      post: async (path: string) => {
+        if (path !== '/model/embedding/test') return envelope({})
+        if (shouldFail) throw new StudioApiError(
+          'Embedding 维度不匹配：服务商实际返回 1024 维，配置要求 4096 维。',
+          502, 'MODEL_TEST_INVALID_RESPONSE',
+        )
+        return envelope({ status: 'ok', latency_ms: 88, dimension: 4096, vectors: 2 })
+      },
+    })
+    const { container } = await openEmbedding(api)
+    fireEvent.click(screen.getByRole('button', { name: 'models.embeddingTest' }))
+    await waitFor(() => expect(container.textContent).toContain('models.vectorDimension: 4096'))
+    expect(container.textContent).toContain('models.vectorCount: 2')
+    shouldFail = true
+    fireEvent.click(screen.getByRole('button', { name: 'models.embeddingTest' }))
+    await waitFor(() => expect(container.textContent).toContain('实际返回 1024 维'))
+    expect(container.textContent).toContain('配置要求 4096 维')
+    expect(container.textContent).toContain('models.test.invalidResponseHint')
     expect(container.textContent).not.toContain(FAKE_CREDENTIAL)
   })
 

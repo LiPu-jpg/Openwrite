@@ -3,7 +3,7 @@
   "dsh": "0.1.2-rc.1",
   "uv_version": "0.11.19",
   "python_version": "3.12.13",
-  "core_version": "5.8.12",
+  "core_version": "5.8.13",
   "contract_version": 1,
   "platforms": {
     "darwin-arm64": {
@@ -56,8 +56,8 @@
     }
   },
   "wheel": {
-    "file": "openwrite-5.8.12-py3-none-any.whl",
-    "sha256": "fefd03aebfb0ebf084fd40f4897af309a532111903a3813f01276daa1c36c345"
+    "file": "openwrite-5.8.13-py3-none-any.whl",
+    "sha256": "b1e3110c3e9e0d9e7daf41d3e5d31372a3831bb1822bb392963ab39717c08d26"
   },
   "requirements": {
     "file": "requirements.lock",
@@ -65,9 +65,9 @@
   },
   "sources": {
     "core": {
-      "repository": "https://github.com/LiPu-jpg/Openwrite",
-      "branch": "fix/core-issues-98-100",
-      "commit": "079fc335ad53caf9a50035c69884c05bf82e6252"
+      "repository": "https://github.com/kelriclink/Openwrite",
+      "branch": "fix/gitee-embedding-dimensions-core",
+      "commit": "80883d263a891b157ae7829165769e382da53e3b"
     },
     "dog": {
       "repository": "https://github.com/Fun10165/dsh-dog",
