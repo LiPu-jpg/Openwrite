@@ -27,8 +27,8 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/(
 Object.assign(env, { DSH_HOME: join(temporary, 'dsh'), XDG_CONFIG_HOME: join(temporary, 'config'), XDG_DATA_HOME: join(temporary, 'data'), CI: '1' })
 await mkdir(env.DSH_HOME, { recursive: true })
 function run(args) {
-  const result = spawnSync(process.execPath, [cli, ...args], { cwd: temporary, env, encoding: 'utf8', timeout: 120_000, maxBuffer: 8 * 1024 ** 2 })
-  if (result.status !== 0) throw new Error(`${args.slice(0, 3).join(' ')}: ${result.stderr}\n${result.stdout}`)
+  const result = spawnSync(process.execPath, [cli, ...args], { cwd: temporary, env, encoding: 'utf8', timeout: sourceSpec ? 300_000 : 120_000, maxBuffer: 8 * 1024 ** 2 })
+  if (result.status !== 0) throw new Error(`${args.slice(0, 3).join(' ')} (status=${result.status}, signal=${result.signal}, error=${result.error?.code ?? 'none'}): ${result.stderr}\n${result.stdout}`)
   return result.stdout
 }
 let host
