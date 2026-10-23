@@ -72,11 +72,17 @@ def _render(chapters: list[dict[str, Any]]) -> str:
         "emotional_arc": "情感弧线",
         "beats": "节拍",
         "hooks": "悬念",
+        "promise": "章节承诺",
+        "payoff_of": "回收伏笔",
+        "word_budget": "字数预算",
+        "function": "章节功能",
     }
     sections = []
     for chapter in chapters:
         lines = [f"#### 第{chapter['number']}章：{chapter['title']}", "", chapter["summary"], ""]
         for key, label in labels.items():
+            if key not in chapter:
+                continue
             value = chapter[key]
             lines.append(f"> {label}: {', '.join(value) if isinstance(value, list) else value}")
         sections.append("\n".join(lines))

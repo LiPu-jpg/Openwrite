@@ -146,7 +146,7 @@ def test_writer_length_retry_uses_same_reader_count_as_final_parse():
                 usage={"total_tokens": 10},
             ),
             SimpleNamespace(
-                content='{"edits": [{"old": "' + "文" * 79 + '", "new": "' + "文" * 100 + '"}]}',
+                content="续" * 21,
                 usage={"total_tokens": 20},
             ),
         ]
@@ -161,7 +161,8 @@ def test_writer_length_retry_uses_same_reader_count_as_final_parse():
     result = asyncio.run(writer._creative_write({}, 1, 0.7, 100))
 
     assert len(calls) == 2
-    assert "79 字（不含标题和内联批注）" in calls[1][-1].content
+    assert "已完成 79 字" in calls[1][-1].content
+    assert "直接续写" in calls[1][-1].content
     assert result["word_count"] == 100
     assert result["usage"]["total_tokens"] == 30
 

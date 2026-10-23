@@ -163,6 +163,10 @@ def mutate_outline_structure(
                 "beats": "节拍",
                 "hooks": "悬念",
                 "characters": "涉及人物",
+                "promise": "章节承诺",
+                "payoff_of": "回收伏笔",
+                "word_budget": "字数预算",
+                "function": "章节功能",
             }
             values: dict[str, Any] = {}
             for key, label in labels.items():
@@ -170,19 +174,30 @@ def mutate_outline_structure(
                 if match:
                     values[key] = (
                         int(match.group(1).replace(",", ""))
-                        if key == "target_words"
+                        if key in {"target_words", "word_budget"}
                         else match.group(1)
                     )
             if operation == "set_meta":
                 if not isinstance(metadata, dict) or not metadata or set(metadata) - set(labels):
                     raise OutlineEditError("metadata requires supported chapter fields")
+                metadata = dict(metadata)
+                if "word_budget" in metadata:
+                    if "target_words" in metadata and int(metadata["target_words"]) != int(metadata["word_budget"]):
+                        raise OutlineEditError("word_budget must match target_words")
+                    metadata["target_words"] = metadata["word_budget"]
+                elif "target_words" in metadata and "word_budget" in values:
+                    metadata["word_budget"] = metadata["target_words"]
                 for key, value in metadata.items():
-                    if key == "target_words":
+                    if key in {"target_words", "word_budget"}:
                         from tools.writing_policy import resolve_target_words
 
                         value = resolve_target_words(value)["target_words"]
-                    elif not isinstance(value, str) or "\n" in value or "\r" in value:
+                    elif key in {"function", "payoff_of"} and isinstance(value, list) and all(isinstance(v, str) for v in value):
+                        value = ", ".join(value)
+                    if not isinstance(value, int) and (not isinstance(value, str) or "\n" in value or "\r" in value):
                         raise OutlineEditError("Metadata text must be a single line")
+                    if key == "function" and set(re.split(r"[,，、]\s*", value)) - {"推进", "揭示", "关系", "代价"}:
+                        raise OutlineEditError("function must contain 推进/揭示/关系/代价")
                     pattern = rf"^>\s*{labels[key]}\s*[:：].*$"
                     replacement = f"> {labels[key]}: {value}"
                     if re.search(pattern, body, re.M):
@@ -347,6 +362,17 @@ def validate_outline_targets(content: str) -> None:
                 resolve_target_words(int(match.group(1).replace(",", "")))
             except ValueError as exc:
                 raise OutlineEditError(str(exc)) from exc
+    from tools.outline_parser import OutlineMdParser
+    try:
+        hierarchy = OutlineMdParser().parse(content, "")
+        from tools.writing_policy import resolve_target_words
+        for chapter in hierarchy.chapters:
+            if chapter.word_budget:
+                resolve_target_words(chapter.word_budget)
+        if any(set(ch.function) - {"推进", "揭示", "关系", "代价"} for ch in hierarchy.chapters):
+            raise ValueError("Invalid chapter function")
+    except ValueError as exc:
+        raise OutlineEditError(str(exc)) from exc
 
 
 def _parse_tree(

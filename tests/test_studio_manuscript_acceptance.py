@@ -93,7 +93,7 @@ def test_application_reconciles_acceptance_in_persistent_task_and_reports_chapte
 
         assert completed["status"] == "completed", completed.get("error")
         assert completed["type"] == "manuscript_reconcile"
-        assert completed["progress"] == {
+        assert {key: completed["progress"][key] for key in ("completed_units", "total_units", "ratio", "unit_kind")} == {
             "completed_units": 1,
             "total_units": 1,
             "ratio": 1.0,

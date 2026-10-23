@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from typing import Any
 
 from tools.task_store import TASK_PHASES, TaskStore, TaskStoreError
@@ -295,6 +295,13 @@ class PersistentTaskRunner:
             )
             return
         context = TaskContext(self.store, task_id)
+        heartbeat_stop = Event()
+
+        def heartbeat() -> None:
+            while not heartbeat_stop.wait(5):
+                self.store.heartbeat(task_id)
+
+        heartbeat_thread = Thread(target=heartbeat, daemon=True, name=f"heartbeat-{task_id}")
         try:
             self.store.transition(
                 task_id,
@@ -303,6 +310,8 @@ class PersistentTaskRunner:
                 event="task_started",
             )
             context.phase_name = "reading"
+            self.store.heartbeat(task_id)
+            heartbeat_thread.start()
             context.checkpoint()
             payload = self.store.materialize_input(task)
             if task.get("type") == "continuous_write":
@@ -381,3 +390,5 @@ class PersistentTaskRunner:
                 },
                 event="task_failed",
             )
+        finally:
+            heartbeat_stop.set()

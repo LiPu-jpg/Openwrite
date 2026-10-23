@@ -21,7 +21,7 @@ from tools.writing_targets import normalize_writing_targets
 
 SCHEMA_VERSION = "openwrite.export-preflight.v1"
 CHAPTER_FILE_RE = re.compile(r"^ch_(\d+)\.md$")
-PURPOSES = {"backup", "delivery"}
+PURPOSES = {"backup", "delivery", "personal_archive"}
 FORMATS = {"md", "txt", "epub"}
 
 
@@ -56,7 +56,7 @@ class ExportPreflightService:
         if clean_format not in FORMATS:
             raise ExportPreflightError("导出格式仅支持 md、txt 或 epub", code="INVALID_FORMAT")
         if clean_purpose not in PURPOSES:
-            raise ExportPreflightError("导出用途仅支持 backup 或 delivery", code="INVALID_PURPOSE")
+            raise ExportPreflightError("purpose must be backup, delivery or personal_archive", code="INVALID_PURPOSE")
 
         config = self._config()
         targets = normalize_writing_targets(config.get("writing_targets"))

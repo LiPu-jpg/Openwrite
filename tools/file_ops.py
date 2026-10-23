@@ -5,6 +5,25 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import json
+import os
+import tempfile
+
+
+def atomic_write(path: Path, content: str) -> None:
+    """Replace a UTF-8 document in its own directory, without partial reads."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", dir=path.parent,
+                                         prefix=f".{path.name}.", delete=False) as handle:
+            temporary = handle.name
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 class FileOps:

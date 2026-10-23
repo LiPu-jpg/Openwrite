@@ -288,6 +288,40 @@ class ManuscriptAcceptanceService:
             source_run_id=source_run_id,
         )
 
+    def accept_without_model(self, operation_id: str) -> dict[str, Any]:
+        """Accept frozen bytes while leaving derived facts explicitly stale.
+
+        This is resumable by the normal model reconciliation path. It never
+        fabricates facts or clears the write guard for subsequent chapters.
+        """
+        from tools.project_lock import ProjectWriteLock
+
+        with ProjectWriteLock(self.project_root, self.novel_id, operation="accept:fast"):
+            operation = self.operation(operation_id)
+            if operation["status"] == "completed":
+                return operation
+            if operation["status"] in {"stale", "abandoned"}:
+                raise ManuscriptAcceptanceError(
+                    "Acceptance source changed", code="ACCEPTED_SOURCE_CHANGED"
+                )
+            state = self._state()
+            for frozen in operation["frozen_chapters"]:
+                self._assert_frozen_current(operation, frozen)
+                head = state.get("chapters", {}).get(frozen["chapter_id"], {})
+                if head.get("operation_id") != operation_id:
+                    raise ManuscriptAcceptanceError(
+                        "Acceptance operation was superseded", code="STALE_ACCEPTED_REVISION"
+                    )
+                head.update(accepted_revision=frozen["revision"], status="stale",
+                            updated_at=self._now())
+            state["revision"] = int(state.get("revision") or 0) + 1
+            state["updated_at"] = self._now()
+            operation.update(status="accepted_without_facts", facts_pending=True,
+                             accepted_revision=operation["target_revision"], updated_at=self._now())
+            self._write_operation(operation)
+            self._write_state(state)
+            return operation
+
     def resume(
         self,
         operation_id: str,
@@ -326,6 +360,7 @@ class ManuscriptAcceptanceService:
             self._set_heads_status(operation, "failed")
             raise
         operation["status"] = "completed"
+        operation["facts_pending"] = False
         operation["accepted_revision"] = str(operation.get("target_revision") or "")
         operation["updated_at"] = self._now()
         operation["completed_at"] = self._now()

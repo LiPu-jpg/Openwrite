@@ -13,7 +13,7 @@ from uuid import uuid4
 
 
 class ProjectBusyError(RuntimeError):
-    pass
+    code = "PROJECT_BUSY"
 
 
 def _process_alive(pid: int) -> bool:

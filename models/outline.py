@@ -68,6 +68,10 @@ class OutlineNode(BaseModel):
     involved_characters: List[str] = Field(default_factory=list, description="涉及人物")
     involved_settings: List[str] = Field(default_factory=list, description="涉及设定")
     estimated_words: int = Field(default=0, description="预估字数")
+    promise: str = Field(default="", description="可观察状态 A -> B 的章节承诺")
+    payoff_of: List[str] = Field(default_factory=list, description="本章计划回收的伏笔 ID")
+    word_budget: int = Field(default=0, ge=0, le=50000, description="与预估字数同源的章字数预算")
+    function: List[str] = Field(default_factory=list, description="推进/揭示/关系/代价，可多选")
     # 章内微观情绪变化 (canonical field)
     emotional_arc: str = Field(default="", description="章内情绪变化（微观）")
 

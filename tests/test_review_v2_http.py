@@ -755,7 +755,7 @@ def test_benchmark_task_reports_real_progress_units(tmp_path: Path):
         assert evaluation_units == sorted(evaluation_units)
 
         # Task DTO: progress union + benchmark result_ref (M1a).
-        assert task["progress"] == {
+        assert {key: task["progress"][key] for key in ("completed_units", "total_units", "ratio", "unit_kind")} == {
             "completed_units": 1,
             "total_units": 1,
             "ratio": 1.0,

@@ -257,7 +257,9 @@ class WorkspaceManager:
                 raise StudioError(
                     "工作区根目录与另一个已激活工作区存在嵌套关系",
                     code="WORKSPACE_ROOT_INVALID",
-                    details={"reason": "nested", "parent": str(other)},
+                    details={"reason": "nested", "parent": str(other),
+                             "requested_root": str(root),
+                             "active_roots": sorted(str(item) for item in active_roots)},
                 )
 
     def _build_app(self, root: Path) -> Any:

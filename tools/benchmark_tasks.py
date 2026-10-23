@@ -136,6 +136,8 @@ def benchmark_options(project_root: Path, novel_id: str) -> dict[str, Any]:
                 "has_manuscript": chapter_id in drafted,
                 "availability": "unavailable" if reason else "available",
                 "reason": reason,
+                "isolated_rewrite_available": historical and not issues,
+                "isolated_rewrite_warning": "Uses current canon, not a reconstructed pre-chapter baseline" if historical else "",
             }
         )
     return {
@@ -146,7 +148,7 @@ def benchmark_options(project_root: Path, novel_id: str) -> dict[str, Any]:
         "limits": {
             "outline_start_chapter": {"min": latest + 1, "max": 100000},
             "outline_chapter_count": {"min": 1, "max": 20, "default": 3},
-            "target_words": {"min": 200, "max": 12000, "default": 3000},
+            "target_words": {"min": 200, "max": 50000, "default": 3000},
             "repeats": {"min": 1, "max": 5, "default": 1},
             "concurrency": {"min": 1, "max": 4, "default": 1},
             "planning_context_chars": {"max": MAX_PLANNING_CONTEXT_CHARS},
@@ -230,12 +232,16 @@ def benchmark_target(
         if not re.fullmatch(r"ch_\d+", chapter_id) or int(chapter_id[3:]) < 1:
             raise BenchmarkInputError("章节 ID 必须形如 ch_001")
         chapter_id = f"ch_{int(chapter_id[3:]):03d}"
-    if enforce_history and int(chapter_id[3:]) <= latest:
+    historical = task == "chapter" and int(chapter_id[3:]) <= latest
+    allow_historical = payload.get("allow_historical") is True
+    if enforce_history and int(chapter_id[3:]) <= latest and not (historical and allow_historical):
         raise BenchmarkInputError(
             "当前事实包含所选章节或后续正文，不能构建可信的章前测试基线；请选择尚未写到的章节",
             code="BENCHMARK_HISTORICAL_CONTEXT_UNAVAILABLE",
         )
     target["chapter_id"] = chapter_id
+    if historical and allow_historical:
+        target.update(historical=True, allow_historical=True, baseline_kind="current_canon_rewrite")
     return target
 
 

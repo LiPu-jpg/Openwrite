@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 import re
+import math
+from pathlib import Path
 from dataclasses import dataclass, field
 
 from ..character_state_index import normalize_character_state_annotation_fences
@@ -178,6 +180,9 @@ class WriterAgent(BaseAgent):
         target_words: int,
     ) -> dict:
         """Phase 1: 创意写作"""
+        context = self._serial_context(context, chapter_number)
+        if target_words >= 6000 and context.get("segmented_write", True):
+            return await self._segmented_write(context, chapter_number, temperature, target_words)
         system_prompt = self._build_creative_system_prompt(context)
         user_prompt = self._build_creative_user_prompt(
             context=context,
@@ -222,6 +227,11 @@ class WriterAgent(BaseAgent):
         from ..writing_policy import chapter_word_bounds
 
         minimum_words, _, maximum_words = chapter_word_bounds(target_words)
+        initial = self._parse_creative_output(response.content, chapter_number, first_usage)
+        if initial["word_count"] < minimum_words:
+            return await self._segmented_write(
+                context, chapter_number, temperature, target_words, initial_response=response
+            )
         current_content = response.content
         final_response = response
         all_usage = [first_usage]
@@ -322,6 +332,117 @@ class WriterAgent(BaseAgent):
         )
         return parsed
 
+    def _serial_context(self, context: dict, chapter_number: int) -> dict:
+        import yaml
+        from tools.writing_assets import WritingAssets
+
+        if not getattr(getattr(self, "ctx", None), "project_root", None):
+            return context
+        root = Path(self.ctx.project_root)
+        novel_id = getattr(self.ctx, "book_id", None)
+        if not novel_id and (root / "novel_config.yaml").is_file():
+            config = yaml.safe_load((root / "novel_config.yaml").read_text(encoding="utf-8")) or {}
+            novel_id = config.get("novel_id")
+        if not novel_id:
+            return context
+        source_assets = WritingAssets(root, novel_id)
+        assets = source_assets.context(f"ch_{chapter_number:03d}")
+        result = {**context, **assets}
+        from tools.arc_audit import ArcAuditService
+        plans = ArcAuditService(root, novel_id).chapter_guidance(f"ch_{chapter_number:03d}")
+        if plans:
+            result["external_context"] = str(context.get("external_context") or "") + "\n后文回收计划：\n" + "\n".join(plans)
+        # Group texts are optional descriptive material. Canonical identity,
+        # relationships and state remain in the original character card.
+        characters = []
+        incoming = context.get("active_characters") or [
+            {"name": name, "description": text}
+            for name, text in (context.get("character_documents") or {}).items()
+        ]
+        group_table = source_assets.load()["character_groups"]
+        for item in incoming:
+            if not isinstance(item, dict):
+                continue
+            description = str(item.get("description") or "")
+            groups = group_table.get(item.get("name"), [])
+            for group in groups:
+                description = description.replace(group["text"], "")
+            selected = assets["character_group_selection"].get(item.get("name"), [])
+            if selected:
+                description += "\n本章可用描写素材（不必全部使用）：\n" + "\n".join(g["text"] for g in selected)
+            characters.append({**item, "description": description})
+        if characters:
+            result["active_characters"] = characters
+        return result
+
+    async def _segmented_write(self, context: dict, chapter_number: int, temperature: float,
+                               target_words: int, initial_response=None) -> dict:
+        from tools.writing_assets import join_segment
+        from tools.writing_policy import chapter_word_bounds
+
+        minimum, _, maximum = chapter_word_bounds(target_words)
+        planned = max(1, math.ceil(target_words / 2500))
+        beats = list(context.get("chapter_beats") or context.get("chapter_requirements", {}).get("beats") or [])
+        current = initial_response.content if initial_response else ""
+        usages = [initial_response.usage] if initial_response and initial_response.usage else []
+        response = initial_response
+        completed = 0
+        # Bounded generation, including repair continuations for early model stops.
+        for index in range(planned + 3):
+            count = self._parse_creative_output(current, chapter_number, {})["word_count"] if current else 0
+            if count >= minimum and (initial_response or completed >= planned):
+                break
+            remaining = max(1, target_words - count)
+            slots = max(1, planned - completed)
+            segment_target = min(3000, math.ceil(remaining / slots))
+            segment_context = dict(context)
+            start = math.floor(completed * len(beats) / planned)
+            end = math.floor((completed + 1) * len(beats) / planned)
+            segment_context["chapter_beats"] = beats[start:end] if completed < planned else []
+            final = completed >= planned - 1 or initial_response is not None and remaining <= 3000
+            if not final:
+                segment_context.pop("chapter_hooks", None)
+            prompt = self._build_creative_user_prompt(segment_context, chapter_number, segment_target)
+            prompt += (f"\n这是同一章的第 {completed + 1} 段，本章总目标 {target_words} 字，已完成 {count} 字。"
+                       f"本段约 {segment_target} 字。只写本段，按当前节拍推进；"
+                       "不要重复前文、不要复述人物卡。")
+            prompt += "不要重复章节标题。" if current else "首段须输出章节标题和本段正文。"
+            prompt += "本段完成章末钩子。" if final else "本段不要结束整章，为下一段保留行动。"
+            messages = [Message("system", self._build_creative_system_prompt(segment_context))]
+            if current:
+                messages.append(Message("assistant", current[-1500:]))
+                prompt += "\n从上述前文尾部之后直接续写，不得重写已经完成的段落。"
+            messages.append(Message("user", prompt))
+            try:
+                response = self.chat(messages=messages, temperature=temperature, max_tokens=None)
+            except Exception as exc:
+                partial = str(getattr(exc, "partial_content", "") or "")
+                if current:
+                    exc.partial_content = join_segment(current, partial) if partial else current
+                raise
+            if response.usage:
+                usages.append(response.usage)
+            new = join_segment(current, response.content) if current else response.content
+            if new == current:
+                break
+            current = new
+            completed += 1
+            parsed = self._parse_creative_output(current, chapter_number, self._merge_usage(*usages))
+            on_draft = getattr(getattr(self, "ctx", None), "on_draft", None)
+            if callable(on_draft):
+                on_draft({**parsed, "segmented": True, "segments_completed": completed})
+            if parsed["word_count"] >= maximum:
+                break
+        parsed = self._parse_creative_output(current, chapter_number, self._merge_usage(*usages))
+        parsed.update(segmented=True, segments_completed=completed,
+                      finish_reason=str(getattr(response, "finish_reason", "") or ""),
+                      model=str(getattr(response, "model", "") or ""),
+                      provider=str(getattr(response, "provider", "") or ""))
+        if not minimum <= parsed["word_count"] <= maximum:
+            parsed.update(length_out_of_range=True,
+                          length_warning=f"Chapter has {parsed['word_count']} writing units; expected {minimum}-{maximum}")
+        return parsed
+
     def _build_creative_system_prompt(self, context: dict) -> str:
         """构建创意写作系统提示"""
         parts = []
@@ -340,6 +461,14 @@ class WriterAgent(BaseAgent):
 - 适当的环境描写烘托气氛
 - 人物心理通过动作和表情展现""")
         parts.append(INLINE_ANNOTATION_CONTRACT)
+        if context.get("term_table"):
+            import json
+            parts.append("项目术语表（规范词、禁用词、最低次数与用法）：\n" +
+                         json.dumps(context["term_table"], ensure_ascii=False))
+            parts.append("最低出现次数按整章计算，不要求每个分段都达到该次数。")
+        if context.get("anchor_samples"):
+            parts.append("范本仅供句法、节奏和段落结构参照。禁止照抄具体句子、情节与专名。\n" +
+                         "\n\n".join(context["anchor_samples"].values()))
 
         # 题材指导
         if context.get("genre"):
@@ -392,6 +521,10 @@ class WriterAgent(BaseAgent):
         if context.get("chapter_goals"):
             goals = "\n".join(f"- {g}" for g in context["chapter_goals"])
             parts.append(f"## 章节目标\n{goals}\n")
+        if context.get("chapter_promise"):
+            parts.append(f"## 本章可观察状态承诺\n{context['chapter_promise']}")
+        if context.get("chapter_payoffs"):
+            parts.append("## 本章回收伏笔 ID\n" + ", ".join(context["chapter_payoffs"]))
 
         if context.get("chapter_beats"):
             beats = "\n".join(f"- {item}" for item in context["chapter_beats"])

@@ -12,7 +12,7 @@ def test_all_writer_phases_and_retries_use_selected_model_budget(tmp_path, budge
     responses = iter(
         [
             "# 第一章：雾城\n\n" + "山" * 10,
-            '{"edits": [{"old": "' + "山" * 10 + '", "new": "' + "山" * 100 + '"}]}',
+            "川" * 90,
             "角色抵达雾城。",
             "not a valid settlement",
             'state_updates: {}\nchapter_summary: "角色抵达雾城。"',

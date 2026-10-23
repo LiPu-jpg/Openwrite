@@ -86,6 +86,7 @@ def test_responses_usage_is_normalized_to_shared_token_names():
         "completion_tokens": 3,
         "total_tokens": 11,
         "completion_tokens_details": {"reasoning_tokens": 2},
+        "reasoning_tokens": 2,
         "cost_reported": False,
     }
 

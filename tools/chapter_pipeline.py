@@ -194,6 +194,12 @@ def _save_chapter(
     ):
         title = f"第{_chapter_number(chapter_id)}章 {title}"
     _atomic_write(path, f"# {title}\n\n{content}".encode())
+    from tools.writing_assets import WritingAssets
+
+    assets = WritingAssets(project_root, novel_id)
+    diagnostic = assets.inspect_chapter(chapter_id)
+    _atomic_write(assets.root / "data" / "writing_diagnostics" / f"{chapter_id}.json",
+                  json.dumps(diagnostic, ensure_ascii=False, indent=2).encode())
     return path
 
 
@@ -412,6 +418,9 @@ def build_writer_payload(
         "author_intent": getattr(context, "author_intent", ""),
         "creative_focus": getattr(context, "creative_focus", ""),
         "chapter_goals": getattr(context, "chapter_goals", []),
+        "chapter_promise": getattr(current_chapter, "promise", "") if current_chapter else "",
+        "chapter_payoffs": getattr(current_chapter, "payoff_of", []) if current_chapter else [],
+        "chapter_functions": getattr(current_chapter, "function", []) if current_chapter else [],
         "chapter_beats": getattr(current_chapter, "beats", []) if current_chapter else [],
         "chapter_hooks": getattr(current_chapter, "hooks", []) if current_chapter else [],
         "emotion_arc": getattr(context, "emotion_arc", ""),

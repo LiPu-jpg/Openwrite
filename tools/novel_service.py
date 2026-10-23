@@ -285,9 +285,28 @@ class NovelApplicationService:
                         code="EXPORT_PREFLIGHT_CHANGED",
                         details={"preflight": current},
                     )
+                receipt_path = None
+                receipt = None
+                if purpose == "personal_archive":
+                    import json
+                    from uuid import uuid4
+                    from tools.file_ops import atomic_write
+
+                    receipt_path = self.novel_root / "data" / "exports" / f"archive_{uuid4().hex}.json"
+                    receipt = {"purpose": purpose, "status": "prepared", "preflight": checked,
+                               "output_sha256": hashlib.sha256(staged.read_bytes()).hexdigest()}
+                    atomic_write(receipt_path, json.dumps(receipt, ensure_ascii=False, indent=2))
                 self._publish_export(staged, destination)
                 committed = True
                 self._best_effort_unlink(previous)
+                if receipt_path is not None:
+                    receipt["status"] = "completed"
+                    try:
+                        atomic_write(receipt_path, json.dumps(receipt, ensure_ascii=False, indent=2))
+                    except OSError as exc:
+                        raise NovelServiceError("Export completed but archive receipt could not be finalized",
+                                                code="EXPORT_AUDIT_FAILED",
+                                                details={"export_completed": True, "receipt": str(receipt_path)}) from exc
                 return destination
         except ExportPreflightError as exc:
             raise NovelServiceError(
