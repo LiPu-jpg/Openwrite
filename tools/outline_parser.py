@@ -216,6 +216,11 @@ class OutlineMdParser:
             i += 1
 
         self._normalize_hierarchy_links(hierarchy)
+        for chapter in hierarchy.chapters:
+            if chapter.word_budget and chapter.estimated_words and chapter.word_budget != chapter.estimated_words:
+                raise ValueError(f"{chapter.node_id}: word_budget must match estimated_words")
+            if chapter.word_budget:
+                chapter.estimated_words = chapter.word_budget
         return hierarchy
 
     def _strip_ignored_blocks(self, md_content: str) -> str:
@@ -284,6 +289,14 @@ class OutlineMdParser:
             node.involved_settings.extend(settings)
 
         # 章纲字段
+        elif key_lower in ("promise", "章节承诺"):
+            node.promise = value
+        elif key_lower in ("payoff_of", "回收伏笔"):
+            node.payoff_of = [v.strip() for v in re.split(r"[，,、]", value) if v.strip()]
+        elif key_lower in ("word_budget", "字数预算"):
+            node.word_budget = int(value.replace(",", ""))
+        elif key_lower in ("function", "章节功能"):
+            node.function = [v.strip() for v in re.split(r"[，,、]", value) if v.strip()]
         elif key_lower in ("本章目标", "写作目标", "goals", "目标"):
             goals = [g.strip() for g in re.split(r"[，,、]", value) if g.strip()]
             node.goals.extend(goals)

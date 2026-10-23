@@ -162,6 +162,27 @@ class ReviewerAgent(BaseAgent):
             ReviewResult 审核结果
         """
         all_issues: list[ReviewIssue] = []
+        from tools.writing_assets import WritingAssets, term_findings, manuscript_metrics
+
+        context = dict(context)
+        root = Path(getattr(getattr(self, "ctx", None), "project_root", "."))
+        config_path = root / "novel_config.yaml"
+        if config_path.is_file() and "term_table" not in context:
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            if config.get("novel_id"):
+                assets = WritingAssets(root, config["novel_id"])
+                data = assets.load()
+                context.update(term_table=data["terms"], review_terms=data["review_terms"])
+        term_checks = term_findings(content, context.get("term_table") or []) if context.get("review_terms", True) else []
+        for finding in term_checks:
+            all_issues.append(ReviewIssue(
+                severity="warning", category="terminology",
+                description=(f"Forbidden term {finding['term']} at line {finding['line']}"
+                             if finding["kind"] == "forbidden_term" else
+                             f"Required term {finding['term']}: {finding['actual']}/{finding['minimum']} occurrences"),
+                suggestion=str(finding.get("suggestion") or "Use the project terminology table"),
+                evidence=str(finding.get("evidence") or ""),
+            ))
 
         # ── 规则类检查（零 LLM 成本）─
         rule_issues = self._rule_based_check(
@@ -226,7 +247,7 @@ class ReviewerAgent(BaseAgent):
                 for issue in all_issues
                 if issue.dimension in selected
                 or issue.dimension in GATE_CHECK_IDS
-                or issue.category == "structure"
+                or issue.category in {"structure", "terminology"}
             ]
 
         issue_payloads = [self._issue_payload(issue) for issue in all_issues]
@@ -249,6 +270,8 @@ class ReviewerAgent(BaseAgent):
             ),
         )
         review_v2["strict"] = bool(strict)
+        review_v2["terminology"] = {"enabled": context.get("review_terms", True), "findings": term_checks}
+        review_v2["manuscript_metrics"] = manuscript_metrics(content)
         review_v2["check_scope"] = (
             "outline" if context.get("review_form") == "outline" else "chapter"
         )

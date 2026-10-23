@@ -55,6 +55,10 @@ class StudioPostRoute:
 
 
 POST_ROUTES = {
+    "/api/manuscript/accept": StudioPostRoute("accept_external_manuscript", envelope=True),
+    "/api/manuscript/reconcile": StudioPostRoute("reconcile_manuscript_acceptance", envelope=True),
+    "/api/writing-assets": StudioPostRoute("save_writing_assets", envelope=True),
+    "/api/arc-reconcile": StudioPostRoute("arc_reconcile", envelope=True),
     "/api/focus": StudioPostRoute("update_focus", requires_project=False),
     "/api/model": StudioPostRoute("configure_model", requires_project=False, envelope=True),
     "/api/model/test": StudioPostRoute(
@@ -154,7 +158,7 @@ POST_ROUTES = {
     "/api/runtime-skills": StudioPostRoute("runtime_skill_action"),
     "/api/rules": StudioPostRoute("rule_action"),
     "/api/chapter-runs-v2": StudioPostRoute("chapter_run_v2_action"),
-    "/api/diagnostics": StudioPostRoute("runtime_diagnostics"),
+    "/api/diagnostics": StudioPostRoute("runtime_diagnostics", read_only=True),
     "/api/rolling-plans": StudioPostRoute("rolling_plan_action"),
     "/api/narrative-forecasts": StudioPostRoute("narrative_forecast_action"),
     "/api/manuscript-editing": StudioPostRoute(
@@ -216,6 +220,7 @@ def resolve_post_route(path: str) -> tuple[StudioPostRoute | None, dict[str, str
 
 
 GET_ROUTE_PATTERNS = [
+    r"/api/manuscript/(?P<chapter_id>ch_\d+)/metrics",
     "/api/benchmarks/(?P<run_id>bench_[A-Za-z0-9_-]+)",
     "/api/research/reports/(?P<report_id>[A-Za-z0-9][A-Za-z0-9_-]{0,100})",
     "/api/chapters/(?P<chapter_id>ch_\\d+)/scenes",
@@ -246,6 +251,7 @@ GET_ROUTES = frozenset(
         "/api/export",
         "/api/export/preflight",
         "/api/health",
+        "/api/status",
         "/api/manuscript-imports",
         "/api/manuscript/acceptance",
         "/api/manuscript/drafts",
@@ -268,6 +274,8 @@ GET_ROUTES = frozenset(
         "/api/traces",
         "/api/workspace",
         "/api/workspace/context",
+        "/api/writing-assets",
+        "/api/outline/audit",
     ]
 )
 
@@ -367,6 +375,7 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
             if self._context is not None and not self.app.initialized:
                 allowed_uninitialized = {
                     "/api/health",
+                    "/api/status",
                     "/api/workspace/context",
                     "/api/project/list",
                     "/api/model/profiles",
@@ -382,6 +391,20 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                     )
             if parsed.path == "/api/health":
                 self._json(health_payload())
+                return
+            if parsed.path == "/api/status":
+                expected_root = parse_qs(parsed.query).get("project_path", [""])[0]
+                actual_root = str(self.app.project_root.resolve())
+                if expected_root and os.path.realpath(os.path.expanduser(expected_root)) != actual_root:
+                    raise StudioError(
+                        "Connected workspace differs from requested project",
+                        HTTPStatus.CONFLICT, code="WORKSPACE_CONTEXT_MISMATCH",
+                        details={"project_path": actual_root, "requested_path": expected_root},
+                    )
+                self._json({**health_payload(), "instance_id": self.server.instance_id,
+                            "port": self.server.server_port, "project_path": actual_root,
+                            "novel_id": self.app.novel_id,
+                            "workspace": self.workspace_manager.describe(self._context, self.app)})
                 return
             if parsed.path == "/api/workspace/context":
                 manager = self.workspace_manager
@@ -399,6 +422,18 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/workspace":
                 self._json(self.app.workspace())
+                return
+            if parsed.path == "/api/writing-assets":
+                self._json(self.app.writing_assets())
+                return
+            if parsed.path == "/api/outline/audit":
+                query = parse_qs(parsed.query)
+                self._json(self.app.outline_audit(
+                    query.get("group_id", [""])[0], query.get("start", [""])[0], query.get("end", [""])[0]))
+                return
+            metrics_match = re.fullmatch(r"/api/manuscript/(ch_\d+)/metrics", parsed.path)
+            if metrics_match:
+                self._json(self.app.manuscript_metrics(metrics_match.group(1)))
                 return
             if parsed.path == "/api/traces":
                 self.app.require_project()
@@ -1044,6 +1079,8 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(status)
         self._security_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("X-OpenWrite-Instance-Id", str(getattr(self.server, "instance_id", "")))
+        self.send_header("X-OpenWrite-Project-Path", quote(str(self.app.project_root.resolve()), safe=""))
         self.send_header("X-Request-ID", self.request_id)
         if status == HTTPStatus.METHOD_NOT_ALLOWED:
             self.send_header("Allow", str(payload.get("details", {}).get("allow", "")))

@@ -415,7 +415,7 @@ class ModelBenchmarkService:
         target_words = self._bounded_int(
             payload.get("target_words"),
             200,
-            12000,
+            50000,
             int(context_preview.get("target_words") or 3000),
         )
         packet = context_preview.get("packet")
@@ -429,9 +429,10 @@ class ModelBenchmarkService:
             from tools.manuscript_acceptance import ManuscriptAcceptanceService
             from tools.write_guard import validate_chapter_writable
 
-            ManuscriptAcceptanceService(self.project_root, self.novel_id).require_current(
-                chapter_id
-            )
+            if not target.get("historical"):
+                ManuscriptAcceptanceService(self.project_root, self.novel_id).require_current(
+                    chapter_id
+                )
             guard = validate_chapter_writable(self.project_root, self.novel_id, chapter_id)
             if not guard.get("ok"):
                 raise BenchmarkFrameworkError(
@@ -990,6 +991,17 @@ class ModelBenchmarkService:
                 return generate_outline_candidate(workspace, self.novel_id, packet)
         from tools.chapter_pipeline import execute_write_chapter, load_chapter
         from tools.chapter_run_v2 import ChapterRunV2Store
+
+        if packet.get("historical"):
+            # Explicit current-canon rewrite comparison. Source prose and
+            # ledgers are never changed; candidates use private workspaces.
+            root = workspace / "data" / "novels" / self.novel_id
+            for path in (root / "data" / "manuscript").glob("**/ch_*.md"):
+                if re.fullmatch(r"ch_\d+", path.stem) and int(path.stem[3:]) >= int(chapter_id[3:]):
+                    path.unlink()
+            for path in (root / "data" / "memory" / "chapters").glob("ch_*.yaml"):
+                if re.fullmatch(r"ch_\d+", path.stem) and int(path.stem[3:]) >= int(chapter_id[3:]):
+                    path.unlink()
 
         with activate_model_profile(profile, search_profile=search_profile):
             result = execute_write_chapter(

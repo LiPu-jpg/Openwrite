@@ -208,6 +208,10 @@ def _chapter_requirements(chapter: Any) -> dict[str, Any]:
             "beats": getattr(chapter, "beats", []),
             "hooks": getattr(chapter, "hooks", []),
             "emotional_arc": getattr(chapter, "emotional_arc", ""),
+            "promise": getattr(chapter, "promise", ""),
+            "payoff_of": getattr(chapter, "payoff_of", []),
+            "word_budget": getattr(chapter, "word_budget", 0),
+            "function": getattr(chapter, "function", []),
         }
     )
 

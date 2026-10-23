@@ -260,6 +260,14 @@ class OutlineMdSerializer:
             metadata.append(f"> 内容焦点: {node.content_focus}")
         if node.estimated_words:
             metadata.append(f"> 预估字数: {node.estimated_words}")
+        if node.promise:
+            metadata.append(f"> 章节承诺: {node.promise}")
+        if node.word_budget:
+            metadata.append(f"> 字数预算: {node.word_budget}")
+        if node.payoff_of:
+            metadata.append("> 回收伏笔: " + ", ".join(node.payoff_of))
+        if node.function:
+            metadata.append("> 章节功能: " + ", ".join(node.function))
         if node.emotional_arc:
             metadata.append(f"> 情感弧线: {node.emotional_arc}")
         if node.status:

@@ -4851,10 +4851,64 @@ class StudioApplication:
         phase = dto.get("phase")
         dto["phase_index"] = TASK_PHASES.index(phase) if phase in TASK_PHASES else None
         dto["result_ref"] = task_result_ref(dto)
+        if isinstance(dto.get("progress"), dict):
+            dto["progress"] = {
+                **dto["progress"],
+                **{key: dto.get(key) for key in (
+                    "last_activity_at", "last_heartbeat_at", "model_call_elapsed_ms"
+                )},
+            }
         return dto
 
     def benchmark_surface(self, limit: int = 20) -> dict[str, Any]:
         return self._benchmarks().surface(limit)
+
+    def writing_assets(self) -> dict[str, Any]:
+        from tools.writing_assets import WritingAssets
+        self.require_project()
+        return WritingAssets(self.project_root, self.novel_id).surface()
+
+    def save_writing_assets(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.writing_assets import WritingAssets
+        try:
+            with ProjectWriteLock(self.project_root, self.novel_id, operation="writing_assets"):
+                assets = WritingAssets(self.project_root, self.novel_id)
+                if payload.get("action") == "save_anchor":
+                    return assets.save_anchor(str(payload.get("name") or ""), payload.get("content"),
+                                              str(payload.get("expected_revision") or ""))
+                if payload.get("action") == "mark_usage":
+                    return assets.mark_usage(str(payload.get("chapter_id") or ""), payload.get("groups"))
+                return assets.save(
+                    payload.get("assets"), str(payload.get("expected_revision") or ""))
+        except ValueError as exc:
+            raise StudioError(str(exc), code="INVALID_WRITING_ASSETS") from exc
+        except ProjectBusyError as exc:
+            raise StudioError(str(exc), HTTPStatus.CONFLICT, code="PROJECT_BUSY") from exc
+
+    def manuscript_metrics(self, chapter_id: str) -> dict[str, Any]:
+        from tools.writing_assets import WritingAssets
+        self.require_project()
+        try:
+            return WritingAssets(self.project_root, self.novel_id).inspect_chapter(chapter_id)
+        except ValueError as exc:
+            raise StudioError(str(exc), code="INVALID_CHAPTER_ID") from exc
+
+    def outline_audit(self, group_id: str = "", start: str = "", end: str = "") -> dict[str, Any]:
+        from tools.arc_audit import ArcAuditService
+        self.require_project()
+        try:
+            return ArcAuditService(self.project_root, self.novel_id).audit(group_id, start, end)
+        except ValueError as exc:
+            raise StudioError(str(exc), code="INVALID_AUDIT_INPUT") from exc
+
+    def arc_reconcile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.arc_audit import ArcAuditService
+        try:
+            return ArcAuditService(self.project_root, self.novel_id).change(payload)
+        except ValueError as exc:
+            raise StudioError(str(exc), code="DRIFT_RECONCILE_REJECTED") from exc
+        except ProjectBusyError as exc:
+            raise StudioError(str(exc), HTTPStatus.CONFLICT, code="PROJECT_BUSY") from exc
 
     def benchmark_options(self) -> dict[str, Any]:
         return self._benchmarks().options()
@@ -4917,23 +4971,31 @@ class StudioApplication:
     def accept_external_manuscript(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             service = self._manuscript_acceptance()
-            operation = service.accept_external(
-                str(payload.get("chapter_id") or ""),
-                confirm=payload.get("confirm") is True,
-            )
+            with ProjectWriteLock(self.project_root, self.novel_id, operation="accept:external"):
+                operation = service.accept_external(
+                    str(payload.get("chapter_id") or ""),
+                    confirm=payload.get("confirm") is True,
+                )
+            if payload.get("no_model") is True:
+                operation = service.accept_without_model(operation["operation_id"])
             return self._manuscript_acceptance_result(service, operation)
         except ManuscriptAcceptanceError as exc:
             raise self._translate_manuscript_acceptance_error(exc) from exc
+        except ProjectBusyError as exc:
+            raise StudioError(str(exc), HTTPStatus.CONFLICT, code="PROJECT_BUSY") from exc
 
     def reconcile_manuscript_acceptance(self, payload: dict[str, Any]) -> dict[str, Any]:
         operation_id = str(payload.get("operation_id") or "")
+        mode = str(payload.get("mode") or ("fast" if payload.get("no_model") is True else "full"))
+        if mode not in {"fast", "full"}:
+            raise StudioError("mode must be fast or full", code="INVALID_REQUEST_BODY")
         try:
             operation = self._manuscript_acceptance().operation(operation_id)
         except ManuscriptAcceptanceError as exc:
             raise self._translate_manuscript_acceptance_error(exc) from exc
         analyzed = operation.get("analysis_results")
         analyzed = analyzed if isinstance(analyzed, dict) else {}
-        if any(
+        if mode == "full" and any(
             str(item.get("chapter_id") or "") not in analyzed
             for item in operation.get("frozen_chapters") or []
             if isinstance(item, dict)
@@ -4945,6 +5007,7 @@ class StudioApplication:
                 "input": {
                     "operation_id": operation_id,
                     "chapter_id": str(operation.get("chapter_id") or ""),
+                    "mode": mode,
                 },
             }
         )
@@ -5320,6 +5383,14 @@ class StudioApplication:
         context.report_progress(completed_units, total_units, "chapters")
         context.checkpoint()
 
+        if payload.get("mode") == "fast" or payload.get("no_model") is True:
+            completed = service.accept_without_model(operation_id)
+            context.phase("committing", "Accepted manuscript; derived facts remain stale")
+            context.report_progress(total_units, total_units, "chapters")
+            return {"operation_id": operation_id, "operation": completed,
+                    "facts_pending": completed.get("facts_pending", False),
+                    "acceptance": service.inspect()}
+
         profile: dict[str, Any] | None = None
         if completed_units < total_units:
             profile = self._operation_profile("chapter_write")
@@ -5333,6 +5404,7 @@ class StudioApplication:
         ) -> dict[str, Any]:
             nonlocal completed_units
             context.checkpoint()
+            context.phase("model", f"Extracting facts for {chapter_id}")
             result = analyze_existing_chapter(
                 self.project_root,
                 self.novel_id,
@@ -5346,7 +5418,9 @@ class StudioApplication:
             return result
 
         try:
-            with self._model_context(profile):
+            with self._model_context(profile), ProjectWriteLock(
+                self.project_root, self.novel_id, operation="manuscript_reconcile"
+            ):
                 completed = service.resume(operation_id, analyzer=analyzer)
         except ManuscriptAcceptanceError as exc:
             raise self._translate_manuscript_acceptance_error(exc) from exc
@@ -5379,9 +5453,10 @@ class StudioApplication:
         if target["task_type"] == "outline":
             snapshot = outline_context_preview(self.project_root, self.novel_id, target)
         else:
-            ManuscriptAcceptanceService(self.project_root, self.novel_id).require_current(
-                chapter_id
-            )
+            if not target.get("historical"):
+                ManuscriptAcceptanceService(self.project_root, self.novel_id).require_current(
+                    chapter_id
+                )
             guard = validate_chapter_writable(self.project_root, self.novel_id, chapter_id)
             if not guard.get("ok"):
                 raise StudioError(
@@ -6989,6 +7064,9 @@ def create_server(
     handler = partial(ModularStudioRequestHandler, directory=str(STATIC_ROOT))
     server = ModularOpenWriteStudioServer((host, port), handler)
     server.instance_token = instance_token
+    from uuid import uuid4
+
+    server.instance_id = uuid4().hex
     server.app = app
     server.workspace_manager = manager
     return server

@@ -52,6 +52,10 @@ class ChapterOutline:
     emotional_arc: str = ""
     beats: list[str] = field(default_factory=list)
     hooks: list[str] = field(default_factory=list)
+    promise: str = ""
+    payoff_of: list[str] = field(default_factory=list)
+    word_budget: int = 0
+    function: list[str] = field(default_factory=list)
 
 
 class ArchitectAgent:
@@ -212,6 +216,10 @@ class ArchitectAgent:
     "content_focus": "本章核心内容",
     "goals": ["目标1", "目标2"],
     "estimated_words": {targets['chapter_words']},
+    "word_budget": {targets['chapter_words']},
+    "promise": "可观察的章初状态 -> 可观察的章末状态",
+    "payoff_of": [],
+    "function": ["推进"],
     "involved_characters": ["规范角色名"],
     "involved_settings": ["规范设定名"],
     "emotional_arc": "戒备 -> 动摇 -> 决意",
@@ -629,6 +637,10 @@ status 使用“埋伏/待收/已收/废弃”；章节 ID 使用 ch_001 格式�
                             emotional_arc=item.get("emotional_arc", ""),
                             beats=item.get("beats", []),
                             hooks=item.get("hooks", []),
+                            promise=item.get("promise", ""),
+                            payoff_of=item.get("payoff_of", []),
+                            word_budget=item.get("word_budget", item.get("estimated_words", 0)),
+                            function=item.get("function", []),
                         )
                     )
                 return outlines

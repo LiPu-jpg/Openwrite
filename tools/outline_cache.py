@@ -100,6 +100,10 @@ def serialize_outline_hierarchy(hierarchy: OutlineHierarchy) -> dict[str, Any]:
             entry["beats"] = list(chapter.beats)
         if chapter.hooks:
             entry["hooks"] = list(chapter.hooks)
+        for key in ("promise", "payoff_of", "word_budget", "function"):
+            value = getattr(chapter, key)
+            if value:
+                entry[key] = value
         chapters.append(entry)
     if chapters:
         data["chapters"] = chapters
@@ -180,6 +184,10 @@ def deserialize_outline_hierarchy(data: dict[str, Any], novel_id: str) -> Outlin
                 emotional_arc=chapter.get("emotional_arc", ""),
                 beats=list(chapter.get("beats", [])),
                 hooks=list(chapter.get("hooks", [])),
+                promise=str(chapter.get("promise") or ""),
+                payoff_of=list(chapter.get("payoff_of") or []),
+                word_budget=_to_int(chapter.get("word_budget", 0)),
+                function=list(chapter.get("function") or []),
             )
         )
 

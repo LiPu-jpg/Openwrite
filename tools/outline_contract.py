@@ -50,6 +50,10 @@ OUTLINE_MARKDOWN_CONTRACT = """## OpenWrite 大纲写入契约
 > 内容焦点: 本章实际发生的核心行动、冲突和结果
 > 本章目标: 建立当前矛盾, 推进人物选择
 > 预估字数: 3000
+> 字数预算: 3000
+> 章节承诺: 尚未取得钥匙 -> 已取得钥匙
+> 回收伏笔: hook_001
+> 章节功能: 推进, 代价
 > 出场角色: 角色规范名A, 角色规范名B
 > 涉及设定: 已存在设定名A, 已存在设定名B
 > 情感弧线: 戒备 -> 动摇 -> 决意
@@ -61,6 +65,9 @@ OUTLINE_MARKDOWN_CONTRACT = """## OpenWrite 大纲写入契约
 规则：
 - 总纲、篇纲、节纲和章纲统一在标题后直接写普通散文梗概，不使用弧线、情感或张力元数据代替梗概。
 - 章级元数据必须使用 `> 键: 值`；不要改写成项目符号、表格、粗体标签或含糊散文。
+- 新建章纲补充章节承诺、回收伏笔、字数预算和章节功能。承诺使用可观察的 A -> B；
+  回收伏笔只填现有伏笔 ID，无回收则留空；功能从推进/揭示/关系/代价中多选。
+  字数预算与预估字数及 writing_targets 同源；已有章纲缺少这些字段时只报告，不臆造事实。
 - `出场角色`只列本章实际进入场景或直接参与行动的人物，使用 `src/characters/`
   中的规范名或 ID；“团队”“众人”等群体词不能代替具体人物，不得把仅被提及者
   自动算作出场。
@@ -79,6 +86,8 @@ OUTLINE_JSON_FIELDS = """每个章节 JSON 对象必须包含：
 - content_focus、goals、estimated_words
 - involved_characters、involved_settings
 - emotional_arc、beats、hooks
+- promise（可观察的 A -> B）、payoff_of（现有伏笔 ID 数组，无回收可为空）
+- word_budget（与 estimated_words 及 writing_targets 一致）、function（推进/揭示/关系/代价数组）
 
 人物与设定名称必须来自已提供的规范资料；不要用“团队”“众人”等群体词代替具体人物。"""
 

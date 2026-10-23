@@ -121,6 +121,12 @@ def validate_chapter_writable(
       template docs to mislead with).
     """
     chapter_id = str(chapter_id or "").strip()
+    from tools.arc_audit import ArcAuditService
+    try:
+        ArcAuditService(project_root, novel_id).require_unfrozen(chapter_id)
+    except ValueError as exc:
+        return {"ok": False, "chapter_id": chapter_id, "code": "ARC_FROZEN",
+                "message": str(exc), "issues": [str(exc)]}
     issues: list[str] = []
     has_outline = (_novel_root(project_root, novel_id) / "src" / "outline.md").is_file()
 

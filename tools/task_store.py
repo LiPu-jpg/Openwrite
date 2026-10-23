@@ -88,7 +88,18 @@ def normalize_task_record(raw: Mapping[str, Any]) -> dict[str, Any]:
         "completed_at",
     ):
         record.setdefault(key, None)
-    record["finished_at"] = record.get("completed_at")
+    record["finished_at"] = record.get("finished_at") or record.get("completed_at")
+    record["last_activity_at"] = record.get("last_activity_at") or record.get("updated_at")
+    record.setdefault("last_heartbeat_at", None)
+    record.setdefault("phase_started_at", None)
+    record["model_call_elapsed_ms"] = None
+    if status == "running" and record.get("phase") == "model" and record.get("phase_started_at"):
+        try:
+            record["model_call_elapsed_ms"] = max(0, int((
+                datetime.now(timezone.utc) - datetime.fromisoformat(record["phase_started_at"])
+            ).total_seconds() * 1000))
+        except (ValueError, TypeError):
+            pass
     started, finished = record.get("started_at"), record.get("finished_at")
     try:
         record["duration_ms"] = (
@@ -292,6 +303,7 @@ class TaskStore:
                     task["finished_at"] = now
             if phase is not None:
                 task["phase"] = phase
+                task["phase_started_at"] = now
             if updates:
                 safe_updates = dict(updates)
                 if "result" in safe_updates:
@@ -302,6 +314,7 @@ class TaskStore:
                     )
                 task.update(safe_updates)
             task["updated_at"] = now
+            task["last_activity_at"] = now
             # Publish the append-only event first. A reader can therefore never
             # observe a terminal snapshot before its completion event is durable.
             event_id = self._append_event_unlocked(
@@ -316,6 +329,14 @@ class TaskStore:
             self._write_index_unlocked()
         self._notify_change(task)
         return normalize_task_record(task)
+
+    def heartbeat(self, task_id: str) -> None:
+        """Worker liveness, separate from actual work and progress events."""
+        with self._lock:
+            task = self._load_raw(task_id)
+            if task and task.get("status") == "running":
+                task["last_heartbeat_at"] = self._now()
+                self._save_unlocked(task)
 
     def _notify_change(self, task: dict[str, Any]) -> None:
         """Invoke the change listener outside the store lock; listener errors

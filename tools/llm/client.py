@@ -102,6 +102,10 @@ def _plain_usage(usage: Any, *, response: Any = None) -> dict[str, Any]:
         converted.get("output_tokens_details"), dict
     ):
         converted["completion_tokens_details"] = converted["output_tokens_details"]
+    details = converted.get("completion_tokens_details")
+    if "reasoning_tokens" not in converted and isinstance(details, dict):
+        if details.get("reasoning_tokens") is not None:
+            converted["reasoning_tokens"] = details["reasoning_tokens"]
 
     explicit_reported = converted.get("cost_reported")
     cost: float | None = None
@@ -927,9 +931,18 @@ class LLMClient:
         response_model = self.config.model
         chinese_chars = 0
         start_time = time.time()
+        total_timeout = float(os.getenv("OW_LLM_TOTAL_TIMEOUT") or max(300, self.config.timeout_seconds * 4))
+        if not math.isfinite(total_timeout) or total_timeout <= 0:
+            raise ValueError("OW_LLM_TOTAL_TIMEOUT must be a finite positive number")
+        deadline = time.monotonic() + total_timeout
 
         try:
             for event in stream:
+                if time.monotonic() > deadline:
+                    from .errors import LLMTimeoutError
+                    failure = LLMTimeoutError("Model stream exceeded its total time budget")
+                    failure.partial_content = "".join(chunks)
+                    raise failure
                 delta = ""
                 choices = _value(event, "choices", []) or []
                 if choices:
@@ -963,6 +976,14 @@ class LLMClient:
                     _value(event, "model", response_model) or response_model
                 )
         except Exception as exc:
+            if getattr(exc, "code", "") == "PROVIDER_TIMEOUT":
+                close = getattr(stream, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception as close_error:
+                        logger.warning("Timed-out model stream cleanup failed: %s", close_error)
+                raise
             partial = "".join(chunks)
             if partial:
                 logger.warning("Stream interrupted: %s; returning partial content", exc)
