@@ -1,7 +1,16 @@
 import type { BackendConnection } from './managed-runtime.js'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve, win32 } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { realpathSync } from 'node:fs'
+
+/** Windows roots are case-insensitive and may use either separator. */
+export function workspaceRootsEqual(left: string, right: string, platform = process.platform): boolean {
+  const normalize = platform === 'win32'
+    ? (value: string) => win32.normalize(value).replace(/[\\/]+$/, '').toLowerCase()
+    : (value: string) => resolve(value)
+  return normalize(left) === normalize(right)
+}
 /**
  * Shared HTTP client for the OpenWrite Studio action surface.
  *
@@ -238,8 +247,19 @@ export class StudioClient {
       const connection = await this.connect?.()
       const target = connection ? new URL(url.pathname + url.search, connection.baseUrl) : url
       const headers = connection?.token ? { ...(init.headers as Record<string, string>), Authorization: `Bearer ${connection.token}` } : init.headers
-      return await fetch(target, { ...init, headers, signal: AbortSignal.any(signals) })
+      const response = await fetch(target, { ...init, headers, signal: AbortSignal.any(signals) })
+      const actual = response.headers.get('X-OpenWrite-Project-Path')
+      if (response.ok && actual && this.context?.workspaceRoot) {
+        const expected = realpathSync(this.context.workspaceRoot)
+        const received = decodeURIComponent(actual)
+        if (!workspaceRootsEqual(received, expected)) {
+          await response.body?.cancel()
+          throw new StudioError('Connected workspace differs from requested project', 409, 'WORKSPACE_CONTEXT_MISMATCH', { requested_path: expected, project_path: received })
+        }
+      }
+      return response
     } catch (error: unknown) {
+      if (error instanceof StudioError) throw error
       if (this.context?.workspaceRoot) {
         try {
           const root = join(this.context.workspaceRoot, '.openwrite', 'transport-errors')

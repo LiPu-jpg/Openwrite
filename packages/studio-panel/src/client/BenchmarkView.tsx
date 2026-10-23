@@ -155,6 +155,7 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
   const [targetWords, setTargetWords] = useState('3000')
   const [concurrency, setConcurrency] = useState('1')
   const [executionMode, setExecutionMode] = useState<'framework' | 'creative'>('framework')
+  const [allowHistorical, setAllowHistorical] = useState(false)
   const [runs, setRuns] = useState<BenchmarkRun[]>([])
   const [selected, setSelected] = useState<RecordValue | null>(null)
   const [reviewOutcomes, setReviewOutcomes] = useState<Record<string, { status: string; incomplete: boolean }>>({})
@@ -317,19 +318,20 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
   const taskCapability = options?.tasks.find(task => task.taskType === taskType)
   const pipeline = taskCapability?.pipelines.find(item => item.executionMode === effectiveMode) ?? null
   const readinessBlocked = taskCapability?.readiness.ok === false
+    && !(allowHistorical && chosenChapter?.rewriteAvailable)
     && !(taskType === 'chapter' && chapter !== 'next' && chosenChapter?.available
       && taskCapability.readiness.code === 'TARGET_NOT_PLANNED')
   const validRange = outlineStartNumber !== null && outlineCountNumber !== null && options !== null
     && outlineStartNumber >= options.outlineStartMin && outlineCountNumber <= options.outlineCountMax
     && outlineStartNumber + outlineCountNumber - 1 <= options.outlineStartMax
-  const validTarget = taskType === 'outline' ? validRange : chosenChapter !== undefined && chosenChapter.available
+  const validTarget = taskType === 'outline' ? validRange : chosenChapter !== undefined && (chosenChapter.available || allowHistorical && chosenChapter.rewriteAvailable)
   const validConfig = validTarget && pipeline !== null && pipeline.nodes.length > 0 && !readinessBlocked
 
   const submit = async () => {
     if (loading || writers.size === 0 || reviewers.size === 0 || activeTask !== '' || submissionPending.current) return
     if (!validConfig) return
     const numericSettings: [number, number, number][] = [[Number(repeats), 1, 5], [Number(concurrency), 1, 4]]
-    if (taskType === 'chapter') numericSettings.push([Number(targetWords), 200, 12000])
+    if (taskType === 'chapter') numericSettings.push([Number(targetWords), 200, 50000])
     if (!numericSettings.every(([value, min, max]) => Number.isInteger(value) && value >= min && value <= max)) return
     submissionPending.current = true
     setSubmitting(true)
@@ -339,7 +341,7 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
       const response = data(await postStudioApi('/benchmarks', {
         task_type: taskType, writer_profile_ids: [...writers], reviewer_profile_ids: [...reviewers],
         execution_mode: effectiveMode, repeats: Number(repeats), concurrency: Number(concurrency),
-        ...(taskType === 'chapter' ? { chapter_id: chapter, target_words: Number(targetWords) }
+        ...(taskType === 'chapter' ? { chapter_id: chapter, target_words: Number(targetWords), ...(allowHistorical ? { allow_historical: true } : {}) }
           : { outline_start_chapter: outlineStartNumber, outline_chapter_count: outlineCountNumber }),
       }))
       if (!mounted.current) return
@@ -583,12 +585,13 @@ export function BenchmarkView({ fetchStudioApi, postStudioApi, t, initialRunId =
             {taskType === 'chapter' ? <>
             <label>{t('benchmark.chapter')}<select value={chapterChoice} onChange={event => setChapterChoice(event.target.value)}>
               <option value="next">{t('benchmark.nextChapter')}{options?.nextChapterId ? ` · ${options.nextChapterId}` : ''}</option>
-              {options?.chapters.map(item => <option key={item.id} value={item.id} disabled={!item.available}>
+              {options?.chapters.map(item => <option key={item.id} value={item.id} disabled={!item.available && !(allowHistorical && item.rewriteAvailable)}>
                 {item.id} · {item.title} · {t(item.hasManuscript ? 'benchmark.chapterWritten' : 'benchmark.chapterPlanned')}{!item.available ? ` · ${item.reason || t('benchmark.chapterUnavailable')}` : ''}
               </option>)}
               <option value="__custom__">{t('benchmark.customChapter')}</option>
             </select></label>
-            <label>{t('benchmark.words')}<input type="number" min={200} max={12000} step={1} required value={targetWords} onChange={event => setTargetWords(event.target.value)} /></label>
+            <label>{t('benchmark.words')}<input type="number" min={200} max={50000} step={1} required value={targetWords} onChange={event => setTargetWords(event.target.value)} /></label>
+            <label><input type="checkbox" checked={allowHistorical} onChange={event => setAllowHistorical(event.target.checked)} />{t('serial.historical')}</label>
             <label>{t('benchmark.mode')}<select value={executionMode} onChange={event => setExecutionMode(event.target.value as 'framework' | 'creative')}>
               <option value="framework">{t('benchmark.mode.framework')}</option>
               <option value="creative">{t('benchmark.mode.creative')}</option>

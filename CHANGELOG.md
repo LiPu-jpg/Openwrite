@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.25（未发布）
+
+- 捆绑 Core 5.8.12，处理 #98–#100：无模型验收、实例根目录校验、任务心跳与有限超时、历史隔离横评、作者自留存档及逐章体检。
+- 新增长章分段续写、范本池、共享术语表、角色属性轮换和重合检测；新增「连载体检」工作台及 5 个领域工具。
+- 章纲支持承诺、回收伏笔、字数预算、章节功能；章组审计输出计数事实，漂移裁决保留不可变基线和中断恢复日志。
+- 新增 `openwrite-safe-upgrade` 停机旁路安装、完整日志与失败恢复；原生 `dsh plugin add/update` 和宿主 bundle 启动降级仍需宿主侧处理。详见 [实现与限制](docs/ISSUES_98_100.md)。
+
 ## 0.2.23
 
 - 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：声明并验证精确宿主 dsh `0.2.1-rc.2`。根包与内嵌子包（`@dsh-novel/openwrite-bridge`、`@dsh-novel/studio-panel`、`@dsh-external/dsh-dog`）的 `peerDependencies`、`dsh.compatibility.dsh` 与 `dshReleases` 同步加入 `0.2.1-rc.2`；宿主安装和激活不再以“plugin does not support the DSH version in use”拒绝，也不需要版本豁免或手工编辑 `compatibility.json`。宿主闸门读取的是 `@deepseek-ai/dsh-*` peer 范围（`dsh.compatibility` 只是展示元数据），因此只改后者无效；实测 0.2.1-rc.2 的宿主 API 未发现破坏性变更，失败原因是版本门槛。

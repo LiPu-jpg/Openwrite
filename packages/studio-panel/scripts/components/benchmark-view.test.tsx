@@ -415,7 +415,7 @@ describe('BenchmarkView usable configuration', () => {
     await screen.findByText('benchmark.noProfiles')
     expect((screen.getByRole('button', { name: 'benchmark.run' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('benchmark.empty')).toBeTruthy()
-    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect((screen.getByRole('checkbox', { name: 'serial.historical' }) as HTMLInputElement).checked).toBe(false)
   })
 
   it('keeps a deliberately empty model selection when refreshing', async () => {

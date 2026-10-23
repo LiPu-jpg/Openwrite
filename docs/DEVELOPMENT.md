@@ -18,7 +18,7 @@
 
 | 路径 | 说明 |
 |---|---|
-| `packages/openwrite-bridge/` | dsh 插件：90 个 `novel_*` 工具，覆盖 Studio HTTP 动作面并提供隔离模型横评与脱敏 trace |
+| `packages/openwrite-bridge/` | dsh 插件：95 个 `novel_*` 工具，覆盖 Studio HTTP 动作面并提供隔离模型横评与脱敏 trace |
 | `packages/studio-panel/` | dsh web 原生工作台：创作 / 资料 / 任务，含规范章节导航、连续审读、场景双序、正文编辑器、双 DAG、模型测试台与工具卡 |
 | `presets/openwrite/` | OpenWrite 全流程 agent 预设（规划/资产/写章/评审/修订） |
 | `scripts/install.sh` | 构建插件、安装预设到 `~/.dsh/.agent-presets/`、插件装进 dsh profile |

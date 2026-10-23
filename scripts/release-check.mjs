@@ -21,12 +21,12 @@ try {
   }
   assert.equal(packed.name, 'dsh-openwrite')
   assert.equal(packed.private, undefined)
-  for (const file of ['plugin.mjs', 'preset-definition.mjs', 'plugin.d.ts', 'cordis.patch.yml', 'packages/openwrite-bridge/lib/index.js', 'packages/openwrite-bridge/lib/index.d.ts', 'packages/openwrite-bridge/lib/preset-tools.js', 'packages/studio-panel/lib/client.js', 'packages/studio-panel/lib/types/index.d.ts', 'packages/studio-panel/vendor/vditor/LICENSE', 'vendor/dsh-dog/lib/index.js', 'vendor/dsh-dog/lib/client.js', 'vendor/dsh-dog/LICENSE', 'presets/openwrite/agent.cordis.yml', 'scripts/dog/review-record.js', 'LICENSE', 'THIRD_PARTY_NOTICES.md']) {
+  for (const file of ['scripts/safe-upgrade.mjs', 'plugin.mjs', 'preset-definition.mjs', 'plugin.d.ts', 'cordis.patch.yml', 'packages/openwrite-bridge/lib/index.js', 'packages/openwrite-bridge/lib/index.d.ts', 'packages/openwrite-bridge/lib/preset-tools.js', 'packages/studio-panel/lib/client.js', 'packages/studio-panel/lib/types/index.d.ts', 'packages/studio-panel/vendor/vditor/LICENSE', 'vendor/dsh-dog/lib/index.js', 'vendor/dsh-dog/lib/client.js', 'vendor/dsh-dog/LICENSE', 'presets/openwrite/agent.cordis.yml', 'scripts/dog/review-record.js', 'LICENSE', 'THIRD_PARTY_NOTICES.md']) {
     assert.ok((await readFile(join(root, file))).length > 0, file)
   }
   for (const asset of [manifest.wheel, manifest.requirements, ...(manifest.dependency_wheels ?? [])]) assert.equal(hash(await readFile(join(root, 'release', asset.file))), asset.sha256, asset.file)
   const wheel = unzipSync(await readFile(join(root, 'release', manifest.wheel.file)))
-  for (const file of ['tools/managed_runtime.py', 'tools/studio_http.py', 'tools/model_benchmark.py', 'tools/benchmark_scheduler.py']) assert.ok(wheel[file], `Core wheel: ${file}`)
+  for (const file of ['tools/arc_audit.py', 'tools/writing_assets.py', 'tools/managed_runtime.py', 'tools/studio_http.py', 'tools/model_benchmark.py', 'tools/benchmark_scheduler.py']) assert.ok(wheel[file], `Core wheel: ${file}`)
   assert.ok(Object.keys(wheel).some(name => /dist-info\/licenses\/LICENSE/.test(name)), 'Core license')
   const bridge = await readFile(join(root, 'packages/openwrite-bridge/lib/index.js'), 'utf8')
   assert.doesNotMatch(bridge, /registerNovelTools\(/, 'host must not register novel tools')

@@ -64,6 +64,8 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
+`0.2.25`（Core 5.8.12）为本分支的未发布候选，新增连载体检、分段续写、共享术语/范本、章组审计和漂移裁决，并修复验收与任务可观测性。范围、离线升级工具及宿主侧限制见 [#98–#100 实现说明](docs/ISSUES_98_100.md)。不要把候选版本当作已上架版本。
+
 `0.2.24`（Core 5.8.11）修复 [#88–#95](docs/ISSUES_88_95.md)：删章验收账本、结算降级、长文本流式生成、后台写章进度、统一字数门限、草稿发现与恢复及诊断/路由语义。[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 与 [npm](https://www.npmjs.com/package/dsh-openwrite/v/0.2.24) 均已发布，完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#024)。升级后停止并重新启动 dsh，再刷新浏览器页面。
 
 `0.2.23` 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的兼容声明加入精确宿主 `0.2.1-rc.2`，安装和激活不再被宿主版本闸门拒绝，无需版本豁免或手工编辑 `compatibility.json`。已在 `0.2.1-rc.2` 完成 Web 客户端验收（启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存），`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过；Windows Electron 桌面端未实机复测。该版本完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#023)。升级后停止并重新启动 dsh，再刷新浏览器页面。

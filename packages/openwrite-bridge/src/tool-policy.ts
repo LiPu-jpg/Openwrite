@@ -12,6 +12,7 @@ const reads = new Set([
   'novel_revision_get', 'novel_tasks_list', 'novel_continuity', 'novel_diagnostics',
   'novel_research_status', 'novel_research_report', 'novel_model_profiles',
   'novel_manuscript_acceptance', 'novel_export_preflight',
+  'novel_manuscript_metrics', 'novel_outline_audit',
 ])
 const generates = new Set([
   'novel_write_chapter', 'novel_review_chapter', 'novel_multi_write', 'novel_task_create',
@@ -20,6 +21,7 @@ const generates = new Set([
   'novel_model_test', 'novel_model_embedding_test',
 ])
 const readActions: Record<string, readonly string[]> = {
+  novel_writing_assets: ['get'],
   novel_model_benchmark: ['list', 'get', 'options'],
   novel_chapter_run_action: ['list', 'get'],
   novel_rolling_plan_action: ['list', 'get'],

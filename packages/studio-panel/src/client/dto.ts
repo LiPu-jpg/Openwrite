@@ -217,7 +217,7 @@ export function parseResultRef(value: unknown): ResultRefDto | null {
 }
 
 export type ExportFormatDto = 'md' | 'txt' | 'epub'
-export type ExportPurposeDto = 'backup' | 'delivery'
+export type ExportPurposeDto = 'backup' | 'delivery' | 'personal_archive'
 
 export type ExportChapterDto = {
   chapter_id: string
@@ -274,7 +274,7 @@ function exportFormat(value: unknown): ExportFormatDto {
 }
 
 function exportPurpose(value: unknown): ExportPurposeDto {
-  return value === 'backup' ? 'backup' : 'delivery'
+  return value === 'backup' || value === 'personal_archive' ? value : 'delivery'
 }
 
 function stringMap(value: unknown): Record<string, string[]> {

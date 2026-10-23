@@ -91,6 +91,7 @@ const expected = [
   // planning: chapter runs, rolling plans, forecasts, manuscript editing
   'novel_chapter_run_action', 'novel_rolling_plan_action', 'novel_narrative_forecast_action',
   'novel_manuscript_edit_action', 'novel_manuscript_acceptance_reconcile',
+  'novel_writing_assets', 'novel_manuscript_metrics', 'novel_outline_audit', 'novel_drift_entry', 'novel_arc_reconcile',
   // style sources, reference library, runtime skills, rules
   'novel_source_action', 'novel_reference_library_action', 'novel_runtime_skill_action',
   'novel_rule_action',
