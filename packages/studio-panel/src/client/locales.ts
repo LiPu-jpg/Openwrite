@@ -975,6 +975,13 @@ export type StudioPanelKey =
   | 'models.output'
   | 'models.credential'
   | 'models.embeddingProvider'
+  | 'models.embeddingProviderOpenai'
+  | 'models.embeddingProviderLocal'
+  | 'models.embeddingProviderUnknown'
+  | 'models.embeddingProviderOpenaiHint'
+  | 'models.embeddingProviderLocalHint'
+  | 'models.embeddingLocalPreset'
+  | 'models.vectorDimensionsLocalHint'
   | 'models.embeddingModel'
   | 'models.embeddingCredential'
   | 'models.credentialHint'
@@ -1021,6 +1028,7 @@ export type StudioPanelKey =
   | 'models.validation.required'
   | 'models.validation.positive'
   | 'models.validation.temperature'
+  | 'models.validation.embeddingProvider'
   | 'models.unsavedChanges'
   | 'models.unsavedDiscard'
   | 'models.unsavedKeep'
@@ -2115,6 +2123,13 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.output': '输出 Token',
   'models.credential': 'Chat',
   'models.embeddingProvider': 'Embedding 协议适配器',
+  'models.embeddingProviderOpenai': 'OpenAI 兼容 API（云端）',
+  'models.embeddingProviderLocal': 'FastEmbed（本地）',
+  'models.embeddingProviderUnknown': '未知适配器',
+  'models.embeddingProviderOpenaiHint': '适用于 Gitee AI、OpenAI 及兼容 /embeddings 接口的服务，需要 Base URL 和 API Key。',
+  'models.embeddingProviderLocalHint': '在本机运行 FastEmbed 模型，不需要 Base URL 或 API Key。切换适配器不会自动覆盖模型及向量参数。',
+  'models.embeddingLocalPreset': '使用本地 FastEmbed 推荐参数（BGE-small，512 维）',
+  'models.vectorDimensionsLocalHint': '本地 FastEmbed 输出固定维度，请根据实际模型配置。修改已有索引的维度后需要重新向量化。',
   'models.embeddingModel': 'Embedding Model ID',
   'models.embeddingCredential': 'Embedding',
   'models.credentialHint': '留空保持已有 API Key',
@@ -2161,6 +2176,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.validation.required': '必填项缺失：档案 ID、档案名、真实 Model ID。',
   'models.validation.positive': '数值字段必须为合法正数。',
   'models.validation.temperature': '温度必须在 0 到 2 之间。',
+  'models.validation.embeddingProvider': 'Embedding 协议适配器无效，请从下拉框选择支持的类型。',
   'models.unsavedChanges': '当前档案有未保存的修改。',
   'models.unsavedDiscard': '放弃修改',
   'models.unsavedKeep': '继续编辑',
@@ -3301,6 +3317,13 @@ export const en: Record<StudioPanelKey, string> = {
   'models.output': 'Output tokens',
   'models.credential': 'Chat',
   'models.embeddingProvider': 'Embedding protocol adapter',
+  'models.embeddingProviderOpenai': 'OpenAI-compatible API (cloud)',
+  'models.embeddingProviderLocal': 'FastEmbed (local)',
+  'models.embeddingProviderUnknown': 'Unknown adapter',
+  'models.embeddingProviderOpenaiHint': 'For Gitee AI, OpenAI, and other compatible /embeddings endpoints. Requires a base URL and API key.',
+  'models.embeddingProviderLocalHint': 'Runs FastEmbed on this machine, without a base URL or API key. Switching providers does not automatically replace model or vector settings.',
+  'models.embeddingLocalPreset': 'Use recommended local FastEmbed preset (BGE-small, 512 dimensions)',
+  'models.vectorDimensionsLocalHint': 'Local FastEmbed models return fixed-size vectors. Match the dimensions to the actual model and rebuild existing vector indexes after changing them.',
   'models.embeddingModel': 'Embedding model ID',
   'models.embeddingCredential': 'Embedding',
   'models.credentialHint': 'Leave blank to keep the stored API Key',
@@ -3347,6 +3370,7 @@ export const en: Record<StudioPanelKey, string> = {
   'models.validation.required': 'Missing required fields: profile ID, name, real model ID.',
   'models.validation.positive': 'Numeric fields must be valid positive numbers.',
   'models.validation.temperature': 'Temperature must be between 0 and 2.',
+  'models.validation.embeddingProvider': 'Invalid embedding adapter. Select a supported option from the list.',
   'models.unsavedChanges': 'This profile has unsaved changes.',
   'models.unsavedDiscard': 'Discard changes',
   'models.unsavedKeep': 'Keep editing',

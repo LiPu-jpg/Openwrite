@@ -129,6 +129,21 @@ const emptyEmbedding = (): Embedding => ({
   last_test: null,
   api_key: "",
 });
+// Match the Core's normalize_embedding_provider aliases; do not silently
+// convert an unknown stored provider to a different, working backend.
+const normalizeEmbeddingProvider = (value: string): string => {
+  const provider = (value || "openai").trim().toLowerCase().replaceAll("_", "-");
+  if (["cloud", "openai-compatible", "openai-compatible-api"].includes(provider)) return "openai";
+  if (["fastembed", "on-device"].includes(provider)) return "local";
+  return provider;
+};
+const localEmbeddingPreset = {
+  model: "BAAI/bge-small-zh-v1.5",
+  dimension: "512",
+  max_tokens: "512",
+  base_url: "",
+} as const;
+
 const newEmbeddingDraft = (): Embedding => ({
   ...emptyEmbedding(),
   id: `embedding-${Date.now().toString(36)}`,
@@ -274,7 +289,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
       const embeds: Embedding[] = rawEmb.map((raw) => {
         const x = asRecord(raw);
         return {
-          id: asText(x.id), label: asText(x.label), provider: asText(x.provider) || "openai",
+          id: asText(x.id), label: asText(x.label), provider: normalizeEmbeddingProvider(asText(x.provider)),
           model: asText(x.model), base_url: asText(x.base_url),
           dimension: String(asInteger(x.dimension, 1536)), max_tokens: String(asInteger(x.max_tokens, 8192)),
           configured: x.configured === true, active: x.active === true,
@@ -361,7 +376,11 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
     discardedSections.current.delete("embedding");
     setEmbedding((current) => ({ ...current, [key]: value }));
   };
-  const validationError = (message: "models.validation.required" | "models.validation.positive" | "models.validation.temperature") => {
+  const applyLocalEmbeddingPreset = () => {
+    discardedSections.current.delete("embedding");
+    setEmbedding((current) => ({ ...current, ...localEmbeddingPreset }));
+  };
+  const validationError = (message: "models.validation.required" | "models.validation.positive" | "models.validation.temperature" | "models.validation.embeddingProvider") => {
     setNotice({ text: t(message), bad: true });
   };
   const positiveInteger = (value: string) => Number.isInteger(Number(value)) && Number(value) > 0;
@@ -393,16 +412,17 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
   const saveEmbedding = async () => {
     if (busy) return;
     if (![embedding.id, embedding.label, embedding.model].every((value) => value.trim())) return validationError("models.validation.required");
+    if (!["openai", "local"].includes(embedding.provider)) return validationError("models.validation.embeddingProvider");
     if (![embedding.dimension, embedding.max_tokens].every(positiveInteger)) return validationError("models.validation.positive");
     setBusy("embedding-save");
     const finishSave = trackModelSave(memoryKey, "embedding");
     try {
       const payload: JsonRecord = {
         id: embedding.id.trim(), label: embedding.label.trim(), provider: embedding.provider,
-        model: embedding.model.trim(), base_url: embedding.base_url,
+        model: embedding.model.trim(), base_url: embedding.provider === "local" ? "" : embedding.base_url,
         dimension: Number(embedding.dimension), max_tokens: Number(embedding.max_tokens), remember_api_key: true,
       };
-      if (embedding.api_key) payload.api_key = embedding.api_key;
+      if (embedding.provider === "openai" && embedding.api_key) payload.api_key = embedding.api_key;
       await postStudioApi("/model/embedding", payload);
       clearSavedDraft(memoryKey, "embedding", snapshot(embedding));
       discardedSections.current.add("embedding");
@@ -421,7 +441,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
     try {
       const target: JsonRecord = kind === "chat"
         ? { ...form, context_tokens: Number(form.context_tokens), max_output_tokens: Number(form.max_output_tokens), temperature: Number(form.temperature), timeout_seconds: Number(form.timeout_seconds) }
-        : { id: embedding.id, label: embedding.label, provider: embedding.provider, model: embedding.model, base_url: embedding.base_url, dimension: Number(embedding.dimension), max_tokens: Number(embedding.max_tokens), api_key: embedding.api_key };
+        : { id: embedding.id, label: embedding.label, provider: embedding.provider, model: embedding.model, base_url: embedding.provider === "local" ? "" : embedding.base_url, dimension: Number(embedding.dimension), max_tokens: Number(embedding.max_tokens), api_key: embedding.provider === "openai" ? embedding.api_key : "" };
       if (!target.api_key) delete target.api_key;
       const result = parseConnectionTestResult(await postStudioApi(kind === "chat" ? "/model/test" : "/model/embedding/test", target));
       const vectorInfo = kind === "embedding" && result.dimension !== null
@@ -885,10 +905,18 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                 <div className={css.modelFormGrid}>
                 <label>
                   {t("models.embeddingProvider")}
-                  <input
+                  <select
                     value={embedding.provider}
                     onChange={(e) => setEmbed("provider", e.target.value)}
-                  />
+                  >
+                    {!(["openai", "local"].includes(embedding.provider)) && (
+                      <option value={embedding.provider} disabled>
+                        {t("models.embeddingProviderUnknown")}: {embedding.provider}
+                      </option>
+                    )}
+                    <option value="openai">{t("models.embeddingProviderOpenai")}</option>
+                    <option value="local">{t("models.embeddingProviderLocal")}</option>
+                  </select>
                 </label>
                 <label>
                   {t("models.embeddingModel")}
@@ -897,14 +925,24 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     onChange={(e) => setEmbed("model", e.target.value)}
                   />
                 </label>
-                <label>
-                  {t("models.embeddingBaseUrl")}
-                  <input
-                    value={embedding.base_url}
-                    onChange={(e) => setEmbed("base_url", e.target.value)}
-                  />
-                </label>
+                {embedding.provider === "openai" && (
+                  <label>
+                    {t("models.embeddingBaseUrl")}
+                    <input
+                      value={embedding.base_url}
+                      onChange={(e) => setEmbed("base_url", e.target.value)}
+                    />
+                  </label>
+                )}
                 </div>
+                <p className={css.modelHint}>
+                  {t(embedding.provider === "local" ? "models.embeddingProviderLocalHint" : "models.embeddingProviderOpenaiHint")}
+                </p>
+                {embedding.provider === "local" && (
+                  <button type="button" className={css.button} onClick={applyLocalEmbeddingPreset}>
+                    {t("models.embeddingLocalPreset")}
+                  </button>
+                )}
               </fieldset>
               <fieldset className={css.modelGroup} disabled={!!busy}>
                 <legend className={css.modelGroupTitle}>{t("models.vectorParameters")}</legend>
@@ -930,8 +968,11 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     />
                   </label>
                 </div>
-                <p className={css.modelHint}>{t("models.vectorDimensionsHint")}</p>
+                <p className={css.modelHint}>
+                  {t(embedding.provider === "local" ? "models.vectorDimensionsLocalHint" : "models.vectorDimensionsHint")}
+                </p>
               </fieldset>
+              {embedding.provider === "openai" && (
               <fieldset className={css.modelGroup} disabled={!!busy}>
                 <legend className={css.modelGroupTitle}>{t('models.group.credentials')}</legend>
                 <div className={css.modelFormGrid}>
@@ -944,7 +985,9 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     onChange={(e) => setEmbed("api_key", e.target.value)}
                   />
                 </div>
+                <p className={css.modelHint}>{t("models.credentialHint")}</p>
               </fieldset>
+              )}
               <div className={css.modelTestRow}>
                 <span>{t('models.embeddingTest')} · {marker(t, embedding.last_test, busy === 'embedding-test')}</span>
               </div>

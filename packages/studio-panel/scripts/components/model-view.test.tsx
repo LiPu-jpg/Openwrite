@@ -196,6 +196,83 @@ describe('ModelView independent Embedding contracts', () => {
     expect((screen.getByLabelText('models.route.review') as HTMLSelectElement).value).toBe('writer-b')
   })
 
+  it('offers only the two supported Embedding adapters and keeps the current cloud settings', async () => {
+    const api = makeEmbeddingApi()
+    await openEmbedding(api)
+    const adapter = screen.getByLabelText('models.embeddingProvider') as HTMLSelectElement
+    expect(adapter.tagName).toBe('SELECT')
+    expect([...adapter.options].map(option => option.value)).toEqual(['openai', 'local'])
+    expect(adapter.value).toBe('openai')
+    expect(screen.getByLabelText('models.embeddingBaseUrl')).toBeTruthy()
+    expect(screen.getByLabelText('models.group.credentials')).toBeTruthy()
+
+    fireEvent.change(adapter, { target: { value: 'local' } })
+    expect(adapter.value).toBe('local')
+    expect(screen.queryByLabelText('models.embeddingBaseUrl')).toBeNull()
+    expect(screen.queryByLabelText('models.group.credentials')).toBeNull()
+    // Switching adapters must never silently replace an existing model/index.
+    expect((screen.getByLabelText('models.embeddingModel') as HTMLInputElement).value).toBe('fake-embed-a')
+    expect((screen.getByLabelText('models.vectorDimension') as HTMLInputElement).value).toBe('1536')
+
+    fireEvent.change(adapter, { target: { value: 'openai' } })
+    expect((screen.getByLabelText('models.embeddingBaseUrl') as HTMLInputElement).value)
+      .toBe('https://example.invalid/embed')
+    expect(api.postStudioApi).not.toHaveBeenCalled()
+  })
+
+  it('uses the explicit local preset and never sends a cloud secret for a local probe or save', async () => {
+    const api = makeEmbeddingApi()
+    const { container } = await openEmbedding(api)
+    fireEvent.change(passwordInputs(container)[0]!, { target: { value: FAKE_CREDENTIAL } })
+    const adapter = screen.getByLabelText('models.embeddingProvider') as HTMLSelectElement
+    fireEvent.change(adapter, { target: { value: 'local' } })
+    expect(passwordInputs(container)).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'models.embeddingLocalPreset' }))
+    expect((screen.getByLabelText('models.embeddingModel') as HTMLInputElement).value).toBe('BAAI/bge-small-zh-v1.5')
+    expect((screen.getByLabelText('models.vectorDimension') as HTMLInputElement).value).toBe('512')
+    expect((screen.getByLabelText('models.vectorMaxTokens') as HTMLInputElement).value).toBe('512')
+
+    fireEvent.click(screen.getByRole('button', { name: 'models.embeddingTest' }))
+    await screen.findByText('models.embeddingOk · 31 ms')
+    const [testPath, testBody] = api.postStudioApi.mock.calls[0] as [string, Record<string, unknown>]
+    expect(testPath).toBe('/model/embedding/test')
+    expect(testBody).toMatchObject({ provider: 'local', base_url: '', dimension: 512, max_tokens: 512 })
+    expect(testBody).not.toHaveProperty('api_key')
+
+    fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
+    await waitFor(() => expect(api.postStudioApi).toHaveBeenCalledTimes(2))
+    const [savePath, saveBody] = api.postStudioApi.mock.calls[1] as [string, Record<string, unknown>]
+    expect(savePath).toBe('/model/embedding')
+    expect(saveBody).toMatchObject({ provider: 'local', model: 'BAAI/bge-small-zh-v1.5', base_url: '', dimension: 512, max_tokens: 512 })
+    expect(saveBody).not.toHaveProperty('api_key')
+    expect(container.innerHTML).not.toContain(FAKE_CREDENTIAL)
+  })
+
+  it('normalizes saved adapter aliases without overriding unknown values', async () => {
+    const aliasApi = makeApi({ fetch: async () => envelope({
+      profiles: [PROFILE], routes: {},
+      embedding_profiles: [{ ...EMBEDDING_PROFILE, provider: 'fastembed' }],
+      active_embedding_profile_id: 'embed-a',
+    }) })
+    await openEmbedding(aliasApi)
+    expect((screen.getByLabelText('models.embeddingProvider') as HTMLSelectElement).value).toBe('local')
+  })
+
+  it('rejects unknown saved adapters instead of silently selecting cloud API', async () => {
+    const api = makeApi({ fetch: async () => envelope({
+      profiles: [PROFILE], routes: {},
+      embedding_profiles: [{ ...EMBEDDING_PROFILE, provider: 'not-supported' }],
+      active_embedding_profile_id: 'embed-a',
+    }) })
+    await openEmbedding(api)
+    const adapter = screen.getByLabelText('models.embeddingProvider') as HTMLSelectElement
+    expect(adapter.value).toBe('not-supported')
+    expect([...adapter.options].map(option => option.value)).toEqual(['not-supported', 'openai', 'local'])
+    fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
+    expect(screen.getByRole('alert').textContent).toContain('models.validation.embeddingProvider')
+    expect(api.postStudioApi).not.toHaveBeenCalled()
+  })
+
   it('creates and updates an independent profile without empty credentials or chat fields', async () => {
     const api = makeEmbeddingApi()
     await openEmbedding(api)
