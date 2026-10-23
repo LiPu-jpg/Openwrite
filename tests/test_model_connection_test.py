@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from tools.contracts_generated import validate_model_connection_test_v1
-from tools.embedding_runtime import EmbeddingRuntimeError
+from tools.embedding_runtime import EmbeddingDimensionMismatch, EmbeddingRuntimeError
 from tools.init_project import init_project
 from tools.llm.errors import (
     APIError,
@@ -448,3 +448,29 @@ def test_embedding_test_failure_uses_same_taxonomy(tmp_path: Path, monkeypatch: 
     entry = profiles.surface()["embedding_profiles"][0]
     assert entry["last_test"]["status"] == "failed"
     assert entry["last_test"]["error_code"] == "MODEL_TEST_AUTHENTICATION_FAILED"
+
+
+def test_embedding_dimension_mismatch_explains_actual_vs_expected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _isolate_env(monkeypatch)
+    profiles = ModelProfileStore(tmp_path / "model-profiles")
+    profiles.save_embedding_profile(
+        _embedding_profile("writer-vector", "Qwen3-Embedding-8B"),
+        api_key="fake-credential-for-unit-test",
+    )
+
+    def fake_probe(_settings):
+        raise EmbeddingDimensionMismatch(actual=1024, expected=4096)
+
+    monkeypatch.setattr("tools.embedding_runtime.run_embedding_probe", fake_probe)
+    app = _app(tmp_path, monkeypatch)
+    payload = {**_embedding_profile("writer-vector", "Qwen3-Embedding-8B"), "dimension": 4096}
+    with pytest.raises(StudioError) as captured:
+        app.test_embedding_connection(payload)
+
+    assert captured.value.code == "MODEL_TEST_INVALID_RESPONSE"
+    assert captured.value.status == 502
+    assert "1024" in str(captured.value)
+    assert "4096" in str(captured.value)
+    assert "fake-credential-for-unit-test" not in str(captured.value)

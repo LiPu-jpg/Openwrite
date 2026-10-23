@@ -21,6 +21,34 @@ class EmbeddingRuntimeError(RuntimeError):
     """Raised when an embedding provider cannot be initialized or queried."""
 
 
+class EmbeddingDimensionMismatch(EmbeddingRuntimeError):
+    """The provider returned vectors of a different size than configured."""
+
+    def __init__(self, actual: int, expected: int):
+        self.actual = actual
+        self.expected = expected
+        super().__init__(f"Embedding 实际维度为 {actual}，配置值为 {expected}")
+
+
+def _dimensions_parameter_unsupported(exc: Exception) -> bool:
+    """Retry only when the provider explicitly rejects the dimensions field.
+
+    Invalid values, authorization failures and unrelated 4xx errors must not
+    be silently retried with different request semantics.
+    """
+    if getattr(exc, "status_code", None) not in (400, 422):
+        return False
+    message = str(exc).lower()
+    return "dimensions" in message and any(
+        hint in message
+        for hint in (
+            "unknown", "unsupported", "unrecognized", "unexpected",
+            "not support", "not allowed", "not permitted", "extra field",
+            "extra input", "additional propert",
+        )
+    )
+
+
 def normalize_embedding_provider(value: Any) -> str:
     provider = str(value or "openai").strip().lower().replace("_", "-")
     aliases = {
@@ -108,9 +136,7 @@ class EmbeddingRuntime:
         if len(shape) != 2 or shape[0] != 2:
             raise EmbeddingRuntimeError("Embedding 服务返回的向量数量无效")
         if shape[1] != self.settings.dimension:
-            raise EmbeddingRuntimeError(
-                f"Embedding 实际维度为 {shape[1]}，配置值为 {self.settings.dimension}"
-            )
+            raise EmbeddingDimensionMismatch(shape[1], self.settings.dimension)
         return {
             "ok": True,
             **self.settings.public_payload(),
@@ -131,11 +157,23 @@ class EmbeddingRuntime:
                 base_url=self.settings.base_url.rstrip("/"),
                 timeout=self.settings.timeout_seconds,
             )
-            response = await client.embeddings.create(
-                model=self.settings.model,
-                input=texts,
-                encoding_format="float",
-            )
+            try:
+                response = await client.embeddings.create(
+                    model=self.settings.model,
+                    input=texts,
+                    encoding_format="float",
+                    dimensions=self.settings.dimension,
+                )
+            except Exception as exc:
+                if not _dimensions_parameter_unsupported(exc):
+                    raise
+                # Older OpenAI-compatible providers can reject the optional
+                # dimensions field. Validate their native vector size too.
+                response = await client.embeddings.create(
+                    model=self.settings.model,
+                    input=texts,
+                    encoding_format="float",
+                )
         except Exception as exc:
             # Construction-time failures (e.g. httpx InvalidURL from a bad
             # NO_PROXY) chain through __cause__ so test_errors can classify
@@ -190,9 +228,7 @@ class EmbeddingRuntime:
         if len(shape) != 2 or shape[0] != expected_count:
             raise EmbeddingRuntimeError("Embedding 返回的数据形状无效")
         if shape[1] != self.settings.dimension:
-            raise EmbeddingRuntimeError(
-                f"Embedding 实际维度为 {shape[1]}，配置值为 {self.settings.dimension}"
-            )
+            raise EmbeddingDimensionMismatch(shape[1], self.settings.dimension)
 
 
 PROBE_TIMEOUT_MARGIN_SECONDS = 30
