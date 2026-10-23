@@ -99,12 +99,18 @@ describe('parseConnectionTestResult', () => {
     expect(result).toEqual({
       status: 'ok', provider: 'openai', model: 'fake-model-1',
       latency_ms: 812, tested_at: '2026-08-31T10:00:00Z', reply: 'pong',
+      dimension: null, vectors: null,
     })
+  })
+
+  it('reports dimensions and vector counts for Embedding probes', () => {
+    expect(parseConnectionTestResult(envelope({ dimension: 4096, vectors: 2 }))).toMatchObject({ dimension: 4096, vectors: 2 })
   })
 
   it('degrades missing fields to empty/null instead of throwing', () => {
     expect(parseConnectionTestResult(envelope({}))).toEqual({
       status: '', provider: '', model: '', latency_ms: null, tested_at: '', reply: '',
+      dimension: null, vectors: null,
     })
     expect(parseConnectionTestResult(undefined).latency_ms).toBeNull()
   })

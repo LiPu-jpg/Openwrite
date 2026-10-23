@@ -975,6 +975,13 @@ export type StudioPanelKey =
   | 'models.output'
   | 'models.credential'
   | 'models.embeddingProvider'
+  | 'models.embeddingProviderOpenai'
+  | 'models.embeddingProviderLocal'
+  | 'models.embeddingProviderUnknown'
+  | 'models.embeddingProviderOpenaiHint'
+  | 'models.embeddingProviderLocalHint'
+  | 'models.embeddingLocalPreset'
+  | 'models.vectorDimensionsLocalHint'
   | 'models.embeddingModel'
   | 'models.embeddingCredential'
   | 'models.credentialHint'
@@ -982,6 +989,13 @@ export type StudioPanelKey =
   | 'models.save'
   | 'models.chatTest'
   | 'models.embeddingTest'
+  | 'models.vectorParameters'
+  | 'models.vectorDimension'
+  | 'models.vectorMaxTokens'
+  | 'models.vectorCount'
+  | 'models.vectorDimensionsHint'
+  | 'models.test.invalidResponseHint'
+  | 'models.test.unsupportedHint'
   | 'models.delete'
   | 'models.delete.confirm'
   | 'models.delete.blocked'
@@ -1014,6 +1028,7 @@ export type StudioPanelKey =
   | 'models.validation.required'
   | 'models.validation.positive'
   | 'models.validation.temperature'
+  | 'models.validation.embeddingProvider'
   | 'models.unsavedChanges'
   | 'models.unsavedDiscard'
   | 'models.unsavedKeep'
@@ -2108,6 +2123,13 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.output': '输出 Token',
   'models.credential': 'Chat',
   'models.embeddingProvider': 'Embedding 协议适配器',
+  'models.embeddingProviderOpenai': 'OpenAI 兼容 API（云端）',
+  'models.embeddingProviderLocal': 'FastEmbed（本地）',
+  'models.embeddingProviderUnknown': '未知适配器',
+  'models.embeddingProviderOpenaiHint': '适用于 Gitee AI、OpenAI 及兼容 /embeddings 接口的服务，需要 Base URL 和 API Key。',
+  'models.embeddingProviderLocalHint': '在本机运行 FastEmbed 模型，不需要 Base URL 或 API Key。切换适配器不会自动覆盖模型及向量参数。',
+  'models.embeddingLocalPreset': '使用本地 FastEmbed 推荐参数（BGE-small，512 维）',
+  'models.vectorDimensionsLocalHint': '本地 FastEmbed 输出固定维度，请根据实际模型配置。修改已有索引的维度后需要重新向量化。',
   'models.embeddingModel': 'Embedding Model ID',
   'models.embeddingCredential': 'Embedding',
   'models.credentialHint': '留空保持已有 API Key',
@@ -2115,6 +2137,13 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.save': '保存档案',
   'models.chatTest': '聊天测试',
   'models.embeddingTest': 'Embedding 测试',
+  'models.vectorParameters': '向量参数',
+  'models.vectorDimension': '向量维度',
+  'models.vectorMaxTokens': '文本 Token 上限',
+  'models.vectorCount': '返回向量数',
+  'models.vectorDimensionsHint': '云端模型会请求指定 dimensions 维度；不支持该参数的服务商将回退到默认维度，并检查实际返回是否匹配。修改维度后需要重新构建已有向量索引。',
+  'models.test.invalidResponseHint': '请核对实际维度、响应向量数量以及服务商对 dimensions 参数的支持情况。',
+  'models.test.unsupportedHint': '请检查服务商支持的模型参数和请求格式。',
   'models.delete': '删除档案',
   'models.delete.confirm': '确认删除',
   'models.delete.blocked': '删除受阻',
@@ -2147,6 +2176,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.validation.required': '必填项缺失：档案 ID、档案名、真实 Model ID。',
   'models.validation.positive': '数值字段必须为合法正数。',
   'models.validation.temperature': '温度必须在 0 到 2 之间。',
+  'models.validation.embeddingProvider': 'Embedding 协议适配器无效，请从下拉框选择支持的类型。',
   'models.unsavedChanges': '当前档案有未保存的修改。',
   'models.unsavedDiscard': '放弃修改',
   'models.unsavedKeep': '继续编辑',
@@ -3287,6 +3317,13 @@ export const en: Record<StudioPanelKey, string> = {
   'models.output': 'Output tokens',
   'models.credential': 'Chat',
   'models.embeddingProvider': 'Embedding protocol adapter',
+  'models.embeddingProviderOpenai': 'OpenAI-compatible API (cloud)',
+  'models.embeddingProviderLocal': 'FastEmbed (local)',
+  'models.embeddingProviderUnknown': 'Unknown adapter',
+  'models.embeddingProviderOpenaiHint': 'For Gitee AI, OpenAI, and other compatible /embeddings endpoints. Requires a base URL and API key.',
+  'models.embeddingProviderLocalHint': 'Runs FastEmbed on this machine, without a base URL or API key. Switching providers does not automatically replace model or vector settings.',
+  'models.embeddingLocalPreset': 'Use recommended local FastEmbed preset (BGE-small, 512 dimensions)',
+  'models.vectorDimensionsLocalHint': 'Local FastEmbed models return fixed-size vectors. Match the dimensions to the actual model and rebuild existing vector indexes after changing them.',
   'models.embeddingModel': 'Embedding model ID',
   'models.embeddingCredential': 'Embedding',
   'models.credentialHint': 'Leave blank to keep the stored API Key',
@@ -3294,6 +3331,13 @@ export const en: Record<StudioPanelKey, string> = {
   'models.save': 'Save profile',
   'models.chatTest': 'Chat test',
   'models.embeddingTest': 'Embedding test',
+  'models.vectorParameters': 'Vector parameters',
+  'models.vectorDimension': 'Vector dimensions',
+  'models.vectorMaxTokens': 'Text token limit',
+  'models.vectorCount': 'Returned vectors',
+  'models.vectorDimensionsHint': 'Cloud models request the configured dimensions. Providers rejecting this field fall back to their native vector size, which is still checked. Rebuild existing vector indexes when changing dimensions.',
+  'models.test.invalidResponseHint': 'Check the actual dimensions, vector count and provider support for the dimensions parameter.',
+  'models.test.unsupportedHint': 'Check the provider-supported model parameters and request format.',
   'models.delete': 'Delete profile',
   'models.delete.confirm': 'Confirm delete',
   'models.delete.blocked': 'Deletion blocked',
@@ -3326,6 +3370,7 @@ export const en: Record<StudioPanelKey, string> = {
   'models.validation.required': 'Missing required fields: profile ID, name, real model ID.',
   'models.validation.positive': 'Numeric fields must be valid positive numbers.',
   'models.validation.temperature': 'Temperature must be between 0 and 2.',
+  'models.validation.embeddingProvider': 'Invalid embedding adapter. Select a supported option from the list.',
   'models.unsavedChanges': 'This profile has unsaved changes.',
   'models.unsavedDiscard': 'Discard changes',
   'models.unsavedKeep': 'Keep editing',
