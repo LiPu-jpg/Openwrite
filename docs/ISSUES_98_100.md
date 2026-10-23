@@ -1,12 +1,12 @@
 # #98–#100：连载写作与运行可靠性
 
-本分支为 dsh-openwrite 0.2.25 / Core 5.8.12 候选，尚未发布。Core 代码位于同仓库 native-core 分支；安装包将捆绑对应 wheel。完整数据契约见 Core `docs/SERIAL_WRITING.md`。
+dsh-openwrite 0.2.25 / Core 5.8.12 已在 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.25) 与 [npm](https://www.npmjs.com/package/dsh-openwrite/v/0.2.25) 发布。Core 代码已合并到同仓库 native-core 分支；安装包捆绑对应 wheel。完整数据契约见 Core `docs/SERIAL_WRITING.md`。
 
 ## 覆盖范围
 
 | Issue | 实现 |
 | --- | --- |
-| #98.1 插件升级破坏 bundle | 新增停机离线旁路升级工具，复制整个 profile 后安装、校验、切换，保留旧目录和日志；支持修复不完整 OpenWrite bundle 与中断恢复。原生 dsh 安装器和宿主启动降级未修改，见下方限制。 |
+| #98.1 插件升级破坏 bundle | 新增停机离线旁路升级工具，复制整个 profile 后安装、校验、切换，保留旧目录和日志；支持修复不完整 OpenWrite bundle 与中断恢复。原生宿主安装器补丁单独保留在 fork PR，未随插件包发布，见下方限制。 |
 | #98.2 外部验收失败 | `no_model=true` / `mode=fast` 承认正文版本，派生事实明确 stale，可稍后完整对账。 |
 | #98.3 误连实例 | status/响应头标识 root、instance、port；Bridge 校验实际根，不一致返回 409。 |
 | #98.4、#99.1 长章 | 按 beats 分段，携带 1,500 字尾文续写，拼接去重；不足时续写，预算耗尽保留草稿。 |
@@ -25,13 +25,13 @@
 
 先完整退出 DeepSeek Harness / DSH Desktop 并停止 dsh、OpenWrite managed runtime。整个升级过程中保持停机。工具会在安装前及切换前检查进程；未知进程状态也拒绝修改。宿主原生命令不受此检查保护。
 
-从解压的候选/发行包运行（或已安装版本提供的 `openwrite-safe-upgrade`）：
+从解压的发行包运行（或已安装版本提供的 `openwrite-safe-upgrade`）：
 
 ```sh
 node /path/to/package/scripts/safe-upgrade.mjs --profile desktop --package /absolute/path/dsh-openwrite-0.2.25.tgz
 ```
 
-候选版本未上架前不要使用 `dsh-openwrite@0.2.25` 下载命令。`DSH_HOME` 必须指向实际宿主的 home；默认 `~/.dsh`。Windows 另设 `DSH_BIN` 为已验收宿主运行时的绝对 `lib/bin.js` 路径，使用 Node 直接执行而非 `.cmd` shell。其余平台可通过 DSH_BIN 指定同一受信任 CLI。
+可用 `npm pack dsh-openwrite@0.2.25` 下载官方包，或从对应 GitHub Release 获取相同字节的附件。`DSH_HOME` 必须指向实际宿主的 home；默认 `~/.dsh`。Windows 另设 `DSH_BIN` 为已验收宿主运行时的绝对 `lib/bin.js` 路径，使用 Node 直接执行而非 `.cmd` shell。其余平台可通过 DSH_BIN 指定同一受信任 CLI。
 
 安装在旁路 profile 中进行；整个旧 profile（包括其他插件、锁文件及设置）在切换前保持可用。只有 OpenWrite 的必要文件和 manifest 校验成功才进入目录切换。切换为两次同盘 rename，**不是整个目录树的单次原子交换**；停机状态避免读取窗口，中断由持久事务记录恢复。锁覆盖本工具的并发操作，不能阻止未经协调的原生安装器或用户重新启动宿主。
 
@@ -54,6 +54,8 @@ node /path/to/package/scripts/safe-upgrade.mjs --profile desktop --repair --appl
 
 这些测试不调用付费模型。真实模型达到 10,000 字的稳定率仍由模型决定；系统保证有限续写与草稿留存，不保证模型质量。具象名词密度依赖作者词典；承诺是否兑现未做语义判断。历史横评使用当前正典，不声称复原当时章前状态。伏笔声明边与 DAG 已确认状态分别报告，不自动篡改已收状态。
 
-Windows Desktop 的文件句柄冲突与恢复需 Windows 实机补验；本次在 macOS 完成实现和本地回归。原生 `dsh plugin add/update` 与「损坏 bundle 自动跳过并提供修复入口」属于 deepseek-harness 宿主代码，未在这个仓库修复，因此 #98 不应标为全部解决。现有宿主用户必须使用本工具的停机路径，或等宿主更新后再走原生更新。
+原生宿主修复保留在 [deepseek-harness fork PR #1](https://github.com/LiPu-jpg/deepseek-harness/pull/1)，代码提交 `906e10574b7cc2875348cc31c43aa779a5c8e652`：Desktop 记录外壳进程、原生 CLI 在停机后暂存并校验整个 profile、拒绝运行中替换、保留真实 stdout/stderr 和中断恢复记录。该补丁的 [Windows/Linux 原生专项 CI](https://github.com/LiPu-jpg/deepseek-harness/actions/runs/39901088607) 通过：Windows 185 passed / 3 skipped，Linux 187 passed / 1 skipped；macOS 187 passed / 1 skipped，构建、类型检查及 43 项文档检查通过。Windows 用例实际运行 profile 内的程序并检查存活与退出后的升级行为，未执行交互式 Electron 人工验收。
 
-本地回归记录（2026-10-23，macOS arm64）：Core 全量 1,424 passed / 32 skipped；后续超时配置校验等定向回归 38 passed、规划转换回归 36 passed；前端 301 passed；managed runtime/策略 24 passed；离线升级 5 passed；跨端契约检查通过。Core wheel 已从独立解压目录验证版本、体检模块及 HTTP 路由。真实服务商调用、Windows 实机和发布操作均未执行。
+当前上游 master 已有损坏 bundle 的跳过加载及插件管理恢复能力，相关现有用例已重跑通过。上游仓库所有者已关闭 PR 提交入口，API 与网页均无法创建上游 PR；fork 补丁尚未合入上游或成为已发布宿主。它不包含在 OpenWrite 0.2.25 包内，因此 #98.1 仍需追踪宿主发布及 Windows Desktop 人工验收。现有宿主用户继续使用本工具的停机升级路径。
+
+本地回归记录（2026-10-23，macOS arm64）：Core 全量 1,424 passed / 32 skipped；后续超时配置校验等定向回归 38 passed、规划转换回归 36 passed；前端 301 passed；managed runtime/策略 24 passed；离线升级 5 passed；跨端契约检查通过。Core wheel 已从独立解压目录验证版本、体检模块及 HTTP 路由。真实服务商调用与 Windows Electron 人工验收未执行。跨平台发布 CI 的 8 份原生安装/源码报告和 4 份精确宿主客户端报告均通过；发布状态与哈希见 [发布验收](RELEASE_ACCEPTANCE.md#025)。

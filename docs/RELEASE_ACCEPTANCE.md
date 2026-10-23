@@ -6,6 +6,14 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.25
+
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.25) 与 [npm `dsh-openwrite@0.2.25`](https://www.npmjs.com/package/dsh-openwrite/v/0.2.25) 均已发布，npm `latest` 已更新到 0.2.25。使用 [PR 完整发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39893387812) 验收通过的原始产物，没有重新打包。该运行的来源提交为 `1c04d97c9571f09f9a49567c95b7c38c0507ddbc`，源码 tree `3db86dcdb88f69fd6d92f5881fee0db3c2f0bd8c` 与主分支合并提交 `f0785f2c331f2d090450b1e127e5750c64dc4487` 一致。包 SHA-256 为 `ca73ca424844ddee62f37c2725591bf44ff7701f25d1d12693fa270ee0c26049`；官方 registry 无认证下载的完整 10,141,143 字节与 CI 包一致，GitHub Release 的服务端附件 digest 也一致。
+
+8 份原生安装/源码报告和 4 份精确宿主客户端报告均通过，覆盖 Linux、macOS arm64/x64、Windows、Node 22.19/24/26、源码安装、alpha 兼容及宿主 `0.1.2-rc.1` / `0.1.5-alpha.1` / `0.2.0-rc.2` / `0.2.1-rc.2`。合并后的 [主分支发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39895883025) 同样通过。核心 [PR #101](https://github.com/LiPu-jpg/Openwrite/pull/101) 与插件 [PR #102](https://github.com/LiPu-jpg/Openwrite/pull/102) 已合并。Core wheel 5.8.12 的 SHA-256 为 `fefd03aebfb0ebf084fd40f4897af309a532111903a3813f01276daa1c36c345`。
+
+Core 全量 1424 passed / 32 skipped；后续超时配置校验等定向回归 38 passed、规划转换回归 36 passed；前端 301 passed；managed runtime/策略 24 passed；离线升级 5 passed；跨端契约通过。手工浏览器检查只使用 `~/my_novel`。真实模型调用为 0，Windows Electron 人工验收尚未执行。#98.1 的原生宿主补丁见 [fork PR #1](https://github.com/LiPu-jpg/deepseek-harness/pull/1)，[专项 CI](https://github.com/LiPu-jpg/deepseek-harness/actions/runs/39901088607) 的 Windows 185 passed / 3 skipped、Linux 187 passed / 1 skipped。上游关闭 PR 提交入口，补丁尚未成为已发布宿主；详情见 [实现与限制](ISSUES_98_100.md)。
+
 ## 0.2.24
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 与 [npm `dsh-openwrite@0.2.24`](https://www.npmjs.com/package/dsh-openwrite/v/0.2.24) 均已发布，npm `latest` 已更新到 0.2.24。直接使用[完整发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39716542888) 验收通过的原始产物，未重新打包。来源提交 `d16623c6b0d2a84d45dffe23c24e641df790175f`，源码 tree `e0b2fd0647114e46e6fd188f4fb32b13fadc6b3d` 与主分支合并提交 `32166de6a3f66d8ebb2e3b5bd3912c1c1236f07b` 一致。npm 包 SHA-256 为 `a9fb766e8277b0f7dfecd9ea2284720512583e766e82515b70a529c967aa0170`；从官方 registry 无认证重新下载后，包字节、SHA-1、SHA-512 integrity 与 CI 产物和 registry 元数据均一致。
