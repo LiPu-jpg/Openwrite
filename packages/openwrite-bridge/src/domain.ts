@@ -2,7 +2,7 @@ import type { BackendConnection } from './managed-runtime.js'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { StudioClient, workspaceRootHeaders, mutationAffectsState, type WorkspaceContext } from './client.js'
+import { StudioClient, workspaceRootHeaders, workspaceRootsEqual, mutationAffectsState, type WorkspaceContext } from './client.js'
 import { workspaceContextFromExec } from './tools.js'
 
 export const CONFIG_ROUTE = '/studio-panel/config.json'
@@ -14,6 +14,8 @@ const PROXY_TIMEOUT_MS = 60_000
 /** Cap for the best-effort upstream context_epoch read; never blocks a snapshot longer. */
 const CONTEXT_EPOCH_TIMEOUT_MS = 5_000
 const WRITABLE_PATHS = new Set([
+  'writing-assets',
+  'arc-reconcile',
   'assets',
   'assets/update',
   'assets/package/import',
@@ -512,6 +514,12 @@ export class NovelDomainService extends Service {
           signal: AbortSignal.any([lifetime, AbortSignal.timeout(PROXY_TIMEOUT_MS)]),
         })
         if (lifetime.aborted) return
+        const actualRoot = upstream.headers.get('X-OpenWrite-Project-Path')
+        if (upstream.ok && actualRoot && !workspaceRootsEqual(decodeURIComponent(actualRoot), resolved.root)) {
+          await upstream.body?.cancel()
+          sendJson(res, 409, { error: 'Connected workspace differs from requested project', code: 'WORKSPACE_CONTEXT_MISMATCH', details: { requested_path: resolved.root, project_path: decodeURIComponent(actualRoot) } })
+          return
+        }
         const upstreamBytes = Buffer.from(await upstream.arrayBuffer())
         const bytes = compactTaskList(upstreamBytes, pathPart, method)
         const responseHeaders: Record<string, string> = {
@@ -520,6 +528,9 @@ export class NovelDomainService extends Service {
           'content-length': String(bytes.length),
         }
         const disposition = upstream.headers.get('content-disposition')
+        const instanceId = upstream.headers.get('X-OpenWrite-Instance-Id')
+        if (instanceId) responseHeaders['X-OpenWrite-Instance-Id'] = instanceId
+        if (actualRoot) responseHeaders['X-OpenWrite-Project-Path'] = actualRoot
         if (disposition !== null) responseHeaders['content-disposition'] = disposition
         res.writeHead(upstream.status, responseHeaders)
         res.end(bytes)

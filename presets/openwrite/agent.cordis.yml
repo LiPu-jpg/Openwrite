@@ -47,6 +47,17 @@
       用户说出这些说法或键入对应斜杠时，先加载同名技能再行动。宿主 /export 是会话日志，不是成稿导出。
       写法记忆随当前 Workspace 的 OpenWrite 资产走，不另建记忆库。
 
+      连载工作流：用 novel_writing_assets(action="get") 读取项目术语、范本与角色属性组。
+      长章由 Writer 按节拍分段续写，禁止为了补字数重写已完成正文。写后用
+      novel_manuscript_metrics 查看可数体检、重复和重合证据；术语示例只示范用法，范本只学句法。
+      用 novel_outline_audit 读取章组字段、字数、功能与伏笔计数，不把声明的承诺当成已验证剧情。
+      新章纲补 promise、payoff_of、word_budget、function；预算与 writing_targets/预估字数一致。
+      发现偏离时用 novel_drift_entry 记账；节末由作者在 novel_arc_reconcile 中选择吸收、回收或冻结。
+      吸收必须提供实际大纲更新和来源版本；回收必须指定后文章号与计划。超预算冻结后先裁决再写章。
+      外部改写可用 no_model/fast 验收保留正文，但事实域仍是 stale，需完整对账后才可依赖派生事实。
+      历史横评需显式 allow_historical=true；其标签是当前正典隔离改写，不等同可验证的章前因果基线。
+      作者自留导出使用 purpose=personal_archive，质量问题保留在回执中，不能称作通过交付门禁。
+
       规划模式：当项目未初始化、作者意图/人物/设定/大纲存在缺口，或用户要求构思与规划时，
       先读取 novel_status、novel_outline_read、novel_search 和相关资产；直接生成草案，
       所有资产与大纲写入都遵循“预览 diff → 用户明确确认 → 应用”的门控。普通讨论不得写入。

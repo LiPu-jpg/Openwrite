@@ -11,11 +11,12 @@ import { ModelView, type ModelNavigationGuard } from './ModelView.tsx'
 import { modelMemoryContextKey, WorkspaceViewMemory } from './model-view-memory.ts'
 import { TasksView, type NavigationRequest } from './TasksView.tsx'
 import { ManuscriptImportWorkspace, ProjectArchiveWorkspace } from './TransferWorkspaces.tsx'
+import { SerialWritingView } from './SerialWritingView.tsx'
 import { useWorkbench, workbenchStore } from './WorkbenchStore.ts'
 import { createNovelWorkspace, initWorkspaceProject, useBindStudioContext, type StudioPanelInjected } from './workspace-context.ts'
 import css from './Workbench.module.css'
 
-type OperationsMode = 'tasks' | 'benchmark' | 'models' | 'research' | 'transfer'
+type OperationsMode = 'tasks' | 'benchmark' | 'models' | 'research' | 'transfer' | 'serial'
 const operationsModeMemory = new WorkspaceViewMemory<OperationsMode>()
 
 export type OperationsViewProps = ConvViewProps & InjectFace<StudioPanelInjected> & PropsLocale<'studio-panel'>
@@ -140,7 +141,7 @@ function OperationsWorkspace(props: OperationsViewProps) {
   const navigateToMode = (next: OperationsMode) => {
     if (next === mode) return
     const navigate = () => setMode(next)
-    if (mode === 'models' && modelNavigationGuard.current) modelNavigationGuard.current(navigate)
+    if ((mode === 'models' || mode === 'serial') && modelNavigationGuard.current) modelNavigationGuard.current(navigate)
     else navigate()
   }
   const items = [
@@ -149,6 +150,7 @@ function OperationsWorkspace(props: OperationsViewProps) {
     { id: 'models' as const, icon: Cpu, label: props.t('view.models') },
     { id: 'research' as const, icon: FlaskConical, label: props.t('view.research') },
     { id: 'transfer' as const, icon: FileUp, label: props.t('operations.transfer') },
+    { id: 'serial' as const, icon: Gauge, label: props.t('serial.title') },
   ]
   return <div className={css.workspaceRoot}>
     <nav className={css.workspaceNav} aria-label={props.t('view.operations')}>
@@ -164,6 +166,7 @@ function OperationsWorkspace(props: OperationsViewProps) {
       {mode === 'models' && <ModelView key={workbench.contextEpoch} {...props} onNavigationGuardChange={registerModelNavigationGuard} />}
       {mode === 'research' && <ResearchView key={workbench.epochs.research} {...props} initialReportId={resultTarget?.view === 'research' ? resultTarget.id : ''} />}
       {mode === 'transfer' && <TransferPanel {...props} />}
+      {mode === 'serial' && <SerialWritingView {...props} onNavigationGuardChange={registerModelNavigationGuard} />}
     </section>
   </div>
 }
@@ -361,7 +364,7 @@ function TransferPanel(props: OperationsViewProps) {
         {workspace !== undefined && !notInitialized && <ProjectMetadataEditor fetchStudioApi={fetchStudioApi} postStudioApi={postStudioApi} t={t} onSaved={() => { setPreflightReload(value => value + 1); workbenchStore.invalidate('workspace') }} />}
         <div className={css.exportControls}>
           <span className={css.exportPurpose} role="group" aria-label={t('tools.export.purpose')}>
-            {(['delivery', 'backup'] as const).map(purpose => <button key={purpose} type="button" className={css.actionButton}
+            {(['delivery', 'backup', 'personal_archive'] as const).map(purpose => <button key={purpose} type="button" className={css.actionButton}
               data-active={exportPurpose === purpose} disabled={busy !== ''}
               onClick={() => selectPurpose(purpose)}>{t(`tools.export.purpose.${purpose}`)}</button>)}
           </span>

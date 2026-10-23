@@ -1,6 +1,6 @@
 {
   "name": "dsh-openwrite",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "description": "OpenWrite 长篇小说领域后端接入 DeepSeek Harness：统一创作 Agent 预设 + 原生创作工作台",
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
     "install-dsh": "bash scripts/install.sh",
     "dev": "bash scripts/dev.sh",
     "doctor": "node scripts/plugin-doctor.mjs",
-    "test:maintenance": "node --test scripts/plugin-doctor.test.mjs scripts/lifecycle.test.mjs packages/openwrite-bridge/scripts/runtime-lifecycle.test.mjs scripts/maintenance.test.mjs scripts/preset-lifecycle.test.mjs",
+    "test:maintenance": "node --test scripts/plugin-doctor.test.mjs scripts/lifecycle.test.mjs packages/openwrite-bridge/scripts/runtime-lifecycle.test.mjs scripts/maintenance.test.mjs scripts/preset-lifecycle.test.mjs scripts/safe-upgrade.test.mjs",
     "check": "npm run check:plugin && npm run test:contracts",
     "test:lifecycle": "node --test scripts/lifecycle.test.mjs",
     "test:runtime": "node --test packages/openwrite-bridge/scripts/runtime-lifecycle.test.mjs",
@@ -95,6 +95,7 @@
     "packages/studio-panel/package.json",
     "scripts/dog",
     "scripts/maintenance.mjs",
+    "scripts/safe-upgrade.mjs",
     "packages/openwrite-bridge/LICENSE",
     "packages/studio-panel/LICENSE",
     "release/licenses",
@@ -119,7 +120,8 @@
     "@deepseek-ai/dsh-tools": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2"
   },
   "bin": {
-    "openwrite-maintenance": "scripts/maintenance.mjs"
+    "openwrite-maintenance": "scripts/maintenance.mjs",
+    "openwrite-safe-upgrade": "scripts/safe-upgrade.mjs"
   },
   "repository": {
     "type": "git",

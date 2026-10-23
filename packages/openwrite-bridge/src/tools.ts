@@ -194,6 +194,11 @@ function objectValue(value: unknown): JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {}
 }
 
+function requireRecord(value: unknown, name: string): JsonObject {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${name} must be a JSON object`)
+  return value as JsonObject
+}
+
 async function deliveryForResponse(
   client: StudioClient,
   response: JsonValue,
@@ -985,7 +990,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'so the downloaded file is bound to the manuscript state that was inspected.',
     parameters: {
       format: { type: 'string', enum: ['md', 'txt', 'epub'], description: 'Export format (default "md").' },
-      purpose: { type: 'string', enum: ['backup', 'delivery'], description: 'Export purpose (default "delivery"). Delivery applies publication gates; backup preserves the current work.' },
+      purpose: { type: 'string', enum: ['backup', 'delivery', 'personal_archive'], description: 'Export purpose (default "delivery"). personal_archive preserves author copies with gate findings recorded as warnings.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
@@ -1006,7 +1011,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'preflight_revision unchanged to bind the download to that inspected manuscript state. Returns the saved file path.',
     parameters: {
       format: { type: 'string', enum: ['md', 'txt', 'epub'], description: 'Export format (default "md").' },
-      purpose: { type: 'string', enum: ['backup', 'delivery'], description: 'Export purpose (default "delivery").' },
+      purpose: { type: 'string', enum: ['backup', 'delivery', 'personal_archive'], description: 'Export purpose (default "delivery").' },
       preflight_revision: { type: 'string', description: 'Revision returned by novel_export_preflight for the same format and purpose.' },
     },
     output: {
@@ -2153,6 +2158,8 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'acknowledge are confirmation-gated by the server.',
     parameters: {
       action: { type: 'string', required: true, enum: ['baseline', 'external', 'resume', 'acknowledge', 'abandon'], description: 'The reconciliation action.' },
+      mode: { type: 'string', enum: ['full', 'fast'], description: 'resume: fast accepts frozen manuscript without calling a model; derived facts remain stale and can be reconciled later.' },
+      no_model: { type: 'boolean', description: 'external: accept manuscript bytes without extracting facts; does not clear the facts guard.' },
       chapter_id: { type: 'string', description: 'Optional chapter id (ch_<digits>); omit for the project-level operation.' },
       operation_id: { type: 'string', description: 'Durable operation id to resume or acknowledge.' },
       domains: { type: 'array', items: { type: 'string' }, description: 'Affected domains to acknowledge or retry; acknowledge defaults to outline and foreshadowing.' },
@@ -2165,13 +2172,97 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
         throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
       }
       const body: JsonObject = {}
-      for (const key of ['chapter_id', 'operation_id', 'domains', 'confirm'] as const) {
+      for (const key of ['chapter_id', 'operation_id', 'domains', 'confirm', 'mode', 'no_model'] as const) {
         const value = args[key]
         if (value !== undefined) body[key] = value
       }
       if (args.action === 'acknowledge' && args.domains === undefined) body['domains'] = ['outline', 'foreshadowing']
       const route = args.action === 'acknowledge' ? 'ack' : args.action === 'resume' ? 'reconcile' : args.action
       return await clientFor(exec).postJson(`/api/manuscript/acceptance/${route}`, body, exec.signal)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'novel_writing_assets',
+    description: 'Read or save shared project terminology, review_terms toggle, concrete noun lexicon, overlap_threshold and character_groups. Anchors are Markdown files in the novel anchor/ directory. Save requires the revision returned by get. Character groups are optional descriptive material; retain identity and canonical state in character cards.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['get', 'save', 'save_anchor', 'mark_usage'], description: 'Asset operation.' },
+      assets: { type: 'json', description: 'Object: terms [{term, forbidden?, replacement?, min_occurrences?, example?}], character_groups {name: [{id,text}]}, review_terms?, concrete_nouns?, overlap_threshold?.' },
+      expected_revision: { type: 'string', description: 'Revision from get; empty for a new asset table.' },
+      name: { type: 'string', description: 'save_anchor: simple .md filename.' },
+      content: { type: 'string', description: 'save_anchor: Markdown reference prose.' },
+      chapter_id: { type: 'string', description: 'mark_usage: chapter whose optional character details were used.' },
+      groups: { type: 'json', description: 'mark_usage: character name to group IDs used in this chapter.' },
+    },
+    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
+    timeoutMs,
+    isConcurrencySafe: args => args.action === 'get',
+    async execute(args, exec) {
+      const client = clientFor(exec)
+      if (args.action === 'get') return await client.getJson('/api/writing-assets', {}, exec.signal)
+      if (args.action === 'save_anchor') return await client.postJson('/api/writing-assets', { action: args.action, name: args.name ?? '', content: args.content ?? '', expected_revision: args.expected_revision ?? '' }, exec.signal)
+      if (args.action === 'mark_usage') return await client.postJson('/api/writing-assets', { action: args.action, chapter_id: args.chapter_id ?? '', groups: requireRecord(args.groups, 'groups') }, exec.signal)
+      const assets = requireRecord(args.assets, 'assets')
+      return await client.postJson('/api/writing-assets', { assets: assets as JsonObject, expected_revision: args.expected_revision ?? '' }, exec.signal)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'novel_manuscript_metrics',
+    description: 'Read deterministic chapter metrics, terminology findings, overlap against anchors and the previous three chapters, duplicate paragraphs and selected character groups. Overlap spans use Unicode codepoint offsets. No model call.',
+    parameters: { chapter_id: { type: 'string', required: true, description: 'Canonical chapter ID.' } },
+    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
+    timeoutMs, isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      if (!CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error('Invalid chapter_id')
+      return await clientFor(exec).getJson(`/api/manuscript/${encodeURIComponent(args.chapter_id)}/metrics`, {}, exec.signal)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'novel_outline_audit',
+    description: 'Read countable chapter-group facts: budgets/actual words, declared promises and function streaks, declared/confirmed payoffs, overdue hooks and drift ledger. Never generates a score or claims prose fulfilled a promise. No model call.',
+    parameters: {
+      group_id: { type: 'string', description: 'Optional sec_* or arc_* group.' },
+      start: { type: 'string', description: 'Optional first chapter ID.' },
+      end: { type: 'string', description: 'Optional last chapter ID.' },
+    },
+    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
+    timeoutMs, isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      return await clientFor(exec).getJson('/api/outline/audit', { group_id: args.group_id ?? '', start: args.start ?? '', end: args.end ?? '' }, exec.signal)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'novel_drift_entry',
+    description: 'Record author-observed chapter drift. Saves an immutable outline/manuscript baseline first. More than two unresolved rewrite drifts in a section freezes generation until explicit reconciliation and replanning.',
+    parameters: {
+      group_id: { type: 'string', required: true, description: 'Section ID sec_*.' },
+      chapter_id: { type: 'string', required: true, description: 'Chapter in this section.' },
+      kind: { type: 'string', required: true, enum: ['growth', 'escape', 'dilution', 'snowball'], description: 'Drift kind.' },
+      impact: { type: 'string', required: true, enum: ['local', 'section', 'arc'], description: 'Impact scope.' },
+      rewrite: { type: 'boolean', description: 'Counts toward rewrite budget; default true.' },
+      note: { type: 'string', required: true, description: 'Observed drift and supporting evidence.' },
+      expected_revision: { type: 'integer', required: true, description: 'ledger.revision from outline audit.' },
+    },
+    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
+    timeoutMs,
+    async execute(args, exec) {
+      return await clientFor(exec).postJson('/api/arc-reconcile', { ...args, action: 'drift_entry' }, exec.signal)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'novel_arc_reconcile',
+    description: 'Resolve selected drift entries by absorbing authored outline metadata, scheduling recovery in a later chapter, or freezing. Absorption requires concrete outline_updates and outline_revision; baseline is saved before edits. resume=true explicitly resumes a replanned group within budget. Does not rewrite manuscript.',
+    parameters: {
+      data: { type: 'json', required: true, description: 'Object: group_id, expected_revision, entry_ids[], decision absorb/recover/freeze, confirm:true. absorb: outline_revision, outline_updates[{node_id,metadata}], resume?. recover: plan, target_chapter_id.' },
+    },
+    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
+    timeoutMs,
+    async execute(args, exec) {
+      return await clientFor(exec).postJson('/api/arc-reconcile', { ...requireRecord(args.data, 'data'), action: 'arc_reconcile' } as JsonObject, exec.signal)
     },
   }))
 
@@ -2381,13 +2472,14 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       run_id: { type: 'string', description: 'Benchmark run id for get.' },
       task_type: { type: 'string', enum: ['chapter', 'outline'], description: 'Run target: chapter (default) or outline. Outline supports framework mode only.' },
       chapter_id: { type: 'string', description: 'Chapter task target: next (default) or an available canonical chapter_id from options, e.g. ch_003. Unavailable targets are rejected without fallback; inspect availability/reason first.' },
+      allow_historical: { type: 'boolean', description: 'Explicit isolated rewrite of an already written chapter using current canon. This is not a reconstructed pre-chapter baseline. Source manuscript and ledgers remain unchanged.' },
       outline_start_chapter: { type: 'integer', description: 'Outline task first chapter number, inclusive, 1-100000. Omit to continue after the last outline chapter.' },
       outline_chapter_count: { type: 'integer', description: 'Outline task range length including its starting chapter, 1-20 (default 3).' },
       writer_profile_ids: { type: 'array', items: { type: 'string' }, description: 'Writing profiles to compare (run).' },
       reviewer_profile_ids: { type: 'array', items: { type: 'string' }, description: 'Independent blind-review profiles (run).' },
       execution_mode: { type: 'string', enum: ['framework', 'creative'], description: 'Execution path: full framework (default); creative diagnostic is available only for chapter tasks. Read task pipelines with options.' },
       repeats: { type: 'integer', description: 'Repeats per writing profile, 1-5.' },
-      target_words: { type: 'integer', description: 'Chapter candidate target length, 200-12000; use outline_chapter_count for outline range.' },
+      target_words: { type: 'integer', description: 'Chapter candidate target length, 200-50000; use outline_chapter_count for outline range.' },
       concurrency: { type: 'integer', description: 'Concurrent model jobs, 1-4.' },
       limit: { type: 'integer', description: 'List limit, default 20.' },
     },
@@ -2416,7 +2508,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
         writer_profile_ids: args.writer_profile_ids,
         reviewer_profile_ids: args.reviewer_profile_ids,
       }
-      for (const key of ['task_type', 'chapter_id', 'outline_start_chapter', 'outline_chapter_count', 'execution_mode', 'repeats', 'target_words', 'concurrency'] as const) {
+      for (const key of ['task_type', 'chapter_id', 'allow_historical', 'outline_start_chapter', 'outline_chapter_count', 'execution_mode', 'repeats', 'target_words', 'concurrency'] as const) {
         const value = args[key]
         if (value !== undefined) body[key] = value
       }

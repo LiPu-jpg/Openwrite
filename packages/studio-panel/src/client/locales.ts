@@ -5,6 +5,81 @@ export const NS = 'studio-panel'
 
 /** The studio-panel dictionary key set (the source of truth for both locales). */
 export type StudioPanelKey =
+  | 'serial.used'
+  | 'serial.recoverTransaction'
+  | 'serial.title'
+  | 'serial.hint'
+  | 'serial.saved'
+  | 'serial.audit'
+  | 'serial.scope'
+  | 'serial.all'
+  | 'serial.words'
+  | 'serial.payoffs'
+  | 'serial.overdue'
+  | 'serial.promiseHint'
+  | 'serial.chapter'
+  | 'serial.promise'
+  | 'serial.budget'
+  | 'serial.function'
+  | 'serial.payoffIds'
+  | 'serial.actual'
+  | 'serial.saveOutline'
+  | 'serial.streak'
+  | 'serial.metrics'
+  | 'serial.hanzi'
+  | 'serial.paragraphs'
+  | 'serial.sentences'
+  | 'serial.paragraphLengths'
+  | 'serial.nounDensity'
+  | 'serial.dialogue'
+  | 'serial.duplicate'
+  | 'serial.assets'
+  | 'serial.assetsHint'
+  | 'serial.term'
+  | 'serial.forbidden'
+  | 'serial.minimum'
+  | 'serial.example'
+  | 'serial.replacement'
+  | 'serial.remove'
+  | 'serial.addTerm'
+  | 'serial.reviewTerms'
+  | 'serial.nouns'
+  | 'serial.threshold'
+  | 'serial.groups'
+  | 'serial.groupsHint'
+  | 'serial.character'
+  | 'serial.detail'
+  | 'serial.addGroup'
+  | 'serial.saveAssets'
+  | 'serial.anchors'
+  | 'serial.anchorHint'
+  | 'serial.drift'
+  | 'serial.driftHint'
+  | 'serial.frozen'
+  | 'serial.unfrozen'
+  | 'serial.kind'
+  | 'serial.impact'
+  | 'serial.note'
+  | 'serial.addDrift'
+  | 'serial.growth'
+  | 'serial.escape'
+  | 'serial.dilution'
+  | 'serial.snowball'
+  | 'serial.local'
+  | 'serial.section'
+  | 'serial.arc'
+  | 'serial.decision'
+  | 'serial.absorb'
+  | 'serial.recover'
+  | 'serial.freeze'
+  | 'serial.target'
+  | 'serial.reconcile'
+  | 'serial.historical'
+  | 'serial.discard'
+  | 'serial.activity'
+  | 'serial.heartbeat'
+  | 'serial.modelElapsed'
+  | 'tools.export.purpose.personal_archive'
   | 'view.overview'
   | 'view.writing'
   | 'view.studio'
@@ -1072,6 +1147,81 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh: Record<StudioPanelKey, string> = {
+  'serial.used': "本章已用",
+  'serial.recoverTransaction': "恢复中断的裁决",
+  'serial.title': "连载体检",
+  'serial.hint': "查看可数事实，维护写作资产与漂移记录。",
+  'serial.saved': "已保存",
+  'serial.audit': "章组体检与章节承诺",
+  'serial.scope': "章组",
+  'serial.all': "全书",
+  'serial.words': "实际 / 计划字数",
+  'serial.payoffs': "确认 / 声明回收",
+  'serial.overdue': "超期伏笔",
+  'serial.promiseHint': "承诺写成“可观察状态 A -> B”；功能填写推进、揭示、关系、代价，可用逗号分隔。统计只反映声明，不证明正文已兑现。",
+  'serial.chapter': "章节",
+  'serial.promise': "章节承诺",
+  'serial.budget': "字数预算",
+  'serial.function': "章节功能",
+  'serial.payoffIds': "回收伏笔 ID",
+  'serial.actual': "实际字数",
+  'serial.saveOutline': "保存章节承诺",
+  'serial.streak': "连续同功能",
+  'serial.metrics': "逐章指标与重合检测",
+  'serial.hanzi': "汉字数",
+  'serial.paragraphs': "段落数",
+  'serial.sentences': "句长中位 / P90",
+  'serial.paragraphLengths': "段长中位 / P90",
+  'serial.nounDensity': "具象名词 / 千字（项目词典）",
+  'serial.dialogue': "对白占比",
+  'serial.duplicate': "重复段落",
+  'serial.assets': "术语与描写素材",
+  'serial.assetsHint': "Writer 与 Reviewer 共用此词表。最低次数按整章检查；范本重合检测使用 12 字窗口。",
+  'serial.term': "规范词 / 禁用词",
+  'serial.forbidden': "禁用",
+  'serial.minimum': "最低次数",
+  'serial.example': "用法示例",
+  'serial.replacement': "替换为",
+  'serial.remove': "移除",
+  'serial.addTerm': "添加术语",
+  'serial.reviewTerms': "审稿检查术语表",
+  'serial.nouns': "具象名词词典（逗号分隔，选填）",
+  'serial.threshold': "重合率警示阈值（0–1）",
+  'serial.groups': "角色描写属性组",
+  'serial.groupsHint': "每章轮换提供最多 3 组可选描写；身份、关系与当前状态仍保留在角色卡中。",
+  'serial.character': "角色规范名",
+  'serial.detail': "一组可选描写细节",
+  'serial.addGroup': "添加属性组",
+  'serial.saveAssets': "保存写作资产",
+  'serial.anchors': "风格范本",
+  'serial.anchorHint': "上传 Markdown 范本；每章取样最多 1200 字，只学习句法与节奏，禁止照抄具体句子。同名文件上传时会校验版本后更新。",
+  'serial.drift': "漂移账本与节末裁决",
+  'serial.driftHint': "先选择一节。每次记账与吸收前保存基线；未解决的改写级漂移超过 2 次会冻结该节。吸收时请在上方填写对应章节的新承诺，裁决会一并保存。",
+  'serial.frozen': "已冻结，需先裁决与重规划",
+  'serial.unfrozen': "未冻结",
+  'serial.kind': "漂移类型",
+  'serial.impact': "影响范围",
+  'serial.note': "观察到的偏离与依据 / 后文回收计划",
+  'serial.addDrift': "记录改写级漂移",
+  'serial.growth': "生长",
+  'serial.escape': "逃逸",
+  'serial.dilution': "稀释",
+  'serial.snowball': "雪球",
+  'serial.local': "局部",
+  'serial.section': "节级",
+  'serial.arc': "篇级",
+  'serial.decision': "裁决",
+  'serial.absorb': "吸收并回写大纲",
+  'serial.recover': "安排后文回收",
+  'serial.freeze': "冻结重规划",
+  'serial.target': "后文目标章节 ID",
+  'serial.reconcile': "确认并执行裁决",
+  'serial.historical': "允许已写章节隔离改写（使用当前正典，非原始章前基线）",
+  'serial.discard': "写作资产或章节承诺尚未保存，确定离开并丢弃修改？",
+  'serial.activity': "最后活动",
+  'serial.heartbeat': "工作线程心跳",
+  'serial.modelElapsed': "当前模型阶段耗时",
+  'tools.export.purpose.personal_archive': "作者自留存档",
   'assets.draft.restored': '已恢复未保存的资料草稿',
   'assets.draft.unsaved': '资料草稿尚未保存',
   'assets.draft.conflict': '资料已在其他位置更新。已保留本地草稿，请先核对再决定是否放弃并载入最新内容。',
@@ -2133,6 +2283,81 @@ export const zh: Record<StudioPanelKey, string> = {
 
 /** English dictionary. */
 export const en: Record<StudioPanelKey, string> = {
+  'serial.used': "Used in this chapter",
+  'serial.recoverTransaction': "Recover interrupted reconciliation",
+  'serial.title': "Serial writing",
+  'serial.hint': "Inspect countable facts, writing assets and drift.",
+  'serial.saved': "Saved",
+  'serial.audit': "Chapter groups and promises",
+  'serial.scope': "Chapter group",
+  'serial.all': "Whole book",
+  'serial.words': "Actual / planned writing units",
+  'serial.payoffs': "Confirmed / declared payoffs",
+  'serial.overdue': "Overdue hooks",
+  'serial.promiseHint': "Write promises as observable state A -> B. Function tags: 推进, 揭示, 关系, 代价. Counts describe declarations, not verified prose fulfillment.",
+  'serial.chapter': "Chapter",
+  'serial.promise': "Promise",
+  'serial.budget': "Word budget",
+  'serial.function': "Function",
+  'serial.payoffIds': "Payoff IDs",
+  'serial.actual': "Actual units",
+  'serial.saveOutline': "Save chapter promises",
+  'serial.streak': "Repeated function streak",
+  'serial.metrics': "Chapter metrics and overlap",
+  'serial.hanzi': "Chinese characters",
+  'serial.paragraphs': "Paragraphs",
+  'serial.sentences': "Sentence length median / P90",
+  'serial.paragraphLengths': "Paragraph length median / P90",
+  'serial.nounDensity': "Concrete nouns / 1,000 units (project lexicon)",
+  'serial.dialogue': "Dialogue ratio",
+  'serial.duplicate': "Duplicate paragraph",
+  'serial.assets': "Terminology and descriptive assets",
+  'serial.assetsHint': "Writer and reviewer share this table. Minimum counts apply to the full chapter. Overlap uses 12-character windows.",
+  'serial.term': "Term",
+  'serial.forbidden': "Forbidden",
+  'serial.minimum': "Minimum count",
+  'serial.example': "Usage example",
+  'serial.replacement': "Replacement",
+  'serial.remove': "Remove",
+  'serial.addTerm': "Add term",
+  'serial.reviewTerms': "Check terminology during review",
+  'serial.nouns': "Concrete noun lexicon (comma separated, optional)",
+  'serial.threshold': "Overlap warning threshold (0–1)",
+  'serial.groups': "Character detail groups",
+  'serial.groupsHint': "Rotate up to three optional detail groups per chapter. Keep identity, relationships and current state in character cards.",
+  'serial.character': "Canonical character name",
+  'serial.detail': "Optional descriptive detail group",
+  'serial.addGroup': "Add group",
+  'serial.saveAssets': "Save writing assets",
+  'serial.anchors': "Style anchors",
+  'serial.anchorHint': "Upload a Markdown anchor. Each chapter samples up to 1,200 characters for syntax and rhythm, never exact sentences. Uploads replace same-name anchors after a revision check.",
+  'serial.drift': "Drift ledger and reconciliation",
+  'serial.driftHint': "Select a section. Baselines precede entries and absorption; more than two unresolved rewrite drifts freeze the section. For absorption, edit the corresponding chapter promises above; reconciliation saves them together.",
+  'serial.frozen': "Frozen; reconcile and replan before generation",
+  'serial.unfrozen': "Not frozen",
+  'serial.kind': "Drift kind",
+  'serial.impact': "Impact",
+  'serial.note': "Observed drift and evidence / recovery plan",
+  'serial.addDrift': "Record rewrite drift",
+  'serial.growth': "Growth",
+  'serial.escape': "Escape",
+  'serial.dilution': "Dilution",
+  'serial.snowball': "Snowball",
+  'serial.local': "Local",
+  'serial.section': "Section",
+  'serial.arc': "Arc",
+  'serial.decision': "Decision",
+  'serial.absorb': "Absorb into outline",
+  'serial.recover': "Schedule recovery",
+  'serial.freeze': "Freeze and replan",
+  'serial.target': "Later target chapter ID",
+  'serial.reconcile': "Confirm reconciliation",
+  'serial.historical': "Allow isolated rewrites of written chapters (current canon, not an original pre-chapter baseline)",
+  'serial.discard': "Discard unsaved writing assets or chapter promises and leave?",
+  'serial.activity': "Last activity",
+  'serial.heartbeat': "Worker heartbeat",
+  'serial.modelElapsed': "Current model phase elapsed",
+  'tools.export.purpose.personal_archive': "Personal archive",
   'assets.draft.restored': 'Unsaved asset draft restored',
   'assets.draft.unsaved': 'Asset draft has unsaved changes',
   'assets.draft.conflict': 'This asset changed elsewhere. Your local draft is preserved; review it before discarding it and loading the latest content.',

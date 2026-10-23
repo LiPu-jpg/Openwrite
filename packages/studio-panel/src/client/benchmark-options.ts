@@ -11,7 +11,7 @@ export interface BenchmarkPipeline {
 }
 
 export interface BenchmarkOptions {
-  chapters: { id: string; title: string; status: string; hasManuscript: boolean; available: boolean; reason: string }[]
+  chapters: { id: string; title: string; status: string; hasManuscript: boolean; available: boolean; reason: string; rewriteAvailable: boolean }[]
   nextChapterId: string
   defaultOutlineStart: number
   outlineStartMin: number
@@ -54,6 +54,7 @@ export function parseBenchmarkOptions(value: unknown): BenchmarkOptions {
         id: asText(chapter['chapter_id']), title: asText(chapter['title']), status: asText(chapter['status']),
         hasManuscript: chapter['has_manuscript'] === true, available: chapter['availability'] !== 'unavailable',
         reason: asText(chapter['reason']),
+        rewriteAvailable: chapter['isolated_rewrite_available'] === true,
       }
     }).filter(chapter => chapter.id !== ''),
     nextChapterId: asText(item['next_chapter_id']),

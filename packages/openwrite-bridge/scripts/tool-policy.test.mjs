@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { novelEffect, novelPolicyDenial } from '../lib/tool-policy.js'
 import { registerNovelTools, workspaceContextFromExec } from '../lib/tools.js'
-import { StudioClient, StudioError } from '../lib/client.js'
+import { StudioClient, StudioError, workspaceRootsEqual } from '../lib/client.js'
 
 test('every registered novel tool has a conservative effect; mixed actions do not inherit read access', () => {
   const tools = []
   registerNovelTools({ tools: { register: tool => tools.push(tool) } }, () => { throw new Error('No API call allowed') }, { timeoutMs: 1000, outputDir: '/unused' })
-  assert.equal(tools.length, 90)
+  assert.equal(tools.length, 95)
   for (const tool of tools) assert.ok(['read', 'write', 'generate'].includes(novelEffect(tool.name, {})))
   assert.equal(novelEffect('novel_model_benchmark', { action: 'get' }), 'read')
   assert.equal(novelEffect('novel_model_benchmark', { action: 'run' }), 'generate')
@@ -22,6 +22,12 @@ test('every registered novel tool has a conservative effect; mixed actions do no
   assert.equal(novelEffect('novel_export', {}), 'write')
   assert.equal(novelEffect('novel_task_retry', {}), 'generate')
   assert.equal(novelEffect('novel_task_cancel', {}), 'write')
+  assert.equal(novelEffect('novel_writing_assets', { action: 'get' }), 'read')
+  assert.equal(novelEffect('novel_writing_assets', { action: 'save' }), 'write')
+  assert.equal(novelEffect('novel_manuscript_metrics', {}), 'read')
+  assert.equal(novelEffect('novel_outline_audit', {}), 'read')
+  assert.equal(novelEffect('novel_drift_entry', {}), 'write')
+  assert.equal(novelEffect('novel_arc_reconcile', {}), 'write')
   assert.equal(novelEffect('novel_manuscript_edit_action', { action: 'drafts' }), 'read')
   assert.equal(novelEffect('novel_manuscript_edit_action', { action: 'restore_draft' }), 'write')
 })
@@ -40,7 +46,7 @@ test('host write policy and plan state independently gate generation and changes
   assert.match(novelPolicyDenial({ get: () => undefined }, { name: 'novel_doc_write', agent: { ctx: { get: () => undefined }, session: {} }, arguments: {} }), /READ_ONLY/)
 })
 
-test('real dsh tool registry isolates 90 tools by preset and disposes them', async () => {
+test('real dsh tool registry isolates 95 tools by preset and disposes them', async () => {
   const { Context } = await import('@deepseek-ai/cordis')
   const { ToolRuntime } = await import('@deepseek-ai/dsh-tools')
   const { createScope } = await import('@deepseek-ai/dsh-scope')
@@ -62,7 +68,7 @@ test('real dsh tool registry isolates 90 tools by preset and disposes them', asy
     assert.equal(denied.isError, true)
     assert.match(JSON.stringify(denied), /OPENWRITE_READ_ONLY/)
     const tools = root.tools.schemas(writing)
-    assert.equal(tools.filter(tool => tool.name.startsWith('novel_')).length, 90)
+    assert.equal(tools.filter(tool => tool.name.startsWith('novel_')).length, 95)
     console.log(JSON.stringify({ measurement: 'native-tool-schema', tools: tools.length, utf8Bytes: Buffer.byteLength(JSON.stringify(tools)), tokenizer: 'not-measured' }))
     root.provide('codeRuntime', { language: 'typescript' })
     const ptcAgent = {}
@@ -70,7 +76,7 @@ test('real dsh tool registry isolates 90 tools by preset and disposes them', asy
     try {
       await ptcScope.ctx.plugin(preset, { presentation: 'ptc' })
       assert.deepEqual(wireSchemas({ scope: ptcAgent }).schemas.map(tool => tool.name), ['run_code'])
-      assert.equal(root.tools.schemas(writing).length, 90, 'PTC must not change another preset')
+      assert.equal(root.tools.schemas(writing).length, 95, 'PTC must not change another preset')
       const sdk = sections.find(value => value.name === 'tools:sdk').text({ scope: ptcAgent })
       assert.ok(sdk.includes('novel_doc_read'))
       console.log(JSON.stringify({ measurement: 'ptc-presentation', schemaBytes: Buffer.byteLength(JSON.stringify(wireSchemas({ scope: ptcAgent }).schemas)), sdkBytes: Buffer.byteLength(sdk), tokenizer: 'not-measured' }))
@@ -126,4 +132,16 @@ test('saved drafts can be listed and explicitly restored through the existing ed
   assert.deepEqual(requests[1], { path: '/api/manuscript/drafts/restore', method: 'POST', body: {
     run_id_v2: 'runv2_saved', expected_revision: 'sha256:current', confirm: true,
   } })
+})
+
+test('root identity handles Windows casing and rejects a successful response from another project', async t => {
+  assert.equal(workspaceRootsEqual('C:\\Books\\小说', 'c:/books/小说/', 'win32'), true)
+  assert.equal(workspaceRootsEqual('C:\\Books\\A', 'C:\\Books\\B', 'win32'), false)
+  const workspace = await mkdtemp(join(tmpdir(), 'openwrite-identity-'))
+  t.after(() => rm(workspace, { recursive: true, force: true }))
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ private: 'another project' }), {
+    headers: { 'X-OpenWrite-Project-Path': encodeURIComponent(workspace + '-other'), 'content-type': 'application/json' },
+  }))
+  const client = new StudioClient({ baseUrl: 'http://127.0.0.1:9', timeoutMs: 1_000 }).scoped({ workspaceRoot: workspace })
+  await assert.rejects(() => client.getJson('/status'), error => error instanceof StudioError && error.code === 'WORKSPACE_CONTEXT_MISMATCH')
 })

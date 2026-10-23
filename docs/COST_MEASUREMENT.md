@@ -11,7 +11,7 @@ npm --prefix packages/openwrite-bridge run build
 node --test packages/openwrite-bridge/scripts/tool-policy.test.mjs
 ```
 
-`real dsh tool registry isolates 90 tools` 会打印两行 JSON：
+`real dsh tool registry isolates 95 tools` 会打印两行 JSON：
 
 | 字段 | 含义 | 不是什么 |
 |---|---|---|
@@ -20,7 +20,7 @@ node --test packages/openwrite-bridge/scripts/tool-policy.test.mjs
 | `sdkBytes` | 注入到 system prompt 的 SDK 文本字节 | 不是费用 |
 | `tokenizer: not-measured` | 本仓库不内置某家 tokenizer | 不得改写成已测 token |
 
-同一套检查还断言：普通预设 `novel_*` 为 0；创作预设为 90 且不随 PTC 另一 scope 改变。
+同一套检查还断言：普通预设 `novel_*` 为 0；创作预设为 95 且不随 PTC 另一 scope 改变。
 
 要对比「请求大小」，把一次真实 `tools.schemas(agent)` 或 PTC `wireSchemas` 的 JSON 写入文件后对体积做 `wc -c` / SHA-256。这仍是请求体字节，不是 token。
 
