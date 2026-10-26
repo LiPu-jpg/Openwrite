@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from threading import Thread
 from urllib.request import ProxyHandler, build_opener
@@ -16,6 +19,19 @@ from tools.research_service import (
 )
 from tools.studio import create_server
 from tools.studio_preferences import StudioResearchSettingsStore
+
+
+def _stub_research_process(monkeypatch):
+    original = subprocess.Popen
+    monkeypatch.setattr("tools.research_service.shutil.which", lambda name: "test-pnpm")
+
+    def launch(command, **kwargs):
+        if command[0] != "test-pnpm":
+            return original(command, **kwargs)
+        assert command[1] == "research"
+        return original([sys.executable, "-c", "print('stub output')"], **kwargs)
+
+    monkeypatch.setattr("tools.research_service.subprocess.Popen", launch)
 
 
 def test_research_service_archives_and_reads_report(tmp_path: Path):
@@ -69,7 +85,9 @@ def test_research_settings_keep_search_credentials_private(tmp_path: Path):
     assert bocha["credential_configured"] is True
     assert "private-bocha-key" not in json.dumps(surface, ensure_ascii=False)
     assert store.credential("bocha") == "private-bocha-key"
-    assert (store.credentials_path.stat().st_mode & 0o777) == 0o600
+    if os.name == "posix":
+        # Windows chmod does not implement POSIX owner/group permission bits.
+        assert (store.credentials_path.stat().st_mode & 0o777) == 0o600
 
 
 def test_research_environment_uses_routed_model_and_saved_search_key(tmp_path: Path):
@@ -193,7 +211,7 @@ def test_research_service_rejects_failed_internal_episode_after_archiving(
             return False
 
     monkeypatch.setattr(service, "status", lambda: {"available": True})
-    monkeypatch.setattr("tools.research_service.shutil.which", lambda name: "/bin/echo")
+    _stub_research_process(monkeypatch)
     monkeypatch.setattr(
         service,
         "_parse_summary",
@@ -242,7 +260,7 @@ class _FakeContext:
 
 def _stub_successful_run(service, monkeypatch, summary):
     monkeypatch.setattr(service, "status", lambda: {"available": True})
-    monkeypatch.setattr("tools.research_service.shutil.which", lambda name: "/bin/echo")
+    _stub_research_process(monkeypatch)
     monkeypatch.setattr(service, "_parse_summary", lambda output: summary)
 
 

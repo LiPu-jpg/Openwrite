@@ -100,13 +100,12 @@ class ChapterRunV2Store:
         statuses: set[str] | None = None,
         limit: int = 50,
         since: str = "",
+        include_archived: bool = False,
     ) -> list[ChapterRunV2Manifest]:
         if since:
             cutoff = datetime.fromisoformat(since.replace("Z", "+00:00"))
             since = (cutoff.replace(tzinfo=timezone.utc) if cutoff.tzinfo is None
                      else cutoff.astimezone(timezone.utc)).isoformat()
-        if not self.root.is_dir():
-            return []
         result: list[ChapterRunV2Manifest] = []
         for path in self.root.glob("runv2_*.json"):
             manifest = self.load(path.stem)
@@ -119,6 +118,27 @@ class ChapterRunV2Store:
             if statuses is not None and manifest.status not in statuses:
                 continue
             result.append(manifest)
+        if include_archived:
+            archive_root = self.root.parent / "chapter_deletions"
+            for path in archive_root.glob("*/chapter_runs_v2/runv2_*.json"):
+                if path.is_symlink() or not path.resolve().is_relative_to(archive_root.resolve()):
+                    continue
+                try:
+                    manifest = ChapterRunV2Manifest.model_validate_json(
+                        path.read_text(encoding="utf-8")
+                    )
+                except (OSError, ValueError):
+                    continue
+                if (
+                    chapter_id
+                    and manifest.chapter_id != chapter_id
+                    or since
+                    and manifest.created_at < since
+                    or statuses is not None
+                    and manifest.status not in statuses
+                ):
+                    continue
+                result.append(manifest.model_copy(update={"archived": True}))
         result.sort(key=lambda item: item.created_at, reverse=True)
         return result[: max(1, min(200, int(limit)))]
 
@@ -141,6 +161,21 @@ class ChapterRunV2Store:
         payload = manifest.model_dump(mode="json")
         payload["revision"] = self.revision(manifest)
         payload["next_stage"] = self.next_stage(manifest)
+        if manifest.archived:
+            payload["next_stage"] = None
+            matches = list(
+                (self.root.parent / "chapter_deletions").glob(
+                    f"*/chapter_runs_v2/{manifest.run_id}.json"
+                )
+            )
+            if len(matches) == 1:
+                archive_dir = matches[0].parent
+                payload["archive_directory"] = str(archive_dir.relative_to(self.project_root))
+                prefix = str(self.root.relative_to(self.project_root)) + "/"
+                for stage in payload["stages"].values():
+                    artifact = str(stage.get("artifact") or "")
+                    if artifact.replace("\\", "/").startswith(prefix.replace("\\", "/")):
+                        stage["artifact"] = str(archive_dir / artifact[len(prefix) :])
         return payload
 
     def require_revision(self, manifest: ChapterRunV2Manifest, expected_revision: str) -> None:
@@ -293,6 +328,12 @@ class ChapterRunV2Store:
         manifest: ChapterRunV2Manifest,
         current_input_revisions: dict[str, str],
     ) -> tuple[str, ...]:
+        if (
+            manifest.status in {"failed", "cancelled"}
+            or manifest.cancel_requested
+            or manifest.archived
+        ):
+            return ()
         changed = {
             key
             for key, value in current_input_revisions.items()
@@ -412,6 +453,12 @@ class ChapterRunV2Store:
         reason: str = "input_changed",
     ) -> tuple[str, ...]:
         self._require_stage(stage)
+        if (
+            manifest.status in {"failed", "cancelled"}
+            or manifest.cancel_requested
+            or manifest.archived
+        ):
+            return ()
         start = V2_STAGE_NAMES.index(stage)
         stale: list[str] = []
         for name in V2_STAGE_NAMES[start:]:
@@ -597,6 +644,7 @@ def chapter_run_v2_action(
             statuses=statuses,
             limit=int(payload.get("limit") or 20),
             since=str(payload.get("since") or ""),
+            include_archived=payload.get("include_archived") is True,
         )
         return {
             "runs": [store.payload(run) for run in runs],

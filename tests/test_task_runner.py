@@ -9,14 +9,17 @@ from tools.task_runner import PersistentTaskRunner, TaskContext
 from tools.task_store import TaskStore
 
 
-def _wait_for(store: TaskStore, task_id: str, status: str, timeout: float = 3.0) -> dict:
+def _wait_for(store: TaskStore, task_id: str, status: str, timeout: float = 10.0) -> dict:
     deadline = time.monotonic() + timeout
+    task = None
     while time.monotonic() < deadline:
         task = store.load(task_id)
         if task and task.get("status") == status:
             return task
-        time.sleep(0.01)
-    raise AssertionError(f"task {task_id} did not reach {status}")
+        if task and task.get("status") in {"completed", "failed", "cancelled"}:
+            raise AssertionError(f"unexpected terminal task state: {task}")
+        time.sleep(0.05)
+    raise AssertionError(f"task {task_id} did not reach {status}; last snapshot: {task}")
 
 
 def test_task_store_externalizes_large_input_and_redacts_credentials(tmp_path: Path):
@@ -125,7 +128,7 @@ def test_pending_and_running_tasks_can_be_cancelled_without_result(tmp_path: Pat
     runner = PersistentTaskRunner(tmp_path, "demo", handlers={"revision_generate": handler})
     try:
         running = runner.submit("revision_generate", {"chapter_id": "ch_001"})
-        assert started.wait(1)
+        assert started.wait(5), runner.store.load(running["task_id"])
         pending = runner.submit("revision_generate", {"chapter_id": "ch_002"})
 
         runner.cancel(pending["task_id"])

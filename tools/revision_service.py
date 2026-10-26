@@ -89,7 +89,7 @@ class RevisionService:
         kind: str | None = None,
     ) -> dict[str, Any]:
         path = self._chapter_path(chapter_id)
-        content = path.read_text(encoding="utf-8")
+        content = path.read_bytes().decode("utf-8")
         if full_chapter:
             start, end = 0, len(content)
         start, end = self._validated_range(content, start, end)
@@ -166,7 +166,7 @@ class RevisionService:
         if len(selected) != len(set(clean_ids)):
             raise RevisionError("部分审稿问题不存在或已变化", code="REVIEW_ISSUE_NOT_FOUND")
         path = self._chapter_path(chapter_id)
-        content = path.read_text(encoding="utf-8")
+        content = path.read_bytes().decode("utf-8")
         document_revision = self.fingerprint(content)
         expected_document = str(expected_document_revision or "").strip()
         if expected_document and expected_document != document_revision:
@@ -219,7 +219,7 @@ class RevisionService:
             review_issues=selected,
         )
         current_review = review_store.load_revisioned(chapter_id)
-        current_content = path.read_text(encoding="utf-8")
+        current_content = path.read_bytes().decode("utf-8")
         current_document_revision = self.fingerprint(current_content)
         if current_review is None or current_review[1] != review_revision:
             raise RevisionError(
@@ -353,7 +353,7 @@ class RevisionService:
                         details={"status": locked_proposal.get("status")},
                     )
                 proposal = locked_proposal
-                current = path.read_text(encoding="utf-8")
+                current = path.read_bytes().decode("utf-8")
                 self._check_conflict(proposal, current)
                 selection = proposal.get("selection") or {}
                 start = int(selection.get("start") or 0)
@@ -797,6 +797,7 @@ class RevisionService:
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",
+                newline="",
                 dir=path.parent,
                 prefix=f".{path.name}.",
                 suffix=".tmp",

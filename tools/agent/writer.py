@@ -80,6 +80,44 @@ class WriterAgent(BaseAgent):
     def get_name(self) -> str:
         return "writer"
 
+    def chat(self, *args, usage_stage="draft", segment_index=None, attempt_index=1, **kwargs):
+        """Retain billing provenance for every provider attempt, including failures."""
+        from tools.llm.cancellation import check_model_cancellation
+
+        check_model_cancellation()
+
+        def tagged(usage, *, error="", model=""):
+            raw = dict(usage or {})
+            raw.pop("calls", None)
+            raw.setdefault("cost_reported", False)
+            if raw.get("cost_reported") is True:
+                cost = raw.get("cost_usd")
+                raw["cost_reported"] = (
+                    type(cost) in {int, float} and math.isfinite(cost) and cost >= 0
+                )
+            entry = {
+                "stage": usage_stage,
+                "segment_index": segment_index,
+                "attempt_index": attempt_index,
+                "model": model or self.ctx.model,
+                "usage": dict(raw),
+                "error_code": error,
+            }
+            if not hasattr(self, "_usage_history"):
+                self._usage_history = []
+            self._usage_history.append(entry)
+            return {**raw, "calls": [entry]}
+
+        try:
+            response = super().chat(*args, **kwargs)
+        except Exception as exc:
+            exc.usage = tagged(
+                getattr(exc, "usage", {}), error=str(getattr(exc, "code", "PROVIDER_CALL_FAILED"))
+            )
+            raise
+        response.usage = tagged(response.usage, model=str(getattr(response, "model", "") or ""))
+        return response
+
     async def write_chapter(
         self,
         context: dict,
@@ -100,6 +138,7 @@ class WriterAgent(BaseAgent):
         """
         target_words = target_words or context.get("target_words", 6000)
         self.model_call_count = 0
+        self._usage_history = []
 
         self.log.info(f"Phase 1: creative writing for chapter {chapter_number}")
 
@@ -185,6 +224,19 @@ class WriterAgent(BaseAgent):
     ) -> dict:
         """Phase 1: 创意写作"""
         context = self._serial_context(context, chapter_number)
+        resume_content = str(context.pop("_resume_draft", "") or "")
+        if resume_content:
+            from types import SimpleNamespace
+
+            return await self._segmented_write(
+                context,
+                chapter_number,
+                temperature,
+                target_words,
+                initial_response=SimpleNamespace(
+                    content=resume_content, usage={}, finish_reason="resume"
+                ),
+            )
         if target_words >= 6000 and context.get("segmented_write", True):
             return await self._segmented_write(context, chapter_number, temperature, target_words)
         system_prompt = self._build_creative_system_prompt(context)
@@ -347,7 +399,7 @@ class WriterAgent(BaseAgent):
 
             check_model_cancellation()
             try:
-                response = self.chat(**kwargs)
+                response = self.chat(**kwargs, attempt_index=attempt + 1)
                 if failures:
                     response.usage = self._merge_usage(*failures, response.usage)
                 return response
@@ -357,6 +409,8 @@ class WriterAgent(BaseAgent):
                     not in {"PROVIDER_NETWORK_ERROR", "MODEL_OUTPUT_TRUNCATED"}
                     or attempt == 2
                 ):
+                    if failures:
+                        exc.usage = self._merge_usage(*failures, getattr(exc, "usage", {}) or {})
                     raise
                 failures.append(getattr(exc, "usage", None) or {"cost_reported": False})
                 self.log.info("Generation retry %s after %s", attempt + 2, exc.code)
@@ -457,12 +511,16 @@ class WriterAgent(BaseAgent):
             messages.append(Message("user", prompt))
             try:
                 response = await self._creative_chat(
-                    messages=messages, temperature=temperature, max_tokens=None
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=None,
+                    segment_index=completed + 1,
                 )
             except Exception as exc:
                 partial = str(getattr(exc, "partial_content", "") or "")
                 if current:
                     exc.partial_content = join_segment(current, partial) if partial else current
+                exc.usage = self._merge_usage(*usages, getattr(exc, "usage", {}) or {})
                 raise
             if response.usage:
                 usages.append(response.usage)
@@ -806,6 +864,7 @@ class WriterAgent(BaseAgent):
             ],
             temperature=0.5,
             max_tokens=None,  # Reasoning and final content share the configured budget.
+            usage_stage="fact_extract",
         )
 
         return {"content": response.content, "usage": response.usage or {}}
@@ -887,6 +946,7 @@ chapter_summary: |
                 ],
                 temperature=0.3,
                 max_tokens=None,  # Do not silently shrink the configured model budget.
+                usage_stage="settle",
             )
             return self._parse_settlement(
                 response.content,
@@ -902,6 +962,9 @@ chapter_summary: |
                 "MODEL_OUTPUT_TRUNCATED",
             }:
                 raise
+            failed_usage = getattr(exc, "usage", {}) or getattr(
+                locals().get("response"), "usage", {}
+            )
 
         compact_prompt = f"""章节编号：ch_{chapter_number:03d}
 章节标题：{title}
@@ -926,11 +989,13 @@ chapter_summary: "80-150字章节摘要"
             ],
             temperature=0.1,
             max_tokens=None,  # Reasoning and final content share the configured budget.
+            usage_stage="settle",
+            attempt_index=2,
         )
         return self._parse_settlement(
             retry.content,
             {**context, "chapter_number": chapter_number},
-            usage=retry.usage or {},
+            usage=self._merge_usage(failed_usage, retry.usage or {}),
             observations=observations,
         )
 
@@ -1067,6 +1132,23 @@ chapter_summary: "80-150字章节摘要"
         )
 
     @staticmethod
+    def usage_for_stage(usage: dict, stage: str) -> dict:
+        calls = [call for call in usage.get("calls", []) if call.get("stage") == stage]
+        if not usage.get("calls"):
+            return dict(usage) if stage == "draft" else {"usage_reported": False}
+        return WriterAgent._merge_usage(
+            *[{**call.get("usage", {}), "calls": [call]} for call in calls]
+        )
+
+    def usage_summary(self):
+        return self._merge_usage(
+            *[
+                {**call.get("usage", {}), "calls": [call]}
+                for call in getattr(self, "_usage_history", [])
+            ]
+        )
+
+    @staticmethod
     def _merge_usage(*usages: dict) -> dict:
         merged: dict = {}
         usage_items: list[dict] = []
@@ -1080,6 +1162,17 @@ chapter_summary: "80-150字章节摘要"
             for key, value in usage.items():
                 if key == "cost_reported":
                     continue
+                if key == "calls" and isinstance(value, list):
+                    merged.setdefault("calls", []).extend(value)
+                    continue
+                if key in {"completion_tokens_details", "prompt_tokens_details"} and isinstance(
+                    value, dict
+                ):
+                    target = merged.setdefault(key, {})
+                    for detail, amount in value.items():
+                        if isinstance(amount, (int, float)) and not isinstance(amount, bool):
+                            target[detail] = target.get(detail, 0) + amount
+                    continue
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     merged[key] = merged.get(key, 0) + value
                 elif key not in merged and value is not None:
@@ -1089,6 +1182,21 @@ chapter_summary: "80-150字章节摘要"
             merged["cost_reported"] = all(cost_reports)
             merged["cost_reported_calls"] = sum(cost_reports)
             merged["usage_calls"] = len(cost_reports)
+        if merged.get("calls"):
+            calls = merged["calls"]
+            reports = [c.get("usage", {}).get("cost_reported") is True for c in calls]
+            merged["usage_calls"] = len(calls)
+            merged["cost_reported_calls"] = sum(reports)
+            merged["cost_reported"] = all(reports)
+            merged["cost_summary"] = {
+                "reported_usd": sum(
+                    float(c["usage"].get("cost_usd") or 0)
+                    for c, reported in zip(calls, reports)
+                    if reported
+                ),
+                "complete": all(reports),
+                "missing_calls": len(calls) - sum(reports),
+            }
         return merged
 
     def _post_write_validation(self, content: str) -> list:

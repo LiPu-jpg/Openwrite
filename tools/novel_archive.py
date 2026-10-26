@@ -1526,8 +1526,13 @@ class NovelArchiveService:
             return "tasks"
         return "structured_data"
 
-    @staticmethod
-    def _exclusion_reason(path: Path) -> str:
+    def _exclusion_reason(self, path: Path) -> str:
+        # Exclusions describe project contents. Ancestor names such as /tmp,
+        # an exports volume or a user's cache folder do not classify a novel.
+        try:
+            path = path.relative_to(self.novel_root)
+        except ValueError:
+            path = path.relative_to(self.project_root)
         parts = tuple(part.casefold() for part in path.parts)
         name = path.name.casefold()
         credential_dirs = {

@@ -85,7 +85,7 @@ class ChapterWorkBriefService:
         clean_id = self._chapter_id(chapter_id)
         path = self._chapter_path(clean_id)
         try:
-            content = path.read_text(encoding="utf-8")
+            content = path.read_bytes().decode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise ChapterWorkBriefError(
                 f"章节无法读取: {clean_id}", code="CHAPTER_UNREADABLE"

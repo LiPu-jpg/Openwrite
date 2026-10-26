@@ -45,7 +45,7 @@ id = "outline"
 
 ### 主角
 """,
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
 
 
@@ -94,7 +94,7 @@ summary = "全书事件梗概。"
 > 内容焦点: 本章事件梗概。
 > 情感弧线: 平静 -> 戒备
 """,
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
 
     volume = build_outline_structure(tmp_path)["roots"][0]
@@ -112,7 +112,7 @@ def test_outline_tree_recommends_first_planned_chapter_and_recent_word_average(t
     _write_outline(tmp_path)
     manuscript = tmp_path / "data" / "manuscript" / "arc_001"
     manuscript.mkdir(parents=True)
-    (manuscript / "ch_001.md").write_text("甲" * 4200, encoding="utf-8")
+    (manuscript / "ch_001.md").write_text("甲" * 4200, encoding="utf-8", newline="")
 
     result = build_outline_structure(tmp_path)
     recommendation = result["recommendation"]
@@ -135,7 +135,7 @@ def test_outline_tree_prefers_explicit_chapter_target_over_project_default(tmp_p
     outline.write_text(
         "# 第一卷\n## 第一幕\n### 第一节\n"
         "#### 第一章：开门\n> 预估字数: 4200\n脚印。\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
 
     result = build_outline_structure(
@@ -157,7 +157,7 @@ def test_outline_tree_can_select_drafted_chapter_without_overwriting_it(tmp_path
     _write_outline(tmp_path)
     manuscript = tmp_path / "data" / "manuscript" / "arc_001"
     manuscript.mkdir(parents=True)
-    (manuscript / "ch_001.md").write_text("已有正文", encoding="utf-8")
+    (manuscript / "ch_001.md").write_text("已有正文", encoding="utf-8", newline="")
 
     selected = build_outline_structure(tmp_path, chapter_id="ch_001")["recommendation"]
 
@@ -171,7 +171,7 @@ def test_outline_tree_understands_chinese_chapter_numbers(tmp_path: Path):
     outline.parent.mkdir(parents=True)
     outline.write_text(
         "# 第一卷\n## 第一幕\n### 第一节\n#### 第一百零四章：终点\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
 
     recommendation = build_outline_structure(tmp_path)["recommendation"]
@@ -211,7 +211,7 @@ def test_outline_tree_can_rename_add_and_delete_one_local_subtree(tmp_path: Path
     assert "## 第一幕：雨中来信" in renamed["content"]
     assert "收到一封没有寄件人的信。" in renamed["content"]
     assert len(renamed["content"]) - len(original) == len("雨中")
-    outline_path.write_text(renamed["content"], encoding="utf-8")
+    outline_path.write_text(renamed["content"], encoding="utf-8", newline="")
 
     structure = build_outline_structure(tmp_path)
     added = mutate_outline_structure(
@@ -224,7 +224,7 @@ def test_outline_tree_can_rename_add_and_delete_one_local_subtree(tmp_path: Path
     )
     assert "#### 第四章：新的钟声" in added["content"]
     assert added["content"].index("#### 第四章：新的钟声") < added["content"].index("## 第二幕：回声")
-    outline_path.write_text(added["content"], encoding="utf-8")
+    outline_path.write_text(added["content"], encoding="utf-8", newline="")
 
     structure = build_outline_structure(tmp_path)
     deleted = mutate_outline_structure(
@@ -260,7 +260,7 @@ def test_outline_tree_can_update_node_content_without_touching_children(tmp_path
     assert "- 保留两个子章" in edited["content"]
     assert "#### 第一章：雨夜" in edited["content"]
     assert "#### 第二章：少掉的十三秒" in edited["content"]
-    outline_path.write_text(edited["content"], encoding="utf-8")
+    outline_path.write_text(edited["content"], encoding="utf-8", newline="")
     section = build_outline_structure(tmp_path)["roots"][0]["children"][0]["children"][0]
     assert section["content"] == "这一节改成直接在树上维护。\n- 保留两个子章"
     assert "保留两个子章" in section["summary"]
@@ -272,7 +272,7 @@ def test_outline_tree_updates_chapter_summary_without_removing_execution_metadat
     outline.write_text(
         "# 第一卷\n## 第一幕\n### 第一节\n#### 第一章：开门\n"
         "> 内容焦点: 发现门外脚印\n> 情感弧线: 平静 -> 戒备\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
     structure = build_outline_structure(tmp_path)
 
@@ -300,7 +300,7 @@ def test_deleting_chapter_fourteen_continuously_renumbers_later_chapters(
         "#### 第14章（拟定）：删除\n"
         "#### 第15章：追踪\n"
         "#### 第16章：抵达\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
     structure = build_outline_structure(tmp_path)
 
@@ -329,7 +329,7 @@ def test_deleting_structure_subtree_renumbers_volume_act_section_and_chapter(
         "# 第一卷：开端\n## 第一幕：初见\n### 第一节：门外\n#### 第一章：开始\n"
         "# 第二卷：删除\n## 第二幕：删除\n### 第二节：删除\n#### 第二章：删除\n"
         "# 第三卷：以后\n## 第三幕：深入\n### 第三节：门内\n#### 第三章：继续\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
     structure = build_outline_structure(tmp_path)
     target = structure["roots"][1]
@@ -360,7 +360,7 @@ def test_deleting_chinese_numbered_chapter_preserves_style_and_skips_unnumbered(
         "#### 第一百零四章：删除\n"
         "#### 过场：无编号\n"
         "#### 第一百零五章：之后\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
     structure = build_outline_structure(tmp_path)
 
@@ -384,11 +384,11 @@ def test_deletion_is_blocked_when_renumbering_would_move_a_drafted_chapter(
     outline.write_text(
         "# 第一卷\n## 第一幕\n### 第一节\n"
         "#### 第14章：删除\n#### 第15章：已有正文\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
     manuscript = tmp_path / "data" / "manuscript" / "arc_001"
     manuscript.mkdir(parents=True)
-    (manuscript / "ch_015.md").write_text("正文", encoding="utf-8")
+    (manuscript / "ch_015.md").write_text("正文", encoding="utf-8", newline="")
     structure = build_outline_structure(tmp_path)
     target = next(
         node
@@ -411,7 +411,7 @@ def test_outline_tree_rejects_stale_duplicate_and_drafted_destructive_edits(tmp_
     _write_outline(tmp_path)
     manuscript = tmp_path / "data" / "manuscript" / "arc_001"
     manuscript.mkdir(parents=True)
-    (manuscript / "ch_001.md").write_text("已有正文", encoding="utf-8")
+    (manuscript / "ch_001.md").write_text("已有正文", encoding="utf-8", newline="")
     structure = build_outline_structure(tmp_path)
 
     with pytest.raises(OutlineEditError, match="变化") as stale:

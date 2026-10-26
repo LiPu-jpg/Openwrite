@@ -709,7 +709,7 @@ def test_exec_review_chapter_uses_packet_based_context(
     result = cli_module._exec_review_chapter(tmp_path, {"chapter_id": "ch_001"})
 
     assert result["ok"] is True
-    assert captured["content"] == "# 第一章\n\n正文"
+    assert captured["content"] == draft_path.read_bytes().decode("utf-8")
     assert "角色档案" in captured["context"]["character_profiles"]
     assert captured["context"]["current_state"] == "写前状态"
     assert captured["context"]["relationships"] == "写前关系"

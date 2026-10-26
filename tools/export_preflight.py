@@ -294,7 +294,7 @@ class ExportPreflightService:
                 continue
             relative = path.relative_to(self.novel_root).as_posix()
             try:
-                content = path.read_text(encoding="utf-8")
+                content = path.read_bytes().decode("utf-8")
             except (OSError, UnicodeError):
                 unreadable.append(relative)
                 continue
@@ -469,7 +469,7 @@ class ExportPreflightService:
     def _config(self) -> dict[str, Any]:
         path = self.project_root / "novel_config.yaml"
         try:
-            value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            value = yaml.safe_load(path.read_bytes().decode("utf-8")) or {}
         except (OSError, yaml.YAMLError) as exc:
             raise ExportPreflightError(f"项目配置无法读取: {exc}") from exc
         return value if isinstance(value, dict) else {}

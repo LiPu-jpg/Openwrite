@@ -14,6 +14,9 @@ class ManuscriptVersionV1(BaseModel):
     version_id: str = Field(pattern=r"^ver_[A-Za-z0-9_-]{8,80}$")
     chapter_id: str = Field(pattern=r"^ch_\d+$")
     source_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    source_revision_format: Literal["utf8-bytes", "legacy-universal-newlines"] = (
+        "legacy-universal-newlines"
+    )
     reason: Literal["autosave", "manual", "ai_revision", "full_rewrite", "restore"]
     label: str = Field(default="", max_length=200)
     created_at: str

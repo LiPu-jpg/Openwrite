@@ -72,6 +72,9 @@ class OutlineNode(BaseModel):
     payoff_of: List[str] = Field(default_factory=list, description="本章计划回收的伏笔 ID")
     word_budget: int = Field(default=0, ge=0, le=50000, description="与预估字数同源的章字数预算")
     function: List[str] = Field(default_factory=list, description="推进/揭示/关系/代价，可多选")
+    extra_metadata: dict[str, str] = Field(
+        default_factory=dict, description="项目白名单允许的章级扩展字段"
+    )
     # 章内微观情绪变化 (canonical field)
     emotional_arc: str = Field(default="", description="章内情绪变化（微观）")
 

@@ -905,11 +905,14 @@ class ProjectSearchIndex:
         canonical_ids = self._canonical_document_ids()
         for path in self._iter_documents():
             try:
-                raw_body = path.read_text(encoding="utf-8")
+                raw_body = path.read_bytes().decode("utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
             relative = self._relative(path)
-            body = self._indexable_body(relative, raw_body)
+            # Retrieval works with normalized lines; source identity hashes
+            # the original text so it matches the document APIs on Windows.
+            normalized_body = raw_body.replace("\r\n", "\n").replace("\r", "\n")
+            body = self._indexable_body(relative, normalized_body)
             if not body.strip():
                 continue
             descriptor = describe_document(relative, raw_body)

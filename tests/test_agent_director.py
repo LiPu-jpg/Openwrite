@@ -93,6 +93,41 @@ def _bootstrap_novel(tmp_path: Path, novel_id: str = "demo") -> Path:
     return novel_root
 
 
+@pytest.mark.parametrize("without_world", [False, True])
+def test_authored_progression_reaches_writer_and_document_manifest(tmp_path, without_world):
+    import shutil
+
+    from tools.chapter_pipeline import _packet_payload
+    from tools.context_manifest import build_context_manifest
+    from tools.structured_assets import StructuredAssetService
+
+    root = _bootstrap_novel(tmp_path)
+    asset = StructuredAssetService(tmp_path, "demo").create("progression", {
+        "id": "rain_path",
+        "data": {
+            "name": "听雨进阶",
+            "kind": "cultivation",
+            "stages": [{"id": "first_rain", "name": "初雨", "requirements": ["辨认雨声"]}],
+        },
+    })
+    if without_world:
+        shutil.rmtree(root / "src/world")
+    packet = ChapterAssemblerV2(project_root=tmp_path, novel_id="demo").assemble("ch_001")
+    content = packet.setting_documents["progression.rain_path"]
+    assert "听雨进阶" in content and "辨认雨声" in content
+    assert content in packet.to_markdown()
+    assert content in _packet_payload(packet)["outline"]
+    usage = next(row for row in packet.document_usage if row["document"] == "progression.rain_path")
+    assert usage["original_characters"] == len(content)
+    assert usage["assembled_characters"] == len(content)
+    assert usage["excluded"] is False
+    manifest = build_context_manifest(root, vars(packet))
+    item = next(row for row in manifest["items"] if row["section"] == "setting_documents")
+    source = next(row for row in item["sources"] if row["path"] == "src/progression/")
+    assert source["revision"]
+    assert (root / asset["path"]).is_file()
+
+
 def test_assemble_packet_includes_runtime_truth_files(tmp_path: Path):
     _bootstrap_novel(tmp_path)
 

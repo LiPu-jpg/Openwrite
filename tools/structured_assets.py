@@ -97,7 +97,7 @@ class StructuredAssetService:
         path = self._find(asset_kind, asset_id)
         if path is None:
             raise StructuredAssetError("资产不存在", code="ASSET_NOT_FOUND")
-        content = path.read_text(encoding="utf-8")
+        content = path.read_bytes().decode("utf-8")
         return self._read_content(asset_kind, path, content)
 
     def _read_content(
@@ -211,7 +211,7 @@ class StructuredAssetService:
         path = self._find(asset_kind, clean_id)
         if path is None:
             raise StructuredAssetError("资产不存在", code="ASSET_NOT_FOUND")
-        current = path.read_text(encoding="utf-8")
+        current = path.read_bytes().decode("utf-8")
         related_mode = str(payload.get("related_mode") or "merge")
         if related_mode not in {"merge", "replace"}:
             raise StructuredAssetError(
@@ -290,7 +290,7 @@ class StructuredAssetService:
         try:
             with ProjectWriteLock(self.project_root, self.novel_id, operation=operation):
                 if expected_revision:
-                    current = path.read_text(encoding="utf-8") if path.exists() else ""
+                    current = path.read_bytes().decode("utf-8") if path.exists() else ""
                     if self.fingerprint(current) != expected_revision:
                         raise StructuredAssetError(
                             "资产已在其他位置修改，请重新载入",
@@ -302,7 +302,7 @@ class StructuredAssetService:
             raise StructuredAssetError(str(exc), code="PROJECT_BUSY", recoverable=True) from exc
 
     def _summary(self, kind: str, path: Path) -> dict[str, Any]:
-        content = path.read_text(encoding="utf-8")
+        content = path.read_bytes().decode("utf-8")
         if kind == "progression":
             data = yaml.safe_load(content) or {}
             data = data if isinstance(data, dict) else {}
@@ -512,6 +512,7 @@ class StructuredAssetService:
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",
+                newline="",
                 dir=path.parent,
                 prefix=f".{path.name}.",
                 suffix=".tmp",

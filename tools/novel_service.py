@@ -528,7 +528,12 @@ class NovelApplicationService:
         return path
 
     def context_preview(
-        self, chapter_id: str = "next", *, include_agent_payload: bool = False
+        self,
+        chapter_id: str = "next",
+        *,
+        include_agent_payload: bool = False,
+        guidance: str = "",
+        target_words: int | None = None,
     ) -> dict[str, Any]:
         from tools.context_builder import ContextBuilder
         from tools.context_manifest import build_context_manifest
@@ -553,7 +558,7 @@ class NovelApplicationService:
         manifest["retrieval"] = dict(generation.semantic_retrieval)
         from tools.writing_policy import resolve_target_words
 
-        target_policy = resolve_target_words(outline=packet.get("target_words"))
+        target_policy = resolve_target_words(target_words, outline=packet.get("target_words"))
         result = {
             **target_policy,
             "chapter_id": target,
@@ -583,7 +588,7 @@ class NovelApplicationService:
                 context=generation,
                 truth=TruthFilesManager(self.project_root, self.novel_id).load_truth_files(),
                 packet=packet,
-                guidance="",
+                guidance=guidance,
                 target_words=target_policy["target_words"],
             )
             payload = writer._serial_context(payload, number)
@@ -598,8 +603,9 @@ class NovelApplicationService:
                 },
             ]
             result["payload_scope"] = (
-                "Current canonical writer input; generation guidance and subsequent "
-                "segment/retry messages depend on the write request. No model was called."
+                "Current canonical writer input, including the supplied guidance and target. "
+                "Subsequent segment/retry messages and transport budgets can differ. "
+                "No generation model was called."
             )
             rendered = "\n".join(message["content"] for message in result["writer_messages"])
             inventory = []
@@ -678,6 +684,47 @@ class NovelApplicationService:
 
     def write_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
         chapter_id = self.resolve_chapter_id(str(payload.get("chapter_id") or "next"))
+        try:
+            return self._write_chapter(payload)
+        except NovelServiceError as exc:
+            if not exc.details.get("run_id_v2"):
+                from tools.chapter_run_store import ChapterRunStore
+                from tools.chapter_run_v2 import ChapterRunV2Store
+
+                old = ChapterRunStore(self.project_root, self.novel_id)
+                run = old.load(exc.details["run_id"]) if exc.details.get("run_id") else None
+                if run is None:
+                    run = old.create(
+                        chapter_id,
+                        requested_target_words=0,
+                        outline_target_words=0,
+                        effective_target_words=0,
+                        provider="",
+                        model="",
+                        context_payload={},
+                        baseline_state_revision=0,
+                    )
+                    old.fail(run, stage="write", code=exc.code)
+                store = ChapterRunV2Store(self.project_root, self.novel_id)
+                rejected = store.create(chapter_id)
+                store.fail_stage(rejected, "context", code=exc.code, message=str(exc))
+                known_preflight = exc.code in {
+                    "CHAPTER_ALREADY_EXISTS",
+                    "PROJECT_BUSY",
+                    "RUN_NOT_RESUMABLE",
+                    "ACCEPTANCE_BASELINE_REQUIRED",
+                    "MANUSCRIPT_FACTS_PENDING",
+                    "EXTERNAL_MANUSCRIPT_CHANGE",
+                }
+                exc.details.update(
+                    run_id=run.run_id,
+                    run_id_v2=rejected.run_id,
+                    model_call_count=0 if known_preflight else None,
+                )
+            raise
+
+    def _write_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
+        chapter_id = self.resolve_chapter_id(str(payload.get("chapter_id") or "next"))
         from tools.manuscript_acceptance import (
             ManuscriptAcceptanceError,
             ManuscriptAcceptanceService,
@@ -689,13 +736,22 @@ class NovelApplicationService:
         except ManuscriptAcceptanceError as exc:
             raise NovelServiceError(str(exc), code=exc.code, details=exc.details) from exc
         resume_id = str(payload.get("run_id_v2") or "").strip()
+        partial_id = ""
         if payload.get("resume_from_draft") and not resume_id:
             from tools.chapter_run_v2 import ChapterRunV2Store
 
-            latest = ChapterRunV2Store(self.project_root, self.novel_id).latest_for_chapter(
-                chapter_id
+            store = ChapterRunV2Store(self.project_root, self.novel_id)
+            latest = next(
+                (
+                    r
+                    for r in store.list(chapter_id=chapter_id, limit=200)
+                    if r.status == "drafted"
+                    or r.status in {"failed", "cancelled"}
+                    and (store.root / "artifacts" / r.run_id / "uncommitted.md").is_file()
+                ),
+                None,
             )
-            if latest and latest.status == "drafted":
+            if latest and latest.status in {"drafted", "failed", "cancelled"}:
                 resume_id = latest.run_id
             else:
                 raise NovelServiceError("No resumable draft found", code="RUN_NOT_RESUMABLE")
@@ -703,7 +759,15 @@ class NovelApplicationService:
             from tools.chapter_run_v2 import ChapterRunV2Store
 
             run = ChapterRunV2Store(self.project_root, self.novel_id).load(resume_id)
-            if not run or run.chapter_id != chapter_id or run.status != "drafted":
+            if (
+                run
+                and run.chapter_id == chapter_id
+                and run.status in {"failed", "cancelled"}
+                and payload.get("resume_from_draft") is True
+            ):
+                partial_id = resume_id
+                resume_id = ""
+            elif not run or run.chapter_id != chapter_id or run.status != "drafted":
                 raise NovelServiceError(
                     "Run is not a resumable draft for this chapter", code="RUN_NOT_RESUMABLE"
                 )
@@ -716,6 +780,9 @@ class NovelApplicationService:
                 code="CHAPTER_ALREADY_EXISTS",
             )
         args = dict(payload)
+        if partial_id:
+            args.pop("run_id_v2", None)
+            args["resume_partial_run_id"] = partial_id
         if resume_id:
             args["run_id_v2"] = resume_id
         args["chapter_id"] = chapter_id
@@ -726,7 +793,7 @@ class NovelApplicationService:
         target_policy = resolve_target_words(
             args.get("target_words"), args["context_packet"].get("target_words")
         )
-        if resume_id:
+        if resume_id or partial_id:
             if (
                 args.get("target_words") is not None
                 and target_policy["target_words"] != run.effective_target_words
@@ -773,9 +840,19 @@ class NovelApplicationService:
         *,
         strict: bool = False,
         dimensions: list[int] | None = None,
+        depth: str = "full",
+        domains: list[str] | None = None,
         task_phase: Callable[[str, str], None] | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
+        from tools.review_rubric import resolve_review_dimensions
+
+        try:
+            dimensions = resolve_review_dimensions(
+                dimensions=dimensions, depth=depth, domains=domains
+            )
+        except ValueError as exc:
+            raise NovelServiceError(str(exc), code="INVALID_INPUT") from exc
         target = self.resolve_chapter_id(chapter_id, latest=True)
         executor = self._review_executor or self._default_review_executor
         if not self._task_lock.acquire(blocking=False):

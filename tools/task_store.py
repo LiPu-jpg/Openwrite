@@ -243,10 +243,14 @@ class TaskStore:
 
     def _load_raw(self, task_id: str) -> dict[str, Any] | None:
         path = self.snapshot_path(task_id)
-        if not path.is_file():
-            return None
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            with self._lock:
+                if not path.is_file():
+                    return None
+                text = path.read_text(encoding="utf-8")
+            # Close the Windows file handle before allowing replacement, but
+            # parse the immutable snapshot without blocking background writes.
+            data = yaml.safe_load(text) or {}
         except (OSError, yaml.YAMLError):
             return None
         return data if isinstance(data, dict) else None
@@ -601,7 +605,9 @@ class TaskStore:
                 handle.flush()
                 os.fsync(handle.fileno())
                 temp_path = Path(handle.name)
-            temp_path.replace(path)
+            from tools.file_ops import replace_file
+
+            replace_file(temp_path, path)
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)

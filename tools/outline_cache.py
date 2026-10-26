@@ -104,6 +104,8 @@ def serialize_outline_hierarchy(hierarchy: OutlineHierarchy) -> dict[str, Any]:
             value = getattr(chapter, key)
             if value:
                 entry[key] = value
+        if chapter.extra_metadata:
+            entry["extra_metadata"] = dict(chapter.extra_metadata)
         chapters.append(entry)
     if chapters:
         data["chapters"] = chapters
@@ -188,6 +190,7 @@ def deserialize_outline_hierarchy(data: dict[str, Any], novel_id: str) -> Outlin
                 payoff_of=list(chapter.get("payoff_of") or []),
                 word_budget=_to_int(chapter.get("word_budget", 0)),
                 function=list(chapter.get("function") or []),
+                extra_metadata=dict(chapter.get("extra_metadata") or {}),
             )
         )
 

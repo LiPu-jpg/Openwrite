@@ -283,7 +283,7 @@ def test_same_chapter_reorder_preserves_scene_ids_and_all_text(tmp_path: Path) -
     chapter = next(item for item in surface["chapters"] if item["chapter_id"] == "ch_001")
     scenes = [item for item in surface["scenes"] if item["chapter"]["chapter_id"] == "ch_001"]
     path = novel / chapter["path"]
-    before = path.read_text(encoding="utf-8")
+    before = path.read_bytes().decode("utf-8")
     blocks = {
         item["scene_id"]: before[item["anchor"]["start"] : item["anchor"]["end"]] for item in scenes
     }
@@ -303,7 +303,7 @@ def test_same_chapter_reorder_preserves_scene_ids_and_all_text(tmp_path: Path) -
         scenes[1]["scene_id"],
         scenes[0]["scene_id"],
     ]
-    content = path.read_text(encoding="utf-8")
+    content = path.read_bytes().decode("utf-8")
     assert all(content.count(block) == 1 for block in blocks.values())
     assert all(item["freshness"] == "current" for item in reordered)
 
@@ -385,8 +385,11 @@ def test_move_rejects_stale_anchor_or_chapter_revision_without_writes(tmp_path: 
     assert _files(novel) == before
 
 
-def test_move_rolls_back_both_chapters_and_sidecar_on_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_move_rolls_back_both_chapters_and_sidecar_on_failure(tmp_path: Path, newline) -> None:
     novel = _project(tmp_path)
+    for path in (novel / "data/manuscript").rglob("*.md"):
+        path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", newline.encode()))
 
     def fail(stage: str) -> None:
         if stage == "sidecar_replaced":

@@ -104,7 +104,7 @@ class ManuscriptAcceptanceService:
         seen: set[str] = set()
         for chapter_id, path in self._chapters():
             seen.add(chapter_id)
-            content = path.read_text(encoding="utf-8")
+            content = path.read_bytes().decode("utf-8")
             current = self.fingerprint(content)
             head = heads.get(chapter_id) if isinstance(heads.get(chapter_id), dict) else {}
             accepted = str(head.get("accepted_revision") or "")
@@ -499,7 +499,7 @@ class ManuscriptAcceptanceService:
         )
         clean = self._chapter_id(chapter_id)
         frozen = next(item for item in operation["frozen_chapters"] if item["chapter_id"] == clean)
-        full_content = (self.root / frozen["snapshot"]).read_text(encoding="utf-8")
+        full_content = (self.root / frozen["snapshot"]).read_bytes().decode("utf-8")
         title, _body = self._split_chapter(clean, full_content)
         operation["analysis_results"] = {
             clean: self._normalize_fact(
@@ -534,6 +534,27 @@ class ManuscriptAcceptanceService:
         recorded_previous = str(existing.get("accepted_revision") or "")
         recorded_base = str(existing.get("pending_revision") or recorded_previous)
         expected = str(expected_previous_revision or "")
+        # Retrying the same accepted bytes must not create another operation or
+        # invalidate running chapter stages a second time. Check every affected
+        # chapter, including edits made later in the book.
+        previous_id = str(existing.get("operation_id") or "")
+        if previous_id and not baseline:
+            previous = self.operation(previous_id)
+            frozen = previous.get("frozen_chapters") or []
+            if (
+                previous.get("status") not in {"stale", "abandoned"}
+                and previous.get("source") == source
+                and [item["chapter_id"] for item in frozen] == chapter_ids
+                and all(
+                    (heads.get(item["chapter_id"]) or {}).get("operation_id") == previous_id
+                    and self.fingerprint(
+                        self._chapter_path(item["chapter_id"]).read_bytes().decode("utf-8")
+                    )
+                    == item["revision"]
+                    for item in frozen
+                )
+            ):
+                return previous
         if not baseline and recorded_base and expected != recorded_base:
             raise ManuscriptAcceptanceError(
                 "Acceptance base changed. Inspect the operation; resume it, or explicitly abandon it before retrying. To accept current disk text use external(confirm=true).",
@@ -554,7 +575,7 @@ class ManuscriptAcceptanceService:
         frozen: list[dict[str, Any]] = []
         for chapter_id in chapter_ids:
             path = self._chapter_path(chapter_id)
-            content = path.read_text(encoding="utf-8")
+            content = path.read_bytes().decode("utf-8")
             revision = self.fingerprint(content)
             snapshot = self.snapshots_dir / operation_id / f"{chapter_id}.md"
             self._atomic_text(snapshot, content)
@@ -696,7 +717,7 @@ class ManuscriptAcceptanceService:
             if chapter_id not in results:
                 if fault_injector:
                     fault_injector("analyze")
-                snapshot = (self.root / frozen["snapshot"]).read_text(encoding="utf-8")
+                snapshot = (self.root / frozen["snapshot"]).read_bytes().decode("utf-8")
                 title, body = self._split_chapter(chapter_id, snapshot)
                 result = analyzer(chapter_id, title, body, prior_context)
                 if not isinstance(result, dict):
@@ -750,7 +771,7 @@ class ManuscriptAcceptanceService:
                     code="FACT_BASELINE_REQUIRED",
                     details={"chapter_id": chapter_id},
                 )
-            current = self.fingerprint(self._chapter_path(chapter_id).read_text(encoding="utf-8"))
+            current = self.fingerprint(self._chapter_path(chapter_id).read_bytes().decode("utf-8"))
             if str(fact.get("source_revision") or "") != current:
                 raise ManuscriptAcceptanceError(
                     f"{chapter_id} 事实来源已变化",
@@ -843,7 +864,7 @@ class ManuscriptAcceptanceService:
 
     def _assert_frozen_current(self, operation: dict[str, Any], frozen: dict[str, Any]) -> None:
         path = self.novel_root / frozen["path"]
-        current = self.fingerprint(path.read_text(encoding="utf-8")) if path.is_file() else ""
+        current = self.fingerprint(path.read_bytes().decode("utf-8")) if path.is_file() else ""
         if current == frozen["revision"]:
             return
         operation["status"] = "stale"
@@ -1060,7 +1081,7 @@ class ManuscriptAcceptanceService:
         if not path.is_file():
             return None
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_bytes().decode("utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
         return payload if isinstance(payload, dict) else None
@@ -1079,6 +1100,7 @@ class ManuscriptAcceptanceService:
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",
+                newline="",
                 dir=path.parent,
                 prefix=f".{path.name}.",
                 suffix=".tmp",

@@ -242,6 +242,42 @@ def selected_domains(dimensions: Sequence[int] | None) -> tuple[DomainSpec, ...]
     return tuple(domains)
 
 
+def resolve_review_dimensions(
+    *, dimensions: list[int] | None = None, depth: str = "full", domains: list[str] | None = None
+) -> list[int] | None:
+    """Resolve explicit scope before any model request; quick never means full approval."""
+    if depth not in {"quick", "full"}:
+        raise ValueError("depth must be quick or full")
+    if domains is not None and depth != "full":
+        raise ValueError("Use domains or depth=quick, not both")
+    if dimensions is not None:
+        if domains is not None or depth != "full":
+            raise ValueError(
+                "Use dimensions, domains, or depth=quick, not multiple scope selectors"
+            )
+        if (
+            not isinstance(dimensions, list)
+            or not dimensions
+            or any(type(i) is not int or i not in DIMENSION_NAMES for i in dimensions)
+        ):
+            raise ValueError("dimensions must be a non-empty array of integers from 1 to 37")
+        return sorted(set(dimensions))
+    if domains is None and depth == "full":
+        return None
+    selected = domains if domains is not None else ["coherence", "canon", "prose"]
+    known = {d.id for d in QUALITY_DOMAINS}
+    if (
+        not isinstance(selected, list)
+        or not selected
+        or any(not isinstance(i, str) or i not in known for i in selected)
+    ):
+        raise ValueError("domains must be a non-empty array of known review domain ids")
+    return sorted(
+        {i for d in QUALITY_DOMAINS if d.id in selected for i in d.legacy_check_ids}
+        | set(GATE_CHECK_IDS)
+    )
+
+
 def normalize_review_form(value: Any) -> str | None:
     text = str(value or "").strip().lower().replace("_", "-")
     if text in {"web-novel", "webnovel", "网文"}:

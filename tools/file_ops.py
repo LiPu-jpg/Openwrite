@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Dict, Any, List, Optional
-import json
 import os
 import tempfile
+import time
+from pathlib import Path
+from typing import Any
+
+
+def replace_file(source: Path | str, target: Path) -> None:
+    """Bounded retries for Windows sharing violations; keep other errors visible."""
+    delays = (0, 0.01, 0.02, 0.04, 0.08, 0.16, 0.32)
+    for attempt, delay in enumerate(delays):
+        if delay:
+            time.sleep(delay)
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) not in {5, 32, 33} or attempt == len(delays) - 1:
+                raise
 
 
 def atomic_write(path: Path, content: str) -> None:
@@ -14,13 +28,19 @@ def atomic_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", dir=path.parent,
-                                         prefix=f".{path.name}.", delete=False) as handle:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as handle:
             temporary = handle.name
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        replace_file(temporary, path)
     finally:
         if temporary and os.path.exists(temporary):
             os.unlink(temporary)
@@ -41,7 +61,7 @@ class FileOps:
             raise ValueError(f"Path traversal detected: {path}")
         return full_path
 
-    def read_file(self, path: str) -> Dict[str, Any]:
+    def read_file(self, path: str) -> dict[str, Any]:
         """读取文件"""
         try:
             full_path = self._resolve_path(path)
@@ -53,7 +73,7 @@ class FileOps:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def write_file(self, path: str, content: str) -> Dict[str, Any]:
+    def write_file(self, path: str, content: str) -> dict[str, Any]:
         """写入文件"""
         try:
             full_path = self._resolve_path(path)
@@ -63,7 +83,7 @@ class FileOps:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def list_files(self, path: str = "") -> Dict[str, Any]:
+    def list_files(self, path: str = "") -> dict[str, Any]:
         """列出目录文件"""
         try:
             full_path = self._resolve_path(path) if path else self.data_dir
@@ -75,7 +95,7 @@ class FileOps:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def file_exists(self, path: str) -> Dict[str, Any]:
+    def file_exists(self, path: str) -> dict[str, Any]:
         """检查文件是否存在"""
         try:
             full_path = self._resolve_path(path)

@@ -36,7 +36,7 @@ class ArcAuditService:
 
     def _hierarchy(self):
         text = self.outline.read_text(encoding="utf-8") if self.outline.is_file() else ""
-        return OutlineMdParser().parse(text, self.novel_id)
+        return OutlineMdParser.for_path(self.project_root).parse(text, self.novel_id)
 
     def _chapters(self, group_id: str = "") -> list:
         hierarchy = self._hierarchy()

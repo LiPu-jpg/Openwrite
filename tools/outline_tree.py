@@ -84,7 +84,7 @@ def build_outline_structure(
 
     from tools.outline_parser import OutlineMdParser
 
-    parser = OutlineMdParser()
+    parser = OutlineMdParser.for_path(root)
     try:
         parser.parse(body, root.name)
         metadata_rows = parser.metadata_diagnostics
@@ -143,7 +143,9 @@ def mutate_outline_structure(
     target = by_id.get(node_id)
     operation = str(operation or "").strip()
     kind = str(kind or "").strip()
-    lines = outline_path.read_bytes().decode("utf-8").splitlines(keepends=True)
+    raw_text = outline_path.read_bytes().decode("utf-8")
+    newline = "\r\n" if "\r\n" in raw_text else "\n"
+    lines = raw_text.splitlines(keepends=True)
     selection_hint: dict[str, Any] = {}
 
     if operation in {"get_meta", "set_meta"}:
@@ -222,7 +224,9 @@ def mutate_outline_structure(
                     else:
                         body = body.rstrip("\r\n") + "\n" + replacement + "\n\n"
                     values[key] = value
-                lines[start:end] = body.splitlines(keepends=True)
+                lines[start:end] = (
+                    body.replace("\r\n", "\n").replace("\n", newline).splitlines(keepends=True)
+                )
             results[target["id"]] = values
         validate_outline_targets("".join(lines))
         return {
@@ -260,7 +264,7 @@ def mutate_outline_structure(
                 raise OutlineEditError(f"{next_chapter_id} 已存在，请使用新的章节号")
         line_index = int(target["line"]) - 1
         marker = "#" * int(target["level"])
-        ending = "\n" if lines[line_index].endswith("\n") else ""
+        ending = _line_ending(lines[line_index])
         lines[line_index] = f"{marker} {clean_title}{ending}"
         selection_hint = {"kind": target["kind"], "title": clean_title, "line": line_index + 1}
         message = f"已将{target['label']}重命名为“{clean_title}”"
@@ -276,10 +280,13 @@ def mutate_outline_structure(
             if any(_is_structured_outline_line(line) for line in clean_summary.splitlines())
             else _direct_summary_span(lines, start, end)
         )
-        lines[summary_start:summary_end] = _summary_block(
-            clean_summary,
-            has_following=summary_end < len(lines),
-        )
+        lines[summary_start:summary_end] = [
+            line.replace("\n", newline)
+            for line in _summary_block(
+                clean_summary,
+                has_following=summary_end < len(lines),
+            )
+        ]
         selection_hint = {
             "kind": target["kind"],
             "title": target["title"],
@@ -317,7 +324,7 @@ def mutate_outline_structure(
                 raise OutlineEditError(f"{chapter_id} 已存在，请使用新的章节号")
         level = OUTLINE_KINDS.index(expected_kind) + 1
         block, heading_offset = _heading_block(lines, insert_index, level, clean_title)
-        lines[insert_index:insert_index] = block
+        lines[insert_index:insert_index] = [line.replace("\n", newline) for line in block]
         selection_hint = {
             "kind": expected_kind,
             "title": clean_title,
@@ -334,7 +341,7 @@ def mutate_outline_structure(
         for change in renumbered:
             line_index = int(change["line"]) - 1
             marker = "#" * int(change["level"])
-            ending = "\n" if lines[line_index].endswith("\n") else ""
+            ending = _line_ending(lines[line_index])
             lines[line_index] = f"{marker} {change['new_title']}{ending}"
         start = int(target["line"]) - 1
         end = int(target["end_line"])
@@ -664,6 +671,12 @@ def _is_structured_outline_line(line: str) -> bool:
             re.IGNORECASE,
         )
     )
+
+
+def _line_ending(line: str) -> str:
+    if line.endswith("\r\n"):
+        return "\r\n"
+    return "\n" if line.endswith("\n") else ""
 
 
 def _summary_block(summary: str, *, has_following: bool) -> list[str]:

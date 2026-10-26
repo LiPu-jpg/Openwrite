@@ -44,7 +44,7 @@ def test_checkpoint_load_restore_and_metadata_identity_guards(tmp_path: Path) ->
     assert store.list("ch_001") == [version]
 
     changed = original + "\n新增一段。\n"
-    chapter.write_text(changed, encoding="utf-8")
+    chapter.write_text(changed, encoding="utf-8", newline="")
     ManuscriptAcceptanceService(tmp_path, "demo").start_acceptance(
         "ch_001",
         source="manual",
@@ -89,7 +89,7 @@ def test_checkpoint_load_restore_and_metadata_identity_guards(tmp_path: Path) ->
     metadata_path = store.root / "ch_001" / f"{version.version_id}.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     metadata["content_file"] = "data/manuscript_versions/ch_999/ver_abcdefgh.md"
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8", newline="")
     with pytest.raises(ManuscriptEditingError) as invalid:
         store.load("ch_001", version.version_id)
     assert invalid.value.code == "INVALID_VERSION"
@@ -101,7 +101,7 @@ def test_restore_participates_in_the_shared_project_write_lock(tmp_path: Path) -
     original = chapter.read_text(encoding="utf-8")
     version = store.checkpoint("ch_001", label="锁测试")
     changed = original + "\n锁外修改。\n"
-    chapter.write_text(changed, encoding="utf-8")
+    chapter.write_text(changed, encoding="utf-8", newline="")
 
     with ProjectWriteLock(tmp_path, "demo", operation="other-writer"):
         with pytest.raises(ManuscriptEditingError) as busy:
@@ -122,7 +122,7 @@ def test_compare_version_previews_current_to_target_without_writing(tmp_path: Pa
     original = chapter.read_text(encoding="utf-8")
     version = store.checkpoint("ch_001", label="初稿")
     changed = original.replace("钟声", "远处的钟声")
-    chapter.write_text(changed, encoding="utf-8")
+    chapter.write_text(changed, encoding="utf-8", newline="")
 
     preview = store.compare("ch_001", version.version_id)
 
@@ -151,12 +151,14 @@ def test_annotations_relocate_only_on_one_exact_match_then_detach(tmp_path: Path
     )
     assert annotation.anchor_state == "attached"
 
-    chapter.write_text("序章提示。\n" + original, encoding="utf-8")
+    chapter.write_text("序章提示。\n" + original, encoding="utf-8", newline="")
     relocated = annotations.list("ch_001")[0]
     assert relocated.anchor_state == "relocated"
     assert relocated.current_start == start + len("序章提示。\n")
 
-    chapter.write_text("乙丙。\n" + chapter.read_text(encoding="utf-8"), encoding="utf-8")
+    chapter.write_text(
+        "乙丙。\n" + chapter.read_text(encoding="utf-8"), encoding="utf-8", newline=""
+    )
     detached = annotations.list("ch_001")[0]
     assert detached.anchor_state == "detached"
     assert detached.current_start is None and detached.current_end is None
@@ -246,7 +248,7 @@ def test_annotations_optional_color_loads_old_records_and_persists_palette(tmp_p
             ensure_ascii=False,
         )
         + "\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="",
     )
     loaded = {item.annotation_id: item for item in annotations.list("ch_001")}
     assert loaded["ann_legacycolor0001"].color is None
@@ -327,7 +329,7 @@ def test_studio_contract_and_cli_checkpoint_smoke(
         )
         original = chapter.read_text(encoding="utf-8")
         changed = original + "\n恢复前新增。\n"
-        chapter.write_text(changed, encoding="utf-8")
+        chapter.write_text(changed, encoding="utf-8", newline="")
         changed_revision = ManuscriptVersionStore.fingerprint(changed)
         ManuscriptAcceptanceService(tmp_path, "demo").start_acceptance(
             "ch_001",

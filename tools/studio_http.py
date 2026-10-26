@@ -44,6 +44,8 @@ class StudioPostRoute:
 
     def affects_state(self, payload: dict[str, Any]) -> bool:
         """Classify successful actions by their public state, not their HTTP verb."""
+        if self.method_name == "submit_write_chapter" and payload.get("dry_run") is True:
+            return False
         if self.read_only:
             return False
         if not payload.get("action") and payload.get("confirm"):
