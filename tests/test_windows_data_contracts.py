@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from threading import Event, Thread, current_thread
 from types import SimpleNamespace
 
 import pytest
@@ -27,6 +28,7 @@ from tools.research_service import MAX_PROCESS_OUTPUT_BYTES, ResearchService
 from tools.review_store import ReviewStore
 from tools.studio_application import StudioApplication
 from tools.task_runner import TaskCancelled
+from tools.task_store import TaskStore
 
 
 @pytest.mark.parametrize("winerror", [5, 32, 33])
@@ -67,6 +69,47 @@ def test_snapshot_replacement_does_not_hide_persistent_permission_errors(tmp_pat
     with pytest.raises(PermissionError, match="still denied"):
         file_ops.replace_file(tmp_path / "temporary", tmp_path / "snapshot")
     assert len(calls) == 7
+
+
+def test_parsing_a_task_snapshot_does_not_block_a_background_transition(tmp_path, monkeypatch):
+    import tools.task_store as snapshots
+
+    init_project(tmp_path, "demo")
+    store = TaskStore(tmp_path, "demo")
+    task = store.create("chapter_write", {"chapter_id": "ch_001"})
+    parsing, release, written = Event(), Event(), Event()
+    original = snapshots.yaml.safe_load
+    errors = []
+
+    def parse(value):
+        if current_thread().name == "snapshot-reader":
+            parsing.set()
+            assert release.wait(10)
+        return original(value)
+
+    def transition():
+        try:
+            store.transition(task["task_id"], status="running", phase="model")
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            written.set()
+
+    monkeypatch.setattr(snapshots.yaml, "safe_load", parse)
+    reader = Thread(target=lambda: store.load(task["task_id"]), name="snapshot-reader")
+    writer = Thread(target=transition, name="snapshot-writer")
+    reader.start()
+    try:
+        assert parsing.wait(5)
+        writer.start()
+        assert written.wait(5), "UI snapshot parsing held the background writer lock"
+        assert not errors
+    finally:
+        release.set()
+        reader.join(timeout=5)
+        if writer.ident is not None:
+            writer.join(timeout=5)
+    assert store.load(task["task_id"])["status"] == "running"
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])

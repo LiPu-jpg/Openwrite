@@ -242,15 +242,15 @@ class TaskStore:
         return normalize_task_record(raw) if raw is not None else None
 
     def _load_raw(self, task_id: str) -> dict[str, Any] | None:
-        with self._lock:
-            return self._load_raw_unlocked(task_id)
-
-    def _load_raw_unlocked(self, task_id: str) -> dict[str, Any] | None:
         path = self.snapshot_path(task_id)
-        if not path.is_file():
-            return None
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            with self._lock:
+                if not path.is_file():
+                    return None
+                text = path.read_text(encoding="utf-8")
+            # Close the Windows file handle before allowing replacement, but
+            # parse the immutable snapshot without blocking background writes.
+            data = yaml.safe_load(text) or {}
         except (OSError, yaml.YAMLError):
             return None
         return data if isinstance(data, dict) else None

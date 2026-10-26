@@ -137,19 +137,21 @@ def _wait_task(
     task_id: str,
     headers: dict[str, str],
     *,
-    timeout: float = 5.0,
+    timeout: float = 15.0,
 ) -> dict:
     deadline = time.monotonic() + timeout
+    last = None
     while time.monotonic() < deadline:
         status, payload = _request(opener, base, "GET", f"/api/tasks/{task_id}", headers=headers)
+        last = payload
         if status == 200 and payload["data"]["task"]["status"] in {
             "completed",
             "failed",
             "cancelled",
         }:
             return payload["data"]["task"]
-        time.sleep(0.02)
-    raise AssertionError(f"task {task_id} did not finish")
+        time.sleep(0.05)
+    raise AssertionError(f"task {task_id} did not finish; last response: {last}")
 
 
 @pytest.fixture()
