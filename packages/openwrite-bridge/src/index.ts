@@ -25,6 +25,8 @@ export interface Config {
   artifacts?: string
   /** Base URL of the local OpenWrite Studio server. */
   baseUrl: string
+  /** Optional instance token of an externally managed Studio server. */
+  authToken?: string
   /** Per-tool cooperative timeout in ms; chapter writing/review can take minutes. */
   timeoutMs: number
   /** Directory `novel_export` saves exported files into. */
@@ -36,6 +38,7 @@ export const Config: Schema<Config> = Schema.object({
   runtimeRoot: Schema.string(),
   artifacts: Schema.string(),
   baseUrl: Schema.string().default('http://127.0.0.1:4567'),
+  authToken: Schema.string().role('secret'),
   timeoutMs: Schema.number().default(600000),
   outputDir: Schema.string().default(join(tmpdir(), 'openwrite-exports')),
 })
@@ -60,7 +63,8 @@ export function apply(ctx: Context, config: Config) {
     return connection ? connection.requestRejection({ headers }) : 503
   }
   const domain = new NovelDomainService(ctx, { authorizeRequest, baseUrl: config.baseUrl, timeoutMs: config.timeoutMs, outputDir: config.outputDir, resolveWorkspace,
-    ...(runtime ? { connect: () => runtime.ensure() } : {}),
+    ...(runtime ? { connect: () => runtime.ensure() }
+      : config.authToken ? { connect: async () => ({ baseUrl: config.baseUrl, token: config.authToken }) } : {}),
   })
   ctx.effect(() => () => runtime?.dispose(), 'openwrite: owned runtime cleanup')
   ctx.inject(['webServer'], webCtx => webCtx.effect(() => webCtx.webServer.register({

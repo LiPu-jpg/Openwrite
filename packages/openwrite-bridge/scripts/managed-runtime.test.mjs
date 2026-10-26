@@ -8,7 +8,25 @@ import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { ManagedRuntime, sanitizeDiagnostic, stopOwnedProcess, buildChildEnv } from '../lib/managed-runtime.js'
+import { ManagedRuntime, UnsupportedRuntimePlatformError, sanitizeDiagnostic, stopOwnedProcess, buildChildEnv } from '../lib/managed-runtime.js'
+import { StudioClient } from '../lib/client.js'
+
+test('unsupported runtime is actionable and never becomes a network error or starts installation', async t => {
+  const root = await fixture(t)
+  await writeFile(join(root, 'runtime-manifest.json'), JSON.stringify({ platforms: {} }))
+  const runtime = new ManagedRuntime(join(root, 'runtime'), root)
+  const client = new StudioClient({ baseUrl: 'http://127.0.0.1:1', timeoutMs: 1000, connect: () => runtime.ensure() })
+  await assert.rejects(client.getJson('/api/health'), error => {
+    assert.equal(error.code, 'RUNTIME_PLATFORM_UNSUPPORTED')
+    assert.equal(error.status, 503)
+    assert.match(error.message, /mode: external/)
+    assert.match(error.message, /File tools/)
+    return true
+  })
+  assert.deepEqual(await readdir(root), ['runtime-manifest.json'])
+  assert.equal(new UnsupportedRuntimePlatformError('android/arm64').code, 'RUNTIME_PLATFORM_UNSUPPORTED')
+  await runtime.dispose()
+})
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'openwrite-managed-test-'))

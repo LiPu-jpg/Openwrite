@@ -538,7 +538,12 @@ export class NovelDomainService extends Service {
           this.notifyMutation(`/api/${pathPart}`, { workspaceRoot: resolved.root, workspaceId: resolved.id })
         }
       } catch (error) {
-        if (!lifetime.aborted) sendJson(res, 502, { error: '写作环境暂不可用，请打开环境与诊断重试' })
+        if (!lifetime.aborted) {
+          const failure = error as { code?: string; status?: number; message?: string }
+          if (failure.code === 'RUNTIME_PLATFORM_UNSUPPORTED') {
+            sendJson(res, 503, { error: failure.message, code: failure.code })
+          } else sendJson(res, 502, { error: '写作环境暂不可用，请打开环境与诊断重试' })
+        }
       } finally {
         responses.delete(res)
       }

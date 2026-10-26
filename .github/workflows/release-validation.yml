@@ -61,6 +61,8 @@ jobs:
             before: '2026-10-03T00:00:00Z'
           - host: '0.2.1-rc.2'
             before: '2026-10-18T00:00:00Z'
+          - host: '0.2.1-rc.3'
+            before: '2026-10-27T00:00:00Z'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

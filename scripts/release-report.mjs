@@ -29,7 +29,7 @@ const source = reports.find(r => r.installSource.startsWith('github:'))
 assert.equal(source?.status, 'passed', 'GitHub source installation must pass')
 for (const check of required) assert.ok(source.checks.includes(check), `Source missing check: ${check}`)
 const clientReports = await Promise.all(files.filter(file => /^client-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
-for (const host of ['0.1.2-rc.1', '0.1.5-alpha.1', '0.2.0-rc.2', '0.2.1-rc.2']) {
+for (const host of ['0.1.2-rc.1', '0.1.5-alpha.1', '0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.3']) {
   const report = clientReports.find(r => r.host === host)
   assert.equal(report?.status, 'passed', `Missing client acceptance for ${host}`)
   assert.equal(report.artifactSha256, manifest.sha256, 'Client tested different artifact')

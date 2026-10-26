@@ -1,4 +1,5 @@
 import type { BackendConnection } from './managed-runtime.js'
+import { UnsupportedRuntimePlatformError } from './managed-runtime.js'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve, win32 } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -260,6 +261,9 @@ export class StudioClient {
       return response
     } catch (error: unknown) {
       if (error instanceof StudioError) throw error
+      if (error instanceof UnsupportedRuntimePlatformError) {
+        throw new StudioError(error.message, error.status, error.code, { platform: error.platform })
+      }
       if (this.context?.workspaceRoot) {
         try {
           const root = join(this.context.workspaceRoot, '.openwrite', 'transport-errors')
