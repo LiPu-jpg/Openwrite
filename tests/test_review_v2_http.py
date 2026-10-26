@@ -18,14 +18,15 @@ from tools.studio import StudioApplication, create_server
 from tools.studio_preferences import StudioModelSettingsStore
 
 
-def _wait(app: StudioApplication, task_id: str, timeout: float = 3) -> dict:
+def _wait(app: StudioApplication, task_id: str, timeout: float = 15) -> dict:
     deadline = time.monotonic() + timeout
+    task = None
     while time.monotonic() < deadline:
         task = app.get_task(task_id)["task"]
         if task["status"] in {"completed", "failed", "cancelled", "interrupted"}:
             return task
-        time.sleep(0.01)
-    raise AssertionError(f"task {task_id} did not finish")
+        time.sleep(0.05)
+    raise AssertionError(f"task {task_id} did not finish; last snapshot: {task}")
 
 
 def _request(opener, url: str, *, method: str = "GET", payload: dict | None = None):

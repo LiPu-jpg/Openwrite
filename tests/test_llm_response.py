@@ -67,3 +67,43 @@ def test_wrapped_provider_timeout_has_stable_code_and_no_secret():
 
     assert error.code == "PROVIDER_TIMEOUT"
     assert "sk-" not in str(error)
+
+
+def test_stream_deadline_closes_wrapped_transport_and_keeps_partial(monkeypatch):
+    import time
+    from types import SimpleNamespace
+
+    from tools.llm.client import LLMClient, LLMConfig
+    from tools.llm.errors import LLMTimeoutError
+
+    clock = [0.0]
+
+    class Transport:
+        closed = False
+
+        def __iter__(self):
+            yield {"choices": [{"delta": {"content": "已收到的正文"}}]}
+            clock[0] = 2.0
+            yield {"choices": [{"delta": {"content": "超时后不应接收"}}]}
+
+        def close(self):
+            self.closed = True
+
+    transport = Transport()
+
+    class Wrapper:
+        completion_stream = transport
+
+        def __iter__(self):
+            return iter(self.completion_stream)
+
+    monkeypatch.setenv("OW_LLM_TOTAL_TIMEOUT", "1")
+    monkeypatch.setattr(
+        "tools.llm.client.time", SimpleNamespace(time=time.time, monotonic=lambda: clock[0])
+    )
+    with pytest.raises(LLMTimeoutError) as raised:
+        LLMClient(LLMConfig(model="fake"))._stream_response(Wrapper(), None)
+    assert raised.value.code == "PROVIDER_TIMEOUT"
+    assert raised.value.partial_content == "已收到的正文"
+    assert raised.value.stream_closed is True
+    assert transport.closed is True

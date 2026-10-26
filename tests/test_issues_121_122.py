@@ -141,7 +141,8 @@ def test_canon_diagnostics_report_actual_missing_inputs_and_invalidate_score():
     assert v2["delivery_diagnostics"]["code"] == "hard_gate_blocked"
 
 
-def test_stream_cancellation_closes_transport_and_preserves_partial_text():
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_stream_cancellation_closes_transport_and_preserves_partial_text(wrapped):
     from tools.chapter_pipeline import _model_cancellation_scope
     from tools.llm.cancellation import ModelCancelledError
     from tools.llm.client import LLMClient, LLMConfig
@@ -164,11 +165,22 @@ def test_stream_cancellation_closes_transport_and_preserves_partial_text():
         stopped = True
 
     stream = Stream()
+
+    class Wrapper:
+        # Match LiteLLM's sync wrapper: no close(), owned transport inside.
+        completion_stream = stream
+
+        def __iter__(self):
+            return iter(self.completion_stream)
+
     with _model_cancellation_scope({"_cancel_requested": lambda: stopped}):
         with pytest.raises(ModelCancelledError) as raised:
-            LLMClient(LLMConfig(model="fake"))._stream_response(stream, progress)
+            LLMClient(LLMConfig(model="fake"))._stream_response(
+                Wrapper() if wrapped else stream, progress
+            )
     assert raised.value.partial_content == "门外的雨停了。"
     assert stream.closed is True
+    assert raised.value.stream_closed is True
 
 
 def test_blocked_write_attempts_are_retained_in_both_run_stores(tmp_path):

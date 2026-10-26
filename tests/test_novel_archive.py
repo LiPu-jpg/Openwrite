@@ -129,6 +129,18 @@ def test_archive_exclusions_ignore_ancestor_names_but_keep_internal_rules(tmp_pa
     ).read_bytes()
 
 
+@pytest.mark.parametrize("novel_id", ["tmp", "cache", "secrets", "exports"])
+def test_archive_exclusions_do_not_classify_the_novel_id_as_content(tmp_path, novel_id):
+    init_project(tmp_path, novel_id)
+    service = NovelArchiveService(tmp_path, novel_id)
+    package = tmp_path / "book.owarchive.zip"
+    service.create_archive(package)
+    manifest = service.inspect_archive(package)["manifest"]
+    assert f"data/novels/{novel_id}/src/outline.md" in {
+        row["path"] for row in manifest["includes"]["files"]
+    }
+
+
 def _rewrite_zip(
     source: Path,
     output: Path,
