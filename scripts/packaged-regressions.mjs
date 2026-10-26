@@ -26,7 +26,7 @@ try {
     await copyFile(join(checkout, file), join(root, file))
   }
   await new Promise((done, reject) => {
-    const child = spawn(process.execPath, ['--test', ...tests], { cwd: root, stdio: 'inherit' })
+    const child = spawn(process.execPath, ['--test', '--test-reporter=tap', ...tests], { cwd: root, stdio: 'inherit' })
     child.once('error', reject)
     child.once('exit', (code, signal) => code === 0 ? done() : reject(new Error(`Packaged regressions failed: ${signal ?? code}`)))
   })

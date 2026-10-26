@@ -494,7 +494,7 @@ test('backend stderr is mirrored to state/logs/backend.log for postmortem diagno
   assert.match(log, /embedding probe thread stuck in import numpy/)
 })
 
-test('in-flight generate is not replayed when the managed child is recovered', async t => {
+test('in-flight generate is not replayed when the managed child is recovered', { timeout: 15_000 }, async t => {
   const { root, artifacts } = await prepared(t)
   const log = join(root, 'posts.log')
   await writeFile(log, '')
@@ -507,15 +507,23 @@ test('in-flight generate is not replayed when the managed child is recovered', a
     backoffMs: [5],
     restartLimit: 3,
   })
-  t.after(() => runtime.dispose())
+  const controller = new AbortController()
+  t.after(async () => { controller.abort(); await runtime.dispose() })
   const connection = await runtime.ensure()
   const hung = fetch(connection.baseUrl + '/api/write', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + connection.token, 'content-type': 'application/json' },
     body: JSON.stringify({ chapter_id: 'ch_1' }),
+    signal: controller.signal,
   })
   const hungFailure = hung.then(() => { throw new Error('in-flight write completed after backend crash') }, error => error)
-  await new Promise(resolve => setTimeout(resolve, 40))
+  // A fixed delay can stop the process before Windows has sent the request.
+  // Observe receipt at the server before testing interruption/replay behavior.
+  const deadline = Date.now() + 5000
+  while (!(await readFile(log, 'utf8')).includes('POST /api/write')) {
+    assert.ok(Date.now() < deadline, 'backend did not receive the write request')
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
   await stopOwnedProcess(runtime.child)
   await waitPhase(runtime, 'ready')
   assert.ok(await hungFailure)
