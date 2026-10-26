@@ -57,6 +57,8 @@ PROFILE_FIELDS = (
     "base_url",
     "model",
     "api_format",
+    "auth_source",
+    "workspace_id",
     "context_tokens",
     "max_output_tokens",
     "temperature",
@@ -231,6 +233,10 @@ class ModelProfileStore:
     def _profile_configured(
         self, profile: dict[str, Any], persisted_credentials: dict[str, str]
     ) -> bool:
+        if profile.get("auth_source") == "opencode_console":
+            from tools.llm.opencode_console import console_available
+
+            return console_available()
         credential_ref = str(profile.get("credential_ref") or "")
         return bool(
             self._session_credentials.get(credential_ref)
@@ -265,7 +271,10 @@ class ModelProfileStore:
         # them through save_profile, and a metadata-only save preserves them.
         metadata.pop("last_test", None)
         for test_field in ("last_test",):
-            if existing.get(test_field) is not None:
+            if existing.get(test_field) is not None and all(
+                existing.get(field, default) == metadata.get(field, default)
+                for field, default in (("auth_source", "api_key"), ("workspace_id", ""))
+            ):
                 metadata[test_field] = existing[test_field]
         credential_ref = str(metadata.get("credential_ref") or f"key_{profile_id}")
         metadata["credential_ref"] = credential_ref
@@ -274,6 +283,9 @@ class ModelProfileStore:
             "credential_updated_at"
         ):
             metadata["credential_updated_at"] = existing["credential_updated_at"]
+        if metadata.get("auth_source") == "opencode_console":
+            secret = ""
+            remember_api_key = True
         if secret:
             metadata["credential_updated_at"] = self._utc_timestamp()
             self._session_credentials[credential_ref] = secret
@@ -501,12 +513,15 @@ class ModelProfileStore:
             or self._credentials().get(credential_ref, "")
             or (os.environ.get("LLM_API_KEY", "").strip() if metadata["id"] == "default" else "")
         )
-        if not secret:
+        if not secret and metadata.get("auth_source") != "opencode_console":
             raise ModelProfileError(
                 f"模型档案 {metadata['label']} 缺少 API Key",
                 code="MODEL_CREDENTIAL_MISSING",
             )
-        return {**metadata, "api_key": secret}
+        return {
+            **metadata,
+            "api_key": "" if metadata.get("auth_source") == "opencode_console" else secret,
+        }
 
     def test_embedding_candidate(
         self, profile: dict[str, Any], *, api_key: str = ""
@@ -679,7 +694,10 @@ class ModelProfileStore:
         vector_search_without_chat = (
             operation == "search" and profile.get("search_mode") == "vector"
         )
-        if not api_key and not vector_search_without_chat:
+        console_auth = profile.get("auth_source") == "opencode_console"
+        if console_auth:
+            api_key = ""
+        if not api_key and not vector_search_without_chat and not console_auth:
             raise ModelProfileError(
                 f"模型档案 {profile['label']} 缺少 API Key",
                 code="MODEL_CREDENTIAL_MISSING",
@@ -718,7 +736,10 @@ class ModelProfileStore:
             or self._credentials().get(credential_ref)
             or (os.environ.get("LLM_API_KEY", "").strip() if profile["id"] == "default" else "")
         )
-        if not api_key:
+        console_auth = profile.get("auth_source") == "opencode_console"
+        if console_auth:
+            api_key = ""
+        if not api_key and not console_auth:
             raise ModelProfileError(
                 f"模型档案 {profile['label']} 缺少 API Key",
                 code="MODEL_CREDENTIAL_MISSING",
@@ -888,6 +909,28 @@ class ModelProfileStore:
                 "Base URL 必须是有效的 HTTP(S) 地址",
                 code="INVALID_MODEL_PROFILE",
             )
+        from tools.llm.opencode_console import is_go_url
+
+        auth_source = str(value.get("auth_source") or "api_key")
+        workspace_id = str(value.get("workspace_id") or "").strip()
+        if auth_source not in {"api_key", "opencode_console"}:
+            raise ModelProfileError("认证方式无效", code="INVALID_MODEL_PROFILE")
+        if workspace_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", workspace_id):
+            raise ModelProfileError("工作区 ID 格式无效", code="INVALID_MODEL_PROFILE")
+        if auth_source == "opencode_console" or workspace_id:
+            if (
+                not is_go_url(base_url)
+                or provider not in {"openai", "custom"}
+                or api_format != "chat"
+            ):
+                raise ModelProfileError(
+                    "Console 登录和工作区 ID 仅适用于 OpenCode Go 的 HTTPS Chat 接口",
+                    code="INVALID_MODEL_PROFILE",
+                )
+        if auth_source == "opencode_console" and model.startswith(AUTO_SELECT_PREFIX):
+            raise ModelProfileError(
+                "Console 登录请选择明确的 Go 模型 ID", code="INVALID_MODEL_PROFILE"
+            )
         context_tokens = ModelProfileStore._bounded_number(
             value.get("context_tokens"),
             64000,
@@ -937,6 +980,8 @@ class ModelProfileStore:
             "base_url": base_url,
             "model": model,
             "api_format": api_format,
+            "auth_source": auth_source,
+            "workspace_id": workspace_id,
             "context_tokens": context_tokens,
             "max_output_tokens": max_output_tokens,
             "temperature": temperature,

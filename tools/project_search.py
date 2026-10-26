@@ -164,6 +164,8 @@ class LightRAGConfiguration:
     embedding_dimension: int
     embedding_max_tokens: int
     query_mode: str
+    llm_auth_source: str = "api_key"
+    llm_workspace_id: str = ""
 
     @classmethod
     def from_runtime(cls) -> LightRAGConfiguration:
@@ -184,6 +186,8 @@ class LightRAGConfiguration:
                 base_url=str(search_profile.get("base_url") or ""),
                 model=str(search_profile.get("model") or ""),
                 api_format=search_profile.get("api_format") or "chat",
+                auth_source=search_profile.get("auth_source") or "api_key",
+                workspace_id=search_profile.get("workspace_id") or "",
                 timeout_seconds=float(search_profile.get("timeout_seconds") or 120),
             )
         explicit_query_mode = os.environ.get("OPENWRITE_LIGHTRAG_MODE", "").strip().lower()
@@ -194,7 +198,11 @@ class LightRAGConfiguration:
         if query_mode not in LIGHTRAG_MODES:
             raise SearchConfigurationError("OPENWRITE_LIGHTRAG_MODE 配置无效")
         requires_chat_model = query_mode != "naive"
-        if requires_chat_model and not llm.api_key.strip():
+        if (
+            requires_chat_model
+            and not llm.api_key.strip()
+            and llm.auth_source != "opencode_console"
+        ):
             raise SearchConfigurationError("LightRAG 需要已配置的模型 API Key")
         if requires_chat_model and llm.api_format == "responses":
             raise SearchConfigurationError(
@@ -243,6 +251,8 @@ class LightRAGConfiguration:
             llm_model=llm.model,
             llm_base_url=llm.base_url.rstrip("/"),
             llm_api_key=llm.api_key,
+            llm_auth_source=llm.auth_source,
+            llm_workspace_id=llm.workspace_id,
             timeout_seconds=max(1, int(llm.timeout_seconds)),
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
@@ -404,6 +414,21 @@ class LightRAGSearchBackend:
                     "LightRAG 的 Anthropic 适配器未安装，请重新运行 OpenWrite 启动器"
                 ) from exc
 
+        from tools.llm.opencode_console import is_go_url
+
+        go_client = None
+        if is_go_url(config.llm_base_url):
+            from tools.llm.client import LLMClient, LLMConfig
+
+            go_client = LLMClient(LLMConfig(
+                provider=config.provider,
+                api_key=config.llm_api_key,
+                base_url=config.llm_base_url,
+                model=config.llm_model,
+                auth_source=config.llm_auth_source,
+                workspace_id=config.llm_workspace_id,
+            ))
+
         async def llm_model_func(
             prompt: str,
             system_prompt: str | None = None,
@@ -414,6 +439,14 @@ class LightRAGSearchBackend:
             kwargs.pop("api_key", None)
             kwargs.setdefault("timeout", config.timeout_seconds)
             history = history_messages or []
+            api_key = config.llm_api_key
+            if go_client is not None:
+                params = await asyncio.to_thread(go_client._base_params)
+                api_key = params["api_key"]
+                kwargs["extra_headers"] = {
+                    **kwargs.get("extra_headers", {}),
+                    **params.get("extra_headers", {})
+                }
             if config.provider == "anthropic":
                 if anthropic_complete_if_cache is None:  # pragma: no cover - guarded above
                     raise SearchConfigurationError("Anthropic LightRAG 适配器不可用")
@@ -432,7 +465,7 @@ class LightRAGSearchBackend:
                 system_prompt=system_prompt,
                 history_messages=history,
                 base_url=config.llm_base_url,
-                api_key=config.llm_api_key,
+                api_key=api_key,
                 **kwargs,
             )
 

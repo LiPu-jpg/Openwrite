@@ -2903,6 +2903,8 @@ class StudioApplication:
             model=settings["model"],
             max_tokens=settings["max_tokens"],
             api_format=settings["api_format"],
+            auth_source=settings.get("auth_source", "api_key"),
+            workspace_id=settings.get("workspace_id", ""),
             stream=False,
             timeout_seconds=30,
             max_retries=0,
