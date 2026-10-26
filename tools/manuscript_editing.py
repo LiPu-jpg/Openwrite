@@ -70,6 +70,7 @@ class ManuscriptVersionStore:
             version_id=version_id,
             chapter_id=clean_chapter,
             source_revision=self.fingerprint(source),
+            source_revision_format="utf8-bytes",
             reason=reason,  # type: ignore[arg-type]
             label=str(label or "")[:200],
             created_at=now.isoformat(),
@@ -166,7 +167,15 @@ class ManuscriptVersionStore:
         except (OSError, ValueError) as exc:
             raise ManuscriptEditingError("正文版本损坏", code="INVALID_VERSION") from exc
         if self.fingerprint(content) != version.source_revision:
-            raise ManuscriptEditingError("正文版本校验失败", code="INVALID_VERSION")
+            legacy = content.replace("\r\n", "\n").replace("\r", "\n")
+            if (
+                version.source_revision_format != "legacy-universal-newlines"
+                or self.fingerprint(legacy) != version.source_revision
+            ):
+                raise ManuscriptEditingError("正文版本校验失败", code="INVALID_VERSION")
+            # Old snapshots were hashed after Python's universal-newline read.
+            # Return the represented text without rewriting the saved artifact.
+            content = legacy
         return version, content
 
     def restore(

@@ -1,6 +1,7 @@
 """Cross-platform regressions found by the Windows verification matrix."""
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -15,7 +16,11 @@ from tools.character_state_index import CharacterStateIndex
 from tools.export_preflight import ExportPreflightService
 from tools.init_project import init_project
 from tools.manuscript_acceptance import ManuscriptAcceptanceService
-from tools.manuscript_editing import ManuscriptAnnotationStore, ManuscriptVersionStore
+from tools.manuscript_editing import (
+    ManuscriptAnnotationStore,
+    ManuscriptEditingError,
+    ManuscriptVersionStore,
+)
 from tools.outline_tree import build_outline_structure, mutate_outline_structure
 from tools.project_registry import ProjectRegistry
 from tools.research_service import MAX_PROCESS_OUTPUT_BYTES, ResearchService
@@ -141,6 +146,41 @@ def test_outline_mutations_keep_crlf_without_mixing_line_endings(tmp_path):
         content = edited["content"]
         assert "\r\n" in content and "\n" not in content.replace("\r\n", "")
         path.write_bytes(content.encode())
+
+
+def test_old_normalized_history_remains_readable_without_changing_its_artifact(tmp_path):
+    init_project(tmp_path, "demo")
+    novel = tmp_path / "data/novels/demo"
+    source = novel / "data/manuscript/arc_001/ch_001.md"
+    original = "# 第一章\n\n雨停了。\n"
+    source.write_bytes(original.encode())
+    versions = ManuscriptVersionStore(tmp_path, "demo")
+    version = versions.checkpoint("ch_001")
+    snapshot = novel / version.content_file
+    legacy_bytes = original.replace("\n", "\r\n").encode()
+    snapshot.write_bytes(legacy_bytes)
+    metadata = snapshot.with_suffix(".json")
+    old = json.loads(metadata.read_bytes())
+    old.pop("source_revision_format")
+    metadata.write_text(json.dumps(old), encoding="utf-8")
+    loaded, represented = versions.load("ch_001", version.version_id)
+    assert represented == original and loaded.source_revision == versions.fingerprint(original)
+    assert snapshot.read_bytes() == legacy_bytes
+
+
+def test_new_history_rejects_line_ending_tampering(tmp_path):
+    init_project(tmp_path, "demo")
+    novel = tmp_path / "data/novels/demo"
+    original = "# 第一章\n\n雨停了。\n"
+    (novel / "data/manuscript/arc_001/ch_001.md").write_bytes(original.encode())
+    versions = ManuscriptVersionStore(tmp_path, "demo")
+    version = versions.checkpoint("ch_001")
+    assert version.source_revision_format == "utf8-bytes"
+    snapshot = novel / version.content_file
+    snapshot.write_bytes(original.replace("\n", "\r\n").encode())
+    with pytest.raises(ManuscriptEditingError) as raised:
+        versions.load("ch_001", version.version_id)
+    assert raised.value.code == "INVALID_VERSION"
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
