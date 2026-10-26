@@ -34,6 +34,58 @@ async function fixture(t) {
   return root
 }
 
+for (const phase of ['error', 'cancelled', 'stopped']) {
+  test(`manual retry waits for a terminal ${phase} startup to settle before returning a new connection`, async t => {
+    const root = await fixture(t)
+    const runtime = new ManagedRuntime(root, root)
+    const stale = { baseUrl: 'http://127.0.0.1:1', token: 'old' }
+    const fresh = { baseUrl: 'http://127.0.0.1:2', token: 'new' }
+    runtime.state = { phase, message: 'previous child exited' }
+    runtime.allowRevive = false
+    runtime.pending = Promise.resolve(stale)
+    runtime.verifyConnection = async connection => connection
+    let starts = 0
+    runtime.prepare = async () => {
+      starts++
+      runtime.state = { phase: 'ready', message: 'new backend' }
+      runtime.connection = fresh
+      return fresh
+    }
+    const connections = await Promise.all([runtime.ensure(), runtime.ensure()])
+    assert.deepEqual(connections, [fresh, fresh])
+    assert.equal(starts, 1)
+    assert.equal(runtime.status().phase, 'ready')
+    await runtime.dispose()
+  })
+}
+
+test('manual retry can replace a rejected terminal startup', async t => {
+  const root = await fixture(t)
+  const runtime = new ManagedRuntime(root, root)
+  runtime.state = { phase: 'error', message: 'previous startup failed' }
+  runtime.pending = Promise.reject(new Error('previous startup failed'))
+  runtime.prepare = async () => ({ baseUrl: 'http://127.0.0.1:2', token: 'new' })
+  assert.equal((await runtime.ensure()).token, 'new')
+  await runtime.dispose()
+})
+
+test('cancellation wins over a manual retry waiting for the previous startup', async t => {
+  const root = await fixture(t)
+  const runtime = new ManagedRuntime(root, root)
+  let finish
+  runtime.state = { phase: 'error', message: 'previous child exited' }
+  runtime.pending = new Promise(resolve => { finish = resolve })
+  let starts = 0
+  runtime.prepare = async () => { starts++; return { baseUrl: 'http://127.0.0.1:2' } }
+  const retried = runtime.ensure()
+  const rejected = assert.rejects(retried, /cancelled/i)
+  const cancelled = runtime.cancel()
+  finish({ baseUrl: 'http://127.0.0.1:1', token: 'old' })
+  await Promise.all([rejected, cancelled])
+  assert.equal(starts, 0)
+  await runtime.dispose()
+})
+
 test('cross-process installation lease waits, cancels, and can be reacquired', async t => {
   const root = await fixture(t)
   const first = new ManagedRuntime(root, root)
@@ -494,7 +546,7 @@ test('backend stderr is mirrored to state/logs/backend.log for postmortem diagno
   assert.match(log, /embedding probe thread stuck in import numpy/)
 })
 
-test('in-flight generate is not replayed when the managed child is recovered', async t => {
+test('in-flight generate is not replayed when the managed child is recovered', { timeout: 15_000 }, async t => {
   const { root, artifacts } = await prepared(t)
   const log = join(root, 'posts.log')
   await writeFile(log, '')
@@ -507,21 +559,35 @@ test('in-flight generate is not replayed when the managed child is recovered', a
     backoffMs: [5],
     restartLimit: 3,
   })
-  t.after(() => runtime.dispose())
-  const connection = await runtime.ensure()
-  const hung = fetch(connection.baseUrl + '/api/write', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + connection.token, 'content-type': 'application/json' },
-    body: JSON.stringify({ chapter_id: 'ch_1' }),
-  })
-  const hungFailure = hung.then(() => { throw new Error('in-flight write completed after backend crash') }, error => error)
-  await new Promise(resolve => setTimeout(resolve, 40))
-  await stopOwnedProcess(runtime.child)
-  await waitPhase(runtime, 'ready')
-  assert.ok(await hungFailure)
-  assert.equal((await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length, 1)
-  assert.match(runtime.status().message, /in-progress writing and review tasks require an explicit retry/)
-  assert.doesNotMatch(runtime.status().message, /(?:writing|review) tasks? (?:were |was )?(?:recovered|resumed)/i)
+  const controller = new AbortController()
+  try {
+    const connection = await runtime.ensure()
+    const hung = fetch(connection.baseUrl + '/api/write', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + connection.token, 'content-type': 'application/json' },
+      body: JSON.stringify({ chapter_id: 'ch_1' }),
+      signal: controller.signal,
+    })
+    const hungFailure = hung.then(() => { throw new Error('in-flight write completed after backend crash') }, error => error)
+    // Observe receipt before interruption, including on slower Windows runs.
+    const deadline = Date.now() + 5000
+    while (!(await readFile(log, 'utf8')).includes('POST /api/write')) {
+      assert.ok(Date.now() < deadline, 'backend did not receive the write request')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    await stopOwnedProcess(runtime.child)
+    await waitPhase(runtime, 'ready')
+    assert.ok(await hungFailure)
+    assert.equal((await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length, 1)
+    assert.match(runtime.status().message, /in-progress writing and review tasks require an explicit retry/)
+    assert.doesNotMatch(runtime.status().message, /(?:writing|review) tasks? (?:were |was )?(?:recovered|resumed)/i)
+  } finally {
+    // TestContext after hooks run in registration order: fixture(t) registered
+    // directory removal first. Stop the backend before those hooks, because
+    // Windows cannot remove its still-open working directory.
+    controller.abort()
+    await runtime.dispose()
+  }
 })
 
 test('recovery start failures retry up to the cap without an unhandled rejection', async t => {

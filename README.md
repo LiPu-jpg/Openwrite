@@ -27,9 +27,9 @@
 这是 [OpenWrite](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 的 dsh 插件版本。
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Agent 与交互界面，OpenWrite Core 提供小说领域能力；人物、设定、大纲、正文和评审保存在本地作品目录。
 
-## 源码待发布修复
+## 0.2.27
 
-工作台新增 OpenCode Go Console 认证，捆绑 Core 5.8.15，自动读取本机官方 CLI 的有效凭据和工作区信息；不必手工复制会过期的 Console 令牌。真实工作台连接测试与流式写作已通过。见 [OpenCode Go 接入](docs/OPENCODE_GO.md)。**此项尚未发布到 npm，以下 0.2.26 安装说明不包含它。**
+工作台新增 OpenCode Go Console 认证，捆绑 Core 5.8.16，自动读取本机官方 CLI 的有效凭据和工作区信息；不必手工复制会过期的 Console 令牌。评审首次调用遵守模型输出预算，补充旧会话永久别名和跨平台回归。真实工作台连接测试、流式写作及 Go 安全评审已通过。见 [OpenCode Go 接入](docs/OPENCODE_GO.md) 和 [旧报告复核与待办](docs/CLOSED_ISSUE_FOLLOWUPS.md)。正式发行状态、各平台验收和安装包校验值见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。
 
 ## 0.2.26 更新
 
@@ -40,12 +40,12 @@ Android/ARM 外部 Studio 诊断，以及连载写作可靠性、完整上下文
 
 ## 快速安装
 
-**0.2.26 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.1-rc.3**。五个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
+**0.2.27 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.1-rc.3**。五个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
 
-[npm `dsh-openwrite@0.2.26`](https://www.npmjs.com/package/dsh-openwrite/v/0.2.26) 与 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.26) 均已发布，`latest` 已更新到 0.2.26；两处使用同一份验收产物，公开下载后的完整包校验和一致。也可安装精确版本的 Release 包：
+正式发行状态以 [npm 版本列表](https://www.npmjs.com/package/dsh-openwrite?activeTab=versions) 和 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 为准。以下是 0.2.27 精确版本的安装命令；发布时两处使用同一份验收产物：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.26/dsh-openwrite-0.2.26.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.27/dsh-openwrite-0.2.27.tgz
 dsh web
 ```
 
@@ -75,7 +75,7 @@ dsh web
 
 ### dsh 0.2 桌面端升级
 
-`0.2.26`（Core 5.8.14）包含 #105–#114 修复，以及 #103/#104 的 Embedding 维度和配置改进。升级前完全退出 dsh/桌面客户端；安装后重新启动并刷新浏览器。原有作品、凭据和会话继续保留，历史版本预设用于恢复旧会话。受限平台使用外部 Studio，OpenCode Go 的服务商使用范围和配置要求见上述文档。
+`0.2.27`（Core 5.8.16）包含 Go 工作台认证、评审输出预算及后台重试补漏，并保留 #105–#113 与 #103/#104 的既有修复；原始场景仍待验证的条目见 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123)。升级前完全退出 dsh/桌面客户端；安装后重新启动并刷新浏览器。原有作品、凭据和会话继续保留，历史版本预设用于恢复旧会话。受限平台使用外部 Studio，OpenCode Go 的服务商使用范围和配置要求见上述文档。
 
 `0.2.25`（Core 5.8.12）已在 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.25) 与 [npm](https://www.npmjs.com/package/dsh-openwrite/v/0.2.25) 发布，新增连载体检、分段续写、共享术语/范本、章组审计和漂移裁决，并修复验收与任务可观测性。范围、离线升级工具及宿主侧限制见 [#98–#100 实现说明](docs/ISSUES_98_100.md)，完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#025)。
 

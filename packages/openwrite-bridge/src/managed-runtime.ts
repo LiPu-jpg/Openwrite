@@ -181,6 +181,7 @@ export class ManagedRuntime {
   private connection?: BackendConnection
   private closed = false
   private allowRevive = true
+  private cancelEpoch = 0
   private generation = 0
   private restartAttempts = 0
   private recovered = false
@@ -203,7 +204,22 @@ export class ManagedRuntime {
   ensure(): Promise<BackendConnection> {
     if (this.closed) return Promise.reject(new Error('OpenWrite was removed'))
     if (this.connection) return this.verifyConnection(this.connection)
-    if (this.pending) return this.pending
+    if (this.pending) {
+      if (['error', 'cancelled', 'stopped'].includes(this.state.phase)) {
+        // A ready child can exit while prepare is still saving active.json.
+        // The terminal state is visible before that promise settles; returning
+        // it would hand a manual retry the dead connection or its old error.
+        const prior = this.pending
+        const epoch = this.cancelEpoch
+        const retry = () => {
+          if (epoch !== this.cancelEpoch) throw new Error('Setup was cancelled; retry when ready')
+          if (this.pending === prior) this.pending = undefined
+          return this.ensure()
+        }
+        return prior.then(retry, retry)
+      }
+      return this.pending
+    }
     this.allowRevive = true
     if (this.state.phase === 'error' || this.state.phase === 'cancelled' || this.state.phase === 'stopped') {
       this.restartAttempts = 0
@@ -260,6 +276,7 @@ export class ManagedRuntime {
     }
   }
   async cancel(): Promise<void> {
+    this.cancelEpoch += 1
     this.allowRevive = false
     this.controller?.abort()
     await this.pending?.catch(() => {})

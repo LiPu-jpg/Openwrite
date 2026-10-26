@@ -11,6 +11,7 @@ const manifest = JSON.parse(await readFile(join(directory, artifact + '.manifest
 assert.equal(createHash('sha256').update(await readFile(join(directory, artifact))).digest('hex'), manifest.sha256)
 assert.equal(manifest.source.plugin.dirty, false, 'Release source must be clean')
 const reports = await Promise.all(files.filter(file => /^release-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
+const nativeRegressions = await Promise.all(files.filter(file => /^packaged-regressions-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
 const required = ['install', 'repeat-install', 'existing-plugin-coexistence', 'native-dependency-load', 'native-backend-project-init', 'project-metadata-update', 'readonly-post-invalidation', 'manuscript-mutation-invalidation', 'backend-auth', 'failed-upgrade-preserves-active', 'rollback', 'uninstall', 'retain-data']
 for (const [platform, arch, major] of [['linux', 'x64', 24], ['darwin', 'arm64', 24], ['darwin', 'x64', 24], ['win32', 'x64', 24], ['linux', 'x64', 22], ['linux', 'x64', 26]]) {
   const report = reports.find(r => r.installSource === 'release' && (!r.host || r.host === manifest.host) && r.platform === platform && r.arch === arch && Number(r.node.match(/^v(\d+)/)?.[1]) === major)
@@ -20,6 +21,12 @@ for (const [platform, arch, major] of [['linux', 'x64', 24], ['darwin', 'arm64',
   for (const check of required) assert.ok(report.checks.includes(check), `Missing check: ${check}`)
   assert.ok(report.checks.includes('native-browser-launch'), 'Missing browser acceptance')
   assert.ok(report.checks.includes('browser-project-metadata'), 'Missing metadata browser acceptance')
+  const regression = nativeRegressions.find(r => r.platform === platform && r.arch === arch && Number(r.node.match(/^v(\d+)/)?.[1]) === major)
+  assert.equal(regression?.status, 'passed', `Missing packaged regressions for ${platform}/${arch}/Node ${major}`)
+  assert.equal(regression.artifactSha256, manifest.sha256, 'Native regressions tested different artifact')
+  for (const check of ['durable-preset-identities', 'offline-profile-upgrade', 'managed-runtime']) {
+    assert.ok(regression.checks.includes(check), `Native regressions missing ${check}`)
+  }
 }
 const alpha = reports.find(r => r.host === '0.1.5-alpha.1' && r.platform === 'linux' && r.arch === 'x64')
 assert.equal(alpha?.status, 'passed', 'Exact alpha host compatibility must pass')
@@ -37,7 +44,7 @@ for (const host of ['0.1.2-rc.1', '0.1.5-alpha.1', '0.2.0-rc.2', '0.2.1-rc.2', '
     assert.ok(report.checks.includes(check), `${host} client missing check: ${check}`)
   }
 }
-const result = { status: 'passed', artifact, sha256: manifest.sha256, host: manifest.host, source: manifest.source, workflow: process.env.GITHUB_RUN_ID ? `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : null, reports, clientReports, realModelValidation: { status: 'not-run', modelCalls: 0, countedAsPassed: false } }
+const result = { status: 'passed', artifact, sha256: manifest.sha256, host: manifest.host, source: manifest.source, workflow: process.env.GITHUB_RUN_ID ? `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : null, reports, clientReports, nativeRegressions, realModelValidation: { status: 'not-run', modelCalls: 0, countedAsPassed: false } }
 await writeFile(join(directory, 'release-acceptance.json'), JSON.stringify(result, null, 2) + '\n')
 await writeFile(join(directory, 'SHA256SUMS'), `${manifest.sha256}  ${artifact}\n`)
 console.log(`Release gate passed: ${artifact} ${manifest.sha256}`)

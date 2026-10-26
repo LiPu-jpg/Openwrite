@@ -4,7 +4,13 @@ import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply } from '../plugin.mjs'
-import { presetDefinition } from '../preset-definition.mjs'
+import { legacyPresetIds, presetDefinition } from '../preset-definition.mjs'
+
+test('released versioned identities remain resolvable after migrating sessions without preset directories', async () => {
+  const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.ok(legacyPresetIds.includes(`openwrite-${version.replaceAll('.', '-')}`),
+    'record every new release identity in the durable alias list before publishing')
+})
 
 test('upgrade resolves retired preset identities without rewriting session data or custom definitions', async t => {
   const home = await mkdtemp(join(tmpdir(), 'openwrite-upgrade-resume-'))
@@ -35,7 +41,7 @@ test('upgrade resolves retired preset identities without rewriting session data 
   })
   const unregister = []
   for await (const dispose of activation) unregister.push(dispose)
-  for (const id of ['openwrite', 'openwrite-0-2-1', 'openwrite-0-2-24', 'openwrite-0-2-25']) {
+  for (const id of ['openwrite', 'openwrite-0-2-1', 'openwrite-0-2-24', 'openwrite-0-2-25', 'openwrite-0-2-26']) {
     assert.ok(definitions.get(id).plugins.length > 10, `session preset ${id} resolves`)
   }
   assert.equal(definitions.get('openwrite-0-2-23').name, 'Author preset')
