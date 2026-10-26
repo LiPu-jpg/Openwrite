@@ -40,7 +40,7 @@ jobs:
           path: core
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12.13'
+          python-version: '3.12'
       - name: Keep checked-out source bytes identical to the wheel on every OS
         run: |
           git -C core config core.autocrlf false
