@@ -26,9 +26,26 @@ try {
     await copyFile(join(checkout, file), join(root, file))
   }
   await new Promise((done, reject) => {
-    const child = spawn(process.execPath, ['--test', '--test-reporter=tap', ...tests], { cwd: root, stdio: 'inherit' })
-    child.once('error', reject)
-    child.once('exit', (code, signal) => code === 0 ? done() : reject(new Error(`Packaged regressions failed: ${signal ?? code}`)))
+    const child = spawn(process.execPath, ['--test', '--test-reporter=tap', ...tests], {
+      cwd: root, stdio: 'inherit', detached: process.platform !== 'win32', windowsHide: true,
+    })
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      if (!child.pid) return
+      if (process.platform === 'win32') {
+        const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+        killer.once('error', () => child.kill('SIGKILL'))
+      } else {
+        try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
+      }
+    }, 120_000)
+    child.once('error', error => { clearTimeout(timer); reject(error) })
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer)
+      if (code === 0 && !timedOut) done()
+      else reject(new Error(`Packaged regressions failed: ${timedOut ? 'timeout' : signal ?? code}`))
+    })
   })
   const report = {
     status: 'passed', platform: process.platform, arch: process.arch, node: process.version,

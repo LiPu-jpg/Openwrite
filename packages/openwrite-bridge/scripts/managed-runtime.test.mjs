@@ -508,28 +508,34 @@ test('in-flight generate is not replayed when the managed child is recovered', {
     restartLimit: 3,
   })
   const controller = new AbortController()
-  t.after(async () => { controller.abort(); await runtime.dispose() })
-  const connection = await runtime.ensure()
-  const hung = fetch(connection.baseUrl + '/api/write', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + connection.token, 'content-type': 'application/json' },
-    body: JSON.stringify({ chapter_id: 'ch_1' }),
-    signal: controller.signal,
-  })
-  const hungFailure = hung.then(() => { throw new Error('in-flight write completed after backend crash') }, error => error)
-  // A fixed delay can stop the process before Windows has sent the request.
-  // Observe receipt at the server before testing interruption/replay behavior.
-  const deadline = Date.now() + 5000
-  while (!(await readFile(log, 'utf8')).includes('POST /api/write')) {
-    assert.ok(Date.now() < deadline, 'backend did not receive the write request')
-    await new Promise(resolve => setTimeout(resolve, 20))
+  try {
+    const connection = await runtime.ensure()
+    const hung = fetch(connection.baseUrl + '/api/write', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + connection.token, 'content-type': 'application/json' },
+      body: JSON.stringify({ chapter_id: 'ch_1' }),
+      signal: controller.signal,
+    })
+    const hungFailure = hung.then(() => { throw new Error('in-flight write completed after backend crash') }, error => error)
+    // Observe receipt before interruption, including on slower Windows runs.
+    const deadline = Date.now() + 5000
+    while (!(await readFile(log, 'utf8')).includes('POST /api/write')) {
+      assert.ok(Date.now() < deadline, 'backend did not receive the write request')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    await stopOwnedProcess(runtime.child)
+    await waitPhase(runtime, 'ready')
+    assert.ok(await hungFailure)
+    assert.equal((await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length, 1)
+    assert.match(runtime.status().message, /in-progress writing and review tasks require an explicit retry/)
+    assert.doesNotMatch(runtime.status().message, /(?:writing|review) tasks? (?:were |was )?(?:recovered|resumed)/i)
+  } finally {
+    // TestContext after hooks run in registration order: fixture(t) registered
+    // directory removal first. Stop the backend before those hooks, because
+    // Windows cannot remove its still-open working directory.
+    controller.abort()
+    await runtime.dispose()
   }
-  await stopOwnedProcess(runtime.child)
-  await waitPhase(runtime, 'ready')
-  assert.ok(await hungFailure)
-  assert.equal((await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length, 1)
-  assert.match(runtime.status().message, /in-progress writing and review tasks require an explicit retry/)
-  assert.doesNotMatch(runtime.status().message, /(?:writing|review) tasks? (?:were |was )?(?:recovered|resumed)/i)
 })
 
 test('recovery start failures retry up to the cap without an unhandled rejection', async t => {
