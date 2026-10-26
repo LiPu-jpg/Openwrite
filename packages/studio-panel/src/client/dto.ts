@@ -113,6 +113,8 @@ export type ConnectionTestResultDto = {
   latency_ms: number | null
   tested_at: string
   reply: string
+  dimension: number | null
+  vectors: number | null
 }
 
 export function parseConnectionTestResult(value: unknown): ConnectionTestResultDto {
@@ -124,6 +126,8 @@ export function parseConnectionTestResult(value: unknown): ConnectionTestResultD
     latency_ms: asFiniteNumber(root['latency_ms']),
     tested_at: asText(root['tested_at']),
     reply: asText(root['reply']),
+    dimension: asFiniteNumber(root['dimension']),
+    vectors: asFiniteNumber(root['vectors']),
   }
 }
 
