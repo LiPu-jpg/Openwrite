@@ -6,9 +6,11 @@
 
 本地 Core 全量 1478 passed / 32 skipped；HTTP 行中锚点的 LF/CRLF 预览、应用、撤销与不匹配保护通过。预设生命周期、停机升级与 managed runtime 组合 32 passed（含五项手动重试/取消回归），并加入六组原生安装矩阵。真实 OpenCode Go 流式安全评审 1 次成功，首次 max_tokens=24000、耗时 4.424 秒；此前工作台 Console 档案保存、连接测试及流式写作也成功。CI 本身不调用模型，真实模型记录与其独立，不能把 CI 的 modelCalls:0 解释成真实模型验收。
 
-[GitHub Release v0.2.27](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.27) 已发布；四份公开附件逐字节与 CI 原始文件一致。npm 发布仍需维护者完成本人双重验证，官方 registry 的 latest 当前为 0.2.26。可先安装 GitHub 的 0.2.27 tarball。
+[GitHub Release v0.2.27](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.27) 与 [npm `dsh-openwrite@0.2.27`](https://www.npmjs.com/package/dsh-openwrite/v/0.2.27) 均已发布，官方 registry 的 `latest` 已更新到 0.2.27。GitHub 四份公开附件逐字节与 CI 原始文件一致；从官方 npm registry 无认证重新下载的 10,169,500 字节安装包也与 CI 包逐字节一致，SHA-256、npm 的 SHA-1 与 SHA-512 integrity 均已核对。发布通过本人双重验证后先返回 HTTP 202，等待服务端校验与公开同步完成，再以公开下载验证确认发布成功。
 
 使用 [完整发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/40358781683) 原始 validated-release 产物；[插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40358781965) 同样通过，共 16 项检查全部成功。验收包含 8 份安装/源码报告、5 份精确宿主客户端报告，以及 6 份绑定安装包哈希的原生回归报告，每组 32 项回归通过。tarball SHA-256 为 `94e9df25289b7053f12978f8fc4bb75f3f8da894f02312e82a88ca19efa095f2`。CI 来源提交 `e08679c47258bb1584e2920cf0245f24718bb9db` 与主分支合并提交 `cbab43b4e427ae1507d26e96e47a9abdbeb6414b` 的源码 tree 均为 `5bde0e856c7643d603bfe202704c4051860c43a0`；发布直接使用 CI 包，没有重新打包。
+
+合并后的[主分支发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/40360046529) 和[插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40360046553) 同样全部通过。
 
 [未完成验收与上游依赖](CLOSED_ISSUE_FOLLOWUPS.md) 继续由 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123) 跟踪；新增 #121/#122 保持打开。
 

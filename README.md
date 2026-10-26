@@ -31,7 +31,7 @@
 
 工作台新增 OpenCode Go Console 认证，捆绑 Core 5.8.16，自动读取本机官方 CLI 的有效凭据和工作区信息；不必手工复制会过期的 Console 令牌。评审首次调用遵守模型输出预算，补充旧会话永久别名和跨平台回归。真实工作台连接测试、流式写作及 Go 安全评审已通过。见 [OpenCode Go 接入](docs/OPENCODE_GO.md) 和 [旧报告复核与待办](docs/CLOSED_ISSUE_FOLLOWUPS.md)。正式发行状态、各平台验收和安装包校验值见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。
 
-[GitHub 0.2.27](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.27) 已发布；npm 发布等待维护者完成双重验证，`@latest` 当前仍为 0.2.26。可以使用下方精确 GitHub 包安装命令获取本次修复。
+[GitHub 0.2.27](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.27) 与 [npm 0.2.27](https://www.npmjs.com/package/dsh-openwrite/v/0.2.27) 均已发布，`@latest` 已更新到 0.2.27。两处公开下载包均与 CI 验收包逐字节一致，可使用下方安装命令获取本次修复。
 
 ## 0.2.26 更新
 
