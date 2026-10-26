@@ -778,6 +778,7 @@ export function GraphView({ fetchStudioApi, postStudioApi, t }: GraphViewProps) 
                   </span>
                 </div>
                 {workflow.error !== '' && <div className={css.taskError}>{workflow.error}</div>}
+                <div className={css.taskSummary}>{t('graph.workflow.executionHint')}</div>
                 <div className={css.workflowStages}>
                   {workflow.stages.map(stage => (
                     <span
@@ -790,6 +791,9 @@ export function GraphView({ fetchStudioApi, postStudioApi, t }: GraphViewProps) 
                     </span>
                   ))}
                 </div>
+                {workflow.stages.some(stage => stage.name === 'user_confirm' && stage.status !== 'completed') && (
+                  <div className={css.notice}>{t('graph.workflow.confirmHint')}</div>
+                )}
               </div>
             ))
         )}

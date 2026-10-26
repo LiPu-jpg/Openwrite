@@ -13,7 +13,7 @@ export const stablePresetId = 'openwrite'
 
 // These released identities are durable session references, even after their
 // package-managed directories have been removed by older plugin versions.
-export const legacyPresetIds = Array.from({ length: 27 }, (_, i) => `openwrite-0-2-${i + 1}`)
+export const legacyPresetIds = Array.from({ length: 28 }, (_, i) => `openwrite-0-2-${i + 1}`)
 
 export async function presetDefinition(version, modern = false) {
   const baseUrl = new URL('./presets/openwrite/', import.meta.url)

@@ -816,6 +816,8 @@ export type StudioPanelKey =
   | 'graph.truth.relationships'
   | 'graph.workflows'
   | 'graph.workflow.currentStage'
+  | 'graph.workflow.executionHint'
+  | 'graph.workflow.confirmHint'
   | 'graph.empty.truth'
   | 'graph.empty.truthDoc'
   | 'graph.empty.workflows'
@@ -2013,6 +2015,8 @@ export const zh: Record<StudioPanelKey, string> = {
   'graph.truth.relationships': '关系矩阵',
   'graph.workflows': '工作流',
   'graph.workflow.currentStage': '当前阶段',
+  'graph.workflow.executionHint': '此图显示步骤是否执行完成；审稿步骤完成不代表交付通过，交付结论请查看交付验收。',
+  'graph.workflow.confirmHint': '作者验收确认：先用 novel_manuscript_acceptance 查看 operation_id 和待核对影响；人工核对后，用 novel_manuscript_acceptance_reconcile（action="acknowledge"、confirm=true、domains=已核对的影响域）确认。尚未完成的结算仍需先 resume。',
   'graph.empty.truth': '暂无真相文件内容。章节推进后由 agent 更新 data/world/ 下的真相文件。',
   'graph.empty.truthDoc': '（空）',
   'graph.empty.workflows': '暂无活动章节工作流。',
@@ -3170,6 +3174,8 @@ export const en: Record<StudioPanelKey, string> = {
   'graph.truth.relationships': 'Relationship matrix',
   'graph.workflows': 'Workflows',
   'graph.workflow.currentStage': 'Current stage',
+  'graph.workflow.executionHint': 'These are execution steps. A completed review step does not mean delivery passed; see delivery acceptance for that decision.',
+  'graph.workflow.confirmHint': 'Author confirmation: inspect operation_id and pending impacts with novel_manuscript_acceptance. After checking the text and impacts, call novel_manuscript_acceptance_reconcile with action="acknowledge", confirm=true, and the reviewed domains. Resume unfinished reconciliation first.',
   'graph.empty.truth': 'No truth-file content yet. The agent updates the data/world/ truth files as chapters advance.',
   'graph.empty.truthDoc': '(empty)',
   'graph.empty.workflows': 'No active chapter workflows.',

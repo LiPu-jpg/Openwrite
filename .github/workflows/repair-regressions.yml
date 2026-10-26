@@ -1,0 +1,91 @@
+name: Repair regression verification
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**/*.md'
+  pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**/*.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: repairs-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  core-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Read the wheel's immutable Core source
+        id: source
+        run: node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('plugin/release/runtime-manifest.json')); if(!/^[0-9a-f]{40}$/.test(m.sources.core.commit)) throw Error('Invalid Core commit'); fs.appendFileSync(process.env.GITHUB_OUTPUT,'commit='+m.sources.core.commit+'\n')"
+      - uses: actions/checkout@v4
+        with:
+          repository: LiPu-jpg/Openwrite
+          ref: ${{ steps.source.outputs.commit }}
+          path: core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.13'
+      - name: Keep checked-out source bytes identical to the wheel on every OS
+        run: |
+          git -C core config core.autocrlf false
+          git -C core checkout-index --force --all
+      - run: python plugin/scripts/verify-core-wheel-source.py --plugin plugin --core core --report core-wheel-source.json
+      - run: python -m pip install uv==0.11.19
+      - name: Run all Core regressions without live-model tests
+        working-directory: core
+        run: uv run --frozen --extra dev pytest -q --junitxml=../core-regressions.xml
+      - name: Verify follow-up routes through real HTTP
+        working-directory: core
+        run: uv run --frozen --extra dev pytest -q ../plugin/conductor/test_followup_http.py --junitxml=../followup-http.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-regressions-${{ matrix.os }}
+          path: |
+            core-wheel-source.json
+            core-regressions.xml
+            followup-http.xml
+          if-no-files-found: error
+  electron-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --prefix vendor/dsh-dog --ignore-scripts --no-audit --no-fund
+      - run: npm install --prefix .tmp-electron electron@44.7.0 --registry=https://registry.npmjs.org --no-audit --no-fund
+      - run: node .tmp-electron/node_modules/electron/install.js
+      - name: Select the actual Electron executable
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_ENV,'OPENWRITE_ELECTRON_EXECUTABLE='+require('./.tmp-electron/node_modules/electron')+'\n')"
+      - name: Verify ESM scripts and process diagnostics on the native Electron runtime
+        run: npm --prefix vendor/dsh-dog test -- --run tests/owned-script-electron.spec.ts tests/owned-script.spec.ts --reporter=json --outputFile=../../electron-regressions.json
+      - name: Require the real Electron case to run
+        run: node -e "const r=require('./electron-regressions.json'); if(r.numPassedTests<4 || r.numPendingTests!==0 || r.numFailedTests!==0) throw Error('Electron regressions incomplete')"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: electron-regressions-${{ matrix.os }}
+          path: electron-regressions.json
+          if-no-files-found: error

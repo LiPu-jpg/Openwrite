@@ -37,6 +37,7 @@ const readActions: Record<string, readonly string[]> = {
 export function novelEffect(name: string, args: unknown): NovelEffect {
   if (reads.has(name)) return 'read'
   const values = args && typeof args === 'object' ? args as Record<string, unknown> : {}
+  if (name === 'novel_write_chapter' && values.dry_run === true) return 'read'
   if (readActions[name]?.includes(String(values.action))) return 'read'
   if (name === 'novel_model_benchmark' && values.action === 'run') return 'generate'
   return generates.has(name) ? 'generate' : 'write'

@@ -1,6 +1,6 @@
 {
   "name": "dsh-openwrite",
-  "version": "0.2.27",
+  "version": "0.2.28",
   "description": "OpenWrite 长篇小说领域后端接入 DeepSeek Harness：统一创作 Agent 预设 + 原生创作工作台",
   "type": "module",
   "scripts": {
@@ -14,14 +14,14 @@
     "install-dsh": "bash scripts/install.sh",
     "dev": "bash scripts/dev.sh",
     "doctor": "node scripts/plugin-doctor.mjs",
-    "test:maintenance": "node --test scripts/plugin-doctor.test.mjs scripts/lifecycle.test.mjs packages/openwrite-bridge/scripts/runtime-lifecycle.test.mjs scripts/maintenance.test.mjs scripts/preset-lifecycle.test.mjs scripts/safe-upgrade.test.mjs",
+    "test:maintenance": "node --test scripts/plugin-doctor.test.mjs scripts/lifecycle.test.mjs packages/openwrite-bridge/scripts/runtime-lifecycle.test.mjs scripts/maintenance.test.mjs scripts/preset-lifecycle.test.mjs scripts/safe-upgrade.test.mjs scripts/dog-tools.test.mjs",
     "check": "npm run check:plugin && npm run test:contracts",
     "test:lifecycle": "node --test scripts/lifecycle.test.mjs",
     "test:runtime": "node --test packages/openwrite-bridge/scripts/runtime-lifecycle.test.mjs",
     "check:plugin": "npm run build && npm run doctor && npm run test:maintenance && npm run test:profiles && npm run test:preset && npm --prefix packages/openwrite-bridge run smoke && npm --prefix packages/studio-panel run smoke && npm run test:epochs && npm run test:components",
     "test:profiles": "node scripts/profile-smoke.mjs",
     "prepare": "node scripts/prepare.mjs",
-    "test:managed": "node --test packages/openwrite-bridge/scripts/managed-runtime.test.mjs packages/openwrite-bridge/scripts/tool-policy.test.mjs",
+    "test:managed": "node --test packages/openwrite-bridge/scripts/managed-runtime.test.mjs packages/openwrite-bridge/scripts/tool-policy.test.mjs packages/openwrite-bridge/scripts/followup-tools.test.mjs",
     "test:release": "node scripts/release-smoke.mjs",
     "test:client-boot": "node scripts/client-boot-smoke.mjs"
   },

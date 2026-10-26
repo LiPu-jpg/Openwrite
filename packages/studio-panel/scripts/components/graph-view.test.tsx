@@ -116,6 +116,15 @@ describe('GraphView DAG epoch refresh', () => {
     harness.tasksEpoch = 0
   })
 
+  it('explains execution versus delivery and exposes the author confirmation action', async () => {
+    const api = makeApi()
+    api.fetchStudioApi.mockImplementationOnce(async () => ({...CONTINUITY, workflows: [{chapter_id: 'ch_001', current_stage: 'user_confirm', stages: [{name: 'review', status: 'completed'}, {name: 'user_confirm', status: 'pending'}]}]}))
+    renderView(api)
+    fireEvent.click(await screen.findByText(/graph\.workflows/))
+    expect(await screen.findByText('graph.workflow.confirmHint')).toBeTruthy()
+    expect(screen.getByText('graph.workflow.executionHint')).toBeTruthy()
+  })
+
   it('refetches /dog/graphs when the tasks epoch bumps', async () => {
     const api = makeApi()
     const view = renderView(api)

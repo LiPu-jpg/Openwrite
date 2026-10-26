@@ -234,16 +234,20 @@ export async function materializeChapterDelivery(
   })
   let reviewStage: RecordValue
   if (Object.keys(review).length === 0) {
-    reviewStage = stage(chapterId, 'review', 'inconclusive', 'missing', {})
+    reviewStage = stage(chapterId, 'review', 'inconclusive', 'not_reviewed', {})
   } else if (!reviewCurrent) {
     reviewStage = stage(chapterId, 'review', 'inconclusive', reviewStale ? 'stale' : 'unverifiable', {
       sourceRevision: reviewSourceRevision, currentRevision, staleReason: review['stale_reason'] ?? null,
     })
   } else {
     const v2 = record(review['review_v2'])
-    reviewStage = stage(chapterId, 'review', reviewPassed ? 'pass' : ['inconclusive', 'stale'].includes(currentDeliveryStatus) ? 'inconclusive' : 'fail', 'current', {
+    const diagnostics = record(v2['delivery_diagnostics'])
+    const reviewState = !reviewPassed && currentDeliveryStatus === 'inconclusive' ? String(diagnostics['code'] ?? v2['delivery_reason'] ?? 'review_inconclusive') : 'current'
+    reviewStage = stage(chapterId, 'review', reviewPassed ? 'pass' : ['inconclusive', 'stale'].includes(currentDeliveryStatus) ? 'inconclusive' : 'fail', reviewState, {
       score: review['score'] ?? null, threshold: effectiveThreshold, passedGate: reviewPassed,
-      qualityScore: v2['quality_score'] ?? review['score'] ?? null, coverage: v2['coverage'] ?? 1,
+      qualityScore: hasV2 ? v2['quality_score'] ?? null : review['score'] ?? null, coverage: v2['coverage'] ?? 1,
+      scoreValid: v2['score_valid'] ?? (hasV2 ? v2['quality_score'] != null : review['score'] != null),
+      scopeStatus: v2['scope_status'] ?? 'full', deliveryDiagnostics: diagnostics,
       gateStatus: v2['gate_status'] ?? (hardIssueIds.length > 0 ? 'blocked' : 'pass'),
       deliveryStatus: currentDeliveryStatus,
       issueIds, hardIssueIds, sourceRevision: reviewSourceRevision,

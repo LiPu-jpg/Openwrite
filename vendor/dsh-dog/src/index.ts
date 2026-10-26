@@ -5,6 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { } from '@deepseek-ai/dsh-client-connection'
 import type { } from '@deepseek-ai/dsh-host-webserver'
 import { runOwnedScript } from './owned-script.ts'
+import { parseVerdict, scriptFailureVerdict } from './script-verdict.ts'
 import { fileURLToPath } from 'node:url'
 import { dshHomePath } from './host-shims.ts'
 import type {} from '@deepseek-ai/dsh-settings'
@@ -23,10 +24,9 @@ import { DOG_DEBUG_RPC_CHANNEL, createDogDebugRpcHandler, serveDogDebugRpc } fro
 import { loadSchemaSet } from './schema.ts'
 import { DogRepository } from './storage.ts'
 import { createDogDelegateAgentTool, createDogTools } from './tools.ts'
-import { isJsonValue } from './model.ts'
 import { WorkspaceManager } from './workspace.ts'
 import { waitForSettlementFlexible } from './verifier-file.ts'
-import type { AgenticRunner, ProgrammaticRunner, Verdict } from './verifiers.ts'
+import type { AgenticRunner, ProgrammaticRunner } from './verifiers.ts'
 
 
 export { DogEngine } from './core.ts'
@@ -162,11 +162,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     try {
       out = await runOwnedScript(resolveScriptPath(scriptsDir, script), inputPath, env.signal)
     } catch (error) {
-      return {
-        state: 'inconclusive',
-        evidence: { error: String(error instanceof Error ? error.message : error) },
-        reason: 'script execution failed',
-      }
+      return scriptFailureVerdict(error)
     }
     return parseVerdict(out)
   }
@@ -397,27 +393,6 @@ function buildVerifierPrompt(
     '{"verdict": "pass" | "fail" | "inconclusive", "evidence": <any JSON>}',
     'Create it (it does not exist yet); never write it as a relative path or to another location. After writing, stop.',
   ].join('\n')
-}
-
-function parseVerdict(out: string): Verdict {
-  let value: unknown
-  try {
-    value = JSON.parse(out)
-  } catch {
-    return { state: 'inconclusive', evidence: { parseError: 'script output was not JSON' }, reason: 'script output was not JSON' }
-  }
-  const record = value as Record<string, unknown>
-  if (record === null || typeof record !== 'object' || Array.isArray(record)) {
-    return { state: 'inconclusive', evidence: { parseError: 'script output was not an object' }, reason: 'script output was not an object' }
-  }
-  const verdict = record.verdict
-  if (verdict !== 'pass' && verdict !== 'fail' && verdict !== 'inconclusive') {
-    return { state: 'inconclusive', evidence: { parseError: 'invalid verdict' }, reason: 'script returned an invalid verdict' }
-  }
-  return {
-    state: verdict,
-    evidence: isJsonValue(record.evidence) ? record.evidence : { outcome: 'no evidence supplied by script' },
-  }
 }
 
 /** Read the durable session id from a live Agent, or '' outside an agent boundary. */
