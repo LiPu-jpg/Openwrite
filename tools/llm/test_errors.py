@@ -37,7 +37,7 @@ import asyncio
 from dataclasses import dataclass
 from http import HTTPStatus
 
-from tools.embedding_runtime import EmbeddingRuntimeError
+from tools.embedding_runtime import EmbeddingDimensionMismatch, EmbeddingRuntimeError
 from tools.llm.errors import (
     APIError,
     AuthenticationError,
@@ -122,7 +122,10 @@ _HTTP_STATUS_TO_KIND: dict[int, str] = {
 }
 
 _MESSAGE_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("invalid port", "invalidurl", "invalid url", "invalid proxy", "unsupported protocol"), "invalid_configuration"),
+    (
+        ("invalid port", "invalidurl", "invalid url", "invalid proxy", "unsupported protocol"),
+        "invalid_configuration",
+    ),
     (("401", "unauthorized", "authentication", "api key"), "authentication_failed"),
     (("403", "forbidden", "permission"), "permission_denied"),
     (("404", "not found", "model_not_found"), "model_not_found"),
@@ -254,10 +257,19 @@ def connection_test_failure(exc: BaseException) -> ConnectionTestFailure:
     kind = classify_connection_error(exc)
     if kind not in TEST_ERROR_KINDS:  # pragma: no cover - defensive
         kind = "internal_error"
+    message = _MESSAGES[kind]
+    if isinstance(exc, EmbeddingDimensionMismatch):
+        # Only locally measured integer sizes appear in the response; never
+        # echo raw provider bodies or credentials into the UI.
+        message = (
+            f"Embedding 维度不匹配：服务商实际返回 {exc.actual} 维，"
+            f"配置要求 {exc.expected} 维。请检查服务商是否支持 dimensions 参数，"
+            "或调整模型维度后重新构建向量索引。"
+        )
     return ConnectionTestFailure(
         kind=kind,
         code=f"MODEL_TEST_{kind.upper()}",
         http_status=_STATUS_BY_KIND[kind],
         recoverable=kind in RECOVERABLE_KINDS,
-        message=_MESSAGES[kind],
+        message=message,
     )
