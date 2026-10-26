@@ -58,7 +58,7 @@ class ReviewResult:
     passed: bool
     issues: list[ReviewIssue]
     summary: str
-    score: float = 0.0  # 0-100
+    score: float | None = None  # 0-100; partial reviews are unscored
     token_usage: dict = field(default_factory=dict)
     review_v2: dict = field(default_factory=dict)
 
@@ -297,7 +297,7 @@ class ReviewerAgent(BaseAgent):
             "errors": list(getattr(self, "_review_errors", [])),
         }
         legacy = legacy_adapter(review_v2)
-        score = float(legacy["score"])
+        score = legacy["score"]
         passed = bool(legacy["passed"])
 
         return ReviewResult(

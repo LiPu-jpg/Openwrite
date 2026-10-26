@@ -93,6 +93,7 @@ class BaseAgent(ABC):
             LLMResponse 响应对象
         """
         self.log.debug(f"[{self.name}] Calling chat with {len(messages)} messages")
+        self.model_call_count = getattr(self, "model_call_count", 0) + 1
 
         try:
             kwargs = {
@@ -105,13 +106,17 @@ class BaseAgent(ABC):
             if operation:
                 kwargs["operation"] = operation
             response = self.ctx.client.chat(**kwargs)
-            from ..llm.response import classify_response
+            from ..llm.response import ProviderResponseError, classify_response
 
-            classify_response(
-                response.content,
-                finish_reason=getattr(response, "finish_reason", ""),
-                reasoning=getattr(response, "reasoning", ""),
-            )
+            try:
+                classify_response(
+                    response.content,
+                    finish_reason=getattr(response, "finish_reason", ""),
+                    reasoning=getattr(response, "reasoning", ""),
+                )
+            except ProviderResponseError as exc:
+                exc.usage = response.usage
+                raise
             self.log.debug(
                 f"[{self.name}] Response: {len(response.content)} chars, "
                 f"tokens={response.total_tokens}"

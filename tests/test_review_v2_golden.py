@@ -68,7 +68,9 @@ def test_golden_review_cases_have_locatable_positive_evidence_and_expected_score
         assert result["gate_status"] == expected["gate_status"]
         assert result["delivery_status"] == expected["delivery_status"]
         assert _historical_v1(case["issues"]) == case["historical_v1"]
-        observed_scores[case["id"]] = result["quality_score"]
+        # Fixture comparisons still inspect evaluated criteria, while an
+        # incomplete review must never publish that partial average as a score.
+        observed_scores[case["id"]] = result["earned"] / result["evaluated_max"] * 100
 
     assert observed_scores["high_quality"] > observed_scores["current_quality"]
     assert observed_scores["current_quality"] > observed_scores["corrupted"]

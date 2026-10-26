@@ -20,6 +20,7 @@ from tools.project_lock import ProjectBusyError, ProjectWriteLock
 from tools.shared_documents import (
     normalize_character_document,
     normalize_world_entity_document,
+    _normalize_related,
 )
 
 ASSET_KINDS = {"character", "world", "progression"}
@@ -211,6 +212,11 @@ class StructuredAssetService:
         if path is None:
             raise StructuredAssetError("资产不存在", code="ASSET_NOT_FOUND")
         current = path.read_text(encoding="utf-8")
+        related_mode = str(payload.get("related_mode") or "merge")
+        if related_mode not in {"merge", "replace"}:
+            raise StructuredAssetError(
+                "related_mode must be merge or replace", code="INVALID_ASSET"
+            )
         if not expected_revision or expected_revision != self.fingerprint(current):
             raise StructuredAssetError(
                 "资产已在其他位置修改，请重新载入",
@@ -250,6 +256,17 @@ class StructuredAssetService:
                 if asset_kind == "character"
                 else normalize_world_entity_document(content, fallback_id=clean_id)
             )
+        if asset_kind != "progression" and related_mode == "merge":
+            old_meta, _ = parse_toml_front_matter(current)
+            new_meta, new_body = parse_toml_front_matter(content)
+            relations = {
+                str(item["target"]): item for item in _normalize_related(old_meta.get("related"))
+            }
+            relations.update(
+                {str(item["target"]): item for item in _normalize_related(new_meta.get("related"))}
+            )
+            new_meta["related"] = list(relations.values())
+            content = compose_toml_document(self._related_last(new_meta), new_body)
         return {
             "kind": asset_kind,
             "id": clean_id,

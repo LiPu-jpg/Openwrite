@@ -69,7 +69,7 @@
       ],
       "gates": [{"id": "sensitive_content", "status": "pass"}],
       "historical_v1": {"critical_count": 0, "warning_count": 6, "score": 70, "passed": true},
-      "expected_v2": {"quality_score": 60.0, "coverage": 0.9444, "gate_status": "pass", "delivery_status": "inconclusive"}
+      "expected_v2": {"quality_score": null, "coverage": 0.9444, "gate_status": "pass", "delivery_status": "inconclusive"}
     },
     {
       "id": "corrupted",

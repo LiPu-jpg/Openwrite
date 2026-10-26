@@ -41,6 +41,7 @@ class OutlineMdParser:
         md_content = self._strip_ignored_blocks(md_content)
         lines = md_content.split("\n")
         hierarchy = OutlineHierarchy(novel_id=novel_id)
+        self.metadata_diagnostics = []
 
         # 状态追踪
         current_master: Optional[OutlineNode] = None
@@ -153,10 +154,16 @@ class OutlineMdParser:
             if metadata_match:
                 key = metadata_match.group(1).strip()
                 value = metadata_match.group(2).strip()
-                self._apply_metadata(
-                    current_chapter or current_section or current_arc or current_master,
-                    key,
-                    value,
+                node = current_chapter or current_section or current_arc or current_master
+                recognized = self._apply_metadata(node, key, value)
+                self.metadata_diagnostics.append(
+                    {
+                        "node_id": node.node_id if node else "",
+                        "line": i + 1,
+                        "key": key,
+                        "value": value,
+                        "recognized": bool(recognized),
+                    }
                 )
                 i += 1
                 continue
@@ -235,9 +242,7 @@ class OutlineMdParser:
             cleaned = pattern.sub("", cleaned)
         return cleaned
 
-    def _apply_metadata(
-        self, node: Optional[OutlineNode], key: str, value: str
-    ) -> None:
+    def _apply_metadata(self, node: OutlineNode | None, key: str, value: str) -> bool:
         """应用元数据到节点
 
         Args:
@@ -246,7 +251,7 @@ class OutlineMdParser:
             value: 元数据值
         """
         if not node:
-            return
+            return False
 
         # 标准化键名
         key_lower = key.lower().replace(" ", "_").replace("-", "_")
@@ -317,6 +322,9 @@ class OutlineMdParser:
         elif key_lower in ("悬念", "hooks"):
             hooks = [h.strip() for h in re.split(r"[，,、]", value) if h.strip()]
             node.hooks.extend(hooks)
+        else:
+            return False
+        return True
 
     def _extract_section_text(
         self, lines: List[str], start_idx: int, end_level: int

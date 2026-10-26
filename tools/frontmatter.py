@@ -44,7 +44,16 @@ def render_toml_front_matter(metadata: dict[str, Any]) -> str:
     """Render a limited TOML front matter block."""
     lines = ["+++"]
 
-    for key, value in metadata.items():
+    # TOML has no syntax to return from a table header to the root. Root fields
+    # must precede every table, regardless of the incoming mapping's order.
+    def is_table(value: Any) -> bool:
+        return isinstance(value, dict) or (
+            isinstance(value, list)
+            and bool(value)
+            and all(isinstance(item, dict) for item in value)
+        )
+
+    for key, value in sorted(metadata.items(), key=lambda item: is_table(item[1])):
         if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
             for item in value:
                 lines.append("")

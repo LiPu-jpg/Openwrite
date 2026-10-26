@@ -300,6 +300,11 @@ def _normalize_lookup_key(value: object) -> str:
 
 
 def _normalize_related(value: object) -> list[dict[str, object]]:
+    if isinstance(value, dict):
+        value = [
+            {**(details if isinstance(details, dict) else {"note": details}), "target": target}
+            for target, details in value.items()
+        ]
     if not isinstance(value, list):
         return []
     normalized: list[dict[str, object]] = []

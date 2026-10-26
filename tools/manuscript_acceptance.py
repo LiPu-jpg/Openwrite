@@ -199,9 +199,15 @@ class ManuscriptAcceptanceService:
         statuses = {item["status"] for item in relevant}
         if "external_change" in statuses:
             raise ManuscriptAcceptanceError(
-                "检测到正文被外部修改，请先确认并重建关联事实",
+                "检测到正文被外部修改；尚未调用模型。请先对列出的章节执行 external，"
+                "再用返回的 operation_id 执行 resume；no_model 仅接纳正文，不会重建事实。",
                 code="EXTERNAL_MANUSCRIPT_CHANGE",
-                details={"chapters": relevant},
+                details={
+                    "chapters": relevant,
+                    "next_action": "external_then_resume",
+                    "model_called": False,
+                    "latest_operation_id": surface.get("latest_operation_id", ""),
+                },
             )
         if "baseline_required" in statuses:
             raise ManuscriptAcceptanceError(
@@ -211,9 +217,15 @@ class ManuscriptAcceptanceService:
             )
         if statuses & {"pending", "processing", "failed", "stale"}:
             raise ManuscriptAcceptanceError(
-                "正文已保存，关联事实仍待更新",
+                "正文已保存，关联事实仍待更新；尚未调用模型。"
+                "请用 latest_operation_id 执行 resume，完成后再开始下一章。",
                 code="MANUSCRIPT_FACTS_PENDING",
-                details={"chapters": relevant},
+                details={
+                    "chapters": relevant,
+                    "next_action": "resume",
+                    "model_called": False,
+                    "latest_operation_id": surface.get("latest_operation_id", ""),
+                },
             )
         if surface["needs_review"]:
             raise ManuscriptAcceptanceError(

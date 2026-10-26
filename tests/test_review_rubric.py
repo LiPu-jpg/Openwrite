@@ -87,7 +87,8 @@ def test_not_applicable_and_inconclusive_do_not_become_zero_quality():
     canon["criteria"][1]["earned"] = 0
     canon["criteria"][1]["evidence"] = []
     result = aggregate_review(raw, [])
-    assert result["quality_score"] == 100
+    assert result["quality_score"] is None
+    assert legacy_adapter(result) == {"score": None, "passed": False}
     assert 0 < result["coverage"] < 1
     assert result["delivery_status"] == "inconclusive"
 
@@ -109,7 +110,7 @@ def test_positive_points_without_evidence_become_inconclusive():
     criterion = result["domains"][0]["criteria"][0]
     assert criterion["status"] == "inconclusive"
     assert criterion["earned"] == 0
-    assert result["quality_score"] == 100
+    assert result["quality_score"] is None
     assert result["coverage"] == 0.95
 
 

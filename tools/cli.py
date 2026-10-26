@@ -858,7 +858,11 @@ def _cmd_multi_write(args) -> int:
     logger.info(f"章节已保存: {result['chapter_id']}")
     review = result.get("review")
     if isinstance(review, dict):
-        logger.info(f"审查得分: {float(review.get('score', 0)):.0f}/100")
+        logger.info(
+            "审查未完成，未评分"
+            if review.get("score") is None
+            else f"审查得分: {float(review['score']):.0f}/100"
+        )
         logger.info(f"审查问题数: {int(review.get('issues', 0))}")
     updates = result.get("applied_state_updates") or {}
     if isinstance(updates, dict) and updates:
@@ -884,7 +888,11 @@ def _cmd_review(args) -> int:
         return 1
 
     logger.info(f"审查结果: {'通过' if result.get('passed') else '未通过'}")
-    logger.info(f"得分: {float(result.get('score', 0)):.0f}/100")
+    logger.info(
+        "审查未完成，未评分"
+        if result.get("score") is None
+        else f"得分: {float(result['score']):.0f}/100"
+    )
     logger.info(f"问题数: {int(result.get('issues', 0))}")
 
     return 0

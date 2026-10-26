@@ -279,11 +279,11 @@ def _style_profile(
         value = render_style_manifest_summary(raw) if key == "work.manifest" else str(raw).strip()
         if value:
             used.add(key)
-            parts.append(f"## {label}\n{value[:limit]}")
+            parts.append(f"## {label}\n{value}")
     for key in sorted(documents):
         value = str(documents.get(key) or "").strip()
         if key not in used and value:
-            parts.append(f"## {key}\n{value[:600]}")
+            parts.append(f"## {key}\n{value}")
     return "\n\n".join(parts)[:max_chars]
 
 
@@ -491,6 +491,9 @@ def build_writer_payload(
         style = _style_profile(styles, 4000, include_fingerprint=False)
         if style:
             payload["style_profile"] = style
+            payload["style_profile_truncated"] = len(
+                _style_profile(styles, 10_000_000, include_fingerprint=False)
+            ) > len(style)
         active = _characters(packet.get("character_documents", {}))
         if active:
             packet_by_name = {item["name"]: item for item in active}
@@ -522,6 +525,8 @@ def build_writer_payload(
                 core_documents.get("foundation") or packet.get("foundation"),
             ),
             ("设定规则", settings.get("world.rules") or settings.get("world_rules")),
+            ("术语表", settings.get("world.terminology")),
+            ("年代时间线", settings.get("world.timeline")),
             ("额外要求", guidance),
         ):
             text = str(value or "").strip()
@@ -1210,6 +1215,13 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 "truth_updates": updates,
                 "run_id_v2": run_v2_manifest.run_id,
                 "usage": dict(getattr(result, "token_usage", {}) or {}),
+                "context_summary": {
+                    "compression_level": (packet.get("compression") or {}).get("level", 0),
+                    "style_characters": len(str(writer_payload.get("style_profile") or "")),
+                    "usage": dict(getattr(result, "token_usage", {}) or {}),
+                    "model_calls": getattr(result, "model_calls", None),
+                    "style_profile_truncated": writer_payload.get("style_profile_truncated", False),
+                },
                 "finish_reason": str(getattr(result, "finish_reason", "") or ""),
                 "model_profile": run_v2_manifest.model_profile,
                 "requested_model": run_v2_manifest.requested_model,
