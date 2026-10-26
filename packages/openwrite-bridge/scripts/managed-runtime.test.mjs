@@ -363,8 +363,13 @@ test('ready managed child auto-restarts with backoff; cap leaves a retryable err
   const recorded = []
   const delays = []
   const crash = { value: '' }
+  const recoverySnapshots = []
+  const spawnBackend = backendSpawn(t, () => ({ OPENWRITE_CRASH: crash.value, OPENWRITE_EXIT_CODE: '7' }), recorded)
   const runtime = new ManagedRuntime(root, artifacts, {
-    spawn: backendSpawn(t, () => ({ OPENWRITE_CRASH: crash.value, OPENWRITE_EXIT_CODE: '7' }), recorded),
+    spawn: (...args) => {
+      if (crash.value && args[1].includes('tools.managed_runtime')) recoverySnapshots.push(runtime.status())
+      return spawnBackend(...args)
+    },
     delay: async (ms, value, options) => {
       delays.push(ms)
       if (options?.signal?.aborted) { const error = new Error('aborted'); error.name = 'AbortError'; throw error }
@@ -393,11 +398,14 @@ test('ready managed child auto-restarts with backoff; cap leaves a retryable err
   assert.doesNotMatch(recovered.message, /(?:writing|review) tasks? (?:were |was )?(?:recovered|resumed)/i)
   assert.ok(delays.includes(11) || delays.includes(22))
   await waitPhase(runtime, 'error', 12_000)
+  assert.equal(recoverySnapshots.length, 2)
+  assert.ok(recoverySnapshots.every(state => state.phase === 'recovering' && /exit 7|signal/.test(state.error ?? '')))
   assert.match(runtime.status().message, /Retry manually/)
   assert.match(runtime.status().error ?? '', /exit 7|signal/)
   crash.value = ''
   const retried = await runtime.ensure()
   assert.equal(runtime.status().phase, 'ready')
+  assert.equal(runtime.status().error, undefined)
   assert.equal((await fetch(retried.baseUrl + '/api/health', { headers: { Authorization: 'Bearer ' + retried.token } })).status, 200)
   await runtime.dispose()
   assert.equal(runtime.status().phase, 'uninstalled')

@@ -198,7 +198,9 @@ export class ManagedRuntime {
   }
   status(): RuntimeStatus { return { ...this.state } }
   private update(phase: RuntimeStatus['phase'], message: string, extra: Partial<RuntimeStatus> = {}): void {
-    this.state = { phase, message, ...extra }
+    const recoveryError = this.recovered && ['recovering', 'waiting', 'downloading', 'installing'].includes(phase)
+      ? this.state.error : undefined
+    this.state = { phase, message, ...(recoveryError ? { error: recoveryError } : {}), ...extra }
   }
 
   ensure(): Promise<BackendConnection> {
