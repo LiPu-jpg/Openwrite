@@ -38,7 +38,7 @@ Android/ARM 外部 Studio 诊断，以及连载写作可靠性、完整上下文
 
 **0.2.26 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.1-rc.3**。五个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
 
-正式发布状态以 [npm](https://www.npmjs.com/package/dsh-openwrite) 的 `latest` 与对应 GitHub Release 为准；两处使用同一份验收产物。也可安装精确版本的 Release 包：
+[npm `dsh-openwrite@0.2.26`](https://www.npmjs.com/package/dsh-openwrite/v/0.2.26) 与 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.26) 均已发布，`latest` 已更新到 0.2.26；两处使用同一份验收产物，公开下载后的完整包校验和一致。也可安装精确版本的 Release 包：
 
 ```sh
 dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.26/dsh-openwrite-0.2.26.tgz

@@ -6,6 +6,16 @@
 
 新建作品的验收请求最多等待 60 秒（原为 15 秒），保留成功耗时和失败诊断；不重试写请求，超时仍失败。此调整容纳慢速运行器，不代表初始化耗时问题已被修复。
 
+## 0.2.26
+
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.26) 与 [npm `dsh-openwrite@0.2.26`](https://www.npmjs.com/package/dsh-openwrite/v/0.2.26) 均已发布，npm `latest` 已更新到 0.2.26。使用 [完整发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/40323278858) 的原始 `validated-release` 产物，没有重新打包；[离线契约](https://github.com/LiPu-jpg/Openwrite/actions/runs/40323278881) 也通过，共 16 项检查全部成功。发布 PR [#118](https://github.com/LiPu-jpg/Openwrite/pull/118) 已合并，合并后的 [主分支发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/40324223823) 和 [插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40324223804) 同样全部通过。
+
+包 SHA-256：`d8cd9926a9b4d749f320028313046f0b14a55dbab68d7626d18f13d49740eccd`，大小 10,159,927 字节；GitHub 附件服务端 digest、公开地址无认证重新下载的完整包，以及官方 npm registry 无认证重新下载的完整包，均与 CI 包一致；npm 的 SHA-1 与 SHA-512 integrity 也已核对。来源提交为 CI 测试合并提交 `7522b6cb3b7f37ebaf267519c6051389413aa089`，源码 tree `9e2a2d746f44af554af9192458eb9d8318a6049d` 与主分支合并提交 `e8805b2bcc43bec74af0e9ae364137146c7edf96` 一致。Core 5.8.14 wheel SHA-256：`b96637d9cad364d280122bae9dd59e42be811cd43389ddb704ff4dc110f0acc0`。
+
+8 份原生安装/源码报告和 5 份精确宿主客户端报告全部通过，覆盖 Linux、macOS arm64/x64、Windows、Node 22.19/24/26、GitHub 源码安装、alpha 兼容，以及 DSH `0.1.2-rc.1` / `0.1.5-alpha.1` / `0.2.0-rc.2` / `0.2.1-rc.2` / `0.2.1-rc.3` 的 Web 工作台、预设、DoG 与其他插件共存。发布包的各平台/alpha 安装及客户端报告均绑定同一 SHA-256；源码安装单独固定来源 Commit。
+
+此前 Core 全量 1451 passed / 32 skipped，前端 307 passed；版本升级后的预设生命周期与离线升级回归 8 passed。真实付费模型调用、Android 原生和 Windows Electron 手工升级/恢复未执行，不能计为通过。修复范围与限制见 [升级恢复](ISSUES_105_113.md)、[连载报告](ISSUE_109_REPAIRS.md)、[OpenCode Go](OPENCODE_GO.md)。
+
 ## 0.2.25
 
 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.25) 与 [npm `dsh-openwrite@0.2.25`](https://www.npmjs.com/package/dsh-openwrite/v/0.2.25) 均已发布，npm `latest` 已更新到 0.2.25。使用 [PR 完整发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/39893387812) 验收通过的原始产物，没有重新打包。该运行的来源提交为 `1c04d97c9571f09f9a49567c95b7c38c0507ddbc`，源码 tree `3db86dcdb88f69fd6d92f5881fee0db3c2f0bd8c` 与主分支合并提交 `f0785f2c331f2d090450b1e127e5750c64dc4487` 一致。包 SHA-256 为 `ca73ca424844ddee62f37c2725591bf44ff7701f25d1d12693fa270ee0c26049`；官方 registry 无认证下载的完整 10,141,143 字节与 CI 包一致，GitHub Release 的服务端附件 digest 也一致。
