@@ -172,6 +172,8 @@ dsh web
 |---|---|
 | [安装指南](docs/INSTALL.md) | Agent 安装步骤、手动安装、模型配置、升级和排错 |
 | [使用流程](docs/WORKFLOWS.md) | Workspace、规划、写章、审稿、修订、导入导出 |
+| [工具参考](docs/TOOLS.md) | 全部 novel_* 工具的作用、操作影响、必填与可选参数 |
+| [写手上下文槽位](docs/CONTEXT_SLOTS.md) | 来源文件、选择规则、动态预算、压缩与逐文档用量 |
 | [模型测试](docs/BENCHMARK_TASKS.md) | 章节选择、大纲范围、任务 DAG 和结果解读 |
 | [审稿 DAG](docs/REVIEW_DAG_FRAMEWORK.md) | 标准评审框架与证据结构 |
 | [工程说明](docs/DEVELOPMENT.md) | 组件职责、维护命令、调研和改进记录 |

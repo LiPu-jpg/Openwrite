@@ -45,6 +45,8 @@ jobs:
           python-version: '3.12'
       - name: Restore immutable Git source bytes and compare them to the wheel
         run: python plugin/scripts/verify-core-wheel-source.py --plugin plugin --core core --restore-git-bytes --report core-wheel-source.json
+      - name: Check author context reference against the pinned Core
+        run: python plugin/scripts/gen-context-slots.py --plugin plugin --core core --check
       - run: python -m pip install uv==0.11.19
       - name: Run all Core regressions without live-model tests
         working-directory: core
