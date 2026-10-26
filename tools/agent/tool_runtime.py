@@ -668,7 +668,7 @@ def _edit_project_document(
     preview_token = str(args.get("preview_token") or "").strip()
     if action == "reject":
         _record, stored_preview_path, preview_error = _load_document_edit_preview(
-            project_root, novel_id, preview_token
+            project_root, novel_id, preview_token, allow_consumed=True
         )
         if preview_error or stored_preview_path is None:
             return {
@@ -774,6 +774,7 @@ def _edit_project_document(
                 start_text,
                 end_text,
                 new_text,
+                end_inclusive=edit.get("end_inclusive", True),
             )
             if not replacement["ok"]:
                 return {
@@ -1040,12 +1041,13 @@ def _edit_project_document(
                 faithful=args.get("faithful", True),
             )
             if stored_preview_path is not None:
-                stored_preview_path.unlink(missing_ok=True)
+                if stored_preview_path.stem != payload["preview_token"]:
+                    stored_preview_path.replace(stored_preview_path.with_suffix(".consumed"))
                 payload["retried_from"] = preview_token
         return payload
     if revised == original:
         if stored_preview_path is not None:
-            stored_preview_path.unlink(missing_ok=True)
+            stored_preview_path.replace(stored_preview_path.with_suffix(".consumed"))
         return payload
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -1118,7 +1120,7 @@ def _edit_project_document(
         source_revision,
     )
     if stored_preview_path is not None:
-        stored_preview_path.unlink(missing_ok=True)
+        stored_preview_path.replace(stored_preview_path.with_suffix(".consumed"))
     result = {
         **payload,
         "applied": True,
@@ -1166,7 +1168,16 @@ def _replace_document_text_range(
     start_text: str,
     end_text: str,
     new_text: str,
+    *,
+    end_inclusive: bool = True,
 ) -> dict[str, Any]:
+    if type(end_inclusive) is not bool:
+        return {
+            "ok": False,
+            "error": "invalid_end_inclusive",
+            "message": "end_inclusive must be boolean",
+            "details": {},
+        }
     start_anchor = str(start_text or "")
     end_anchor = str(end_text or "")
     if not start_anchor or not end_anchor:
@@ -1213,7 +1224,7 @@ def _replace_document_text_range(
         for start, start_end in start_spans:
             for end, end_end in end_spans:
                 if end >= start_end:
-                    ranges.append((start, end_end))
+                    ranges.append((start, end_end if end_inclusive else end))
     if not ranges:
         return {
             "ok": False,
@@ -1402,11 +1413,15 @@ def _load_document_edit_preview(
     project_root: Path,
     novel_id: str,
     preview_token: str,
+    *,
+    allow_consumed: bool = False,
 ) -> tuple[dict[str, Any], Path | None, str]:
     if not re.fullmatch(r"[a-f0-9]{24}", preview_token):
         return {}, None, "文档预览凭据格式无效，请重新预览。"
     preview_root = _document_edit_preview_root(project_root, novel_id).resolve()
     path = (preview_root / f"{preview_token}.json").resolve()
+    if allow_consumed and not path.is_file():
+        path = path.with_suffix(".consumed")
     if preview_root not in path.parents or not path.is_file():
         return {}, None, "文档预览凭据不存在或已使用，请重新预览。"
     try:

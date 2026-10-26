@@ -70,6 +70,15 @@ class StudioError(Exception):
         self.code = code
         self.recoverable = recoverable
         self.details = details or {}
+        if code == "PROJECT_BUSY":
+            self.recoverable = True
+            self.details = {
+                "retry_after_seconds": 30,
+                "next_action": (
+                    "Wait 30 seconds, check the running task, then retry with a fresh revision."
+                ),
+                **self.details,
+            }
 
 
 def new_request_id() -> str:

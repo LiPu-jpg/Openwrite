@@ -153,8 +153,12 @@ def overlap_report(
     }
 
 
-def join_segment(previous: str, continuation: str) -> str:
-    """Remove exact repeated boundary text and long repeated paragraphs only."""
+def join_segment(previous: str, continuation: str, *, similarity_threshold: float = 0.96) -> str:
+    """Remove repeated prose while preserving short dialogue and changed numbers."""
+    from difflib import SequenceMatcher
+
+    if not 0.9 <= similarity_threshold <= 1.0:
+        raise ValueError("segment_similarity_threshold must be between 0.9 and 1.0")
     new = re.sub(r"\A\s*#{1,6}\s+[^\n]*\n", "", continuation).strip()
     old = previous.rstrip()
     for length in range(min(len(old), len(new), 3000), 11, -1):
@@ -165,7 +169,16 @@ def join_segment(previous: str, continuation: str) -> str:
     paragraphs = []
     for paragraph in re.split(r"\n\s*\n", new):
         key = paragraph.strip()
-        if key and (len(key) < 12 or key not in existing):
+        repeated = key in existing
+        if not repeated and len(key) >= 40:
+            repeated = any(
+                len(other) >= 40
+                and re.findall(r"\d+", key) == re.findall(r"\d+", other)
+                and SequenceMatcher(None, key, other, autojunk=False).ratio()
+                >= similarity_threshold
+                for other in existing
+            )
+        if key and (len(key) < 12 or not repeated):
             paragraphs.append(paragraph)
             if len(key) >= 12:
                 existing.add(key)

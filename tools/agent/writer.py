@@ -19,11 +19,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import re
 import math
-from pathlib import Path
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ..character_state_index import normalize_character_state_annotation_fences
 from ..llm import Message
@@ -54,6 +55,7 @@ class WritingResult:
     finish_reason: str = ""
     model: str = ""
     provider: str = ""
+    model_calls: int = 0
 
 
 class WriterAgent(BaseAgent):
@@ -97,6 +99,7 @@ class WriterAgent(BaseAgent):
             WritingResult 写作结果
         """
         target_words = target_words or context.get("target_words", 6000)
+        self.model_call_count = 0
 
         self.log.info(f"Phase 1: creative writing for chapter {chapter_number}")
 
@@ -170,6 +173,7 @@ class WriterAgent(BaseAgent):
             finish_reason=str(creative_result.get("finish_reason") or ""),
             model=str(creative_result.get("model") or ""),
             provider=str(creative_result.get("provider") or ""),
+            model_calls=getattr(self, "model_call_count", 0),
         )
 
     async def _creative_write(
@@ -194,7 +198,7 @@ class WriterAgent(BaseAgent):
             Message("system", system_prompt),
             Message("user", user_prompt),
         ]
-        response = self.chat(
+        response = await self._creative_chat(
             messages=messages,
             temperature=temperature,
             max_tokens=None,  # Respect the selected model profile output budget.
@@ -228,7 +232,7 @@ class WriterAgent(BaseAgent):
 
         minimum_words, _, maximum_words = chapter_word_bounds(target_words)
         initial = self._parse_creative_output(response.content, chapter_number, first_usage)
-        if initial["word_count"] < minimum_words:
+        if initial["word_count"] < minimum_words and context.get("segmented_write", True):
             return await self._segmented_write(
                 context, chapter_number, temperature, target_words, initial_response=response
             )
@@ -237,6 +241,9 @@ class WriterAgent(BaseAgent):
         all_usage = [first_usage]
 
         for attempt in range(3):
+            from tools.llm.cancellation import check_model_cancellation
+
+            check_model_cancellation()
             word_count = self._parse_creative_output(current_content, chapter_number, {})[
                 "word_count"
             ]
@@ -266,7 +273,7 @@ class WriterAgent(BaseAgent):
                 f"Length retry #{attempt + 1}: {word_count} writing units "
                 f"(target {minimum_words}-{maximum_words})"
             )
-            retry_response = self.chat(
+            retry_response = await self._creative_chat(
                 messages=[
                     *messages,
                     Message("assistant", current_content),
@@ -332,6 +339,31 @@ class WriterAgent(BaseAgent):
         )
         return parsed
 
+    async def _creative_chat(self, **kwargs):
+        """Bound retries to transient generation failures; cancellation propagates."""
+        failures = []
+        for attempt in range(3):
+            from tools.llm.cancellation import check_model_cancellation
+
+            check_model_cancellation()
+            try:
+                response = self.chat(**kwargs)
+                if failures:
+                    response.usage = self._merge_usage(*failures, response.usage)
+                return response
+            except Exception as exc:
+                if (
+                    getattr(exc, "code", "")
+                    not in {"PROVIDER_NETWORK_ERROR", "MODEL_OUTPUT_TRUNCATED"}
+                    or attempt == 2
+                ):
+                    raise
+                failures.append(getattr(exc, "usage", None) or {"cost_reported": False})
+                progress = getattr(getattr(self, "ctx", None), "on_progress", None)
+                if callable(progress):
+                    progress({"phase": "retrying", "attempt": attempt + 2, "error_code": exc.code})
+                await asyncio.sleep(2**attempt)
+
     def _serial_context(self, context: dict, chapter_number: int) -> dict:
         import yaml
         from tools.writing_assets import WritingAssets
@@ -348,6 +380,13 @@ class WriterAgent(BaseAgent):
         source_assets = WritingAssets(root, novel_id)
         assets = source_assets.context(f"ch_{chapter_number:03d}")
         result = {**context, **assets}
+        if (root / "novel_config.yaml").is_file():
+            options = yaml.safe_load((root / "novel_config.yaml").read_text(encoding="utf-8")) or {}
+            options = options.get("writing_options", {})
+            if isinstance(options, dict):
+                for key in ("segmented_write", "segment_similarity_threshold"):
+                    if key in options:
+                        result.setdefault(key, options[key])
         from tools.arc_audit import ArcAuditService
         plans = ArcAuditService(root, novel_id).chapter_guidance(f"ch_{chapter_number:03d}")
         if plans:
@@ -384,6 +423,11 @@ class WriterAgent(BaseAgent):
         planned = max(1, math.ceil(target_words / 2500))
         beats = list(context.get("chapter_beats") or context.get("chapter_requirements", {}).get("beats") or [])
         current = initial_response.content if initial_response else ""
+        initial_count = (
+            self._parse_creative_output(current, chapter_number, {})["word_count"] if current else 0
+        )
+        if initial_response:
+            planned = max(1, math.ceil(max(0, target_words - initial_count) / 2500))
         usages = [initial_response.usage] if initial_response and initial_response.usage else []
         response = initial_response
         completed = 0
@@ -396,10 +440,10 @@ class WriterAgent(BaseAgent):
             slots = max(1, planned - completed)
             segment_target = min(3000, math.ceil(remaining / slots))
             segment_context = dict(context)
-            start = math.floor(completed * len(beats) / planned)
-            end = math.floor((completed + 1) * len(beats) / planned)
+            start = math.floor(count * len(beats) / target_words)
+            end = math.ceil(min(target_words, count + segment_target) * len(beats) / target_words)
             segment_context["chapter_beats"] = beats[start:end] if completed < planned else []
-            final = completed >= planned - 1 or initial_response is not None and remaining <= 3000
+            final = segment_target >= remaining
             if not final:
                 segment_context.pop("chapter_hooks", None)
             prompt = self._build_creative_user_prompt(segment_context, chapter_number, segment_target)
@@ -414,7 +458,9 @@ class WriterAgent(BaseAgent):
                 prompt += "\n从上述前文尾部之后直接续写，不得重写已经完成的段落。"
             messages.append(Message("user", prompt))
             try:
-                response = self.chat(messages=messages, temperature=temperature, max_tokens=None)
+                response = await self._creative_chat(
+                    messages=messages, temperature=temperature, max_tokens=None
+                )
             except Exception as exc:
                 partial = str(getattr(exc, "partial_content", "") or "")
                 if current:
@@ -422,7 +468,15 @@ class WriterAgent(BaseAgent):
                 raise
             if response.usage:
                 usages.append(response.usage)
-            new = join_segment(current, response.content) if current else response.content
+            new = (
+                join_segment(
+                    current,
+                    response.content,
+                    similarity_threshold=float(context.get("segment_similarity_threshold", 0.96)),
+                )
+                if current
+                else response.content
+            )
             if new == current:
                 break
             current = new

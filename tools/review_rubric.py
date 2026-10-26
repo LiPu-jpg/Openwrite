@@ -429,6 +429,8 @@ def aggregate_review(
     earned = sum(float(domain["earned"]) for domain in normalized_domains)
     quality_score = round(earned / evaluated_max * 100.0, 2) if evaluated_max else None
     coverage = round(evaluated_max / potential_max, 4) if potential_max else 1.0
+    if coverage < 1.0:
+        quality_score = None
     normalized_issues = [dict(issue) for issue in issues]
     normalized_gates = [dict(gate) for gate in gates]
     blocked = any(_hard_issue(issue) for issue in normalized_issues) or any(
@@ -494,6 +496,6 @@ def aggregate_review(
 def legacy_adapter(review_v2: Mapping[str, Any]) -> dict[str, Any]:
     score = review_v2.get("quality_score")
     return {
-        "score": float(score) if isinstance(score, (int, float)) else 0.0,
+        "score": float(score) if isinstance(score, (int, float)) else None,
         "passed": review_v2.get("delivery_status") == "pass",
     }

@@ -8,6 +8,7 @@ import logging
 import math
 import os
 import time
+from uuid import uuid4
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
@@ -312,6 +313,7 @@ class LLMClient:
 
     def __init__(self, config: LLMConfig, client: Any | None = None):
         self.config = config
+        self._provider_session_id = uuid4().hex
         if client is None:
             try:
                 import litellm
@@ -539,7 +541,7 @@ class LLMClient:
 
     def _base_params(self) -> dict[str, Any]:
         provider = "openai" if self.config.provider == "custom" else self.config.provider
-        return {
+        params = {
             "model": self.config.model,
             "custom_llm_provider": provider,
             "api_key": self.config.api_key,
@@ -548,6 +550,15 @@ class LLMClient:
             "max_retries": self.config.max_retries,
             "drop_params": True,
         }
+        url = urlsplit(self.config.base_url)
+        if url.hostname == "opencode.ai" and url.path.startswith(("/zen/go/", "/inference/go/")):
+            from tools.version import __version__
+
+            params["extra_headers"] = {
+                "User-Agent": f"OpenWrite/{__version__}",
+                "x-opencode-session": self._provider_session_id,
+            }
+        return params
 
     def _completion_params(
         self,
@@ -587,6 +598,11 @@ class LLMClient:
             extra_body["thinking"] = {"type": mode}
         if extra_body:
             extra["extra_body"] = extra_body
+        if "extra_headers" in extra:
+            extra["extra_headers"] = {
+                **self._base_params().get("extra_headers", {}),
+                **dict(extra["extra_headers"] or {}),
+            }
         return extra
 
     def _call(self, operation: Callable[..., Any], params: dict[str, Any]) -> Any:

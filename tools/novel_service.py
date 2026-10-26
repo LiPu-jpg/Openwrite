@@ -527,7 +527,9 @@ class NovelApplicationService:
         path.write_text(content, encoding="utf-8")
         return path
 
-    def context_preview(self, chapter_id: str = "next") -> dict[str, Any]:
+    def context_preview(
+        self, chapter_id: str = "next", *, include_agent_payload: bool = False
+    ) -> dict[str, Any]:
         from tools.context_builder import ContextBuilder
         from tools.context_manifest import build_context_manifest
         from tools.context_protection import ContextBudgetError
@@ -567,6 +569,62 @@ class NovelApplicationService:
         scene_context = getattr(generation, "scene_context", {})
         if scene_context:
             result["scene_context"] = scene_context
+        if include_agent_payload:
+            from types import SimpleNamespace
+
+            from tools.agent.writer import WriterAgent
+            from tools.chapter_pipeline import build_writer_payload
+            from tools.truth_manager import TruthFilesManager
+
+            writer = WriterAgent.__new__(WriterAgent)
+            writer.ctx = SimpleNamespace(project_root=self.project_root, book_id=self.novel_id)
+            number = int(target.split("_")[-1])
+            payload = build_writer_payload(
+                context=generation,
+                truth=TruthFilesManager(self.project_root, self.novel_id).load_truth_files(),
+                packet=packet,
+                guidance="",
+                target_words=target_policy["target_words"],
+            )
+            payload = writer._serial_context(payload, number)
+            result["agent_payload"] = payload
+            result["writer_messages"] = [
+                {"role": "system", "content": writer._build_creative_system_prompt(payload)},
+                {
+                    "role": "user",
+                    "content": writer._build_creative_user_prompt(
+                        payload, number, target_policy["target_words"]
+                    ),
+                },
+            ]
+            result["payload_scope"] = (
+                "Current canonical writer input; generation guidance and subsequent "
+                "segment/retry messages depend on the write request. No model was called."
+            )
+            rendered = "\n".join(message["content"] for message in result["writer_messages"])
+            inventory = []
+            for section in (
+                "core_documents",
+                "character_documents",
+                "setting_documents",
+                "continuity_documents",
+                "style_documents",
+            ):
+                for name, content in (packet.get(section) or {}).items():
+                    included = bool(content) and str(content) in rendered
+                    inventory.append(
+                        {
+                            "section": section,
+                            "document": name,
+                            "assembled_characters": len(str(content)),
+                            "fully_in_writer_messages": included,
+                            "reason": "included" if included else "writer_projection_or_budget",
+                        }
+                    )
+            result["document_inventory"] = inventory
+            result["excluded_documents"] = (packet.get("compression") or {}).get(
+                "dropped_documents", []
+            )
         return result
 
     def assemble_packet(self, chapter_id: str) -> dict[str, Any]:

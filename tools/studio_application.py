@@ -3193,6 +3193,7 @@ class StudioApplication:
         chapter_id: str,
         known_revision: str = "",
         known_source_revision: str = "",
+        include_agent_payload: bool = False,
     ) -> dict[str, Any]:
         profile = self._operation_profile(
             "chapter_write",
@@ -3200,7 +3201,11 @@ class StudioApplication:
         )
         try:
             with self._model_context(profile):
-                result = self._service().context_preview(chapter_id)
+                result = (
+                    self._service().context_preview(chapter_id, include_agent_payload=True)
+                    if include_agent_payload
+                    else self._service().context_preview(chapter_id)
+                )
         except NovelServiceError as exc:
             raise self._translate_service_error(exc) from exc
         packet = result.pop("packet", None)
@@ -4985,7 +4990,7 @@ class StudioApplication:
             raise StudioError(str(exc), HTTPStatus.CONFLICT, code="PROJECT_BUSY") from exc
 
     def reconcile_manuscript_acceptance(self, payload: dict[str, Any]) -> dict[str, Any]:
-        operation_id = str(payload.get("operation_id") or "")
+        operation_id = self._acceptance_operation_id(payload)
         mode = str(payload.get("mode") or ("fast" if payload.get("no_model") is True else "full"))
         if mode not in {"fast", "full"}:
             raise StudioError("mode must be fast or full", code="INVALID_REQUEST_BODY")
@@ -5016,7 +5021,7 @@ class StudioApplication:
         try:
             service = self._manuscript_acceptance()
             operation = service.abandon(
-                str(payload.get("operation_id") or ""), confirm=payload.get("confirm") is True
+                self._acceptance_operation_id(payload), confirm=payload.get("confirm") is True
             )
             return self._manuscript_acceptance_result(service, operation)
         except ManuscriptAcceptanceError as exc:
@@ -5033,7 +5038,7 @@ class StudioApplication:
         try:
             service = self._manuscript_acceptance()
             operation = service.acknowledge(
-                str(payload.get("operation_id") or ""),
+                self._acceptance_operation_id(payload),
                 domains=domains,
                 confirm=payload.get("confirm") is True,
             )
@@ -5041,12 +5046,52 @@ class StudioApplication:
         except ManuscriptAcceptanceError as exc:
             raise self._translate_manuscript_acceptance_error(exc) from exc
 
+    def _acceptance_operation_id(self, payload: dict[str, Any]) -> str:
+        if payload.get("operation_id"):
+            return str(payload["operation_id"])
+        chapter_id = str(payload.get("chapter_id") or "")
+        if chapter_id:
+            matches = {
+                row["operation_id"]
+                for row in self._manuscript_acceptance().inspect()["chapters"]
+                if row["chapter_id"] == chapter_id and row["operation_id"]
+            }
+            if len(matches) == 1:
+                return matches.pop()
+        raise StudioError(
+            "请提供 operation_id，或已存在接纳操作的 chapter_id；"
+            "external / baseline 的响应中包含 operation_id。",
+            code="INVALID_OPERATION_ID",
+            details={
+                "accepted_parameters": ["operation_id", "chapter_id"],
+                "next_action": "inspect_acceptance",
+            },
+        )
+
     @staticmethod
     def _manuscript_acceptance_result(
         service: ManuscriptAcceptanceService,
         operation: dict[str, Any],
     ) -> dict[str, Any]:
-        return {"operation": operation, "acceptance": service.inspect()}
+        acceptance = service.inspect()
+        pending = operation.get("status") not in {"completed", "abandoned"}
+        return {
+            "operation": operation,
+            "acceptance": acceptance,
+            "completed": not pending,
+            "status": "partial" if pending else "completed",
+            "blocking": acceptance["blocking"],
+            "next_action": {
+                "action": "resume",
+                "operation_id": operation["operation_id"],
+                "mode": "full",
+            }
+            if pending
+            else None,
+            "message": "正文接纳尚未完成；请执行 resume 重建关联事实，完成前仍会阻塞后续写作。"
+            if pending
+            else "正文接纳操作已结束。",
+        }
 
     @staticmethod
     def _translate_manuscript_acceptance_error(
@@ -6539,7 +6584,9 @@ class StudioApplication:
             subtitle += (
                 " · 审稿待刷新"
                 if review.get("stale")
-                else f" · {float(review.get('score', 0)):.0f} 分"
+                else " · 审稿不完整，未评分"
+                if review.get("score") is None
+                else f" · {float(review['score']):.0f} 分"
             )
         result = {
             "path": relative_path,
@@ -6617,7 +6664,7 @@ class StudioApplication:
             freshness = str(decision.get("freshness_status") or "")
             stale = stale or freshness == "stale"
         result = {
-            "score": float(data.get("score") or 0),
+            "score": review_quality_score(data),
             "passed": bool(data.get("passed")),
             "issues": int(data.get("issues") or 0),
             "reviewed_at": str(data.get("reviewed_at") or ""),
@@ -6755,7 +6802,15 @@ class LegacyStudioRequestHandler(SimpleHTTPRequestHandler):
                 known_revision = params.get("known_revision", [""])[0]
                 known_source_revision = params.get("known_source_revision", [""])[0]
                 self._json(
-                    self.app.context_preview(chapter_id, known_revision, known_source_revision)
+                    self.app.context_preview(
+                        chapter_id,
+                        known_revision,
+                        known_source_revision,
+                        include_agent_payload=params.get("include_agent_payload", ["false"])[
+                            0
+                        ].lower()
+                        in {"true", "1"},
+                    )
                 )
                 return
             if parsed.path == "/api/outline":

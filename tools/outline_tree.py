@@ -82,6 +82,17 @@ def build_outline_structure(
     for node in flat:
         counts[node["kind"]] = counts.get(node["kind"], 0) + 1
 
+    from tools.outline_parser import OutlineMdParser
+
+    parser = OutlineMdParser()
+    try:
+        parser.parse(body, root.name)
+        metadata_rows = parser.metadata_diagnostics
+        parse_error = ""
+    except ValueError as exc:
+        metadata_rows = getattr(parser, "metadata_diagnostics", [])
+        parse_error = str(exc)
+
     return {
         "path": "src/outline.md",
         "revision": hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
@@ -89,6 +100,12 @@ def build_outline_structure(
         "counts": counts,
         "drafted_chapters": len(drafted),
         "recommendation": recommendation,
+        "parse_report": {
+            "metadata": metadata_rows,
+            "recognized_count": sum(row["recognized"] for row in metadata_rows),
+            "ignored": [row for row in metadata_rows if not row["recognized"]],
+            "error": parse_error,
+        },
     }
 
 

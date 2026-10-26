@@ -527,7 +527,15 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 known_revision = params.get("known_revision", [""])[0]
                 known_source_revision = params.get("known_source_revision", [""])[0]
                 self._json(
-                    self.app.context_preview(chapter_id, known_revision, known_source_revision)
+                    self.app.context_preview(
+                        chapter_id,
+                        known_revision,
+                        known_source_revision,
+                        include_agent_payload=params.get("include_agent_payload", ["false"])[
+                            0
+                        ].lower()
+                        in {"true", "1"},
+                    )
                 )
                 return
             if parsed.path == "/api/outline":

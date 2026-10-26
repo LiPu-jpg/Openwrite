@@ -226,6 +226,16 @@ class ArcAuditService:
                 for node in [*self._hierarchy().arcs, *self._hierarchy().sections]
             ],
             "chapters": rows,
+            "errors": [
+                {
+                    "code": "UNKNOWN_PAYOFF_REFERENCE",
+                    "chapter_id": edge["to"],
+                    "reference": edge["from"],
+                    "message": "payoff_of must name an existing foreshadowing node ID",
+                }
+                for edge in edges
+                if not edge["known"]
+            ],
             "ledger": ledger,
             "words": {
                 "planned": planned_total,

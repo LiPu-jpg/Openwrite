@@ -381,13 +381,33 @@ class ChapterAssemblerV2:
             "protagonist_state": 0.04,
             "characters": 0.13,
             "settings": 0.08,
-            "style": 0.07,
+            "style": 0.12,
         }
+        configured_share = self._load_yaml(self.project_root / "novel_config.yaml").get(
+            "context_style_share", shares["style"]
+        )
+        shares["style"] = max(0.01, min(0.5, float(configured_share)))
         total_share = sum(shares.values())
         budgets = {
             name: max(0, int(optional_target_characters * share / total_share))
             for name, share in shares.items()
         }
+        # Preserve authored style documents up to the writer's profile limit
+        # before spending optional capacity on the much larger previous chapter.
+        style_budget = min(
+            optional_target_characters // 2,
+            max(
+                budgets["style"],
+                min(4000, sum(len(value) for value in packet.style_documents.values())),
+            ),
+        )
+        others = sum(value for name, value in budgets.items() if name != "style")
+        for name in budgets:
+            if name != "style" and others:
+                budgets[name] = int(
+                    budgets[name] * (optional_target_characters - style_budget) / others
+                )
+        budgets["style"] = style_budget
 
         self._limit_summary_items(
             packet.historical_arc_summaries,
@@ -531,6 +551,8 @@ class ChapterAssemblerV2:
         if len(text) <= max_chars:
             return text
         truncated.append(label)
+        if max_chars <= 0:
+            return ""
         return text[-max_chars:] if prefer_tail else text[:max_chars]
 
     @classmethod
@@ -581,20 +603,12 @@ class ChapterAssemblerV2:
         if not ordered or total_chars <= 0:
             return kept, truncated, [name for name, _ in ordered]
 
-        # Give every relevant document a fair base allocation before assigning
-        # spare capacity by priority. Filename order must never erase a whole
-        # character merely because earlier profiles filled the bucket first.
-        base_cap = min(per_document, max(1, total_chars // len(ordered)))
-        used = 0
+        capacities = {name: min(per_document, len(content)) for name, content in ordered}
+        demand = sum(capacities.values())
         for name, content in ordered:
-            fitted = content[:base_cap]
-            if fitted:
-                kept[name] = fitted
-                used += len(fitted)
-            else:
-                dropped.append(name)
-
-        remaining = max(0, total_chars - used)
+            cap = min(capacities[name], total_chars * capacities[name] // demand) if demand else 0
+            kept[name] = content[:cap]
+        remaining = max(0, total_chars - sum(map(len, kept.values())))
         for name, content in ordered:
             if remaining <= 0 or name not in kept:
                 break
@@ -605,7 +619,10 @@ class ChapterAssemblerV2:
                 remaining -= extra
 
         for name, content in ordered:
-            if name in kept and len(kept[name]) < len(content):
+            if not kept.get(name):
+                kept.pop(name, None)
+                dropped.append(name)
+            elif len(kept[name]) < len(content):
                 truncated.append(name)
         return kept, truncated, dropped
 
