@@ -112,7 +112,7 @@ def test_benchmark_contract_accepts_live_and_terminal_statuses(status: str) -> N
     validate_benchmark_v1(json.loads(json.dumps(record)))
 
 
-def test_reviewer_budget_floor_rises_after_reasoning_observed() -> None:
+def test_reviewer_budget_uses_configuration_before_any_reasoning_usage() -> None:
     from tools.agent.reviewer import ReviewerAgent
 
     reviewer = ReviewerAgent.__new__(ReviewerAgent)
@@ -128,10 +128,7 @@ def test_reviewer_budget_floor_rises_after_reasoning_observed() -> None:
         client = _Client()
 
     reviewer.ctx = _Ctx()
-    assert reviewer._audit_output_budget([1, 2]) == 4096
-    reviewer._note_reasoning_usage({"completion_tokens_details": {"reasoning_tokens": 3078}})
-    assert reviewer._audit_output_budget([1, 2]) == 16384
-    assert reviewer._raised_budget(4096) == 8192
+    assert reviewer._audit_output_budget([1, 2]) == 24000
 
 
 def test_continuous_write_continues_after_single_chapter_failure(tmp_path: Path) -> None:
