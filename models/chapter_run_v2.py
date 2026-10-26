@@ -77,3 +77,4 @@ class ChapterRunV2Manifest(BaseModel):
     archived: bool = False
     requested_model: str = ""
     target_words_source: str = ""
+    resumed_from_run_id: str = ""

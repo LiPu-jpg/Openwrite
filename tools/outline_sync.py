@@ -13,7 +13,9 @@ def sync_outline_to_hierarchy(src_dir: Path, data_dir: Path) -> None:
     with open(outline_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    hierarchy = OutlineMdParser().parse(content, data_dir.parent.name if data_dir.parent.name else "")
+    hierarchy = OutlineMdParser.for_path(src_dir).parse(
+        content, data_dir.parent.name if data_dir.parent.name else ""
+    )
     data = serialize_outline_hierarchy(hierarchy)
 
     with open(hierarchy_path, "w", encoding="utf-8") as f:

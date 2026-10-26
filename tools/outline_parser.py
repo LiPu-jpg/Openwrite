@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import re
+import logging
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from models.outline import (
@@ -28,6 +30,28 @@ class OutlineMdParser:
     - **节拍:** 或 **悬念:** 后跟列表
     """
 
+    def __init__(self, extra_keys: tuple[str, ...] | list[str] = ()) -> None:
+        self.extra_keys = set(extra_keys)
+
+    @classmethod
+    def for_path(cls, path: Path) -> OutlineMdParser:
+        import yaml
+
+        for parent in (Path(path), *Path(path).parents):
+            config_path = parent / "novel_config.yaml"
+            if config_path.is_file():
+                config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+                keys = config.get("outline_extra_keys", [])
+                if not isinstance(keys, list) or any(
+                    not isinstance(k, str) or not k.strip() or any(c in k for c in "\r\n:")
+                    for k in keys
+                ):
+                    raise ValueError(
+                        "outline_extra_keys must be an array of non-empty metadata key names"
+                    )
+                return cls(keys)
+        return cls()
+
     def parse(self, md_content: str, novel_id: str) -> OutlineHierarchy:
         """解析 Markdown 内容
 
@@ -42,6 +66,7 @@ class OutlineMdParser:
         lines = md_content.split("\n")
         hierarchy = OutlineHierarchy(novel_id=novel_id)
         self.metadata_diagnostics = []
+        warned = set()
 
         # 状态追踪
         current_master: Optional[OutlineNode] = None
@@ -156,6 +181,14 @@ class OutlineMdParser:
                 value = metadata_match.group(2).strip()
                 node = current_chapter or current_section or current_arc or current_master
                 recognized = self._apply_metadata(node, key, value)
+                if not recognized and (getattr(node, "node_id", ""), key) not in warned:
+                    logging.getLogger(__name__).warning(
+                        "OUTLINE_METADATA_IGNORED: %s / %s; "
+                        "register chapter extensions in outline_extra_keys",
+                        getattr(node, "node_id", ""),
+                        key,
+                    )
+                    warned.add((getattr(node, "node_id", ""), key))
                 self.metadata_diagnostics.append(
                     {
                         "node_id": node.node_id if node else "",
@@ -322,6 +355,8 @@ class OutlineMdParser:
         elif key_lower in ("悬念", "hooks"):
             hooks = [h.strip() for h in re.split(r"[，,、]", value) if h.strip()]
             node.hooks.extend(hooks)
+        elif node.node_type == OutlineNodeType.CHAPTER and key in self.extra_keys:
+            node.extra_metadata[key] = value
         else:
             return False
         return True

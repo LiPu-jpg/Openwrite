@@ -982,6 +982,9 @@ class LLMClient:
 
         try:
             for event in stream:
+                from .cancellation import check_model_cancellation
+
+                check_model_cancellation()
                 if time.monotonic() > deadline:
                     from .errors import LLMTimeoutError
                     failure = LLMTimeoutError("Model stream exceeded its total time budget")
@@ -1020,6 +1023,18 @@ class LLMClient:
                     _value(event, "model", response_model) or response_model
                 )
         except Exception as exc:
+            from .cancellation import ModelCancelledError
+
+            if isinstance(exc, ModelCancelledError):
+                exc.partial_content = "".join(chunks)
+                exc.usage = dict(usage)
+                close = getattr(stream, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception as close_error:
+                        logger.warning("Cancelled model stream cleanup failed: %s", close_error)
+                raise
             if getattr(exc, "code", "") == "PROVIDER_TIMEOUT":
                 close = getattr(stream, "close", None)
                 if callable(close):

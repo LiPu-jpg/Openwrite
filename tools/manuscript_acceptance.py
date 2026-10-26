@@ -534,6 +534,27 @@ class ManuscriptAcceptanceService:
         recorded_previous = str(existing.get("accepted_revision") or "")
         recorded_base = str(existing.get("pending_revision") or recorded_previous)
         expected = str(expected_previous_revision or "")
+        # Retrying the same accepted bytes must not create another operation or
+        # invalidate running chapter stages a second time. Check every affected
+        # chapter, including edits made later in the book.
+        previous_id = str(existing.get("operation_id") or "")
+        if previous_id and not baseline:
+            previous = self.operation(previous_id)
+            frozen = previous.get("frozen_chapters") or []
+            if (
+                previous.get("status") not in {"stale", "abandoned"}
+                and previous.get("source") == source
+                and [item["chapter_id"] for item in frozen] == chapter_ids
+                and all(
+                    (heads.get(item["chapter_id"]) or {}).get("operation_id") == previous_id
+                    and self.fingerprint(
+                        self._chapter_path(item["chapter_id"]).read_text(encoding="utf-8")
+                    )
+                    == item["revision"]
+                    for item in frozen
+                )
+            ):
+                return previous
         if not baseline and recorded_base and expected != recorded_base:
             raise ManuscriptAcceptanceError(
                 "Acceptance base changed. Inspect the operation; resume it, or explicitly abandon it before retrying. To accept current disk text use external(confirm=true).",

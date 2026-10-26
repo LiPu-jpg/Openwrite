@@ -117,6 +117,7 @@ class ChapterAssemblyPacket:
     agent_specs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     redundant_agents: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     compression: Dict[str, Any] = field(default_factory=dict)
+    document_usage: list[dict[str, Any]] = field(default_factory=list)
 
     def to_markdown(self) -> str:
         parts: List[str] = []
@@ -338,7 +339,23 @@ class ChapterAssemblerV2:
             chapter_id=chapter_id,
             arc_id=current_arc.node_id if current_arc else "",
         )
+        originals = {
+            section: dict(getattr(packet, section))
+            for section in ("style_documents", "character_documents", "setting_documents")
+        }
         self._enforce_context_budget(packet)
+        packet.document_usage = [
+            {
+                "section": section,
+                "document": name,
+                "original_characters": len(content),
+                "assembled_characters": len(getattr(packet, section).get(name, "")),
+                "compressed": getattr(packet, section).get(name, "") != content,
+                "excluded": name not in getattr(packet, section),
+            }
+            for section, documents in originals.items()
+            for name, content in documents.items()
+        ]
         return packet
 
     def _enforce_context_budget(self, packet: ChapterAssemblyPacket) -> None:
@@ -737,7 +754,7 @@ class ChapterAssemblerV2:
         if outline_src.exists():
             text = self._load_text(outline_src)
             if text.strip():
-                return OutlineMdParser().parse(text, self.novel_id)
+                return OutlineMdParser.for_path(self.project_root).parse(text, self.novel_id)
 
         path = self.runtime_root / "hierarchy.yaml"
         if not path.exists():
@@ -905,7 +922,14 @@ class ChapterAssemblerV2:
         for path in sorted(manuscript_root.glob("arc_*/" + prev + "*.md")):
             text = self._load_text(path)
             if text:
-                return strip_character_state_annotations(text)
+                from tools.previous_context import select_previous_context
+
+                return select_previous_context(
+                    self.project_root,
+                    self.novel_id,
+                    chapter_id,
+                    strip_character_state_annotations(text),
+                )
         return ""
 
     def _load_current_chapter_content(self, chapter_id: str) -> str:

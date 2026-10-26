@@ -206,6 +206,7 @@ def build_context_manifest(novel_root: Path, packet: dict[str, Any]) -> dict[str
         "excluded_items": dropped,
         "missing_items": missing_items,
         "items": items,
+        "documents": list(packet.get("document_usage") or []),
     }
     manifest["freshness"] = check_context_manifest_freshness(root, manifest)
     return manifest

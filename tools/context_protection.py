@@ -212,6 +212,7 @@ def _chapter_requirements(chapter: Any) -> dict[str, Any]:
             "payoff_of": getattr(chapter, "payoff_of", []),
             "word_budget": getattr(chapter, "word_budget", 0),
             "function": getattr(chapter, "function", []),
+            "extra_metadata": getattr(chapter, "extra_metadata", {}),
         }
     )
 

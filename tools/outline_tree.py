@@ -84,7 +84,7 @@ def build_outline_structure(
 
     from tools.outline_parser import OutlineMdParser
 
-    parser = OutlineMdParser()
+    parser = OutlineMdParser.for_path(root)
     try:
         parser.parse(body, root.name)
         metadata_rows = parser.metadata_diagnostics

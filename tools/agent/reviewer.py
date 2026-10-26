@@ -279,11 +279,27 @@ class ReviewerAgent(BaseAgent):
             and not set(self.DIMENSION_MAP).issubset(dimensions)
         ):
             review_v2["partial_review"] = True
+            scoped = aggregate_review(
+                domain_results,
+                issue_payloads,
+                domains=domains,
+                gates=[gate_result],
+                quality_threshold=float(context.get("quality_threshold") or 70),
+                min_coverage=float(context.get("min_review_coverage") or 0.80),
+            )
+            review_v2["scope_status"] = "partial"
+            review_v2["scope_quality_score"] = scoped["quality_score"]
+            review_v2["scope_domains"] = scoped["domains"]
+            review_v2["scope_passed"] = scoped["delivery_status"] == "pass"
+            review_v2["unreviewed_dimensions"] = sorted(set(self.DIMENSION_MAP) - set(dimensions))
             if review_v2["delivery_status"] == "pass":
                 review_v2["delivery_status"] = "inconclusive"
+            review_v2["delivery_reason"] = "partial_review"
+            review_v2["quality_score"] = None
         review_v2["requested_dimensions"] = (
             list(dimensions) if dimensions is not None else list(self.DIMENSION_MAP)
         )
+        review_v2["requested_domains"] = [domain.id for domain in domains]
         runtime_config = getattr(
             getattr(getattr(self, "ctx", None), "client", None),
             "config",
@@ -294,6 +310,9 @@ class ReviewerAgent(BaseAgent):
             "audit_calls": len(getattr(self, "_audit_context_reports", [])),
             "errors": list(getattr(self, "_review_errors", [])),
         }
+        from tools.review_diagnostics import add_review_diagnostics
+
+        add_review_diagnostics(review_v2)
         legacy = legacy_adapter(review_v2)
         score = legacy["score"]
         passed = bool(legacy["passed"])

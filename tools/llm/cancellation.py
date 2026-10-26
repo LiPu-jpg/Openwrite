@@ -7,6 +7,10 @@ from typing import Callable, Iterator
 _cancel: ContextVar[Callable[[], bool] | None] = ContextVar("openwrite_model_cancel", default=None)
 
 
+class ModelCancelledError(RuntimeError):
+    code = "TASK_CANCELLED"
+
+
 @contextmanager
 def model_cancellation(check: Callable[[], bool]) -> Iterator[None]:
     token = _cancel.set(check)
@@ -23,4 +27,4 @@ def cancellation_bound() -> bool:
 def check_model_cancellation() -> None:
     check = _cancel.get()
     if check and check():
-        raise RuntimeError("MODEL_CANCELLED: no further model requests will be scheduled")
+        raise ModelCancelledError("MODEL_CANCELLED: no further model requests will be scheduled")

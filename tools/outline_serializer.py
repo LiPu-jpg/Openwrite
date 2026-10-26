@@ -273,6 +273,8 @@ class OutlineMdSerializer:
         if node.status:
             metadata.append(f"> 状态: {node.status}")
 
+        metadata.extend(f"> {key}: {value}" for key, value in node.extra_metadata.items())
+
         if metadata:
             lines.extend(metadata)
             lines.append("")

@@ -3196,6 +3196,8 @@ class StudioApplication:
         known_revision: str = "",
         known_source_revision: str = "",
         include_agent_payload: bool = False,
+        guidance: str = "",
+        target_words: int | None = None,
     ) -> dict[str, Any]:
         profile = self._operation_profile(
             "chapter_write",
@@ -3204,7 +3206,15 @@ class StudioApplication:
         try:
             with self._model_context(profile):
                 result = (
-                    self._service().context_preview(chapter_id, include_agent_payload=True)
+                    self._service().context_preview(
+                        chapter_id,
+                        include_agent_payload=True,
+                        **(
+                            {"guidance": guidance, "target_words": target_words}
+                            if guidance or target_words is not None
+                            else {}
+                        ),
+                    )
                     if include_agent_payload
                     else self._service().context_preview(chapter_id)
                 )
@@ -4390,6 +4400,14 @@ class StudioApplication:
             raise StudioError(str(exc), status, code=exc.code) from exc
 
     def submit_write_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("dry_run") is True:
+            result = self.context_preview(
+                str(payload.get("chapter_id") or "next"),
+                include_agent_payload=True,
+                guidance=str(payload.get("guidance") or ""),
+                target_words=payload.get("target_words"),
+            )
+            return {"ok": True, "dry_run": True, "model_call_count": 0, "context": result}
         return self.create_task({"type": "chapter_write", "input": payload})
 
     def manuscript_drafts(self) -> dict[str, Any]:
@@ -4625,6 +4643,8 @@ class StudioApplication:
                 result = self._service().review_chapter(
                     path.stem,
                     strict=bool(payload.get("strict", False)),
+                    depth=str(payload.get("depth") or "full"),
+                    domains=payload.get("domains"),
                     dimensions=(
                         payload.get("dimensions")
                         if isinstance(payload.get("dimensions"), list)
@@ -4957,15 +4977,18 @@ class StudioApplication:
     def start_manuscript_acceptance(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             service = self._manuscript_acceptance()
-            operation = service.start_acceptance(
-                str(payload.get("chapter_id") or ""),
-                source=str(payload.get("source") or ""),
-                expected_previous_revision=str(payload.get("expected_previous_revision") or ""),
-                source_run_id=str(payload.get("source_run_id") or ""),
-            )
+            with ProjectWriteLock(self.project_root, self.novel_id, operation="accept:start"):
+                operation = service.start_acceptance(
+                    str(payload.get("chapter_id") or ""),
+                    source=str(payload.get("source") or ""),
+                    expected_previous_revision=str(payload.get("expected_previous_revision") or ""),
+                    source_run_id=str(payload.get("source_run_id") or ""),
+                )
             return self._manuscript_acceptance_result(service, operation)
         except ManuscriptAcceptanceError as exc:
             raise self._translate_manuscript_acceptance_error(exc) from exc
+        except ProjectBusyError as exc:
+            raise StudioError(str(exc), HTTPStatus.CONFLICT, code="PROJECT_BUSY") from exc
 
     def establish_manuscript_baseline(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -5353,6 +5376,8 @@ class StudioApplication:
                 result = self._service().review_chapter(
                     chapter_id,
                     strict=bool(payload.get("strict", False)),
+                    depth=str(payload.get("depth") or "full"),
+                    domains=payload.get("domains"),
                     dimensions=(
                         payload.get("dimensions")
                         if isinstance(payload.get("dimensions"), list)

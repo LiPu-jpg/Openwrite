@@ -190,6 +190,11 @@ class ContextBuilder:
 
         # 7. 加载最近文本
         recent_text = self._get_recent_chapters(chapter_id, limit=2)
+        from tools.previous_context import select_previous_context
+
+        recent_text = select_previous_context(
+            self.project_root, self.novel_id, chapter_id, recent_text
+        )
 
         # 8. 提取章节目标 + 戏剧位置
         chapter_goals: List[str] = []
@@ -505,7 +510,7 @@ class ContextBuilder:
         if outline_src.exists():
             text = self._load_text(outline_src)
             if text.strip():
-                hierarchy = OutlineMdParser().parse(text, self.novel_id)
+                hierarchy = OutlineMdParser.for_path(self.project_root).parse(text, self.novel_id)
                 self._hierarchy_cache = hierarchy
                 return hierarchy
 

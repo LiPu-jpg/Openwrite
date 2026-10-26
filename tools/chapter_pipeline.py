@@ -16,6 +16,7 @@ from typing import Any, cast
 import yaml
 
 from tools.context_schema import normalize_context_payload
+from tools.llm.cancellation import ModelCancelledError
 from tools.style_synthesizer import render_style_manifest_summary
 
 
@@ -81,7 +82,9 @@ def apply_runtime_delta_with_fallback(
         return fallback.model_dump(mode="json"), str(exc)
 
 
-def _apply_canon_gate(review_v2: dict[str, Any], *, strict: bool) -> dict[str, Any]:
+def _apply_canon_gate(
+    review_v2: dict[str, Any], *, strict: bool, context: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Surface unverifiable canon as inconclusive in every review mode.
 
     The canon domain answers "does the draft contradict long-term canon?" with
@@ -89,7 +92,11 @@ def _apply_canon_gate(review_v2: dict[str, Any], *, strict: bool) -> dict[str, A
     compare against (typical for imported manuscripts that never had a
     settlement pass).  Before this gate that signal was silently ignored.
     """
-    domains = review_v2.get("domains")
+    domains = (
+        review_v2.get("scope_domains")
+        if review_v2.get("partial_review")
+        else review_v2.get("domains")
+    )
     canon = None
     if isinstance(domains, list):
         for domain in domains:
@@ -102,16 +109,47 @@ def _apply_canon_gate(review_v2: dict[str, Any], *, strict: bool) -> dict[str, A
         "status": "inconclusive",
         "blocked": False,
         "reason": "canon_unverified",
+        "missing": (
+            [
+                name
+                for name in ("chapter_summaries", "current_state", "ledger", "relationships")
+                if not str(context.get(name) or "").strip()
+            ]
+            if context is not None
+            else []
+        ),
+        "checks": [
+            item for item in canon.get("criteria", []) if item.get("status") == "inconclusive"
+        ],
         "detail": (
             "评审缺少可核对的长期正典事实（章节记忆/运行态真相缺失或不足），"
             "无法确认本章是否与正典冲突。建议先对既有章节执行结算回填"
             "（settle backfill），让评审有正文事实可对。"
         ),
     }
+    if info["missing"]:
+        info["detail"] = (
+            "审稿上下文中未提供："
+            + ", ".join(info["missing"])
+            + "。先核对这些资料是否适用于本章；需要历史事实时执行 settle backfill，"
+            "再复核未定论的正典检查。"
+        )
+    else:
+        info["detail"] = (
+            "正典检查未给出结论，不能由此推断缺少结算或章节记忆。"
+            "请查看 checks 的证据说明和 provenance.errors，"
+            "修复具体数据或服务商错误后重审。"
+        )
     review_v2["canon_gate"] = info
     if review_v2.get("delivery_status") == "pass":
         review_v2["delivery_status"] = "inconclusive"
         review_v2["delivery_reason"] = "canon_unverified"
+    elif review_v2.get("delivery_status") == "inconclusive" and not review_v2.get("partial_review"):
+        review_v2["delivery_reason"] = "canon_unverified"
+    review_v2["quality_score"] = None
+    from tools.review_diagnostics import add_review_diagnostics
+
+    add_review_diagnostics(review_v2)
     return info
 
 
@@ -401,6 +439,11 @@ def _render_current_chapter(context: Any) -> str:
     summary = str(getattr(chapter, "summary", "") or "").strip()
     if summary:
         parts.append("章节摘要:\n" + summary)
+    extras = getattr(chapter, "extra_metadata", {})
+    if extras:
+        parts.append(
+            "章节扩展信息:\n" + "\n".join(f"{key}: {value}" for key, value in extras.items())
+        )
     return "\n\n".join(parts)
 
 
@@ -604,6 +647,7 @@ def build_review_payload(
                 "ledger": getattr(context, "ledger", ""),
                 "relationships": getattr(context, "relationships", "") or payload["relationships"],
                 "current_state": getattr(context, "current_state", "") or payload["current_state"],
+                "chapter_summaries": getattr(context, "chapter_summaries", ""),
             }
         )
     if outline:
@@ -665,6 +709,26 @@ class _TaskCancellationRequested(RuntimeError):
     pass
 
 
+def _model_cancellation_scope(args):
+    from contextlib import nullcontext
+
+    from tools.llm.cancellation import model_cancellation
+
+    check = args.get("_cancel_requested")
+    return model_cancellation(check) if callable(check) else nullcontext()
+
+
+def _stage_usage(usage, stage):
+    from tools.agent.writer import WriterAgent
+
+    return WriterAgent.usage_for_stage(dict(usage or {}), stage)
+
+
+def _writer_failure_usage(writer, error):
+    summary = getattr(writer, "usage_summary", None)
+    return summary() if callable(summary) else getattr(error, "usage", {})
+
+
 def _task_phase(args: dict[str, Any], phase: str, note: str = "") -> None:
     callback = args.get("_task_phase")
     if callable(callback):
@@ -696,12 +760,18 @@ def _preserve_failed_draft(
     manifest: Any,
     *,
     partial_content: str = "",
+    usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if manifest is None:
         return {"run_id_v2": "", "draft_artifact": "", "draft_path": "", "uncommitted": False}
     recovery = store.root / "artifacts" / manifest.run_id / "uncommitted.md"
-    if partial_content and not recovery.exists():
+    if partial_content:
         _atomic_write(recovery, partial_content.encode("utf-8"))
+    if usage:
+        _atomic_write(
+            recovery.with_suffix(".usage.json"),
+            json.dumps(usage, ensure_ascii=False).encode("utf-8"),
+        )
     draft = manifest.stages["draft"]
     if draft.status == "completed" and not recovery.exists():
         saved = store.read_artifact(draft.artifact)
@@ -783,6 +853,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
     active_stage = ""
     run_store = ChapterRunStore(project_root, novel_id)
     run_manifest = None
+    writer = None
     run_v2_store = ChapterRunV2Store(project_root, novel_id)
     requested_run_v2_id = str(args.get("run_id_v2") or "").strip()
     run_v2_manifest = run_v2_store.load(requested_run_v2_id) if requested_run_v2_id else None
@@ -879,7 +950,37 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                         if path.is_file()
                     }
                 ),
+                "project_config": run_v2_store.content_revision(config),
             }
+            partial_source = str(args.get("resume_partial_run_id") or "")
+            if partial_source:
+                from tools.chapter_run_v2 import ChapterRunV2Error
+
+                original = run_v2_store.load(partial_source)
+                if (
+                    original is None
+                    or original.chapter_id != chapter_id
+                    or original.status not in {"failed", "cancelled"}
+                ):
+                    raise ChapterRunV2Error(
+                        "Partial draft is no longer resumable", code="RUN_NOT_RESUMABLE"
+                    )
+                if not all(
+                    original.input_revisions.get(key) == current_revisions[key]
+                    for key in ("context", "source_documents", "project_config")
+                ):
+                    raise ChapterRunV2Error(
+                        "Partial draft inputs changed; "
+                        "inspect or restore the draft before continuing",
+                        code="RESUME_INPUT_STALE",
+                    )
+                recovery_path = run_v2_store.root / "artifacts" / original.run_id / "uncommitted.md"
+                if not recovery_path.is_file() or recovery_path.is_symlink():
+                    raise ChapterRunV2Error("Partial draft is missing", code="RUN_NOT_RESUMABLE")
+                writer_payload["_resume_draft"] = recovery_path.read_text(encoding="utf-8")
+                current_revisions["resume_draft"] = run_v2_store.content_revision(
+                    writer_payload["_resume_draft"]
+                )
             if run_v2_manifest is None:
                 run_v2_manifest = run_v2_store.create(
                     chapter_id,
@@ -890,6 +991,8 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     model_profile=str(profile.get("id") or getattr(llm_config, "model", "")),
                     input_revisions=current_revisions,
                 )
+                run_v2_manifest.resumed_from_run_id = partial_source
+                run_v2_store.save(run_v2_manifest)
             else:
                 stored_context = run_v2_store.read_artifact(
                     run_v2_manifest.stages["context"].artifact
@@ -904,6 +1007,8 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 }
                 if "source_documents" not in run_v2_manifest.input_revisions:
                     current_revisions.pop("source_documents", None)
+                if "project_config" not in run_v2_manifest.input_revisions:
+                    current_revisions.pop("project_config", None)
                 for key in ("target_words", "external_context"):
                     if key in stored_context:
                         comparable_context[key] = stored_context[key]
@@ -985,16 +1090,18 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     run_v2_store,
                     run_v2_manifest,
                     partial_content=f"# {draft['title']}\n\n{draft['content']}",
+                    usage=draft.get("usage"),
                 )
                 _task_phase(args, "model", "生成章节草稿")
-                result = asyncio.run(
-                    writer.write_chapter(
-                        context=writer_payload,
-                        chapter_number=_chapter_number(chapter_id) or 1,
-                        temperature=_generation_temperature(args),
-                        target_words=writer_payload.get("target_words") or None,
+                with _model_cancellation_scope(args):
+                    result = asyncio.run(
+                        writer.write_chapter(
+                            context=writer_payload,
+                            chapter_number=_chapter_number(chapter_id) or 1,
+                            temperature=_generation_temperature(args),
+                            target_words=writer_payload.get("target_words") or None,
+                        )
                     )
-                )
                 _task_phase(args, "validating", "校验模型结果")
                 _raise_if_task_cancelled(
                     args, partial_content=f"# {result.title}\n\n{result.content}"
@@ -1026,7 +1133,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     "draft",
                     output={"title": result.title, "content": result.content},
                     artifact=draft_artifact,
-                    usage=dict(getattr(result, "token_usage", {}) or {}),
+                    usage=_stage_usage(getattr(result, "token_usage", {}), "draft"),
                 )
             _task_phase(args, "validating", "校验模型结果")
             _raise_if_task_cancelled(args)
@@ -1066,6 +1173,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                     "fact_extract",
                     output={"state_delta": state_delta, "legacy_updates": updates},
                     artifact=fact_artifact,
+                    usage=_stage_usage(getattr(result, "token_usage", {}), "fact_extract"),
                 )
             snapshot = truth_manager.create_snapshot(max(_chapter_number(chapter_id) - 1, 0))
             memory = ChapterMemoryStore(project_root, novel_id)
@@ -1097,6 +1205,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                         "state_delta": state_delta,
                         "fallback": state_delta_fallback,
                     },
+                    usage=_stage_usage(getattr(result, "token_usage", {}), "settle"),
                 )
                 memory.save(
                     chapter_id=chapter_id,
@@ -1241,7 +1350,9 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 response_payload["state_delta"] = state_delta
                 response_payload["state_delta_fallback"] = state_delta_fallback
             return response_payload
-    except _TaskCancellationRequested as exc:
+    except (_TaskCancellationRequested, ModelCancelledError) as exc:
+        if run_manifest is not None:
+            run_store.fail(run_manifest, stage=active_stage or "write", code="TASK_CANCELLED")
         if active_stage:
             scheduler.fail_stage(workflow, active_stage, str(exc))
         if run_v2_manifest is not None:
@@ -1262,6 +1373,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             "chapter_id": chapter_id,
             "error": str(exc),
             "code": "TASK_CANCELLED",
+            "run_id": run_manifest.run_id if run_manifest else "",
             **_preserve_failed_draft(
                 project_root,
                 novel_id,
@@ -1269,6 +1381,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 run_v2_store,
                 run_v2_manifest,
                 partial_content=str(getattr(exc, "partial_content", "") or ""),
+                usage=_writer_failure_usage(writer, exc),
             ),
         }
     except ProjectBusyError as exc:
@@ -1291,7 +1404,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             }
         if run_manifest is not None:
             try:
-                run_store.fail(run_manifest, stage=active_stage or "write")
+                run_store.fail(run_manifest, stage=active_stage or "write", code=code)
             except Exception:
                 pass
         if run_v2_manifest is not None and run_v2_active_stage:
@@ -1311,6 +1424,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
             "chapter_id": chapter_id,
             "error": str(exc),
             "code": code,
+            "run_id": run_manifest.run_id if run_manifest else "",
             **_preserve_failed_draft(
                 project_root,
                 novel_id,
@@ -1318,6 +1432,7 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 run_v2_store,
                 run_v2_manifest,
                 partial_content=str(getattr(exc, "partial_content", "") or ""),
+                usage=_writer_failure_usage(writer, exc),
             ),
         }
 
@@ -1340,7 +1455,16 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
         return {"ok": False, "error": "未找到项目配置", "code": "INVALID_PROJECT"}
     novel_id = str(config.get("novel_id") or "")
     chapter_id = str(args.get("chapter_id") or "ch_001")
-    dimensions = args.get("dimensions")
+    from tools.review_rubric import resolve_review_dimensions
+
+    try:
+        dimensions = resolve_review_dimensions(
+            dimensions=args.get("dimensions"),
+            depth=str(args.get("depth") or "full"),
+            domains=args.get("domains"),
+        )
+    except ValueError as exc:
+        return {"ok": False, "chapter_id": chapter_id, "error": str(exc), "code": "INVALID_INPUT"}
     if dimensions is not None and (
         not isinstance(dimensions, list)
         or any(not isinstance(item, int) or item < 1 or item > 37 for item in dimensions)
@@ -1460,14 +1584,15 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                 )
             _task_phase(args, "model", "执行章节审稿")
             strict = bool(args.get("strict", False))
-            result = asyncio.run(
-                reviewer.review(
-                    content=content,
-                    context=review_context,
-                    dimensions=dimensions,
-                    strict=strict,
+            with _model_cancellation_scope(args):
+                result = asyncio.run(
+                    reviewer.review(
+                        content=content,
+                        context=review_context,
+                        dimensions=dimensions,
+                        strict=strict,
+                    )
                 )
-            )
             if run_v2_manifest is not None:
                 run_v2_store.assert_accepts_result(run_v2_manifest)
             issues: list[dict[str, Any]] = [
@@ -1508,9 +1633,12 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                 "dimensions": dimensions,
             }
             canon_gate_on = bool(args.get("canon_gate") or strict)
-            canon_info = _apply_canon_gate(payload["review_v2"], strict=canon_gate_on)
+            canon_info = _apply_canon_gate(
+                payload["review_v2"], strict=canon_gate_on, context=review_context
+            )
             if canon_info:
                 payload["canon_gate"] = canon_info
+                payload["score"] = None
                 if payload["review_v2"].get("delivery_status") != "pass":
                     payload["passed"] = False
             _task_phase(args, "validating", "整理审稿问题")
@@ -1522,7 +1650,7 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                 "review",
                 message="chapter reviewed",
                 data={
-                    "passed": bool(result.passed),
+                    "passed": bool(payload["passed"]),
                     "errors": [
                         item["description"]
                         for item in issues
@@ -1547,7 +1675,7 @@ def execute_review_chapter(project_root: Path, args: dict[str, Any]) -> dict[str
                     artifact=review_artifact,
                 )
             return payload
-    except _TaskCancellationRequested as exc:
+    except (_TaskCancellationRequested, ModelCancelledError) as exc:
         scheduler.fail_stage(workflow, "review", str(exc))
         if run_v2_manifest is not None:
             run_v2_store.request_cancel(run_v2_manifest, reason="review_cancelled")
@@ -1773,6 +1901,7 @@ def execute_multi_agent_chapter(
                 canon_info = _apply_canon_gate(review_payload["review_v2"], strict=canon_gate_on)
                 if canon_info:
                     review_payload["canon_gate"] = canon_info
+                    review_payload["score"] = None
                     if review_payload["review_v2"].get("delivery_status") != "pass":
                         review_payload["passed"] = False
                 ReviewStore(project_root, novel_id).save(chapter_id, review_payload)
@@ -1782,7 +1911,7 @@ def execute_multi_agent_chapter(
                     "review",
                     message="chapter reviewed via multi-write",
                     data={
-                        "passed": bool(result.review.passed),
+                        "passed": bool(review_payload["passed"]),
                         "errors": [
                             item["description"]
                             for item in issues
