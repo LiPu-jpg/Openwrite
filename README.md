@@ -27,6 +27,10 @@
 这是 [OpenWrite](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 的 dsh 插件版本。
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Agent 与交互界面，OpenWrite Core 提供小说领域能力；人物、设定、大纲、正文和评审保存在本地作品目录。
 
+## 源码待发布修复
+
+工作台新增 OpenCode Go Console 认证，捆绑 Core 5.8.15，自动读取本机官方 CLI 的有效凭据和工作区信息；不必手工复制会过期的 Console 令牌。真实工作台连接测试与流式写作已通过。见 [OpenCode Go 接入](docs/OPENCODE_GO.md)。**此项尚未发布到 npm，以下 0.2.26 安装说明不包含它。**
+
 ## 0.2.26 更新
 
 本版捆绑 Core **5.8.14**，包含旧会话恢复、精确 DSH `0.2.1-rc.3` 兼容、
