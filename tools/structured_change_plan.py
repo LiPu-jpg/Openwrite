@@ -109,7 +109,7 @@ class StructuredChangePlanStore:
                     )
                 target = self._target(record)
                 try:
-                    current = target.read_text(encoding="utf-8")
+                    current = target.read_bytes().decode("utf-8")
                 except OSError as exc:
                     raise StructuredChangePlanError(
                         "结构化变更目标无法读取，请重新预览。",
@@ -143,7 +143,7 @@ class StructuredChangePlanStore:
                 undo_token = self._save_record(undo_record)
                 try:
                     self._atomic_write(target, str(record["result_content"]))
-                    actual = target.read_text(encoding="utf-8")
+                    actual = target.read_bytes().decode("utf-8")
                     actual_revision = RevisionService.fingerprint(actual)
                     if actual_revision != record["result_revision"]:
                         raise StructuredChangePlanError(
@@ -373,6 +373,7 @@ class StructuredChangePlanStore:
             with tempfile.NamedTemporaryFile(
                 "w",
                 encoding="utf-8",
+                newline="",
                 dir=path.parent,
                 prefix=f".{path.name}.",
                 suffix=".tmp",

@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import os
 import re
-import selectors
 import shutil
 import signal
 import subprocess
 import time
 import uuid
 from pathlib import Path
+from queue import Empty, Full, Queue
+from threading import Event, Thread
 from typing import Any
 
 from tools.llm.response import redact_sensitive_text
@@ -292,8 +293,7 @@ class ResearchService:
         ).strip().lower()
         if search not in {"bocha", "bing", "jina", "none"}:
             raise ResearchServiceError("深度研究搜索提供方无效", code="INVALID_INPUT")
-        command = [
-            pnpm,
+        command = self._command_prefix(pnpm) + [
             "research",
             "--prompt",
             prompt,
@@ -326,6 +326,7 @@ class ResearchService:
         context.checkpoint()
         run_started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         started_monotonic = time.monotonic()
+        context.phase("model", "DeepResearch 正在检索和组织证据")
         process = subprocess.Popen(
             command,
             cwd=self.framework_root,
@@ -336,38 +337,7 @@ class ResearchService:
             text=False,
             start_new_session=(os.name == "posix"),
         )
-        output = bytearray()
-        selector = selectors.DefaultSelector()
-        if process.stdout is not None:
-            selector.register(process.stdout, selectors.EVENT_READ)
-        try:
-            context.phase("model", "DeepResearch 正在检索和组织证据")
-            while process.poll() is None:
-                for selector_key, _ in selector.select(timeout=0.4):
-                    chunk = os.read(selector_key.fd, 8192)
-                    if chunk:
-                        self._append_process_output(output, chunk)
-                if context.cancellation_requested():
-                    if os.name == "posix":
-                        try:
-                            os.killpg(process.pid, signal.SIGTERM)
-                        except ProcessLookupError:
-                            pass
-                    else:
-                        process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                    raise TaskCancelled("研究任务已取消")
-            if process.stdout is not None:
-                chunk = process.stdout.read()
-                if chunk:
-                    self._append_process_output(output, chunk)
-        finally:
-            selector.close()
-            if process.stdout is not None:
-                process.stdout.close()
+        output = self._collect_process_output(process, context)
         latency_ms = int((time.monotonic() - started_monotonic) * 1000)
         if process.returncode != 0:
             detail = redact_sensitive_text(
@@ -454,6 +424,95 @@ class ResearchService:
             "path": str(target_report.relative_to(self.novel_root)),
             "metrics": metadata["metrics"],
         }
+
+    @staticmethod
+    def _command_prefix(pnpm: str) -> list[str]:
+        if Path(pnpm).suffix.lower() not in {".cmd", ".bat"}:
+            return [pnpm]
+        # Run the package entry point directly, keeping prompts out of cmd.exe.
+        parent = Path(pnpm).parent
+        candidates = (
+            parent / "node_modules/pnpm/bin/pnpm.cjs",
+            parent / "node_modules/corepack/dist/pnpm.js",
+        )
+        node = shutil.which("node")
+        entry = next((path for path in candidates if path.is_file()), None)
+        if not node or entry is None:
+            raise ResearchServiceError(
+                "无法解析 pnpm 的 Node 入口；请安装标准 pnpm 或 Corepack 后重试",
+                code="RESEARCH_RUNTIME_UNAVAILABLE",
+            )
+        return [node, str(entry)]
+
+    def _collect_process_output(self, process, context) -> bytearray:
+        # select/selectors cannot monitor subprocess pipes on Windows.
+        chunks: Queue = Queue(maxsize=32)
+        stopped = Event()
+
+        def send(value):
+            while not stopped.is_set():
+                try:
+                    chunks.put(value, timeout=0.1)
+                    return
+                except Full:
+                    continue
+
+        def read():
+            try:
+                if process.stdout is not None:
+                    while not stopped.is_set():
+                        chunk = process.stdout.read1(8192)
+                        if not chunk:
+                            break
+                        send(chunk)
+            except OSError as exc:
+                send(exc)
+            finally:
+                send(None)
+
+        reader = Thread(target=read, daemon=True, name="openwrite-research-output")
+        reader.start()
+        output = bytearray()
+        ended = False
+        try:
+            while not ended or process.poll() is None:
+                if context.cancellation_requested():
+                    raise TaskCancelled("研究任务已取消")
+                try:
+                    chunk = chunks.get(timeout=0.1)
+                except Empty:
+                    continue
+                if chunk is None:
+                    ended = True
+                elif isinstance(chunk, OSError):
+                    raise chunk
+                else:
+                    self._append_process_output(output, chunk)
+        finally:
+            stopped.set()
+            if process.poll() is None:
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/pid", str(process.pid), "/T", "/F"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                        )
+                    except (OSError, subprocess.TimeoutExpired):
+                        process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            reader.join(timeout=2)
+            if process.stdout is not None and not reader.is_alive():
+                process.stdout.close()
+        return output
 
     def _research_environment(
         self,

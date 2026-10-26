@@ -385,8 +385,11 @@ def test_move_rejects_stale_anchor_or_chapter_revision_without_writes(tmp_path: 
     assert _files(novel) == before
 
 
-def test_move_rolls_back_both_chapters_and_sidecar_on_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_move_rolls_back_both_chapters_and_sidecar_on_failure(tmp_path: Path, newline) -> None:
     novel = _project(tmp_path)
+    for path in (novel / "data/manuscript").rglob("*.md"):
+        path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", newline.encode()))
 
     def fail(stage: str) -> None:
         if stage == "sidecar_replaced":

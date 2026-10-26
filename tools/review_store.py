@@ -552,7 +552,7 @@ class ReviewStore:
         if len(matches) != 1:
             return ""
         try:
-            content = matches[0].read_text(encoding="utf-8")
+            content = matches[0].read_bytes().decode("utf-8")
         except OSError:
             return ""
         return "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()

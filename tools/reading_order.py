@@ -866,7 +866,7 @@ class ReadingOrderService:
         if not self.identity_path.is_file():
             return {}, []
         try:
-            payload = json.loads(self.identity_path.read_text(encoding="utf-8"))
+            payload = json.loads(self.identity_path.read_bytes().decode("utf-8"))
             raw = payload.get("documents") if isinstance(payload, dict) else None
             if (
                 not isinstance(payload, dict)
@@ -896,7 +896,7 @@ class ReadingOrderService:
         if not self.outline_path.is_file():
             return None
         try:
-            return self.outline_path.read_text(encoding="utf-8")
+            return self.outline_path.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise ReadingOrderError(
                 "大纲文件无法读取",
@@ -907,7 +907,7 @@ class ReadingOrderService:
         if document["status"] not in {"present", "orphan"}:
             return ""
         try:
-            return self._safe_document_path(str(document["path"])).read_text(encoding="utf-8")
+            return self._safe_document_path(str(document["path"])).read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError):
             return ""
 

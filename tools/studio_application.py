@@ -1431,7 +1431,7 @@ class StudioApplication:
         rebase: bool,
     ) -> dict[str, Any]:
         source_path = self.novel_root / "src" / "outline.md"
-        source = source_path.read_text(encoding="utf-8")
+        source = source_path.read_bytes().decode("utf-8")
         effective = dict(change)
         if rebase:
             effective["revision"] = self.outline_structure()["revision"]
@@ -1548,7 +1548,7 @@ class StudioApplication:
             notes=self._string_list(change.get("notes")),
         )
         path = self.novel_root / "src" / "story" / "current_focus.md"
-        source = path.read_text(encoding="utf-8") if path.exists() else ""
+        source = path.read_bytes().decode("utf-8") if path.exists() else ""
         return {
             "change_kind": "focus",
             "change": dict(change),
@@ -1569,7 +1569,7 @@ class StudioApplication:
         from models.foreshadowing import ForeshadowingGraph, ForeshadowingNode
 
         path = self.novel_root / "data" / "foreshadowing" / "dag.yaml"
-        source = path.read_text(encoding="utf-8") if path.exists() else ""
+        source = path.read_bytes().decode("utf-8") if path.exists() else ""
         try:
             raw = yaml.safe_load(source) or {}
             if not isinstance(raw, dict):
@@ -1646,7 +1646,7 @@ class StudioApplication:
         self,
         change: dict[str, Any],
     ) -> dict[str, Any]:
-        source = self.config_path.read_text(encoding="utf-8")
+        source = self.config_path.read_bytes().decode("utf-8")
         config = self._load_config()
         current = normalize_writing_targets(config.get("writing_targets"))
         try:

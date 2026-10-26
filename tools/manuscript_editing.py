@@ -59,7 +59,7 @@ class ManuscriptVersionStore:
     ) -> ManuscriptVersionV1:
         clean_chapter = self._chapter_id(chapter_id)
         path = self.chapter_path(clean_chapter)
-        source = path.read_text(encoding="utf-8") if content is None else str(content)
+        source = path.read_bytes().decode("utf-8") if content is None else str(content)
         now = datetime.now(timezone.utc)
         version_id = f"ver_{now.strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:10]}"
         chapter_root = self.root / clean_chapter
@@ -90,7 +90,7 @@ class ManuscriptVersionStore:
         for path in root.glob("ver_*.json"):
             try:
                 versions.append(
-                    ManuscriptVersionV1.model_validate_json(path.read_text(encoding="utf-8"))
+                    ManuscriptVersionV1.model_validate_json(path.read_bytes().decode("utf-8"))
                 )
             except (OSError, ValueError):
                 continue
@@ -131,7 +131,7 @@ class ManuscriptVersionStore:
     def compare(self, chapter_id: str, version_id: str) -> dict[str, Any]:
         clean_chapter = self._chapter_id(chapter_id)
         target, target_content = self.load(clean_chapter, version_id)
-        current_content = self.chapter_path(clean_chapter).read_text(encoding="utf-8")
+        current_content = self.chapter_path(clean_chapter).read_bytes().decode("utf-8")
         from tools.revision_service import RevisionService
 
         return {
@@ -151,7 +151,7 @@ class ManuscriptVersionStore:
             raise ManuscriptEditingError("正文版本不存在", code="VERSION_NOT_FOUND")
         try:
             version = ManuscriptVersionV1.model_validate_json(
-                meta_path.read_text(encoding="utf-8")
+                meta_path.read_bytes().decode("utf-8")
             )
             content_path = (self.root / clean_chapter / f"{clean_version}.md").resolve()
             content_path.relative_to(self.root.resolve())
@@ -162,7 +162,7 @@ class ManuscriptVersionStore:
                 or version.content_file != expected_file
             ):
                 raise ValueError("version metadata identity mismatch")
-            content = content_path.read_text(encoding="utf-8")
+            content = content_path.read_bytes().decode("utf-8")
         except (OSError, ValueError) as exc:
             raise ManuscriptEditingError("正文版本损坏", code="INVALID_VERSION") from exc
         if self.fingerprint(content) != version.source_revision:
@@ -189,7 +189,7 @@ class ManuscriptVersionStore:
                 operation=f"manuscript_restore:{clean_chapter}:{clean_version}",
             ):
                 path = self.chapter_path(clean_chapter)
-                current = path.read_text(encoding="utf-8")
+                current = path.read_bytes().decode("utf-8")
                 if not self.revision_matches(current_revision, self.fingerprint(current)):
                     raise ManuscriptEditingError("当前正文已变化", code="STALE_REVISION")
                 version, content = self.load(clean_chapter, clean_version)
@@ -278,6 +278,7 @@ class ManuscriptVersionStore:
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
+            newline="",
             dir=path.parent,
             prefix=f".{path.name}.",
             suffix=".tmp",
@@ -306,7 +307,7 @@ class ManuscriptAnnotationStore:
         note: str,
         color: object = None,
     ) -> ManuscriptAnnotationV1:
-        content = self.versions.chapter_path(chapter_id).read_text(encoding="utf-8")
+        content = self.versions.chapter_path(chapter_id).read_bytes().decode("utf-8")
         current_revision = self.versions.fingerprint(content)
         if not self.versions.revision_matches(source_revision, current_revision):
             raise ManuscriptEditingError("正文已变化，请重新选择批注位置", code="STALE_REVISION")
@@ -339,11 +340,11 @@ class ManuscriptAnnotationStore:
         result: list[ManuscriptAnnotationV1] = []
         if not root.is_dir():
             return result
-        content = self.versions.chapter_path(chapter_id).read_text(encoding="utf-8")
+        content = self.versions.chapter_path(chapter_id).read_bytes().decode("utf-8")
         for path in root.glob("ann_*.json"):
             try:
                 item = ManuscriptAnnotationV1.model_validate_json(
-                    path.read_text(encoding="utf-8")
+                    path.read_bytes().decode("utf-8")
                 )
             except (OSError, ValueError):
                 continue
@@ -373,7 +374,7 @@ class ManuscriptAnnotationStore:
             raise ManuscriptEditingError("批注不存在", code="ANNOTATION_NOT_FOUND")
         try:
             return ManuscriptAnnotationV1.model_validate_json(
-                path.read_text(encoding="utf-8")
+                path.read_bytes().decode("utf-8")
             )
         except (OSError, ValueError) as exc:
             raise ManuscriptEditingError("批注损坏", code="INVALID_ANNOTATION") from exc

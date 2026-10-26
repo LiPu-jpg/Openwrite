@@ -866,8 +866,8 @@ class SceneStructureService:
         target_document_id = target_chapter["document_id"]
         source_path = self._safe_path(source_chapter["path"])
         target_path = self._safe_path(target_chapter["path"])
-        source_before = source_path.read_text(encoding="utf-8")
-        target_before = target_path.read_text(encoding="utf-8")
+        source_before = source_path.read_bytes().decode("utf-8")
+        target_before = target_path.read_bytes().decode("utf-8")
         source_records = sorted(
             [item for item in sidecar["scenes"] if item["document_id"] == source_document_id],
             key=lambda item: int(item["order"]),
@@ -1267,7 +1267,7 @@ class SceneStructureService:
             return raw, None, self._issue("SCENE_SIDECAR_INVALID")
 
     def _read_document(self, document: dict[str, Any]) -> str:
-        return self._safe_path(str(document["path"])).read_text(encoding="utf-8")
+        return self._safe_path(str(document["path"])).read_bytes().decode("utf-8")
 
     def _safe_path(self, relative: str) -> Path:
         manuscript_root = (self.novel_root / "data" / "manuscript").resolve()

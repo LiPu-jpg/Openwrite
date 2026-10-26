@@ -242,6 +242,10 @@ class TaskStore:
         return normalize_task_record(raw) if raw is not None else None
 
     def _load_raw(self, task_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            return self._load_raw_unlocked(task_id)
+
+    def _load_raw_unlocked(self, task_id: str) -> dict[str, Any] | None:
         path = self.snapshot_path(task_id)
         if not path.is_file():
             return None
@@ -601,7 +605,9 @@ class TaskStore:
                 handle.flush()
                 os.fsync(handle.fileno())
                 temp_path = Path(handle.name)
-            temp_path.replace(path)
+            from tools.file_ops import replace_file
+
+            replace_file(temp_path, path)
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)

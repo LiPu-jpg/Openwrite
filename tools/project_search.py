@@ -905,7 +905,7 @@ class ProjectSearchIndex:
         canonical_ids = self._canonical_document_ids()
         for path in self._iter_documents():
             try:
-                raw_body = path.read_text(encoding="utf-8")
+                raw_body = path.read_bytes().decode("utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
             relative = self._relative(path)

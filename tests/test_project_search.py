@@ -111,13 +111,14 @@ def test_project_search_uses_explicit_literal_fallback_when_lightrag_is_unconfig
     assert payload["results"][0]["line"] == 3
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_manuscript_search_identity_and_revision_match_canonical_reading_order(
-    tmp_path: Path,
+    tmp_path: Path, newline,
 ):
     novel_root = tmp_path / "data" / "novels" / "demo"
     chapter = novel_root / "data" / "manuscript" / "arc_001" / "ch_001.md"
     chapter.parent.mkdir(parents=True)
-    chapter.write_text("# 第一章\n\n钟楼每天少走十三秒。\n", encoding="utf-8")
+    chapter.write_bytes("# 第一章\n\n钟楼每天少走十三秒。\n".replace("\n", newline).encode())
 
     def unavailable(root):
         del root
