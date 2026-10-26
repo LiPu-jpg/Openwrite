@@ -13,7 +13,10 @@ def add_review_diagnostics(review: dict[str, Any]) -> None:
                 "fix_hint": "Run a full review before requesting full-chapter delivery approval.",
             }
         )
+    requested = set(review.get("requested_domains") or [])
     for domain in review.get("domains", []):
+        if review.get("partial_review") and requested and domain.get("id") not in requested:
+            continue
         missing = [
             str(c.get("id"))
             for c in domain.get("criteria", [])
@@ -31,6 +34,16 @@ def add_review_diagnostics(review: dict[str, Any]) -> None:
                     ),
                 }
             )
+    for error in review.get("provenance", {}).get("errors", []):
+        reasons.append(
+            {
+                "code": "provider_error",
+                "domain": error.get("domain"),
+                "error_code": error.get("code"),
+                "missing": [],
+                "fix_hint": "Resolve the reported provider error before rerunning this domain.",
+            }
+        )
     for gate in review.get("gates", []):
         if gate.get("status") == "inconclusive":
             reasons.append(
@@ -69,7 +82,13 @@ def add_review_diagnostics(review: dict[str, Any]) -> None:
         )
     review["score_valid"] = review.get("quality_score") is not None and not any(
         r["code"]
-        in {"partial_review", "review_checks_inconclusive", "gate_inconclusive", "canon_unverified"}
+        in {
+            "partial_review",
+            "review_checks_inconclusive",
+            "gate_inconclusive",
+            "canon_unverified",
+            "provider_error",
+        }
         for r in reasons
     )
     codes = {reason["code"] for reason in reasons}

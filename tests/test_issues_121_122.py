@@ -76,6 +76,33 @@ def test_quick_scope_is_explicit_and_does_not_claim_full_delivery(tmp_path, monk
     assert result.passed is False and v2["delivery_status"] == "inconclusive"
     assert v2["delivery_diagnostics"]["code"] == "partial_review"
     assert v2["unreviewed_dimensions"]
+    assert not any(
+        r["code"] == "review_checks_inconclusive" for r in v2["delivery_diagnostics"]["reasons"]
+    )
+
+
+def test_partial_review_diagnostics_distinguish_unselected_checks_and_provider_errors():
+    from tools.review_diagnostics import add_review_diagnostics
+
+    review = {
+        "partial_review": True,
+        "requested_domains": ["coherence"],
+        "domains": [
+            {"id": name, "criteria": [{"id": name, "status": "inconclusive"}]}
+            for name in ("coherence", "character")
+        ],
+        "provenance": {"errors": [{"domain": "coherence", "code": "PROVIDER_AUTH_ERROR"}]},
+        "quality_score": None,
+    }
+    add_review_diagnostics(review)
+    reasons = review["delivery_diagnostics"]["reasons"]
+    assert [r["domain"] for r in reasons if r["code"] == "review_checks_inconclusive"] == [
+        "coherence"
+    ]
+    assert next(r for r in reasons if r["code"] == "provider_error")["error_code"] == (
+        "PROVIDER_AUTH_ERROR"
+    )
+    assert review["score_valid"] is False
 
 
 @pytest.mark.parametrize(
