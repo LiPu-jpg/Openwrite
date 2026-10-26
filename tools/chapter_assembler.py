@@ -1050,6 +1050,15 @@ class ChapterAssemblerV2:
     def _load_setting_documents(self, concept_names: List[str]) -> Dict[str, str]:
         docs: Dict[str, str] = {}
 
+        # Progression systems are authored setting rules, just like world rules.
+        # Load them even when a project has no world/ directory; the ordinary
+        # settings budget and per-document manifest still apply.
+        progression_root = self.src_root / "progression"
+        if progression_root.exists():
+            for p in sorted(progression_root.iterdir()):
+                if p.is_file() and p.suffix.lower() in {".yaml", ".yml"}:
+                    docs[f"progression.{p.stem}"] = self._load_text(p).strip()
+
         world_root = self.src_root / "world"
         if not world_root.exists():
             return docs
