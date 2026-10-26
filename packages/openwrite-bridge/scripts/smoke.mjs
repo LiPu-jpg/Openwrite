@@ -1211,6 +1211,17 @@ assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
       { old_text: 'first', new_text: 'one' }, { old_text: 'second', new_text: 'two' },
     ] }, run)
     assert.equal(requests[1].body.edits.length, 2)
+    // #109 B-13: preserve literal inline quote anchors through both argument
+    // encodings and the actual tool -> HTTP serialization boundary.
+    for (const edits of [
+      [{ old_text: '> 唯一原文\r\n第二行', new_text: '替换\r\n正文' }],
+      [{ start_text: '> 唯一原文', end_text: '## 下一节', end_inclusive: false, new_text: '替换\r\n' }],
+    ]) {
+      for (const encoded of [edits, JSON.stringify(edits)]) {
+        await documentPlanTool.execute({ action: 'preview', path: 'src/world/rules.md', edits: encoded }, run)
+        assert.deepEqual(requests.at(-1).body.edits, edits)
+      }
+    }
     await assert.rejects(() => documentPlanTool.execute({ action: 'apply', preview_token: 'token', confirm: false }, run), /confirm: true/)
     globalThis.fetch = async () => new Response(JSON.stringify({
       error: { code: 'STALE_ACCEPTED_REVISION', message: 'Reconcile the pending operation', details: { operation_id: 'accept_1' } },

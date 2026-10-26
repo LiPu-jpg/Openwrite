@@ -1,5 +1,13 @@
 # 发布验收记录
 
+## 0.2.27（待发布）
+
+捆绑 Core 5.8.16，来源 [PR #124](https://github.com/LiPu-jpg/Openwrite/pull/124)，源码提交 `27ec8b3bea0a3f8754f5701a7b21c23a9328d6b7`。wheel 从该提交的干净归档构建，496 个打包源文件与提交逐字节一致，SHA-256 为 `8be4dc5e3feb2d0faf91a1e0763f05ff338c237912edd8c066aaad118ec41ec4`。
+
+本地 Core 全量 1478 passed / 32 skipped；HTTP 行中锚点的 LF/CRLF 预览、应用、撤销与不匹配保护通过。预设生命周期、停机升级与 managed runtime 组合 27 passed，并加入六组原生安装矩阵。真实 OpenCode Go 流式安全评审 1 次成功，首次 max_tokens=24000、耗时 4.424 秒；此前工作台 Console 档案保存、连接测试及流式写作也成功。CI 本身不调用模型，真实模型记录与其独立，不能把 CI 的 modelCalls:0 解释成真实模型验收。
+
+发布和各平台安装报告将在完整 CI 完成并下载核对后补充。[未完成验收与上游依赖](CLOSED_ISSUE_FOLLOWUPS.md) 继续由 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123) 跟踪。
+
 ## CI 运行范围
 
 仅修改 README.md 或 docs 下的 Markdown 文档时，跳过插件维护与跨平台发布验收。预设、技能、脚本、依赖、资源和工作流变更仍触发检查；混合文档与代码的提交也照常检查。开发分支通过 PR 检查，避免同一提交在分支 push 与 PR 上重复执行；主分支合并后保留验收，两个工作流均可手动触发。发布必须使用完整验收通过的产物，跳过检查不能作为发布通过的证据。

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.27
+
+- Bundle Core 5.8.16: reviewer safety/domain/legacy calls honor the profile output allowance from the first request, without a hidden 4096-token cap (#69); retain context limits and bounded truncation recovery.
+- Include the workbench OpenCode Go Console integration from Core 5.8.15 (#114), with CLI credential refresh and automatic workspace headers.
+- Preserve 0.2.26/27 session identities as durable aliases; require each new release alias and run lifecycle/upgrade/runtime regressions on the native platform matrix (#105).
+- Add inline quote-anchor HTTP preview/apply/undo regressions for LF/CRLF and tool argument serialization (#109 B-13). Keep original reproduction, real-device acceptance and upstream release work open in #123; see `docs/CLOSED_ISSUE_FOLLOWUPS.md`.
+
 ## Unreleased
 
 - Bundle Core 5.8.15: workbench OpenCode Go Console authentication, per-request CLI credential refresh and automatic workspace headers (#114).
