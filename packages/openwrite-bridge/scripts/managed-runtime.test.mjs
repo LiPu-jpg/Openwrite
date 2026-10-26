@@ -34,6 +34,58 @@ async function fixture(t) {
   return root
 }
 
+for (const phase of ['error', 'cancelled', 'stopped']) {
+  test(`manual retry waits for a terminal ${phase} startup to settle before returning a new connection`, async t => {
+    const root = await fixture(t)
+    const runtime = new ManagedRuntime(root, root)
+    const stale = { baseUrl: 'http://127.0.0.1:1', token: 'old' }
+    const fresh = { baseUrl: 'http://127.0.0.1:2', token: 'new' }
+    runtime.state = { phase, message: 'previous child exited' }
+    runtime.allowRevive = false
+    runtime.pending = Promise.resolve(stale)
+    runtime.verifyConnection = async connection => connection
+    let starts = 0
+    runtime.prepare = async () => {
+      starts++
+      runtime.state = { phase: 'ready', message: 'new backend' }
+      runtime.connection = fresh
+      return fresh
+    }
+    const connections = await Promise.all([runtime.ensure(), runtime.ensure()])
+    assert.deepEqual(connections, [fresh, fresh])
+    assert.equal(starts, 1)
+    assert.equal(runtime.status().phase, 'ready')
+    await runtime.dispose()
+  })
+}
+
+test('manual retry can replace a rejected terminal startup', async t => {
+  const root = await fixture(t)
+  const runtime = new ManagedRuntime(root, root)
+  runtime.state = { phase: 'error', message: 'previous startup failed' }
+  runtime.pending = Promise.reject(new Error('previous startup failed'))
+  runtime.prepare = async () => ({ baseUrl: 'http://127.0.0.1:2', token: 'new' })
+  assert.equal((await runtime.ensure()).token, 'new')
+  await runtime.dispose()
+})
+
+test('cancellation wins over a manual retry waiting for the previous startup', async t => {
+  const root = await fixture(t)
+  const runtime = new ManagedRuntime(root, root)
+  let finish
+  runtime.state = { phase: 'error', message: 'previous child exited' }
+  runtime.pending = new Promise(resolve => { finish = resolve })
+  let starts = 0
+  runtime.prepare = async () => { starts++; return { baseUrl: 'http://127.0.0.1:2' } }
+  const retried = runtime.ensure()
+  const rejected = assert.rejects(retried, /cancelled/i)
+  const cancelled = runtime.cancel()
+  finish({ baseUrl: 'http://127.0.0.1:1', token: 'old' })
+  await Promise.all([rejected, cancelled])
+  assert.equal(starts, 0)
+  await runtime.dispose()
+})
+
 test('cross-process installation lease waits, cancels, and can be reacquired', async t => {
   const root = await fixture(t)
   const first = new ManagedRuntime(root, root)
