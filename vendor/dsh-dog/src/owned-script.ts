@@ -33,6 +33,8 @@ export async function runOwnedScript(script: string, input: string, signal?: Abo
   let stderr = ''
   let failure: Error | undefined
   let escalation: ReturnType<typeof setTimeout> | undefined
+  child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
   const stop = () => {
     if (!child.pid || child.exitCode !== null || child.signalCode !== null) return
     if (process.platform === 'win32') {

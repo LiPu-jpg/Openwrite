@@ -15,7 +15,9 @@ def main():
     parser.add_argument("--core", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
-    manifest = json.loads((args.plugin / "release/runtime-manifest.json").read_text())
+    manifest = json.loads(
+        (args.plugin / "release/runtime-manifest.json").read_text(encoding="utf-8")
+    )
     expected_commit = manifest["sources"]["core"]["commit"]
     actual_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=args.core, text=True
@@ -68,7 +70,7 @@ def main():
         "sourceFilesCompared": len(checked),
         "pythonSourcesRequired": len(expected_python),
     }
-    args.report.write_text(json.dumps(report, indent=2) + "\n")
+    args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report))
 
 

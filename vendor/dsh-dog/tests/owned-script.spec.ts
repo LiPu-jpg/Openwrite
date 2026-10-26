@@ -22,9 +22,9 @@ describe('owned verifier processes', () => {
       const script = join(root, 'verifier.mjs')
       const missing = await runOwnedScript(script, '').catch(scriptFailureVerdict)
       expect(missing).toMatchObject({state: 'inconclusive', evidence: {code: 'SCRIPT_NOT_FOUND', script}})
-      try { resolveScriptPath(root, 'missing-verifier') } catch (error) {
-        expect(scriptFailureVerdict(error)).toMatchObject({state: 'inconclusive', evidence: {code: 'SCRIPT_NOT_FOUND'}})
-      }
+      let missingPathError: unknown
+      try { resolveScriptPath(root, 'missing-verifier') } catch (error) { missingPathError = error }
+      expect(scriptFailureVerdict(missingPathError)).toMatchObject({state: 'inconclusive', evidence: {code: 'SCRIPT_NOT_FOUND'}})
       await writeFile(script, 'process.stderr.write("runtime exploded"); process.stdout.write("unfinished"); process.exit(3)')
       const crashed = await runOwnedScript(script, '').catch(scriptFailureVerdict)
       expect(crashed).toMatchObject({state: 'inconclusive', evidence: {code: 'SCRIPT_EXIT_FAILED', exitCode: 3, stderr: 'runtime exploded', outputPreview: 'unfinished'}})
@@ -33,6 +33,15 @@ describe('owned verifier processes', () => {
       expect(malformed).toMatchObject({state: 'inconclusive', evidence: {code: 'SCRIPT_OUTPUT_NOT_JSON'}})
       expect(Buffer.byteLength((malformed.evidence as {outputPreview: string}).outputPreview)).toBe(200)
     } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('preserves UTF-8 characters split across stdout chunks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openwrite-dog-utf8-'))
+    try {
+      const script = join(root, 'verifier.mjs')
+      await writeFile(script, 'const b=Buffer.from(JSON.stringify({verdict:"pass",evidence:{text:"中文证据"}})); const i=b.indexOf(Buffer.from("中"))+1; process.stdout.write(b.subarray(0,i)); setTimeout(()=>process.stdout.write(b.subarray(i)),50)')
+      expect(parseVerdict(await runOwnedScript(script, ''))).toMatchObject({state: 'pass', evidence: {text: '中文证据'}})
+    } finally { await rm(root, {recursive: true, force: true}) }
   })
 
   it('executes packaged JavaScript through Node and cancels in-flight work', async () => {

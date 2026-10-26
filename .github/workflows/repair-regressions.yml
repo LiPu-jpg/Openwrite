@@ -17,6 +17,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   core-regressions:
+    env:
+      PYTHONUTF8: '1'
     strategy:
       fail-fast: false
       matrix:
@@ -82,7 +84,7 @@ jobs:
       - name: Verify ESM scripts and process diagnostics on the native Electron runtime
         run: npm --prefix vendor/dsh-dog test -- --run tests/owned-script-electron.spec.ts tests/owned-script.spec.ts --reporter=json --outputFile=../../electron-regressions.json
       - name: Require the real Electron case to run
-        run: node -e "const r=require('./electron-regressions.json'); if(r.numPassedTests<4 || r.numPendingTests!==0 || r.numFailedTests!==0) throw Error('Electron regressions incomplete')"
+        run: node -e "const r=require('./electron-regressions.json'); if(r.numPassedTests<5 || r.numPendingTests!==0 || r.numFailedTests!==0) throw Error('Electron regressions incomplete')"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
