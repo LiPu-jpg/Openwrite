@@ -33,6 +33,9 @@
 详见 [#105–#113 修复说明](docs/ISSUES_105_113.md)。这些修复尚未发布到 npm；
 以下正式安装说明仍对应已发布的 `0.2.25`。
 
+开发分支另集成 Core `5.8.14` 的 [连载报告修复](docs/ISSUE_109_REPAIRS.md) 与
+[OpenCode Go 配置及适配](docs/OPENCODE_GO.md)；这两项也尚未发布。
+
 ## 快速安装
 
 **0.2.25 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2**。四个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。

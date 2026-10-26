@@ -390,16 +390,17 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
 
   ctx.tools.register(defineTool({
     name: 'novel_context_preview',
-    description: 'Preview the context packet OpenWrite would assemble for writing a chapter (relevant outline, assets, foreshadowing, and prior-chapter memory).',
+    description: 'Preview the context packet OpenWrite would assemble for writing a chapter (relevant outline, assets, foreshadowing, and prior-chapter memory). Set include_agent_payload to inspect canonical writer inputs and document inclusion without calling a model.',
     parameters: {
       chapter: { type: 'string', description: 'Chapter id (e.g. "ch_0007"); omit or pass "next" for the next chapter to write.' },
+      include_agent_payload: { type: 'boolean', description: 'Include the full writer payload, rendered initial messages and document inventory. Later segment/retry messages depend on the write request.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const client = clientFor(exec)
-      return await client.getJson('/api/context', { chapter: args.chapter?.trim() || 'next' }, exec.signal)
+      return await client.getJson('/api/context', { chapter: args.chapter?.trim() || 'next', ...(args.include_agent_payload ? { include_agent_payload: 'true' } : {}) }, exec.signal)
     },
   }))
 
@@ -821,6 +822,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       data: { type: 'json', description: 'Object of asset fields to merge (e.g. name, summary, aliases).' },
       body_markdown: { type: 'string', description: 'Replacement markdown body (character/world assets).' },
       raw_text: { type: 'string', description: 'Full replacement document text, validated by the server.' },
+      related_mode: { type: 'string', enum: ['merge', 'replace'], description: 'Preserve and merge existing related entries by default; replace explicitly clears or replaces relations.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
@@ -830,6 +832,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       if (args.data !== undefined) body['data'] = args.data
       if (args.body_markdown !== undefined) body['body_markdown'] = args.body_markdown
       if (args.raw_text !== undefined) body['raw_text'] = args.raw_text
+      if (args.related_mode !== undefined) body['related_mode'] = args.related_mode
       return await client.postJson('/api/assets/update', body, exec.signal)
     },
   }))
@@ -900,7 +903,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       action: { type: 'string', required: true, enum: ['preview', 'apply', 'reject', 'retry', 'undo'], description: 'Plan lifecycle action.' },
       confirm: { type: 'boolean', description: 'Required true for apply and undo after author acceptance.' },
       path: { type: 'string', description: 'Existing document path for preview, relative to the novel root.' },
-      edits: { type: 'json', description: 'Preview edits: [{old_text,new_text}] or [{start_text,end_text,new_text}].' },
+      edits: { type: 'json', description: 'Preview edits: [{old_text,new_text}] or [{start_text,end_text,new_text,end_inclusive}]. Range end defaults to inclusive for compatibility; end_inclusive:false preserves the end anchor (e.g. the next heading).' },
       preview_token: { type: 'string', description: 'Immutable preview or undo token for apply/reject/retry/undo.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Bundle Core 5.8.14: serial-writing continuation/retry reliability, style and world context, incomplete-review scoring, relation preservation and document-edit lifecycle (#109).
+- Expose full writer input previews and explicit relation replacement through the bridge.
+- Adapt OpenCode Go client/session headers and document current DeepSeek V4.1 Flash configuration (#114).
+- Restore historical session presets, exact DSH 0.2.1-rc.3 compatibility and actionable external-runtime diagnostics (#105–#113; PR #115).
+
 ## 0.2.25（2026-10-23）
 
 - 捆绑 Core 5.8.12，处理 #98–#100：无模型验收、实例根目录校验、任务心跳与有限超时、历史隔离横评、作者自留存档及逐章体检。
