@@ -2,15 +2,15 @@
 
 PR #103 (Core embedding dimensions) and #104 (embedding configuration UI) were reviewed and merged after 35 Core tests, Ruff, 307 component tests, the plugin gate, contract checks, and source-to-wheel comparison (495 files, no differences).
 
-Upgrade/session and host fixes cover #105, #106, #107, #108, #110, #111, #112, #113; details and platform limits are in docs/ISSUES_105_113.md. Validation: npm run check:plugin passed (42 maintenance tests, 307 component tests); managed runtime suite 18 passed; preset lifecycle 3 passed; cross-branch contracts passed. Isolated real DSH 0.2.1-rc.3 browser boot passed preset selection, workbench render, DoG and coexistence with zero model calls. Windows Electron and Android native runtimes were not tested. These changes are not yet published to npm.
+Upgrade/session and host fixes cover #105, #106, #107, #108, #110, #111, #112, #113; details and platform limits are in docs/ISSUES_105_113.md. Validation: npm run check:plugin passed (42 maintenance tests, 307 component tests); managed runtime suite 18 passed; preset lifecycle 3 passed; cross-branch contracts passed. Isolated real DSH 0.2.1-rc.3 browser boot passed preset selection, workbench render, DoG and coexistence with zero model calls. Windows Electron and Android native runtimes were not tested. These changes are included in the 0.2.26 release candidate.
 
-PR #115 merged after all 16 CI checks passed, including the five exact host client checks, source install, Windows, Linux and both macOS architectures. The issue sweep continues with Core #109 and provider configuration #114.
+PR #115 merged after all 16 CI checks passed, including the five exact host client checks, source install, Windows, Linux and both macOS architectures. Core #109 and provider configuration #114 were subsequently completed.
 
 Core PR #116 merged: Core 5.8.14. Full pytest: 1451 passed, 32 skipped; 18 new regressions. Follow-up retry logging change passed 38 relevant tests. Changed-line Ruff diagnostics: 0; 163 unrelated existing diagnostics retained. The bundle wheel matches all 495 source files, has unchanged runtime dependency requirements and SHA-256 b96637d9cad364d280122bae9dd59e42be811cd43389ddb704ff4dc110f0acc0. Canonical source is commit 3f18d81363909b09fead27339c4a45396cd6af94 on native-core.
 
 The main integration exposes full context preview and explicit related replacement through the bridge. Regression smoke confirms both parameters reach the backend. All 17 report items and 15 suggestions are individually addressed or clarified in docs/ISSUE_109_REPAIRS.md (literal inline quote anchors already worked and now have regression coverage). OpenCode Go documentation was verified against the provider's official current API path and client/session requirements on 2026-10-26. No Go credential, paid request or Android native test was used.
 
-Main integration passed the complete plugin gate (42 maintenance tests, 307 component tests) and cross-branch contracts. Final package acceptance and merge state are tracked on the integration PR for branch codex/integrate-core-109-114. Do not publish npm or a GitHub release without a separate publication request.
+Main integration passed the complete plugin gate (42 maintenance tests, 307 component tests) and cross-branch contracts. PR #117 merged after all 16 checks passed; issues #105–#114 are closed. The user authorized npm and GitHub publication on 2026-10-26. Preparing 0.2.26 from the merged changes; promotion requires the exact artifact from the complete release-validation CI.
 
 # OpenWrite Native Framework / Review v2 Goal and Status
 

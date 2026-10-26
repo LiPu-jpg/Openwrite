@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.26（2026-10-26）
 
+- Support configured embedding dimensions and cloud/local embedding configuration (#103, #104).
 - Bundle Core 5.8.14: serial-writing continuation/retry reliability, style and world context, incomplete-review scoring, relation preservation and document-edit lifecycle (#109).
 - Expose full writer input previews and explicit relation replacement through the bridge.
 - Adapt OpenCode Go client/session headers and document current DeepSeek V4.1 Flash configuration (#114).
