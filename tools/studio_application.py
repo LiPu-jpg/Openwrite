@@ -594,7 +594,7 @@ class StudioApplication:
         if not path.is_file():
             return {}
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load(path.read_bytes().decode("utf-8")) or {}
         except (OSError, UnicodeDecodeError, yaml.YAMLError):
             return {"error": "unreadable"}
         if not isinstance(data, dict):
@@ -768,7 +768,7 @@ class StudioApplication:
         if not registry_path.is_file():
             return []
         try:
-            cfg = _yaml.safe_load(registry_path.read_text(encoding="utf-8")) or {}
+            cfg = _yaml.safe_load(registry_path.read_bytes().decode("utf-8")) or {}
             return [
                 {
                     "path": str(item.get("path") or ""),
@@ -812,7 +812,7 @@ class StudioApplication:
         try:
             import yaml as _yaml
 
-            cfg = _yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            cfg = _yaml.safe_load(config_path.read_bytes().decode("utf-8")) or {}
             novel_id = str(cfg.get("novel_id") or "")
         except (OSError, _yaml.YAMLError):
             novel_id = ""
@@ -850,7 +850,7 @@ class StudioApplication:
 
     def _project_payload(self) -> dict[str, Any]:
         recent = self._project_registry.list() if self._project_registry is not None else []
-        metadata_text = self.config_path.read_text(encoding="utf-8") if self.initialized else ""
+        metadata_text = self.config_path.read_bytes().decode("utf-8") if self.initialized else ""
         metadata_config = yaml.safe_load(metadata_text) or {}
         return {
             "root": str(self.project_root),
@@ -1020,7 +1020,7 @@ class StudioApplication:
                 analysis: dict[str, Any] = {}
                 if analysis_manifest.is_file():
                     try:
-                        loaded = json.loads(analysis_manifest.read_text(encoding="utf-8"))
+                        loaded = json.loads(analysis_manifest.read_bytes().decode("utf-8"))
                         if isinstance(loaded, dict):
                             chunks = loaded.get("chunks") or []
                             analysis = {
@@ -1188,7 +1188,7 @@ class StudioApplication:
             try:
                 versions = ManuscriptVersionStore(self.project_root, self.novel_id)
                 restore_path = versions.chapter_path(chapter_id)
-                restore_before = restore_path.read_text(encoding="utf-8")
+                restore_before = restore_path.read_bytes().decode("utf-8")
             except ManuscriptEditingError as exc:
                 status = (
                     HTTPStatus.NOT_FOUND
@@ -1215,7 +1215,7 @@ class StudioApplication:
                 status = HTTPStatus.CONFLICT
             raise StudioError(str(exc), status, code=exc.code) from exc
         if action == "restore" and restore_path is not None:
-            restored_content = restore_path.read_text(encoding="utf-8")
+            restored_content = restore_path.read_bytes().decode("utf-8")
             relative = restore_path.relative_to(self.novel_root).as_posix()
             result["document"] = {
                 "path": relative,
@@ -2217,7 +2217,7 @@ class StudioApplication:
     def update_focus(self, payload: dict[str, Any]) -> dict[str, Any]:
         before = self._service().focus_snapshot()
         focus_path = self.novel_root / "src" / "story" / "current_focus.md"
-        before_text = focus_path.read_text(encoding="utf-8") if focus_path.exists() else ""
+        before_text = focus_path.read_bytes().decode("utf-8") if focus_path.exists() else ""
         try:
             self._service().update_focus(
                 goal=str(payload.get("goal") or ""),
@@ -2228,7 +2228,7 @@ class StudioApplication:
         except NovelServiceError as exc:
             raise self._translate_service_error(exc) from exc
         after = self._service().focus_snapshot()
-        after_text = focus_path.read_text(encoding="utf-8")
+        after_text = focus_path.read_bytes().decode("utf-8")
         workspace = self.workspace()
         workspace["mutation_summary"] = build_mutation_summary(
             operation="focus.update",
@@ -2256,7 +2256,7 @@ class StudioApplication:
         if not changes:
             raise StudioError("请提供要修改的作品信息", HTTPStatus.BAD_REQUEST)
         with self._write_lock:
-            before = self.config_path.read_text(encoding="utf-8")
+            before = self.config_path.read_bytes().decode("utf-8")
             if payload.get("expected_revision") != RevisionService.fingerprint(before):
                 raise StudioError("作品信息已变化，请重新载入后保存", HTTPStatus.CONFLICT)
             config = yaml.safe_load(before) or {}
@@ -2286,7 +2286,7 @@ class StudioApplication:
     def update_writing_targets(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.require_project()
         current = normalize_writing_targets(self.config.get("writing_targets"))
-        before_config = self.config_path.read_text(encoding="utf-8")
+        before_config = self.config_path.read_bytes().decode("utf-8")
         try:
             targets = normalize_writing_targets(
                 payload,
@@ -3668,7 +3668,7 @@ class StudioApplication:
             Syntax errors, non-object roots, and empty objects are contract
             failures — a corrupt artifact must never look like an absent one."""
             try:
-                value = json.loads(path.read_text(encoding="utf-8"))
+                value = json.loads(path.read_bytes().decode("utf-8"))
             except FileNotFoundError:
                 return None
             except (OSError, json.JSONDecodeError) as exc:
@@ -3995,7 +3995,7 @@ class StudioApplication:
         if not path.is_file():
             return ""
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data = yaml.safe_load(path.read_bytes().decode("utf-8"))
         except (OSError, UnicodeDecodeError, yaml.YAMLError):
             return ""
         if not isinstance(data, dict):
@@ -4453,7 +4453,7 @@ class StudioApplication:
                 if matches
                 else _chapter_path(self.project_root, self.novel_id, chapter_id)
             )
-            previous = path.read_text(encoding="utf-8") if path.is_file() else ""
+            previous = path.read_bytes().decode("utf-8") if path.is_file() else ""
             expected = ManuscriptAcceptanceService.fingerprint(previous) if path.is_file() else ""
             if str(payload.get("expected_revision") or "") != expected:
                 raise StudioError(
@@ -4596,7 +4596,7 @@ class StudioApplication:
             try:
                 draft_path = Path(draft_value).resolve()
                 draft_path.relative_to(self.novel_root.resolve())
-                written_content = draft_path.read_text(encoding="utf-8")
+                written_content = draft_path.read_bytes().decode("utf-8")
                 relative = draft_path.relative_to(self.novel_root).as_posix()
                 response["mutation_summary"] = build_mutation_summary(
                     operation="manuscript.create",
@@ -6535,7 +6535,7 @@ class StudioApplication:
 
     def _load_config(self) -> dict[str, Any]:
         try:
-            data = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load(self.config_path.read_bytes().decode("utf-8")) or {}
         except (OSError, yaml.YAMLError) as exc:
             raise StudioError(f"项目配置无法读取: {exc}") from exc
         return data if isinstance(data, dict) else {}
@@ -6573,7 +6573,7 @@ class StudioApplication:
         }
         for path in iter_library_paths(self.novel_root):
             try:
-                content = path.read_text(encoding="utf-8")
+                content = path.read_bytes().decode("utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
             summary = self._library_document_summary(path, content)
@@ -6743,7 +6743,7 @@ class StudioApplication:
 
     def _document_title(self, path: Path) -> str:
         try:
-            head = path.read_text(encoding="utf-8")[:2000]
+            head = path.read_bytes().decode("utf-8")[:2000]
         except OSError:
             return path.stem
         match = re.search(r"^#\s+(.+?)\s*$", head, re.MULTILINE)

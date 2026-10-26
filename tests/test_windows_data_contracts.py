@@ -9,10 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from tools import file_ops
+from tools.chapter_memory import ChapterMemoryStore
 from tools.chapter_work_brief import ChapterWorkBriefService
+from tools.character_state_index import CharacterStateIndex
+from tools.export_preflight import ExportPreflightService
 from tools.init_project import init_project
 from tools.manuscript_acceptance import ManuscriptAcceptanceService
-from tools.manuscript_editing import ManuscriptVersionStore
+from tools.manuscript_editing import ManuscriptAnnotationStore, ManuscriptVersionStore
 from tools.outline_tree import build_outline_structure, mutate_outline_structure
 from tools.project_registry import ProjectRegistry
 from tools.research_service import MAX_PROCESS_OUTPUT_BYTES, ResearchService
@@ -78,7 +81,9 @@ def test_acceptance_history_and_review_use_the_same_exact_revision(tmp_path, new
     init_project(tmp_path, "demo")
     novel = tmp_path / "data/novels/demo"
     chapter = novel / "data/manuscript/arc_001/ch_001.md"
-    content = "# 第一章\n\n门外有人。\n".replace("\n", newline).encode()
+    content = "# 第一章\n\n门外有人。\n//**林舟[位置]：门内 -> 门外**\n".replace(
+        "\n", newline
+    ).encode()
     chapter.write_bytes(content)
     expected = "sha256:" + hashlib.sha256(content).hexdigest()
     service = ManuscriptAcceptanceService(tmp_path, "demo")
@@ -92,6 +97,33 @@ def test_acceptance_history_and_review_use_the_same_exact_revision(tmp_path, new
     assert version.source_revision == expected
     assert (novel / version.content_file).read_bytes() == content
     assert ReviewStore(tmp_path, "demo")._source_revision("ch_001") == expected
+    assert ChapterMemoryStore(tmp_path, "demo").load("ch_001")["freshness_status"] == "current"
+    assert CharacterStateIndex(tmp_path, "demo").query("林舟")["current"][0]["state"] == "门外"
+    inventory, unreadable = ExportPreflightService(tmp_path, "demo")._inventory()
+    assert not unreadable and inventory[0]["revision"] == expected
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_annotation_offsets_follow_exact_document_characters(tmp_path, newline):
+    init_project(tmp_path, "demo")
+    path = tmp_path / "data/novels/demo/data/manuscript/arc_001/ch_001.md"
+    content = "# 第一章\n\n门外有人。\n".replace("\n", newline)
+    path.write_bytes(content.encode())
+    start = content.index("门外有人")
+    annotations = ManuscriptAnnotationStore(tmp_path, "demo")
+    annotations.create(
+        "ch_001",
+        source_revision=ManuscriptVersionStore.fingerprint(content),
+        quote="门外有人",
+        start_hint=start,
+        end_hint=start + 4,
+        note="核对",
+    )
+    prefix = "序章提示。" + newline
+    path.write_bytes((prefix + content).encode())
+    moved = annotations.list("ch_001")[0]
+    assert moved.current_start == start + len(prefix)
+    assert moved.current_end == start + len(prefix) + 4
 
 
 def test_outline_mutations_keep_crlf_without_mixing_line_endings(tmp_path):

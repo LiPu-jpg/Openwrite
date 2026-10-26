@@ -158,7 +158,7 @@ def test_brief_aggregates_stale_review_acceptance_revision_tasks_and_target(
             "chapter_id": "ch_001",
             "kind": "review_fix",
             "status": "applied",
-            "source_revision": acceptance.fingerprint(chapter.read_text(encoding="utf-8")),
+            "source_revision": acceptance.fingerprint(chapter.read_bytes().decode("utf-8")),
             "applied_revision": "sha256:previous-apply",
             "selection": {},
             "request": {},
@@ -243,7 +243,7 @@ def test_brief_projects_latest_rereview_issue_closure(tmp_path: Path) -> None:
     init_project(tmp_path, "demo")
     chapter = _chapter(tmp_path, "ch_001", "# 第一章\n\n钟声停了。\n")
     source_revision = ManuscriptAcceptanceService.fingerprint(
-        chapter.read_text(encoding="utf-8")
+        chapter.read_bytes().decode("utf-8")
     )
     ReviewStore(tmp_path, "demo").save(
         "ch_001",
@@ -307,7 +307,7 @@ def test_legacy_foreshadow_review_and_task_records_remain_readable(
     )
     review_dir.mkdir(parents=True, exist_ok=True)
     source_revision = ManuscriptAcceptanceService.fingerprint(
-        chapter.read_text(encoding="utf-8")
+        chapter.read_bytes().decode("utf-8")
     )
     (review_dir / "ch_002.json").write_text(
         json.dumps(

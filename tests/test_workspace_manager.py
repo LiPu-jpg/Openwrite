@@ -1222,8 +1222,14 @@ def test_read_only_posts_do_not_bump_context_epoch(tmp_path: Path, opener):
         declared, _ = post({"chapter_id": "ch_001"})
         assert declared == "0"  # omitted action defaults to versions
         assert epoch() == before
-        declared, annotation = post({"action": "annotate", "chapter_id": "ch_001", "quote": "marker-ch_001",
-                                   "revision": historical.source_revision, "start_hint": 10, "end_hint": 23, "note": "test"})
+        content = versions.chapter_path("ch_001").read_bytes().decode("utf-8")
+        quote = "marker-ch_001"
+        start = content.index(quote)
+        declared, annotation = post({
+            "action": "annotate", "chapter_id": "ch_001", "quote": quote,
+            "revision": historical.source_revision, "start_hint": start,
+            "end_hint": start + len(quote), "note": "test",
+        })
         assert declared == "1"
         assert epoch() == before + 1
         declared, data = post({"action": "annotations", "chapter_id": "ch_001"})

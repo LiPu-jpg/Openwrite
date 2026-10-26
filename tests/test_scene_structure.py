@@ -283,7 +283,7 @@ def test_same_chapter_reorder_preserves_scene_ids_and_all_text(tmp_path: Path) -
     chapter = next(item for item in surface["chapters"] if item["chapter_id"] == "ch_001")
     scenes = [item for item in surface["scenes"] if item["chapter"]["chapter_id"] == "ch_001"]
     path = novel / chapter["path"]
-    before = path.read_text(encoding="utf-8")
+    before = path.read_bytes().decode("utf-8")
     blocks = {
         item["scene_id"]: before[item["anchor"]["start"] : item["anchor"]["end"]] for item in scenes
     }
@@ -303,7 +303,7 @@ def test_same_chapter_reorder_preserves_scene_ids_and_all_text(tmp_path: Path) -
         scenes[1]["scene_id"],
         scenes[0]["scene_id"],
     ]
-    content = path.read_text(encoding="utf-8")
+    content = path.read_bytes().decode("utf-8")
     assert all(content.count(block) == 1 for block in blocks.values())
     assert all(item["freshness"] == "current" for item in reordered)
 

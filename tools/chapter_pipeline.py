@@ -194,12 +194,12 @@ def _chapter_path(project_root: Path, novel_id: str, chapter_id: str) -> Path:
 def _load_chapter(project_root: Path, novel_id: str, chapter_id: str) -> str | None:
     expected = _chapter_path(project_root, novel_id, chapter_id)
     if expected.is_file():
-        return expected.read_text(encoding="utf-8")
+        return expected.read_bytes().decode("utf-8")
     root = project_root / "data" / "novels" / novel_id / "data" / "manuscript"
     for pattern in (f"**/{chapter_id}.md", f"**/{chapter_id}_*.md"):
         matches = sorted(root.glob(pattern))
         if matches:
-            return matches[0].read_text(encoding="utf-8")
+            return matches[0].read_bytes().decode("utf-8")
     return None
 
 

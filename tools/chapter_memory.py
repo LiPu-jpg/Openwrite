@@ -60,7 +60,7 @@ class ChapterMemoryStore:
         if not path.is_file():
             return None
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load(path.read_bytes().decode("utf-8")) or {}
         except (OSError, yaml.YAMLError):
             return None
         if not isinstance(data, dict):
@@ -183,7 +183,7 @@ class ChapterMemoryStore:
         if len(matches) != 1 or not matches[0].is_file():
             return ""
         try:
-            content = matches[0].read_text(encoding="utf-8")
+            content = matches[0].read_bytes().decode("utf-8")
         except OSError:
             return ""
         return "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()

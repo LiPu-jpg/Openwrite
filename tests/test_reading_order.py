@@ -216,7 +216,7 @@ def test_cross_volume_move_preserves_identity_content_and_navigation(tmp_path: P
         "ch_002",
         "ch_004",
     ]
-    assert packet["documents"][1]["content"].endswith("第二章正文\n")
+    assert packet["documents"][1]["content"].splitlines()[-1] == "第二章正文"
 
 
 def test_cross_volume_move_into_empty_volume_uses_target_section(tmp_path: Path) -> None:
@@ -376,7 +376,7 @@ def test_services_are_isolated_by_workspace_root(tmp_path: Path) -> None:
     } == before_b
     assert service_b.packet(
         _by_chapter(service_b.surface(), "ch_002")[0]["document_id"], before=0, after=0
-    )["documents"][0]["content"].endswith("B2\n")
+    )["documents"][0]["content"].splitlines()[-1] == "B2"
 
 
 def test_legacy_project_without_outline_has_deterministic_navigation(tmp_path: Path) -> None:

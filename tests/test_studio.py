@@ -1692,7 +1692,7 @@ def test_studio_http_serves_ui_api_and_blocks_unsigned_writes(tmp_path: Path):
             f"{base}/api/manuscript/versions/{historical.version_id}/compare?chapter=ch_001"
         )
         assert preview["data"]["current"]["revision"] == history.fingerprint(
-            chapter.read_text(encoding="utf-8")
+            chapter.read_bytes().decode("utf-8")
         )
         assert preview["data"]["diff"]["hunks"]
 
@@ -2654,7 +2654,7 @@ def test_studio_revision_api_uses_envelope_and_dynamic_apply_route(tmp_path: Pat
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
     opener = build_opener(ProxyHandler({}))
-    content = chapter.read_text(encoding="utf-8")
+    content = chapter.read_bytes().decode("utf-8")
     selected = "门外没有人"
     start = content.index(selected)
 
@@ -2690,7 +2690,7 @@ def test_studio_revision_api_uses_envelope_and_dynamic_apply_route(tmp_path: Pat
         applied, apply_request_id = post(f"/api/revisions/{proposal_id}/apply", {})
         assert applied["request_id"] == apply_request_id
         assert applied["data"]["proposal"]["status"] == "applied"
-        assert "门外看起来没有人" in chapter.read_text(encoding="utf-8")
+        assert "门外看起来没有人" in chapter.read_bytes().decode("utf-8")
     finally:
         server.shutdown()
         server.server_close()
@@ -2709,7 +2709,7 @@ def test_studio_revision_api_returns_document_conflict_details(tmp_path: Path):
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
     opener = build_opener(ProxyHandler({}))
-    content = chapter.read_text(encoding="utf-8")
+    content = chapter.read_bytes().decode("utf-8")
     selected = "门外没有人"
     start = content.index(selected)
 

@@ -228,7 +228,7 @@ class ResearchService:
             if not report_path.is_file():
                 continue
             entry = normalize_report_metadata(metadata, report_id=metadata_path.stem)
-            entry["path"] = str(report_path.relative_to(self.novel_root))
+            entry["path"] = report_path.relative_to(self.novel_root).as_posix()
             entry["bytes"] = report_path.stat().st_size
             reports.append(entry)
         return reports
@@ -390,7 +390,7 @@ class ResearchService:
             "episode_id": episode_id,
             "created_at": run_started_at,
             "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "artifact_ref": str(source_report.parent.relative_to(self.novel_root)),
+            "artifact_ref": source_report.parent.relative_to(self.novel_root).as_posix(),
             "metrics": metrics,
             "task_id": task_id,
             "model_profile": _normalize_model_profile(model_profile),
@@ -421,7 +421,7 @@ class ResearchService:
             "report_id": report_id,
             "episode_id": episode_id,
             "status": metadata["status"],
-            "path": str(target_report.relative_to(self.novel_root)),
+            "path": target_report.relative_to(self.novel_root).as_posix(),
             "metrics": metadata["metrics"],
         }
 

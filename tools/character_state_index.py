@@ -361,7 +361,7 @@ class CharacterStateIndex:
                 )
                 continue
             try:
-                text = path.read_text(encoding="utf-8")
+                text = path.read_bytes().decode("utf-8")
             except (OSError, UnicodeError) as exc:
                 diagnostics.append(
                     {
@@ -559,7 +559,7 @@ class CharacterStateIndex:
                 fact = acceptance._read_json(acceptance.fact_path(path.stem))  # noqa: SLF001
                 if not isinstance(fact, dict):
                     continue
-                content = path.read_text(encoding="utf-8")
+                content = path.read_bytes().decode("utf-8")
                 if fact.get("source_revision") == acceptance.fingerprint(content):
                     accepted.append(path)
         except Exception:
@@ -580,7 +580,7 @@ class CharacterStateIndex:
         if not self.index_path.is_file():
             return {}
         try:
-            payload = json.loads(self.index_path.read_text(encoding="utf-8"))
+            payload = json.loads(self.index_path.read_bytes().decode("utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
         if not isinstance(payload, dict) or payload.get("schema_version") != SCHEMA_VERSION:
@@ -745,7 +745,7 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        value = yaml.safe_load(path.read_bytes().decode("utf-8")) or {}
     except (OSError, yaml.YAMLError):
         return {}
     return value if isinstance(value, dict) else {}

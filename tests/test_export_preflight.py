@@ -120,7 +120,7 @@ def test_backup_ignores_review_gate_but_delivery_requires_current_review_and_met
     chapter = next(
         (tmp_path / "data" / "novels" / "demo" / "data" / "manuscript").rglob("ch_001.md")
     )
-    chapter.write_text(chapter.read_text(encoding="utf-8") + "又响了一声。\n", encoding="utf-8")
+    chapter.write_text(chapter.read_bytes().decode("utf-8") + "又响了一声。\n", encoding="utf-8")
     stale = ExportPreflightService(tmp_path, "demo").inspect(format_name="epub", purpose="delivery")
     assert stale["reviews"]["stale"] == ["ch_001"]
     assert "REVIEW_STALE" in {item["code"] for item in stale["blockers"]}
@@ -160,7 +160,7 @@ def test_delivery_blocks_completed_facts_until_authored_impacts_are_acknowledged
     chapter = _chapter(tmp_path, "arc_001", "ch_001", "# 第一章\n\n钟声落下。\n")
     acceptance = ManuscriptAcceptanceService(tmp_path, "demo")
     _accept_current(tmp_path)
-    previous = acceptance.fingerprint(chapter.read_text(encoding="utf-8"))
+    previous = acceptance.fingerprint(chapter.read_bytes().decode("utf-8"))
     chapter.write_text("# 第一章\n\n钟声被人提前敲响。\n", encoding="utf-8")
     operation = acceptance.start_acceptance(
         "ch_001",

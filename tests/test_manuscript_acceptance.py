@@ -72,7 +72,7 @@ def test_rewrite_invalidates_old_memory_then_rebuilds_facts_from_frozen_content(
     memory = ChapterMemoryStore(tmp_path, "demo")
     assert "林岑仍活着" in memory.render_context("ch_003")
 
-    before = service.fingerprint(changed.read_text(encoding="utf-8"))
+    before = service.fingerprint(changed.read_bytes().decode("utf-8"))
     changed.write_text("# ch_001\n\n林岑在钟楼死去。\n", encoding="utf-8")
     operation = service.start_acceptance(
         "ch_001",
@@ -84,7 +84,7 @@ def test_rewrite_invalidates_old_memory_then_rebuilds_facts_from_frozen_content(
     pending_head = service.inspect()["chapters"][0]
     assert pending_head["accepted_revision"] == before
     assert pending_head["pending_revision"] == service.fingerprint(
-        changed.read_text(encoding="utf-8")
+        changed.read_bytes().decode("utf-8")
     )
     assert "林岑仍活着" not in memory.render_context("ch_003")
     with pytest.raises(ManuscriptAcceptanceError) as raised:
@@ -193,7 +193,7 @@ def test_acceptance_marks_reviews_plans_and_runs_stale_before_analysis(
     run_store.start_stage(run, "context")
     run_store.complete_stage(run, "context", output={"old": True})
 
-    before = service.fingerprint(chapter.read_text(encoding="utf-8"))
+    before = service.fingerprint(chapter.read_bytes().decode("utf-8"))
     chapter.write_text("# ch_001\n\n林岑在钟楼死去。\n", encoding="utf-8")
     operation = service.start_acceptance(
         "ch_001",
@@ -241,14 +241,14 @@ def test_rapid_saves_keep_last_completed_revision_until_latest_facts_are_accepte
     completed_revision = service.inspect()["chapters"][0]["accepted_revision"]
 
     chapter.write_text("# ch_001\n\n林岑走下钟楼。\n", encoding="utf-8")
-    first_pending_revision = service.fingerprint(chapter.read_text(encoding="utf-8"))
+    first_pending_revision = service.fingerprint(chapter.read_bytes().decode("utf-8"))
     first = service.start_acceptance(
         "ch_001",
         source="autosave",
         expected_previous_revision=completed_revision,
     )
     chapter.write_text("# ch_001\n\n林岑离开钟楼。\n", encoding="utf-8")
-    latest_revision = service.fingerprint(chapter.read_text(encoding="utf-8"))
+    latest_revision = service.fingerprint(chapter.read_bytes().decode("utf-8"))
     latest = service.start_acceptance(
         "ch_001",
         source="autosave",
