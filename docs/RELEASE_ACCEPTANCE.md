@@ -6,7 +6,24 @@
 
 Core 5.8.17 来源 [PR #126](https://github.com/LiPu-jpg/Openwrite/pull/126)，固定提交 `c655dc2106b07cf08324728e0b5babf1fcc12afb`；冻结提交全量 **1531 passed / 32 skipped**。wheel 从该提交的干净归档构建，498 个打包源文件逐字节一致，并核对 163 个应打包 Python 文件未遗漏；wheel SHA-256 为 `93507c54ee5fe3d22d4e858e9e1d8efe0cd2917f554ff5a13872dbb1fed06fab`。
 
-本地插件完整检查通过，含界面 310 项、维护检查、预设与宿主契约；DoG 64 项和类型检查通过，其中真实 Electron 44.7.0 验证在旧实现上失败、修复后通过。新增工作流在 Linux/macOS/Windows 核对 Core wheel 对应源文件并运行全部 Core 测试，同时运行真实 Electron 脚本验收。跨平台最终结果将在完成后补记，未运行结果不算通过。
+修复已通过 [Core PR #126](https://github.com/LiPu-jpg/Openwrite/pull/126) 和 [插件 PR #127](https://github.com/LiPu-jpg/Openwrite/pull/127) 合并。最终 **22 项检查全部成功**：[三系统回归](https://github.com/LiPu-jpg/Openwrite/actions/runs/40391934852)、[完整安装/客户端验收](https://github.com/LiPu-jpg/Openwrite/actions/runs/40391934711)、[插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40391935114)。原始 CI 报告下载后再次核对：
+
+| 验收 | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| 固定 Core 全量 | 1531 passed / 32 skipped | 1531 passed / 32 skipped | 1531 passed / 32 skipped |
+| 真实 HTTP dry-run / 归档历史 | 2 passed | 2 passed | 2 passed |
+| 真实 Electron 44.7.0 脚本 | 5 passed / 0 skipped | 5 passed / 0 skipped | 5 passed / 0 skipped |
+| wheel 源码字节 / 应打包 Python 文件 | 498 / 163 一致 | 498 / 163 一致 | 498 / 163 一致 |
+
+32 项跳过均来自仓库缺失的旧标准样例、演示作品或外部 checkout，新增问题回归未跳过。自动化没有复现报告者的原 Windows Electron 历史会话，也不等于 Android/Termux 真机验收。
+
+界面 310 项、本地 DoG 64 项和类型检查、managed 32 项及插件完整检查通过。8 份安装/源码、5 份精确宿主客户端和 6 份原生回归报告全部通过；原生报告覆盖持久预设、离线升级和受管理后端三组。安装包报告绑定同一 tarball SHA-256，源码安装固定插件提交。
+
+候选 tarball SHA-256：`2d0f1b6c34c1a48386fc08798c8fb7a09c2e964ef6d2d6a558f62e7ed469c7bb`。CI 来源提交 `a8babe9b9b3909bbfedbf3e26df41d022624abbb` 与主分支修复合并提交 `bc6af78a562725a02a0fff6133eb0e3f5e603d6f` 的 tree 均为 `240a99caea04ba8436c1bfaec306969db0c216ea`。Core 来源提交已保留在 native-core 的合并历史中。
+
+真实 OpenCode Go 单次流式取消验收确认保留部分正文、关闭 HTTP 响应，后续请求在调用提供方前拒绝，作品文件未变；它与不调用模型的 CI 分开记录。新增 [95 项工具参考](TOOLS.md) 和 [上下文槽位参考](CONTEXT_SLOTS.md) 已核对运行时注册、固定 Core 源码及候选包内字节，修复 #128。
+
+**候选包只作验收证据保存，没有发布。** #123 的四项原场景/实机/上游待办继续保留，未满足用户要求的全部验收完成条件；#121/#122 保持打开。
 
 ## 0.2.27
 
