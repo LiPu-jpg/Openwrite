@@ -1,3 +1,11 @@
+## Issue maintenance 2026-10-26
+
+PR #103 (Core embedding dimensions) and #104 (embedding configuration UI) were reviewed and merged after 35 Core tests, Ruff, 307 component tests, the plugin gate, contract checks, and source-to-wheel comparison (495 files, no differences).
+
+Upgrade/session and host fixes cover #105, #106, #107, #108, #110, #111, #112, #113; details and platform limits are in docs/ISSUES_105_113.md. Validation: npm run check:plugin passed (41 maintenance tests, 307 component tests); managed runtime suite 18 passed; preset lifecycle 3 passed; cross-branch contracts passed. Isolated real DSH 0.2.1-rc.3 browser boot passed preset selection, workbench render, DoG and coexistence with zero model calls. Windows Electron and Android native runtimes were not tested. These changes are not yet published to npm.
+
+Remaining in the user's requested issue sweep: Core report #109 and provider configuration #114. Preserve the original issue scope and do not close either until evidence supports it.
+
 # OpenWrite Native Framework / Review v2 Goal and Status
 
 > Canonical project record for the cross-repository review-v2 work.

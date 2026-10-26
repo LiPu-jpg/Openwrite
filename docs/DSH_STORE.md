@@ -15,6 +15,12 @@ OpenWrite 是一个完整的小说创作插件套件。商城安装目标是仓�
 
 源码验收必须固定到完整 Commit；`prepare` 会自包含构建三个内部插件，包含 Core wheel、编辑器静态资源、预设和许可证，不依赖相邻源码。构建授权仍遵循用户的 pnpm 设置。普通用户优先使用 npm 预编译包：`dsh plugin --profile web add -w dsh-openwrite@latest`。latest 只在执行安装或升级时解析，运行中不自动更新。市场的版本、兼容和验收字段应记录实际核验的精确版本；不能把已有验收结果自动套用到未来版本。精确 npm 版本及对应 GitHub Release `.tgz` 继续用于复现与回退，见 README。
 
+## 开发分支
+
+开发版已在根包及全部内嵌子包加入精确 `0.2.1-rc.3` 声明，真实 Web 客户端验收通过。
+此变更尚未发布；市场请继续按实际 npm/Release 制品记录兼容信息。
+验证范围见 [#105–#113 修复说明](ISSUES_105_113.md)。
+
 ## 兼容声明与证据
 
 根 `package.json` 的 `dsh.compatibility.dshReleases` 是精确版本声明；没有实际验证的版本保持 `unknown`。Node.js 下限是 22.19.0，完整基础平台矩阵使用 Node 24，Node 22.19/26 作兼容检查；系统与架构限制见安装指南。

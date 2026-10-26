@@ -24,6 +24,14 @@ export interface RuntimeStatus {
   message: string; downloadedBytes?: number; totalBytes?: number; error?: string
 }
 export interface BackendConnection { baseUrl: string; token?: string }
+export class UnsupportedRuntimePlatformError extends Error {
+  readonly code = 'RUNTIME_PLATFORM_UNSUPPORTED'
+  readonly status = 503
+  constructor(readonly platform: string) {
+    super(`OpenWrite Studio managed runtime is unavailable on ${platform}. Configure the bridge with mode: external and baseUrl pointing to a supported Studio server; see docs/INSTALL.md#external-studio. File tools that do not require Studio remain available.`)
+    this.name = 'UnsupportedRuntimePlatformError'
+  }
+}
 export type SpawnFn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess
 export interface RuntimeOptions {
   spawn?: SpawnFn
@@ -502,7 +510,7 @@ export class ManagedRuntime {
   private async prepare(signal: AbortSignal): Promise<BackendConnection> {
     const manifest = JSON.parse(await readFile(join(this.artifacts, 'runtime-manifest.json'), 'utf8')) as RuntimeManifest
     const platform = manifest.platforms[`${process.platform}-${process.arch}`]
-    if (!platform) throw new Error(`Unsupported platform: ${process.platform}/${process.arch}`)
+    if (!platform) throw new UnsupportedRuntimePlatformError(`${process.platform}/${process.arch}`)
     if (!manifest.wheel || !manifest.requirements) throw new Error('The package is missing Core or dependency checksums')
     const wheel = join(this.artifacts, manifest.wheel.file)
     const requirements = join(this.artifacts, manifest.requirements.file)

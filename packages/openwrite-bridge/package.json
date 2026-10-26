@@ -28,12 +28,13 @@
       "patch": "./cordis.patch.yml"
     },
     "compatibility": {
-      "dsh": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2",
+      "dsh": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3",
       "dshReleases": {
         "0.1.2-rc.1": "compatible",
         "0.1.5-alpha.1": "compatible",
         "0.2.0-rc.2": "compatible",
-        "0.2.1-rc.2": "compatible"
+        "0.2.1-rc.2": "compatible",
+        "0.2.1-rc.3": "compatible"
       }
     }
   },
@@ -45,9 +46,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.2 || ~4.0.4",
-    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2",
-    "@deepseek-ai/dsh-workspace": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2"
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3",
+    "@deepseek-ai/dsh-workspace": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-host-webserver": {

@@ -97,7 +97,7 @@ dsh web
 dsh plugin --profile web remove -w dsh-openwrite
 ```
 
-正常停止时卸载本插件服务、界面、连接与进程。作品、配置、凭据、会话和缓存默认保留。关闭全部 dsh 进程后，可单独删除 `$DSH_HOME/openwrite/cache/` 清理下载缓存；不要删除整个目录，其中也有配置与管理记录。异常强制退出留下的版本预设可保留排查，重装同版本并正常退出会清理未修改副本。
+正常停止时卸载本插件服务、界面、连接与进程。作品、配置、凭据、会话和缓存默认保留。关闭全部 dsh 进程后，可单独删除 `$DSH_HOME/openwrite/cache/` 清理下载缓存；不要删除整个目录，其中也有配置与管理记录。开发版从 #105 修复起保留版本预设目录，供旧宿主恢复历史会话。
 
 ## 自定义预设和高级配置
 
@@ -106,6 +106,26 @@ dsh plugin --profile web remove -w dsh-openwrite
 小说工具支持 `presentation: native`（默认）、`ptc` 或 `both`。只读策略和计划模式独立约束副作用。模型服务商已接收的请求可能无法撤回：取消后停止新调度和重试，保存已完成结果与用量；费用未知时显示未知，不计为零。
 
 bridge 的高级 `mode: external` / `baseUrl` 配置继续支持外部 Core，不接管外部进程。默认 `managed` 不需要配置端口。旧显式地址配置仍按外部模式解释。
+
+### External Studio
+
+Android / Termux（bionic）和未列入 runtime manifest 的 ARM Linux 无托管 Python/ONNX 产物。
+开发版对此返回 `RUNTIME_PLATFORM_UNSUPPORTED`（503），并提示配置外部 Studio；不再归类为网络故障。
+这项修复不包含 Android 原生运行时。无需 Studio 的文件工具仍可使用。
+
+在受支持的电脑上运行 Studio，通过私有网络或 SSH 隧道连接，在 dsh 当前 profile 的
+`cordis.patch.yml` 中修改已有 `openwrite-bridge` 行的配置（不要另加同 ID 的行）：
+
+```yaml
+config:
+  mode: external
+  baseUrl: http://127.0.0.1:4567
+  # authToken: <外部 Studio 实例凭据；仅在服务端启用认证时填写>
+```
+
+上面的回环地址可指向 SSH 本地转发端口；需要实例凭据时通过私有配置中的 `authToken`
+提供，勿贴入 issue。作品目录必须在 Studio 所在机器上存在，Workspace 路径也须与服务端
+一致，插件不会同步手机与电脑的文件。重启 dsh 后生效；外部进程由作者管理。
 
 ## GitHub 源码安装
 

@@ -4,7 +4,7 @@ import { lock } from 'proper-lockfile'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { presetDefinition } from './preset-definition.mjs'
+import { legacyPresetIds, presetDefinition } from './preset-definition.mjs'
 
 export const name = 'dsh-openwrite'
 
@@ -23,7 +23,7 @@ async function digestTree(dir) {
   return hash.digest('hex')
 }
 
-/** A versioned preset leaves existing authored copies and session identities alone. */
+/** Keep legacy filesystem presets and resolve durable session identities on upgrade. */
 export async function apply(ctx) {
   const home = resolveDshHome()
   const source = fileURLToPath(new URL('./presets/openwrite/', import.meta.url))
@@ -60,8 +60,8 @@ export async function apply(ctx) {
     }
     await writeFile(lease, JSON.stringify({ pid: process.pid }), { mode: 0o600 })
   })
-  // Preset files are package-managed UI entries. Remove only our unmodified
-  // copy after its last live host stops; authored copies and session logs remain.
+  // 0.1 resolves session identities through these directories. They must outlive
+  // a host and a plugin upgrade; removing them strands historical sessions.
   ctx.effect(() => async () => withLock(async () => {
     await rm(lease, { force: true })
     for (const entry of await readdir(leases)) {
@@ -72,16 +72,26 @@ export async function apply(ctx) {
         catch (error) { if (error.code === 'ESRCH') await rm(file, { force: true }) }
       } catch { /* unknown files never grant deletion authority */ }
     }
-    if ((await readdir(leases)).length !== 0) return
-    const owned = await readFile(marker, 'utf8').then(JSON.parse).catch(() => null)
-    if (owned?.source === expected && owned.tree === await digestTree(destination).catch(() => null)) {
-      await rm(destination, { recursive: true })
-    }
   }))
   // 0.1 discovers the managed directory above; 0.2 only accepts registered
   // definitions. The declaring context owns registration and its resolution base.
   ctx.inject(['agentPresets'], async function* (presetCtx) {
     if (typeof presetCtx.agentPresets.register !== 'function') return
-    yield await presetCtx.agentPresets.register(await presetDefinition(version, true))
+    const definition = await presetDefinition(version, true)
+    yield await presetCtx.agentPresets.register(definition)
+    const ids = new Set([...legacyPresetIds, id,
+      ...(await readdir(join(home, '.agent-presets'))).filter(name => /^openwrite-\d+-\d+-\d+(?:-[a-z0-9-]+)?$/.test(name)),
+    ])
+    for (const legacyId of ids) {
+      // An author-supplied definition wins; readDocument checks presence without
+      // waiting for host activation (list/resolve would deadlock startup).
+      if (typeof presetCtx.agentPresets.readDocument === 'function') {
+        try { await presetCtx.agentPresets.readDocument(legacyId); continue }
+        catch (error) { if (error?.code !== 'agent-preset/not-found') throw error }
+      }
+      yield await presetCtx.agentPresets.register({ ...definition, id: legacyId,
+        order: 1000, name: `${definition.name}（历史会话 ${legacyId}）`,
+      })
+    }
   })
 }

@@ -9,6 +9,12 @@ const schema = JSON_SCHEMA.extend(new Type('tag:yaml.org,2002:js', {
   construct: value => ({ __jsExpr: value }),
 }))
 
+export const stablePresetId = 'openwrite'
+
+// These released identities are durable session references, even after their
+// package-managed directories have been removed by older plugin versions.
+export const legacyPresetIds = Array.from({ length: 25 }, (_, i) => `openwrite-0-2-${i + 1}`)
+
 export async function presetDefinition(version, modern = false) {
   const baseUrl = new URL('./presets/openwrite/', import.meta.url)
   const plugins = load(await readFile(new URL('agent.cordis.yml', baseUrl), 'utf8'), { schema })
@@ -27,5 +33,5 @@ export async function presetDefinition(version, modern = false) {
     }
     adapt(plugins)
   }
-  return { ...metadata, id: `openwrite-${version.replace(/[^a-z0-9-]/g, '-')}`, plugins }
+  return { ...metadata, id: stablePresetId, order: -1, plugins }
 }
