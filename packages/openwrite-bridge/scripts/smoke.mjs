@@ -1243,6 +1243,21 @@ assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
   } finally { globalThis.fetch = saved }
 }
 
+const issue109Requests = []
+const issue109Fetch = globalThis.fetch
+globalThis.fetch = async (input, init = {}) => {
+  issue109Requests.push({ url: new URL(String(input)), body: init.body ? JSON.parse(String(init.body)) : null })
+  return new Response(JSON.stringify({ ok: true, data: { accepted: true } }), { status: 200, headers: { 'content-type': 'application/json' } })
+}
+try {
+  await registered.find(tool => tool.name === 'novel_context_preview').execute({ chapter: 'ch_001', include_agent_payload: true }, exec)
+  assert.equal(issue109Requests.find(request => request.url.pathname === '/api/context').url.searchParams.get('include_agent_payload'), 'true')
+  await registered.find(tool => tool.name === 'novel_asset_update').execute({ kind: 'character', id: 'hero', revision: 'fresh', data: { related: [] }, related_mode: 'replace' }, exec)
+  assert.equal(issue109Requests.find(request => request.url.pathname === '/api/assets/update').body.related_mode, 'replace')
+} finally {
+  globalThis.fetch = issue109Fetch
+}
+
 await root.fiber.dispose()
 await rm(wsRootA, { recursive: true, force: true })
 await rm(wsRootB, { recursive: true, force: true })
