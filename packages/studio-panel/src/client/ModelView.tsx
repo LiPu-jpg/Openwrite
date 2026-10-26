@@ -44,6 +44,8 @@ type Form = {
   model: string;
   base_url: string;
   api_format: string;
+  auth_source: string;
+  workspace_id: string;
   context_tokens: string;
   max_output_tokens: string;
   temperature: string;
@@ -109,6 +111,8 @@ const emptyForm = (): Form => ({
   model: "",
   base_url: "",
   api_format: "chat",
+  auth_source: "api_key",
+  workspace_id: "",
   context_tokens: "64000",
   max_output_tokens: "24000",
   temperature: "0.7",
@@ -251,6 +255,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
     const next: Form = p ? {
       id: p.id, label: p.label, provider: p.provider === "anthropic" ? "anthropic" : "openai",
       model: p.model, base_url: p.base_url, api_format: p.api_format || "chat",
+      auth_source: p.auth_source || "api_key", workspace_id: p.workspace_id || "",
       context_tokens: String(p.context_tokens), max_output_tokens: String(p.max_output_tokens),
       temperature: String(p.temperature), timeout_seconds: String(p.timeout_seconds),
       api_key: "", remember_api_key: true,
@@ -397,7 +402,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
         context_tokens: Number(form.context_tokens), max_output_tokens: Number(form.max_output_tokens),
         temperature: Number(form.temperature), timeout_seconds: Number(form.timeout_seconds),
       };
-      if (!form.api_key) delete payload.api_key;
+      if (!form.api_key || form.auth_source === "opencode_console") delete payload.api_key;
       await postStudioApi("/model/profiles", payload);
       clearSavedDraft(memoryKey, "chat", snapshot(form));
       discardedSections.current.add("chat");
@@ -442,7 +447,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
       const target: JsonRecord = kind === "chat"
         ? { ...form, context_tokens: Number(form.context_tokens), max_output_tokens: Number(form.max_output_tokens), temperature: Number(form.temperature), timeout_seconds: Number(form.timeout_seconds) }
         : { id: embedding.id, label: embedding.label, provider: embedding.provider, model: embedding.model, base_url: embedding.provider === "local" ? "" : embedding.base_url, dimension: Number(embedding.dimension), max_tokens: Number(embedding.max_tokens), api_key: embedding.provider === "openai" ? embedding.api_key : "" };
-      if (!target.api_key) delete target.api_key;
+      if (!target.api_key || (kind === "chat" && form.auth_source === "opencode_console")) delete target.api_key;
       const result = parseConnectionTestResult(await postStudioApi(kind === "chat" ? "/model/test" : "/model/embedding/test", target));
       const vectorInfo = kind === "embedding" && result.dimension !== null
         ? ` · ${t("models.vectorDimension")}: ${Math.round(result.dimension)}`
@@ -645,6 +650,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                       {t("models.provider")}
                       <select
                         value={form.provider}
+                        disabled={form.auth_source === "opencode_console"}
                         onChange={(e) => setField("provider", e.target.value)}
                       >
                         <option value="openai">{t("models.protocol.openai")}</option>
@@ -669,6 +675,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                       {t("models.baseUrl")}
                       <input
                         value={form.base_url}
+                        disabled={form.auth_source === "opencode_console"}
                         onChange={(e) => setField("base_url", e.target.value)}
                       />
                     </label>
@@ -676,6 +683,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                       {t("models.apiFormat")}
                       <input
                         value={form.api_format}
+                        disabled={form.auth_source === "opencode_console"}
                         onChange={(e) => setField("api_format", e.target.value)}
                       />
                     </label>
@@ -733,6 +741,21 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.credentials")}
                   </legend>
+                  <label>
+                    {t("models.authSource")}
+                    <select aria-label={t("models.authSource")} value={form.auth_source} onChange={(e) => {
+                      const source = e.target.value;
+                      discardedSections.current.delete("chat");
+                      setForm(current => source === "opencode_console" ? {
+                        ...current, auth_source: source, provider: "openai", api_format: "chat",
+                        base_url: "https://opencode.ai/inference/go/openai/v1", model: "deepseek-v4.1-flash", api_key: "",
+                      } : { ...current, auth_source: source });
+                    }}>
+                      <option value="api_key">{t("models.authApiKey")}</option>
+                      <option value="opencode_console">{t("models.authConsole")}</option>
+                    </select>
+                  </label>
+                  {form.auth_source === "opencode_console" ? <p>{t("models.consoleHint")}</p> : <>
                   <input
                     className={css.modelApiKeyInput}
                     type="password"
@@ -752,6 +775,12 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     />
                     {t("models.remember")}
                   </label>
+                  </>}
+                  {form.base_url.startsWith("https://opencode.ai/") && <label>
+                    {t("models.goWorkspace")}
+                    <input aria-label={t("models.goWorkspace")} value={form.workspace_id} onChange={e => setField("workspace_id", e.target.value)} />
+                    <span>{t("models.goWorkspaceHint")}</span>
+                  </label>}
                 </fieldset>
                 <fieldset className={css.modelGroup} disabled={!!busy}>
                   <legend className={css.modelGroupTitle}>{t("models.group.routeUsage")}</legend>

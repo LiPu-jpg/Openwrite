@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Bundle Core 5.8.15: workbench OpenCode Go Console authentication, per-request CLI credential refresh and automatic workspace headers (#114).
+- Add explicit Console/API Key authentication and optional Go workspace pinning; keep Console tokens out of profiles and browser DTOs.
+
 ## 0.2.26（2026-10-26）
 
 - Support configured embedding dimensions and cloud/local embedding configuration (#103, #104).

@@ -985,6 +985,12 @@ export type StudioPanelKey =
   | 'models.embeddingModel'
   | 'models.embeddingCredential'
   | 'models.credentialHint'
+  | 'models.authSource'
+  | 'models.authApiKey'
+  | 'models.authConsole'
+  | 'models.consoleHint'
+  | 'models.goWorkspace'
+  | 'models.goWorkspaceHint'
   | 'models.remember'
   | 'models.save'
   | 'models.chatTest'
@@ -2133,6 +2139,12 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.embeddingModel': 'Embedding Model ID',
   'models.embeddingCredential': 'Embedding',
   'models.credentialHint': '留空保持已有 API Key',
+  'models.authSource': "认证方式",
+  'models.authApiKey': "API Key",
+  'models.authConsole': "本机 OpenCode Console（Go）",
+  'models.consoleHint': "先在 Studio 所在电脑完成 OpenCode Console CLI 登录（opencode console login）。凭据按请求读取并由 CLI 自动续期，工作区信息自动携带；远程 Studio 需要在远程电脑登录。",
+  'models.goWorkspace': "Go 工作区 ID（可选）",
+  'models.goWorkspaceHint': "Console 模式留空跟随 CLI 当前工作区；填写后只允许该工作区。账户级 API Key 可在此填写所属工作区 ID。",
   'models.remember': '本次保存时记住新输入的 API Key（仅写不可读）',
   'models.save': '保存档案',
   'models.chatTest': '聊天测试',
@@ -3327,6 +3339,12 @@ export const en: Record<StudioPanelKey, string> = {
   'models.embeddingModel': 'Embedding model ID',
   'models.embeddingCredential': 'Embedding',
   'models.credentialHint': 'Leave blank to keep the stored API Key',
+  'models.authSource': "Authentication",
+  'models.authApiKey': "API Key",
+  'models.authConsole': "Local OpenCode Console (Go)",
+  'models.consoleHint': "Sign in with the official OpenCode Console CLI on the Studio machine (opencode console login). Credentials are resolved per request and refreshed by the CLI; workspace headers are included automatically. Remote Studio requires a login on that remote machine.",
+  'models.goWorkspace': "Go workspace ID (optional)",
+  'models.goWorkspaceHint': "Leave blank in Console mode to follow the active CLI workspace, or pin a workspace here. Account-level API keys can also specify their workspace ID.",
   'models.remember': 'Remember the newly entered API Key on this save (write-only)',
   'models.save': 'Save profile',
   'models.chatTest': 'Chat test',

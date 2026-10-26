@@ -67,6 +67,8 @@ export type ModelProfileDto = {
   model: string
   base_url: string
   api_format: string
+  auth_source?: string
+  workspace_id?: string
   context_tokens: number
   max_output_tokens: number
   temperature: number
@@ -87,6 +89,7 @@ export function parseModelProfiles(value: unknown): ModelProfileDto[] {
     return {
       id: asText(item['id']), label: asText(item['label']), provider: asText(item['provider']), model: asText(item['model']),
       base_url: asText(item['base_url']), api_format: asText(item['api_format']),
+      auth_source: asText(item['auth_source']) || 'api_key', workspace_id: asText(item['workspace_id']),
       context_tokens: asInteger(item['context_tokens']), max_output_tokens: asInteger(item['max_output_tokens']),
       temperature: asFiniteNumber(item['temperature']) ?? 0.7,
       timeout_seconds: asFiniteNumber(item['timeout_seconds']) ?? 120,

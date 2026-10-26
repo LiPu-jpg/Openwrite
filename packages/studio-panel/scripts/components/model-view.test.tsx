@@ -1016,3 +1016,39 @@ describe('ModelView containing workspace navigation', () => {
     expect(onNavigationGuardChange).toHaveBeenLastCalledWith(null)
   })
 })
+
+describe('OpenCode Go Console authentication', () => {
+  it('selects Go defaults and tests without sending a browser credential', async () => {
+    const api = makeApi({ post: async () => envelope({ status: 'ok', provider: 'openai',
+      model: 'deepseek-v4.1-flash', latency_ms: 10, tested_at: '2026-10-26T10:00:00Z', reply: 'OK' }) })
+    const { container } = renderView(api)
+    await screen.findByRole('button', { name: /Writer A/ })
+    fireEvent.change(screen.getByLabelText('models.group.credentials'), { target: { value: FAKE_CREDENTIAL } })
+    fireEvent.change(screen.getByLabelText('models.authSource'), { target: { value: 'opencode_console' } })
+    expect(passwordInputs(container)).toHaveLength(0)
+    expect(container.textContent).toContain('models.consoleHint')
+    fireEvent.change(screen.getByLabelText('models.goWorkspace'), { target: { value: 'wrk_pinned' } })
+    fireEvent.click(screen.getByRole('button', { name: 'models.chatTest' }))
+    await waitFor(() => expect(api.postStudioApi).toHaveBeenCalledWith('/model/test', expect.objectContaining({
+      auth_source: 'opencode_console', workspace_id: 'wrk_pinned', provider: 'openai',
+      base_url: 'https://opencode.ai/inference/go/openai/v1', model: 'deepseek-v4.1-flash',
+    })))
+    expect(JSON.stringify(api.postStudioApi.mock.calls)).not.toContain(FAKE_CREDENTIAL)
+  })
+
+  it('restores saved Console mode and preserves it on save without an API key', async () => {
+    const api = makeApi({ fetch: async () => envelope({ profiles: [{ ...PROFILE,
+      auth_source: 'opencode_console', workspace_id: 'wrk_saved',
+      base_url: 'https://opencode.ai/inference/go/openai/v1' }], routes: {} }) })
+    const { container } = renderView(api)
+    await screen.findByRole('button', { name: /Writer A/ })
+    expect((screen.getByLabelText('models.authSource') as HTMLSelectElement).value).toBe('opencode_console')
+    expect((screen.getByLabelText('models.goWorkspace') as HTMLInputElement).value).toBe('wrk_saved')
+    expect(passwordInputs(container)).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
+    await waitFor(() => expect(api.postStudioApi).toHaveBeenCalledWith('/model/profiles', expect.objectContaining({
+      auth_source: 'opencode_console', workspace_id: 'wrk_saved',
+    })))
+    expect((api.postStudioApi.mock.calls[0][1] as Record<string, unknown>).api_key).toBeUndefined()
+  })
+})
