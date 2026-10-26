@@ -80,10 +80,8 @@ class ReviewerAgent(BaseAgent):
     """
 
     DIMENSION_MAP = DIMENSION_NAMES
-    # 8 维/批在推理模型上会因思维链挤占输出预算而截断（实测 37 维全量时
-    # reasoning_content 可达 13K+ 字符），降到 4 维/批给 JSON 输出留足空间。
+    # Keep legacy review reports small without lowering the model's token cap.
     LLM_AUDIT_BATCH_SIZE = 2
-    LLM_AUDIT_OUTPUT_TOKENS_PER_DIMENSION = 1024
     _AUDIT_CONTEXT_SPECS = (
         ("author_intent", "作者意图", 6.0, None),
         ("creative_focus", "当前创作罗盘", 6.0, None),
@@ -443,33 +441,24 @@ critical 仅用于明确事实矛盾、连续性破坏或使章节不可用的�
         except ProviderResponseError as exc:
             if exc.code != "MODEL_OUTPUT_TRUNCATED" or len(domain.criteria) <= 1:
                 raise
-            # 先抬预算原批重试一次：推理模型的思维链按调用计费，
-            # 直接二分仍用旧地板救不回来。
-            try:
-                response = self.chat(
-                    messages=[Message("system", system_prompt), Message("user", user_prompt)],
-                    temperature=0.2,
-                    max_tokens=self._raised_budget(output_budget),
-                    operation="review",
+            # The first call already reserves the selected model's full output
+            # allowance. Split the work rather than repeating the same cap.
+            midpoint = len(domain.criteria) // 2
+            parts = []
+            issues: list[ReviewIssue] = []
+            for criteria in (domain.criteria[:midpoint], domain.criteria[midpoint:]):
+                part = DomainSpec(
+                    domain.id,
+                    domain.name,
+                    sum(item.max_points for item in criteria),
+                    tuple(criteria),
                 )
-            except ProviderResponseError:
-                midpoint = len(domain.criteria) // 2
-                parts = []
-                issues: list[ReviewIssue] = []
-                for criteria in (domain.criteria[:midpoint], domain.criteria[midpoint:]):
-                    part = DomainSpec(
-                        domain.id,
-                        domain.name,
-                        sum(item.max_points for item in criteria),
-                        tuple(criteria),
-                    )
-                    raw, found = self._llm_review_domain(content, context, part, deterministic_issues)
-                    parts.extend(raw.get("criteria") or [])
-                    issues.extend(found)
-                return {"id": domain.id, "criteria": parts}, issues
+                raw, found = self._llm_review_domain(content, context, part, deterministic_issues)
+                parts.extend(raw.get("criteria") or [])
+                issues.extend(found)
+            return {"id": domain.id, "criteria": parts}, issues
         usage = dict(getattr(response, "usage", {}) or {})
         if usage:
-            self._note_reasoning_usage(usage)
             context_report["provider_usage"] = usage
         raw = self._parse_json_object(response.content)
         if str(raw.get("id") or "") != domain.id:
@@ -867,7 +856,8 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
 description 和 suggestion 各不超过 80 字，evidence 不超过 60 字。
 如果没有问题，返回空数组 []。只输出 JSON 数组。"""
 
-        effective_output_budget = output_budget or self._audit_output_budget(requested)
+        configured_budget = self._audit_output_budget(requested)
+        effective_output_budget = min(output_budget or configured_budget, configured_budget)
         user_prompt, context_report = self._build_audit_user_prompt(
             content,
             context,
@@ -889,34 +879,23 @@ description 和 suggestion 各不超过 80 字，evidence 不超过 60 字。
                 max_tokens=effective_output_budget,
             )
         except ProviderResponseError as exc:
-            if exc.code != "MODEL_OUTPUT_TRUNCATED" or len(requested) <= 1:
+            if exc.code != "MODEL_OUTPUT_TRUNCATED":
                 raise
-            # 先抬预算原批重试一次：推理模型的思维链按调用计费，
-            # 直接二分仍用旧地板救不回来。
-            try:
-                response = self.chat(
-                    messages=[
-                        Message("system", system_prompt),
-                        Message("user", user_prompt),
-                    ],
-                    temperature=0.3,
-                    max_tokens=self._raised_budget(effective_output_budget),
-                )
-            except ProviderResponseError:
-                midpoint = len(requested) // 2
+            if effective_output_budget < configured_budget:
+                # An explicit smaller budget can retry once at the configured
+                # cap; rebuild the prompt so input/output reservations agree.
                 return self._llm_audit_batch(
-                    content,
-                    context,
-                    requested[:midpoint],
-                ) + self._llm_audit_batch(
-                    content,
-                    context,
-                    requested[midpoint:],
+                    content, context, requested, output_budget=configured_budget
                 )
+            if len(requested) <= 1:
+                raise
+            midpoint = len(requested) // 2
+            return self._llm_audit_batch(
+                content, context, requested[:midpoint]
+            ) + self._llm_audit_batch(content, context, requested[midpoint:])
 
         usage = dict(getattr(response, "usage", {}) or {})
         if usage:
-            self._note_reasoning_usage(usage)
             context_report["provider_usage"] = usage
         return self._parse_llm_issues(response.content, allowed_dimensions=set(requested))
 
@@ -924,37 +903,11 @@ description 和 suggestion 各不超过 80 字，evidence 不超过 60 字。
         config = getattr(getattr(getattr(self, "ctx", None), "client", None), "config", None)
         configured = self._positive_int(getattr(config, "max_tokens", None), 4096)
         context_window = self._positive_int(getattr(config, "context_tokens", None), 64_000)
-        # 推理模型的思维链会先吃掉输出预算：一旦观察到 reasoning tokens，
-        # 把地板抬到 16384，否则截断后的二分重试也救不回来。
-        floor = 16_384 if getattr(self, "_reasoning_observed", False) else 4_096
-        desired = max(
-            floor,
-            len(requested) * self.LLM_AUDIT_OUTPUT_TOKENS_PER_DIMENSION,
-        )
-        return max(256, min(configured, desired, max(256, context_window - 1024)))
-
-    def _raised_budget(self, current: int) -> int:
-        """截断后的升预算重试上限：翻倍但不越过模型配置输出上限。"""
-        config = getattr(getattr(getattr(self, "ctx", None), "client", None), "config", None)
-        configured = self._positive_int(getattr(config, "max_tokens", None), 4096)
-        return min(configured, max(current * 2, 8_192))
-
-    def _note_reasoning_usage(self, usage: dict) -> None:
-        """推理模型会在 usage 里报告 reasoning tokens；据此抬输出预算地板。"""
-        details = usage.get("completion_tokens_details")
-        tokens = 0
-        if isinstance(details, dict):
-            try:
-                tokens = int(details.get("reasoning_tokens") or 0)
-            except (TypeError, ValueError):
-                tokens = 0
-        if not tokens:
-            try:
-                tokens = int(usage.get("reasoning_tokens") or 0)
-            except (TypeError, ValueError):
-                tokens = 0
-        if tokens > 0:
-            self._reasoning_observed = True
+        # Hidden reasoning spends the same allowance as visible JSON. Waiting
+        # for successful usage to detect it strands the very first gate/leaf
+        # call at 4096. Honor the author's cap from the first request; it is a
+        # maximum, not a request to generate that many tokens.
+        return min(configured, max(1, context_window - 1024))
 
     @staticmethod
     def _positive_int(value: object, default: int) -> int:

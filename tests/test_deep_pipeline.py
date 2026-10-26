@@ -513,15 +513,9 @@ def test_reviewer_bisects_a_domain_after_output_truncation():
         "knowledge_boundary",
         "causality_motivation",
     ]
-    # Truncation now retries the same batch with a raised budget once before
-    # bisecting, so the full domain appears twice.
+    # The first request already uses the profile cap, so split immediately
+    # rather than charging for an identical request with the same cap.
     assert calls == [
-        [
-            "temporal_continuity",
-            "rules_power_numbers",
-            "knowledge_boundary",
-            "causality_motivation",
-        ],
         [
             "temporal_continuity",
             "rules_power_numbers",
@@ -577,7 +571,7 @@ def test_reviewer_uses_profile_budget_and_structured_context_compression():
     _, issues = reviewer._llm_review_domain("章节正文" * 1000, context, QUALITY_DOMAINS[4], [])
 
     assert issues == []
-    assert calls[0]["max_tokens"] == 7168
+    assert calls[0]["max_tokens"] == 12000
     assert "角色设定" not in calls[0]["messages"][1].content
     assert "审稿上下文已按 Token 预算压缩" not in calls[0]["messages"][1].content
     report = reviewer._audit_context_reports[0]
