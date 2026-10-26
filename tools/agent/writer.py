@@ -359,9 +359,7 @@ class WriterAgent(BaseAgent):
                 ):
                     raise
                 failures.append(getattr(exc, "usage", None) or {"cost_reported": False})
-                progress = getattr(getattr(self, "ctx", None), "on_progress", None)
-                if callable(progress):
-                    progress({"phase": "retrying", "attempt": attempt + 2, "error_code": exc.code})
+                self.log.info("Generation retry %s after %s", attempt + 2, exc.code)
                 await asyncio.sleep(2**attempt)
 
     def _serial_context(self, context: dict, chapter_number: int) -> dict:
