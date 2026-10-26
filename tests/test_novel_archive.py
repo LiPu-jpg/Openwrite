@@ -105,6 +105,30 @@ def _tree(root: Path) -> dict[str, bytes]:
     }
 
 
+@pytest.mark.parametrize("ancestor", ["tmp", "cache", "secrets", "exports"])
+def test_archive_exclusions_ignore_ancestor_names_but_keep_internal_rules(tmp_path, ancestor):
+    root = tmp_path / ancestor / "novel-project"
+    novel = _project(root)
+    service = NovelArchiveService(root, "demo")
+    package = tmp_path / f"{ancestor}.owarchive.zip"
+    service.create_archive(package)
+    manifest = service.inspect_archive(package)["manifest"]
+    included = {item["path"] for item in manifest["includes"]["files"]}
+    assert "data/novels/demo/src/outline.md" in included
+    assert "data/novels/demo/data/manuscript/arc_001/ch_001.md" in included
+    assert "data/novels/demo/.env" not in included
+    assert "data/novels/demo/data/cache/vectors.bin" not in included
+    restored = tmp_path / f"restored-{ancestor}"
+    preview = service.preview_restore(package, restored)
+    service.restore_archive(
+        package, restored, confirm=True, expected_archive_sha256=preview["archive_sha256"]
+    )
+    relative = Path("data/manuscript/arc_001/ch_001.md")
+    assert (restored / "data/novels/demo" / relative).read_bytes() == (
+        novel / relative
+    ).read_bytes()
+
+
 def _rewrite_zip(
     source: Path,
     output: Path,
