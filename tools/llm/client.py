@@ -8,11 +8,11 @@ import logging
 import math
 import os
 import time
-from uuid import uuid4
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 from tools.operation_trace import active_operation_trace
 
@@ -218,11 +218,25 @@ class LLMConfig:
     timeout_seconds: float = 300.0
     max_retries: int = 1
     extra: dict[str, Any] = field(default_factory=dict)
+    auth_source: str = "api_key"
+    workspace_id: str = ""
 
     def __post_init__(self) -> None:
         self.provider = _provider_name(self.provider)
         self.api_format = _api_format(self.api_format)
         self.base_url = self._normalize_base_url(self.base_url)
+        if self.auth_source != "api_key" or self.workspace_id:
+            from .opencode_console import is_go_url
+
+            if (
+                self.auth_source not in {"api_key", "opencode_console"}
+                or not is_go_url(self.base_url)
+                or self.provider not in {"openai", "custom"}
+                or self.api_format != "chat"
+            ):
+                raise ValueError(
+                    "Console credentials are restricted to OpenCode Go HTTPS Chat endpoints"
+                )
 
     @classmethod
     def from_env(cls) -> LLMConfig:
@@ -243,6 +257,8 @@ class LLMConfig:
                 context_tokens=int(profile.get("context_tokens") or 64000),
                 stream=os.getenv("LLM_STREAM", "true").lower() == "true",
                 api_format=_api_format(profile.get("api_format")),
+                auth_source=str(profile.get("auth_source") or "api_key"),
+                workspace_id=str(profile.get("workspace_id") or ""),
                 timeout_seconds=float(
                     os.getenv("OW_LLM_TIMEOUT") or profile.get("timeout_seconds") or 300
                 ),
@@ -515,7 +531,7 @@ class LLMClient:
         )
         if stream:
             params["timeout"] = self._stream_timeout()
-        params.update(self._request_extra(operation))
+        self._apply_request_extra(params, operation)
         response = self._call(responses, params)
         if stream:
             return self._stream_response(response, on_progress)
@@ -558,6 +574,14 @@ class LLMClient:
                 "User-Agent": f"OpenWrite/{__version__}",
                 "x-opencode-session": self._provider_session_id,
             }
+        if self.config.workspace_id:
+            params.setdefault("extra_headers", {})["x-opencode-org-id"] = self.config.workspace_id
+        if self.config.auth_source == "opencode_console":
+            from .opencode_console import console_credentials
+
+            key, headers = console_credentials(self.config.workspace_id)
+            params["api_key"] = key
+            params.setdefault("extra_headers", {}).update(headers)
         return params
 
     def _completion_params(
@@ -583,7 +607,7 @@ class LLMClient:
             params["timeout"] = self._stream_timeout()
         if tools:
             params["tools"] = tools
-        params.update(self._request_extra(operation))
+        self._apply_request_extra(params, operation)
         return params
 
     def _request_extra(self, operation: str) -> dict[str, Any]:
@@ -598,12 +622,16 @@ class LLMClient:
             extra_body["thinking"] = {"type": mode}
         if extra_body:
             extra["extra_body"] = extra_body
+        return extra
+
+    def _apply_request_extra(self, params: dict[str, Any], operation: str) -> None:
+        extra = self._request_extra(operation)
         if "extra_headers" in extra:
             extra["extra_headers"] = {
-                **self._base_params().get("extra_headers", {}),
-                **dict(extra["extra_headers"] or {}),
+                **params.get("extra_headers", {}),
+                **dict(extra["extra_headers"] or {})
             }
-        return extra
+        params.update(extra)
 
     def _call(self, operation: Callable[..., Any], params: dict[str, Any]) -> Any:
         from tools.llm.cancellation import cancellation_bound, check_model_cancellation

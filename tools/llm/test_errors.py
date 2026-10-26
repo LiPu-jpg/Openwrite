@@ -258,6 +258,9 @@ def connection_test_failure(exc: BaseException) -> ConnectionTestFailure:
     if kind not in TEST_ERROR_KINDS:  # pragma: no cover - defensive
         kind = "internal_error"
     message = _MESSAGES[kind]
+    from tools.llm.opencode_console import ConsoleAuthenticationError
+    if isinstance(exc, ConsoleAuthenticationError):
+        message = exc.message
     if isinstance(exc, EmbeddingDimensionMismatch):
         # Only locally measured integer sizes appear in the response; never
         # echo raw provider bodies or credentials into the UI.
