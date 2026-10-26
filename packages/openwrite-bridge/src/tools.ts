@@ -728,8 +728,10 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     description:
       'Queue a chapter write and immediately return a durable task_id. Poll novel_task_get for progress/result. Omit chapter_id to write ' +
       'the outline-recommended next chapter; a given chapter_id must match the current recommendation. ' +
-      'Preview context first with novel_context_preview and consult novel_outline_read for the recommendation.',
+      'Preview context first with novel_context_preview and consult novel_outline_read for the recommendation. ' +
+      'Cancel with novel_task_cancel. Generated partial prose is retained; resume_from_draft continues it in a new run when the source/context revisions still match.',
     parameters: {
+      dry_run: { type: 'boolean', description: 'Only assemble the current writer input and per-document sizes; no model call and no writing task. Guidance and target_words are included in this preview.' },
       run_id_v2: { type: 'string', description: 'Resume this completed draft without generating it again.' },
       resume_from_draft: { type: 'boolean', description: 'Resume the latest uncommitted draft for this chapter.' },
       target_words: { type: 'integer', description: 'Target word count, 200-50000. When omitted use the outline target, then default 3000.' },
@@ -754,6 +756,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       if (chapterId) body['chapter_id'] = chapterId
       if (args.temperature !== undefined) body['temperature'] = args.temperature
       if (args.outline_revision !== undefined) body['outline_revision'] = args.outline_revision
+      if (args.dry_run === true) return await client.postJson('/api/write', { ...body, dry_run: true }, exec.signal)
       return await client.postJson('/api/tasks', { type: 'chapter_write', input: body }, exec.signal)
     },
   }))
@@ -770,6 +773,8 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       chapter_id: { type: 'string', description: 'Chapter id (ch_<digits>), resolved client-side to data/manuscript/<id>.md.' },
       strict: { type: 'boolean', description: 'Enable strict review mode (default false).' },
       dimensions: { type: 'array', items: { type: 'integer' }, description: 'Optional list of review dimension numbers (1-37) to restrict to.' },
+      depth: { type: 'string', enum: ['quick', 'full'], description: 'Default full. Quick reviews coherence/canon/prose and safety only; scope_status=partial cannot approve full-chapter delivery. Do not combine quick with dimensions.' },
+      domains: { type: 'array', items: { type: 'string' }, description: 'Review domain ids: coherence, character, plot, pacing, prose, canon. Use this or dimensions. Omitted domains remain explicitly unreviewed.' },
       dog_threshold: { type: 'integer', description: 'DoG aggregate score threshold (default 70); this does not change OpenWrite review.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
@@ -787,6 +792,8 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       const body: JsonObject = { path: resolveReviewPath(args) }
       if (args.strict !== undefined) body['strict'] = args.strict
       if (args.dimensions !== undefined) body['dimensions'] = args.dimensions
+      if (args.depth !== undefined) body['depth'] = args.depth
+      if (args.domains !== undefined) body['domains'] = args.domains
       const response = await client.postJson('/api/review', body, exec.signal)
       const value = response !== null && typeof response === 'object' && !Array.isArray(response)
         ? response as JsonObject
@@ -2004,6 +2011,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'confirm: true), "cancel" (run_id + revision, optional reason). All mutating actions are revision-gated: ' +
       'pass the run\'s current revision from a list/get call.',
     parameters: {
+      include_archived: { type: 'boolean', description: 'For list: include historical runs moved to chapter_deletions when a chapter was deleted. Archived runs are read-only and include archive_directory.' },
       action: { type: 'string', required: true, enum: ['list', 'get', 'record_intervention', 'update_intervention', 'cancel', 'archive'], description: 'The chapter-run operation.' },
       run_id: { type: 'string', description: 'Run id (required for get/record_intervention/update_intervention/cancel).' },
       revision: { type: 'string', description: 'Current run revision (required for mutating actions).' },
@@ -2030,7 +2038,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     async execute(args, exec) {
       const client = clientFor(exec)
       const body: JsonObject = { action: args.action }
-      for (const key of ['run_id', 'revision', 'chapter_id', 'statuses', 'since', 'limit', 'scope', 'risk', 'request', 'affected_items', 'rewrite_required', 'intervention_id', 'state', 'facts_revision', 'impact', 'proposal', 'confirm', 'reason'] as const) {
+      for (const key of ['run_id', 'revision', 'chapter_id', 'statuses', 'since', 'limit', 'include_archived', 'scope', 'risk', 'request', 'affected_items', 'rewrite_required', 'intervention_id', 'state', 'facts_revision', 'impact', 'proposal', 'confirm', 'reason'] as const) {
         const value = args[key]
         if (value !== undefined) body[key] = value
       }

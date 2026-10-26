@@ -17,6 +17,8 @@ test('every registered novel tool has a conservative effect; mixed actions do no
   assert.equal(novelEffect('novel_document_change_plan', { action: 'preview' }), 'write')
   assert.equal(novelEffect('novel_reference_library_action', { action: 'import' }), 'write')
   assert.equal(novelEffect('novel_unknown_future_action', { action: 'read' }), 'write')
+  assert.equal(novelEffect('novel_write_chapter', {dry_run: true}), 'read')
+  assert.equal(novelEffect('novel_write_chapter', {dry_run: 'true'}), 'generate')
   assert.equal(novelEffect('novel_manuscript_acceptance', {}), 'read')
   assert.equal(novelEffect('novel_export_preflight', {}), 'read')
   assert.equal(novelEffect('novel_export', {}), 'write')

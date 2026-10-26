@@ -27,6 +27,10 @@
 这是 [OpenWrite](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 的 dsh 插件版本。
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Agent 与交互界面，OpenWrite Core 提供小说领域能力；人物、设定、大纲、正文和评审保存在本地作品目录。
 
+## 开发中：0.2.28（未发布）
+
+Core 5.8.17 与插件候选正在验收，补修取消后续写、失败运行历史、审稿状态与 DoG Electron 执行，并完善上下文预览。详见 [#121–#123 修复记录](docs/ISSUES_121_123.md)。缺少原始复现、设备及上游发布的工作继续跟踪，本轮暂不发布；下面的 npm/GitHub 安装入口仍为已发布的 0.2.27。
+
 ## 0.2.27
 
 工作台新增 OpenCode Go Console 认证，捆绑 Core 5.8.16，自动读取本机官方 CLI 的有效凭据和工作区信息；不必手工复制会过期的 Console 令牌。评审首次调用遵守模型输出预算，补充旧会话永久别名和跨平台回归。真实工作台连接测试、流式写作及 Go 安全评审已通过。见 [OpenCode Go 接入](docs/OPENCODE_GO.md) 和 [旧报告复核与待办](docs/CLOSED_ISSUE_FOLLOWUPS.md)。正式发行状态、各平台验收和安装包校验值见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。
@@ -168,6 +172,8 @@ dsh web
 |---|---|
 | [安装指南](docs/INSTALL.md) | Agent 安装步骤、手动安装、模型配置、升级和排错 |
 | [使用流程](docs/WORKFLOWS.md) | Workspace、规划、写章、审稿、修订、导入导出 |
+| [工具参考](docs/TOOLS.md) | 全部 novel_* 工具的作用、操作影响、必填与可选参数 |
+| [写手上下文槽位](docs/CONTEXT_SLOTS.md) | 来源文件、选择规则、动态预算、压缩与逐文档用量 |
 | [模型测试](docs/BENCHMARK_TASKS.md) | 章节选择、大纲范围、任务 DAG 和结果解读 |
 | [审稿 DAG](docs/REVIEW_DAG_FRAMEWORK.md) | 标准评审框架与证据结构 |
 | [工程说明](docs/DEVELOPMENT.md) | 组件职责、维护命令、调研和改进记录 |

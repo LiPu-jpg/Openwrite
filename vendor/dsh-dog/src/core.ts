@@ -3,6 +3,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
+import { ScriptExecutionError } from './owned-script.ts'
 import { evaluateBoolExpr } from './logic.ts'
 import { DogValidationError, parseGraph } from './graph.ts'
 import { sha256Json } from './json.ts'
@@ -972,7 +973,7 @@ export function resolveScriptPath(scriptsDirectory: string, script: string): str
   const withJs = `${direct}.js`
   if (existsSync(withJs)) return withJs
  }
- throw new Error(`programmatic script not found in library: ${direct}`)
+ throw new ScriptExecutionError('SCRIPT_NOT_FOUND', `programmatic script not found in library: ${direct}`, {script: direct})
 }
 
 function readScriptDigest(scriptPath: string): string {

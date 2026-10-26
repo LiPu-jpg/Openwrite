@@ -1,5 +1,13 @@
 # 发布验收记录
 
+## 0.2.28 候选（未发布）
+
+按用户要求先修可修部分，保留未完成项并暂停发布。变更范围与限制见 [#121–#123 修复记录](ISSUES_121_123.md)。本节不是正式发布记录，npm/GitHub 公开版本仍为 0.2.27。
+
+Core 5.8.17 来源 [PR #126](https://github.com/LiPu-jpg/Openwrite/pull/126)，固定提交 `c655dc2106b07cf08324728e0b5babf1fcc12afb`；冻结提交全量 **1531 passed / 32 skipped**。wheel 从该提交的干净归档构建，498 个打包源文件逐字节一致，并核对 163 个应打包 Python 文件未遗漏；wheel SHA-256 为 `93507c54ee5fe3d22d4e858e9e1d8efe0cd2917f554ff5a13872dbb1fed06fab`。
+
+本地插件完整检查通过，含界面 310 项、维护检查、预设与宿主契约；DoG 64 项和类型检查通过，其中真实 Electron 44.7.0 验证在旧实现上失败、修复后通过。新增工作流在 Linux/macOS/Windows 核对 Core wheel 对应源文件并运行全部 Core 测试，同时运行真实 Electron 脚本验收。跨平台最终结果将在完成后补记，未运行结果不算通过。
+
 ## 0.2.27
 
 捆绑 Core 5.8.16，来源 [PR #124](https://github.com/LiPu-jpg/Openwrite/pull/124)，源码提交 `27ec8b3bea0a3f8754f5701a7b21c23a9328d6b7`。wheel 从该提交的干净归档构建，496 个打包源文件与提交逐字节一致，SHA-256 为 `8be4dc5e3feb2d0faf91a1e0763f05ff338c237912edd8c066aaad118ec41ec4`。

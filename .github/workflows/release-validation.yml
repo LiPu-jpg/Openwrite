@@ -62,7 +62,9 @@ jobs:
           - host: '0.2.1-rc.2'
             before: '2026-10-18T00:00:00Z'
           - host: '0.2.1-rc.3'
-            before: '2026-10-27T00:00:00Z'
+            # rc.3 was published on Oct 23. Keep a historical cutoff so a
+            # partially published upstream dependency batch cannot enter CI.
+            before: '2026-10-24T00:00:00Z'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
