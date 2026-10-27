@@ -84,12 +84,23 @@ class RevisionService:
         action: str = "rewrite",
         target_units: int = 0,
         original_text: str = "",
+        expected_document_revision: str = "",
         full_chapter: bool = False,
         review_issue_ids: list[str] | None = None,
         kind: str | None = None,
     ) -> dict[str, Any]:
         path = self._chapter_path(chapter_id)
         content = path.read_bytes().decode("utf-8")
+        if (
+            expected_document_revision
+            and expected_document_revision != self.fingerprint(content)
+        ):
+            raise RevisionError(
+                "正文版本已变化，请重新读取后选择修订范围",
+                code="DOCUMENT_CONFLICT",
+                recoverable=True,
+                details={"expected": expected_document_revision, "current": self.fingerprint(content)},
+            )
         if full_chapter:
             start, end = 0, len(content)
         start, end = self._validated_range(content, start, end)
