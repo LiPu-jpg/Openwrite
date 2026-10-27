@@ -16,6 +16,77 @@ import {
   destroyMarkdownEditorsWithin, getPrimaryMarkdownEditor,
   initializePrimaryMarkdownEditor, mountMarkdownEditor, setMarkdownEditorTheme,
 } from "/js/markdown-editor.js";
+import { DocumentDraftStore } from "/js/document-drafts.js";
+
+const documentDrafts = new DocumentDraftStore();
+let documentOwner = null;
+let recoveryDraft = null;
+let documentLoadSequence = 0;
+let draftStorageWarned = false;
+
+function currentDocumentOwner(owner = documentOwner) {
+  return owner && documentOwner === owner && state.document === owner.document
+    && state.workspace?.project?.root === owner.identity.projectRoot;
+}
+
+function draftStorageError() {
+  if (draftStorageWarned) return;
+  draftStorageWarned = true;
+  showToast("本机恢复草稿不可用，请保持页面打开并手动保存", true);
+}
+
+function retainDocumentDraft() {
+  if (!currentDocumentOwner()) return;
+  const content = getPrimaryMarkdownEditor().getValue();
+  try {
+    if (content !== documentOwner.savedContent) {
+      documentDrafts.save(documentOwner.identity, documentOwner.version, content);
+    }
+  } catch { draftStorageError(); }
+}
+
+function renderDocumentRecovery(record = null) {
+  recoveryDraft = record;
+  const banner = $("#editor-recovery");
+  if (!banner) return;
+  banner.hidden = !record;
+  if (!record) return;
+  const conflict = record.version !== String(documentOwner?.version);
+  $("#editor-recovery-message").textContent = conflict
+    ? "发现未保存的本机草稿，但服务器版本已变化。请下载副本对比，服务器正文未改变。"
+    : "发现未保存的本机草稿，可以恢复到编辑器或下载副本。";
+  $("#editor-recovery-restore").disabled = conflict;
+}
+
+async function restoreDocumentRecovery() {
+  const record = recoveryDraft;
+  const owner = documentOwner;
+  if (!record || !currentDocumentOwner(owner) || record.version !== String(owner.version)) return;
+  await getPrimaryMarkdownEditor().setValue(record.content);
+  if (!currentDocumentOwner(owner)) return;
+  renderDocumentRecovery();
+  markEditorDirty();
+}
+
+function downloadDocumentRecovery() {
+  if (!recoveryDraft) return;
+  const url = URL.createObjectURL(new Blob([recoveryDraft.content], {type: "text/markdown;charset=utf-8"}));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${recoveryDraft.path.split("/").pop() || "document"}.recovery.md`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+function discardDocumentRecovery() {
+  if (!recoveryDraft || !window.confirm("确认丢弃这份本机恢复草稿？服务器正文不会改变。")) return;
+  try {
+    documentDrafts.removeIfContent(recoveryDraft, recoveryDraft.version, recoveryDraft.content);
+    renderDocumentRecovery(documentDrafts.load(documentOwner.identity, documentOwner.version));
+  } catch { draftStorageError(); }
+}
 
 const libraryViews = ["core", "characters", "settings"];
 const legacyLibraryViews = { story: "core", world: "settings", assets: "characters" };
@@ -37,7 +108,10 @@ function writeLocalValue(key, value) {
 }
 
 async function loadWorkspace() {
-  state.workspace = await api("/api/workspace");
+  const requestedRoot = state.workspace?.project?.root;
+  const workspace = await api("/api/workspace");
+  if (state.workspace?.project?.root !== requestedRoot) return;
+  state.workspace = workspace;
   renderWorkspace();
   renderRecentProjects();
   document.querySelector("#app").setAttribute("aria-busy", "false");
@@ -703,12 +777,17 @@ function setView(view, pushHistory = true) {
 }
 
 async function openDocument(path, pushHistory) {
+  if (documentOwner) getPrimaryMarkdownEditor().flush();
+  retainDocumentDraft();
   if (state.dirty && !window.confirm("当前文档尚未保存，仍要离开吗？")) return;
   if (state.assets.dirty && !window.confirm("当前资料尚未保存，仍要离开吗？")) return;
   clearTimeout(state.autoSaveTimer);
   state.autoSaveTimer = null;
+  const sequence = ++documentLoadSequence;
+  const requestedRoot = state.workspace?.project?.root;
   try {
     const doc = await api(`/api/document?path=${encodeURIComponent(path)}`);
+    if (sequence !== documentLoadSequence || state.workspace?.project?.root !== requestedRoot) return;
     state.document = doc;
     state.dirty = false;
     state.assets.selected = null;
@@ -736,6 +815,17 @@ async function openDocument(path, pushHistory) {
     const editor = getPrimaryMarkdownEditor();
     await editor.setDisabled(false);
     await editor.setValue(doc.content);
+    if (sequence !== documentLoadSequence || state.document !== doc) return;
+    documentOwner = { document: doc, version: doc.version, savedContent: editor.getValue(), identity: {
+      projectRoot: requestedRoot, novelId: state.workspace?.snapshot?.novel_id, path: doc.path,
+    } };
+    draftStorageWarned = false;
+    renderDocumentRecovery();
+    try {
+      const record = documentDrafts.load(documentOwner.identity, documentOwner.version);
+      if (record && record.content !== editor.getValue()) renderDocumentRecovery(record);
+      else if (record) documentDrafts.removeIfContent(record, record.version, record.content);
+    } catch { draftStorageError(); }
     const reviewProfileId = state.workspace.model_profiles?.routes?.review
       || state.workspace.model_profiles?.default_profile_id;
     const reviewProfile = state.workspace.model_profiles?.profiles?.find((profile) =>
@@ -1600,8 +1690,11 @@ function scheduleAutoSave() {
 }
 
 async function saveDocument(options = {}) {
+  if (documentOwner) getPrimaryMarkdownEditor().flush();
   const silent = Boolean(options.silent);
-  if (!state.document || !state.dirty || state.saving) return;
+  if (!currentDocumentOwner() || !state.dirty || state.saving) return;
+  const owner = documentOwner;
+  const versionAtStart = owner.version;
   clearTimeout(state.autoSaveTimer);
   state.autoSaveTimer = null;
   state.saving = true;
@@ -1612,14 +1705,24 @@ async function saveDocument(options = {}) {
   try {
     const saved = await api("/api/document", {
       method: "PUT",
+      headers: {
+        "X-OpenWrite-Workspace-Root": encodeURIComponent(owner.identity.projectRoot),
+        "X-OpenWrite-Workspace-Root-Encoding": "uri",
+      },
       body: JSON.stringify({
-        path: state.document.path,
+        path: owner.identity.path,
         content: contentAtStart,
-        version: state.document.version,
+        version: versionAtStart,
         save_origin: silent ? "autosave" : "manual",
       }),
     });
+    try { documentDrafts.removeIfContent(owner.identity, versionAtStart, contentAtStart); }
+    catch { if (currentDocumentOwner(owner)) draftStorageError(); }
+    if (!currentDocumentOwner(owner)) return;
     state.document = saved;
+    owner.document = saved;
+    owner.version = saved.version;
+    owner.savedContent = contentAtStart;
     const changedDuringSave = editor.getValue() !== contentAtStart;
     state.dirty = changedDuringSave;
     if (changedDuringSave) {
@@ -1627,6 +1730,11 @@ async function saveDocument(options = {}) {
       setSaveState("还有新内容", true);
       $("#editor-autosave-state").textContent = "新内容等待自动保存";
       scheduleAutoSave();
+      retainDocumentDraft();
+      // The newer body has been rebased onto the returned server version.
+      // Remove only its duplicate from the old version, retaining conflicts.
+      try { documentDrafts.removeIfContent(owner.identity, versionAtStart, editor.getValue()); }
+      catch { draftStorageError(); }
     } else {
       setSaveState("已保存", false);
       $("#editor-autosave-state").textContent = silent ? "已自动保存" : "已保存";
@@ -1634,24 +1742,29 @@ async function saveDocument(options = {}) {
     if (!silent) showToast("文档已保存");
     await loadWorkspace();
   } catch (error) {
+    if (!currentDocumentOwner(owner)) return;
     const conflict = error.status === 409;
     setSaveState(conflict ? "版本冲突" : "保存失败", true);
     $("#editor-autosave-state").textContent = conflict ? "版本冲突，请重新载入" : "自动保存失败";
     if (!silent || conflict) showToast(error.message, true);
   } finally {
     state.saving = false;
+    if (!currentDocumentOwner(owner) && currentDocumentOwner() && state.dirty && !state.autoSaveTimer) scheduleAutoSave();
     $("#save-document").disabled = !state.dirty;
     syncChapterDeleteControl();
   }
 }
 
 function markEditorDirty() {
+  if (!currentDocumentOwner()) return;
+  renderDocumentRecovery();
   state.dirty = true;
   setSaveState("未保存", true);
   updateEditorCount();
   syncRevisionControls();
   syncChapterDeleteControl();
   scheduleAutoSave();
+  retainDocumentDraft();
 }
 
 function syncChapterDeleteControl() {
@@ -2262,6 +2375,10 @@ async function saveWritingTargets(event) {
 
 async function openProject(event) {
   event.preventDefault();
+  if (documentOwner) getPrimaryMarkdownEditor().flush();
+  retainDocumentDraft();
+  clearTimeout(state.autoSaveTimer);
+  state.autoSaveTimer = null;
   const submit = $("#open-project-submit");
   submit.disabled = true;
   $("#open-project-progress").textContent = "正在校验并打开作品…";
@@ -2271,6 +2388,9 @@ async function openProject(event) {
       body: JSON.stringify({ project_path: $("#open-project-path").value.trim() }),
     });
     state.document = null;
+    documentOwner = null;
+    documentLoadSequence += 1;
+    renderDocumentRecovery();
     state.dirty = false;
     renderWorkspace();
     renderRecentProjects();
@@ -6359,8 +6479,13 @@ function bindEvents() {
   window.addEventListener("resize", renderProductTour);
   window.addEventListener("scroll", renderProductTour, true);
   window.addEventListener("beforeunload", (event) => {
+    if (documentOwner) getPrimaryMarkdownEditor().flush();
+    retainDocumentDraft();
     if (state.dirty || state.assets.dirty) event.preventDefault();
   });
+  $("#editor-recovery-restore").addEventListener("click", restoreDocumentRecovery);
+  $("#editor-recovery-download").addEventListener("click", downloadDocumentRecovery);
+  $("#editor-recovery-discard").addEventListener("click", discardDocumentRecovery);
   window.addEventListener("popstate", routeFromLocation);
   bindRevisionUI({
     refreshWorkspace: loadWorkspace,

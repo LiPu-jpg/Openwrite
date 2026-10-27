@@ -6007,6 +6007,10 @@ button.asset-relation-identity:focus-visible {
   display: none;
 }
 
+.editor-recovery { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.editor-recovery[hidden] { display: none; }
+.editor-recovery p { flex: 1 1 240px; margin: 0; overflow-wrap: anywhere; }
+
 .mobile-compact-icon {
   display: none;
 }
@@ -7123,5 +7127,14 @@ button.asset-relation-identity:focus-visible {
   *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Prevent iOS from zooming the page when a narrow-screen field gains focus. */
+@media (max-width: 700px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }

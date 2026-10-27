@@ -18,7 +18,7 @@ const compactToolbar = [
 
 function editorSurface(host) {
   return host.querySelector(
-    ".vditor-ir[contenteditable], .vditor-wysiwyg[contenteditable], .vditor-sv[contenteditable]",
+    ".vditor-ir [contenteditable], .vditor-wysiwyg [contenteditable], .vditor-sv[contenteditable]",
   );
 }
 
@@ -68,6 +68,15 @@ export class MarkdownEditor {
     this.serialization = undefined;
     this.lastSelection = { start: 0, end: 0, text: "" };
     this.suppressInput = false;
+    this.pendingInput = false;
+    this.notifiedValue = this.value;
+    this.observePendingInput = () => { if (!this.suppressInput) this.pendingInput = true; };
+    host.addEventListener("input", this.observePendingInput, true);
+    this.onBackground = () => { if (document.visibilityState === "hidden") this.flush(); };
+    this.onPageHide = () => this.flush();
+    host.addEventListener("focusout", this.onPageHide);
+    document.addEventListener("visibilitychange", this.onBackground);
+    window.addEventListener("pagehide", this.onPageHide);
     this.destroyed = false;
     this.enhanced = Boolean(window.Vditor);
     this.fallback = null;
@@ -112,7 +121,11 @@ export class MarkdownEditor {
       },
       input: (value) => {
         this.value = value;
-        if (!this.suppressInput) this.options.onInput?.(value, this);
+        if (!this.suppressInput) {
+          this.pendingInput = false;
+          this.notifiedValue = value;
+          this.options.onInput?.(value, this);
+        }
       },
       select: () => this.syncSelection(),
       unSelect: () => this.syncSelection(),
@@ -144,7 +157,11 @@ export class MarkdownEditor {
     textarea.setAttribute("aria-label", this.host.getAttribute("aria-label") || "Markdown 编辑器");
     textarea.addEventListener("input", () => {
       this.value = textarea.value;
-      if (!this.suppressInput) this.options.onInput?.(this.value, this);
+      if (!this.suppressInput) {
+        this.pendingInput = false;
+        this.notifiedValue = this.value;
+        this.options.onInput?.(this.value, this);
+      }
       this.syncSelection();
     });
     textarea.addEventListener("select", () => this.syncSelection());
@@ -172,8 +189,19 @@ export class MarkdownEditor {
 
   getSerialization() { return this.serialization; }
 
+  flush() {
+    if (this.destroyed || this.suppressInput || !this.pendingInput) return;
+    const value = this.getValue();
+    this.pendingInput = false;
+    if (value === this.notifiedValue) return;
+    this.notifiedValue = value;
+    this.options.onInput?.(value, this);
+  }
+
   async setValue(value, clearHistory = true) {
     const source = String(value || "");
+    this.pendingInput = false;
+    this.notifiedValue = source;
     this.value = source;
     await this.ready;
     if (this.destroyed) return;
@@ -315,6 +343,11 @@ export class MarkdownEditor {
 
   destroy() {
     if (this.destroyed) return;
+    if (this.options.flushOnLeave) this.flush();
+    this.host.removeEventListener("input", this.observePendingInput, true);
+    this.host.removeEventListener("focusout", this.onPageHide);
+    document.removeEventListener("visibilitychange", this.onBackground);
+    window.removeEventListener("pagehide", this.onPageHide);
     this.cancelSerializationCapture();
     this.destroyed = true;
     editors.delete(this);

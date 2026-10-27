@@ -353,6 +353,12 @@
             </form>
           </div>
           <div id="document-editor-pane" class="editor-canvas">
+            <section id="editor-recovery" class="editor-recovery" role="status" hidden>
+              <p id="editor-recovery-message"></p>
+              <button id="editor-recovery-restore" class="quiet-button" type="button">恢复到编辑器</button>
+              <button id="editor-recovery-download" class="quiet-button" type="button">下载草稿副本</button>
+              <button id="editor-recovery-discard" class="quiet-button" type="button">丢弃本机草稿</button>
+            </section>
             <div id="document-editor" class="document-editor" aria-label="Markdown 文档正文"></div>
           </div>
         </section>
