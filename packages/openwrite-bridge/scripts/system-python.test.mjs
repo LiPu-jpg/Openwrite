@@ -73,9 +73,23 @@ test('supplied Python starts without a platform artifact, preserves dependencies
   process.env.LD_LIBRARY_PATH = modules
   t.after(() => { if (previousLibraryPath === undefined) delete process.env.LD_LIBRARY_PATH; else process.env.LD_LIBRARY_PATH = previousLibraryPath })
   const children = []
-  runtime.spawnFn = (command, args, options) => { children.push(options.env); return spawn(command, args, options) }
+  let stage = 'preflight'
+  const processes = []
+  const diagnostic = setTimeout(() => console.error('Supplied Python fixture progress:', stage, runtime.status(), processes.map(child => ({ pid: child.pid, exit: child.exitCode, signal: child.signalCode }))), 8_000)
+  t.after(() => clearTimeout(diagnostic))
+  runtime.spawnFn = (command, args, options) => {
+    children.push(options.env)
+    const launch = [...args]
+    const script = launch.indexOf('-c')
+    if (script >= 0) launch[script + 1] = 'import faulthandler; faulthandler.dump_traceback_later(8, repeat=True); ' + launch[script + 1]
+    const child = spawn(command, launch, options)
+    processes.push(child)
+    child.stderr?.on('data', bytes => console.error('Supplied Python fixture stderr:', String(bytes)))
+    return child
+  }
   const source = await readFile(join(modules, 'supplied_dependency.py'))
   const first = await runtime.ensure()
+  stage = 'health checks'
   assert.equal(runtime.status().phase, 'ready')
   assert.equal(children.length, 2, 'preflight and managed child both use the supplied interpreter')
   assert.ok(children.every(env => env.LD_LIBRARY_PATH === modules))
@@ -87,12 +101,17 @@ test('supplied Python starts without a platform artifact, preserves dependencies
   assert.deepEqual(await readdir(modules), ['supplied_dependency.py'], 'no dependency or bytecode files written')
   assert.equal((await readdir(runtimeRoot)).includes('binaries'), false)
   const previous = runtime.child
+  stage = 'stop previous child'
   await stopOwnedProcess(previous)
+  stage = 'recover child'
   const recovered = await runtime.ensure()
+  stage = 'recovered health check'
   assert.notEqual(recovered.token, first.token)
   assert.equal(runtime.status().phase, 'ready')
   assert.equal((await fetch(recovered.baseUrl + '/api/health', { headers: { Authorization: `Bearer ${first.token}` } })).status, 401)
   await runtime.dispose()
+  stage = 'disposed'
+  clearTimeout(diagnostic)
   assert.ok(runtime.child === undefined)
 })
 
