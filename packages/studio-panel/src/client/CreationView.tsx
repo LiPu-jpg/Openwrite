@@ -19,7 +19,7 @@ import { storageKey } from './storage.ts'
 import { loadVditor, VditorBody, type ManuscriptEditorApi } from './VditorBody.tsx'
 import {
   MANUSCRIPT_SELECTION_PRESERVE_ATTR, reviewIssuesForSelection, SELECTION_POLISH_ACTIONS,
-  manuscriptSelectionFromRange, selectionPolishRequest,
+  manuscriptSelectionFromRange, mapManuscriptSelection, selectionPolishRequest,
   type ManuscriptSelection, type SelectionPolishKind,
 } from './manuscript-selection.ts'
 import {
@@ -1657,15 +1657,18 @@ export function CreationView(props: CreationViewProps) {
       kind,
       chapterId: id,
       selection,
+      documentContent: documentRef.current?.content ?? '',
       documentRevision: documentRef.current?.revision ?? '',
       reviewRevision: workBrief?.review.review_revision ?? '',
       reviewFresh: reviewCasReady,
-      issueIds: reviewIssuesForSelection(activeChapter?.review.issueDetails ?? [], selection),
+      issueIds: reviewIssuesForSelection(activeChapter?.review.issueDetails ?? [],
+        mapManuscriptSelection(documentRef.current?.content ?? '', selection) ?? { start: 0, end: 0, text: '' }),
     })
     if (!request.ok) {
       setSelectionNotice(t(
         request.reason === 'no-review' ? 'creation.selection.reviewRequired'
           : request.reason === 'no-issues' ? 'creation.selection.noIssues'
+            : request.reason === 'source-changed' ? 'creation.notes.rangeLost'
             : 'creation.selection.empty',
       ))
       return
@@ -1698,7 +1701,9 @@ export function CreationView(props: CreationViewProps) {
         return
       }
     }
-    const live = revalidateAnnotationRange(draftRef.current, selection)
+    const editorContent = editorApi?.getValue() ?? draftRef.current
+    const current = revalidateAnnotationRange(editorContent, selection)
+    const live = current && mapManuscriptSelection(documentRef.current?.content ?? '', { ...current, source: editorContent })
     if (live === null) {
       setSelectionNotice(t('creation.notes.rangeLost'))
       return
@@ -1734,15 +1739,16 @@ export function CreationView(props: CreationViewProps) {
   }
 
   const locateAnnotation = (item: ManuscriptAnnotation) => {
-    const live = liveAnnotationAnchor(draftRef.current, item)
+    const editorContent = editorApi?.getValue() ?? draftRef.current
+    const live = liveAnnotationAnchor(editorContent, item, documentRef.current?.content)
     if (live.state === 'detached') {
       setSelectionNotice(t('creation.notes.detached'))
       return
     }
-    const next = { start: live.start, end: live.end, text: item.quote }
+    const next = manuscriptSelectionFromRange(editorContent, live.start, live.end)!
     manuscriptSelectionRef.current = next
     setManuscriptSelection(next)
-    editorApi?.revealQuote(item.quote, live.start)
+    editorApi?.revealQuote(next.text, live.start)
     setSelectionNotice(t(live.state === 'relocated' ? 'creation.notes.relocated' : 'creation.notes.attached'))
   }
 
@@ -2324,7 +2330,7 @@ export function CreationView(props: CreationViewProps) {
             ) : (
               <VditorBody key={`${path}:${editorEpoch}`} initial={draft} disabled={false} onChange={updateDraft}
                 onSelectionChange={updateManuscriptSelection}
-                annotations={annotations}
+                annotations={annotations} annotationSource={document_?.content}
                 onInsertMarker={() => { setInsertOpen(true); setInsertError('') }}
                 onEditorApi={setEditorApi}
                 onReady={() => setEditorReady(true)} onFailed={() => { setEditorReady(true); setEditorFailed(true) }} />
@@ -2576,7 +2582,7 @@ export function CreationView(props: CreationViewProps) {
                 {annotations.length === 0
                   ? <div className={css.muted}>{t('creation.notes.empty')}</div>
                   : <div className={css.annotationList}>{annotations.map(item => {
-                    const live = liveAnnotationAnchor(draft, item)
+                    const live = liveAnnotationAnchor(draft, item, document_?.content)
                     const stateKey = item.status === 'resolved'
                       ? 'creation.notes.resolved'
                       : live.state === 'detached'

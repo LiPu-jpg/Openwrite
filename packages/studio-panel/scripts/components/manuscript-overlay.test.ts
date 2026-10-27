@@ -26,4 +26,15 @@ describe('display-only overlay bands', () => {
     expect(overlayFill('note', 'dark', 'sky')).not.toBe(overlayFill('relation', 'dark'))
     expect(overlayUnderline('light', 'amber')).not.toBe(overlayFill('note', 'light', 'amber'))
   })
+  it('maps a duplicate note after emoji/CRLF to the same editor occurrence', () => {
+    const raw = '密信\r\n😀\n密信\r\n尾部'
+    const view = raw.replace(/\r\n/g, '\n')
+    const before = raw.lastIndexOf('密信')
+    const start = Array.from(raw.slice(0, before)).length
+    const item = parseAnnotation({ annotation_id: 'ann_boundaryxxxxxxxx', chapter_id: 'ch_001',
+      quote: '密信', note: '第二处', start_hint: start, end_hint: start + 2,
+      current_start: start, current_end: start + 2, anchor_state: 'attached', status: 'open' })!
+    const bands = overlayBands(view, [item], [], raw)
+    expect(bands).toMatchObject([{ kind: 'note', start: view.lastIndexOf('密信'), occurrence: 1, needle: '密信' }])
+  })
 })

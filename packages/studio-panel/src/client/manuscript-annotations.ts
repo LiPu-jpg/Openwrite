@@ -1,5 +1,6 @@
 import { asRecord, asText } from './dto.ts'
 import { locateQuote, locateSelectedMarkdown, type QuoteAnchor } from './manuscript-selection.ts'
+import { mapEditorRange, mapSourceRange } from './selection-coordinates.ts'
 
 export const ANNOTATION_COLORS = ['amber', 'rose', 'sky', 'lime', 'violet'] as const
 export type AnnotationColor = (typeof ANNOTATION_COLORS)[number]
@@ -89,16 +90,15 @@ export function annotationLocateLabel(anchor: QuoteAnchor | { state: AnnotationA
   return '已定位'
 }
 
-export function liveAnnotationAnchor(content: string, item: ManuscriptAnnotation): QuoteAnchor {
-  if (item.anchorState === 'detached' && item.currentStart === null) {
-    return locateQuote(content, item.quote, item.startHint, item.endHint)
+export function liveAnnotationAnchor(content: string, item: ManuscriptAnnotation, source = content): QuoteAnchor {
+  if (!(item.anchorState === 'detached' && item.currentStart === null)) {
+    const start = item.currentStart ?? item.startHint, end = item.currentEnd ?? item.endHint
+    const mapped = mapSourceRange(source, content, start, end)
+    if (mapped && mapEditorRange(source, content, mapped.start, mapped.end)?.text === item.quote) {
+      return { state: item.anchorState === 'relocated' ? 'relocated' : 'attached', start: mapped.start, end: mapped.end }
+    }
   }
-  return locateQuote(
-    content,
-    item.quote,
-    item.currentStart ?? item.startHint,
-    item.currentEnd ?? item.endHint,
-  )
+  return locateQuote(content, item.quote.replace(/\r\n?/g, '\n'), -1, -1)
 }
 
 export function revalidateAnnotationRange(

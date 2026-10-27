@@ -29,7 +29,7 @@
 
 ## 开发中：0.2.28（未发布）
 
-Core 5.8.18 候选补修已合并，22 项 CI 全部通过；修复写章/修订 thinking 开关漏传、锚点诊断及解压包升级入口等问题。#123 的后续回复也补齐了旧会话与 B-13 的 Windows 实测，详见 [回复补修记录](docs/ISSUE_123_FOLLOWUP.md)。剩余宿主正式发布与 Android/Termux 实机两项继续跟踪，本轮不发布；下面的 npm/GitHub 安装入口仍为已发布的 0.2.27。
+Core 5.8.19 候选继续补修 CRLF/emoji 选区坐标，以及中断升级恢复和损坏安装包缓存重试，见 [选区与升级补修](docs/SELECTION_UPGRADE_REPAIRS.md)。前轮修复及 #123 的 Windows 回执见 [回复补修记录](docs/ISSUE_123_FOLLOWUP.md)。剩余宿主正式发布与 Android/Termux 实机两项继续跟踪，本轮不发布；下面的 npm/GitHub 安装入口仍为已发布的 0.2.27。
 
 ## 0.2.27
 
