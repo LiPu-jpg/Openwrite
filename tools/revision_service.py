@@ -165,6 +165,8 @@ class RevisionService:
         target_units: int = 0,
         expected_review_revision: str = "",
         expected_document_revision: str = "",
+        selection: dict[str, Any] | None = None,
+        original_text: str = "",
     ) -> dict[str, Any]:
         clean_ids = [str(item).strip() for item in issue_ids if str(item).strip()]
         if not clean_ids:
@@ -224,13 +226,53 @@ class RevisionService:
                 details={"issue_ids": missing},
             )
         resolved = [anchor for anchor in anchors if anchor is not None]
-        start = min(item[0] for item in resolved)
-        end = max(item[1] for item in resolved)
+        bounded_selection = None
+        if selection is not None:
+            if (
+                not isinstance(selection, dict)
+                or type(selection.get("start")) is not int
+                or type(selection.get("end")) is not int
+                or not isinstance(selection.get("original_text"), str)
+            ):
+                raise RevisionError(
+                    "选区必须包含整数 start/end 和准确的 original_text", code="INVALID_SELECTION"
+                )
+            start, end = self._validated_range(content, selection["start"], selection["end"])
+            if content[start:end] != selection["original_text"]:
+                raise RevisionError(
+                    "选区与当前原文不匹配，请重新选择", code="OLD_TEXT_NOT_FOUND", recoverable=True
+                )
+            if original_text and original_text != selection["original_text"]:
+                raise RevisionError("original_text 与明确选区不一致", code="INVALID_SELECTION")
+            outside = [
+                issue["id"]
+                for issue, anchor in zip(selected, resolved, strict=True)
+                if anchor[0] >= end or anchor[1] <= start
+            ]
+            if outside:
+                raise RevisionError(
+                    "审稿问题位于所选范围外，请重新选择问题",
+                    code="ISSUE_OUTSIDE_SELECTION",
+                    recoverable=True,
+                    details={"issue_ids": outside},
+                )
+            bounded_selection = {"start": start, "end": end, "original_text": content[start:end]}
+        elif original_text:
+            # Older selection UI sent only a quote. It cannot disambiguate two
+            # identical occurrences, so never silently widen it to issue bounds.
+            raise RevisionError(
+                "请更新界面并重新选择明确的修订范围", code="INVALID_SELECTION", recoverable=True
+            )
+        else:
+            start = min(item[0] for item in resolved)
+            end = max(item[1] for item in resolved)
         request = {
             "action": "review_fix",
             "instruction": str(instruction or "").strip(),
             "target_units": self._bounded_target(target_units),
         }
+        if bounded_selection is not None:
+            request["selection"] = bounded_selection
         generation = self._generate(
             chapter_id=chapter_id,
             content=content,
@@ -328,6 +370,7 @@ class RevisionService:
                 target_units=int((previous.get("request") or {}).get("target_units") or 0),
                 expected_review_revision=str(previous.get("review_revision") or ""),
                 expected_document_revision=str(previous.get("source_revision") or ""),
+                selection=(previous.get("request") or {}).get("selection"),
             )
         return self.create_selection(
             chapter_id=str(previous["chapter_id"]),

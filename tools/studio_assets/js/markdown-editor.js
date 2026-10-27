@@ -60,6 +60,12 @@ export class MarkdownEditor {
     this.host = host;
     this.options = options;
     this.value = String(options.value || "");
+    const initialSource = this.value;
+    let inputObserved = false;
+    const observeInput = () => { inputObserved = true; };
+    host.addEventListener("input", observeInput, {once: true});
+    this.cancelSerializationCapture = () => host.removeEventListener("input", observeInput);
+    this.serialization = undefined;
     this.lastSelection = { start: 0, end: 0, text: "" };
     this.suppressInput = false;
     this.destroyed = false;
@@ -72,6 +78,7 @@ export class MarkdownEditor {
     editorsByHost.set(host, this);
     if (!this.enhanced) {
       this.mountFallback();
+      this.cancelSerializationCapture();
       this.resolveReady(this);
       options.onReady?.(this);
       return;
@@ -115,7 +122,9 @@ export class MarkdownEditor {
       },
       blur: () => this.syncSelection(),
       after: () => {
+        this.cancelSerializationCapture();
         if (this.destroyed) return;
+        this.serialization = inputObserved ? undefined : {source: initialSource, value: this.instance.getValue()};
         this.value = this.instance.getValue();
         const surface = editorSurface(this.host);
         surface?.addEventListener("mouseup", () => this.syncSelection());
@@ -161,8 +170,11 @@ export class MarkdownEditor {
     return this.value;
   }
 
+  getSerialization() { return this.serialization; }
+
   async setValue(value, clearHistory = true) {
-    this.value = String(value || "");
+    const source = String(value || "");
+    this.value = source;
     await this.ready;
     if (this.destroyed) return;
     if (this.fallback) {
@@ -174,6 +186,7 @@ export class MarkdownEditor {
     }
     this.suppressInput = true;
     this.instance.setValue(this.value, clearHistory);
+    this.serialization = {source, value: this.instance.getValue()};
     this.suppressInput = false;
     this.lastSelection = { start: 0, end: 0, text: "" };
   }
@@ -302,6 +315,7 @@ export class MarkdownEditor {
 
   destroy() {
     if (this.destroyed) return;
+    this.cancelSerializationCapture();
     this.destroyed = true;
     editors.delete(this);
     editorsByHost.delete(this.host);

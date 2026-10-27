@@ -77,7 +77,7 @@ function openRevisionRequest(fullChapter) {
     showToast("请先选择需要修改的文字", true);
     return;
   }
-  const mapped = mapEditorRange(state.document.content, value, start, end);
+  const mapped = mapEditorRange(state.document.content, value, start, end, editor.getSerialization?.());
   if (!mapped) { showToast("选区与当前原文不一致，请保存或重新读取后选择", true); return; }
   pendingRevisionSelection = { ...mapped, revision: state.document.revision };
   $("#revision-full-mode").value = fullChapter ? "1" : "0";
@@ -353,7 +353,7 @@ function createManuscriptAnnotation() {
   const selection = editor.selection();
   const start = selection.start;
   const end = selection.end;
-  const mapped = mapEditorRange(state.document?.content || "", value, start, end);
+  const mapped = mapEditorRange(state.document?.content || "", value, start, end, editor.getSerialization?.());
   if (!mapped) { showToast("请重新读取原文并选择要批注的文字", true); return; }
   const quote = mapped.text;
   pendingAnnotation = {
