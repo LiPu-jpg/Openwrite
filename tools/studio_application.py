@@ -1251,10 +1251,15 @@ class StudioApplication:
             recoverable = code in {
                 "DOCUMENT_REVISION_CONFLICT",
                 "OLD_TEXT_NOT_FOUND",
+                "TEXT_RANGE_NOT_FOUND",
                 "AMBIGUOUS_OLD_TEXT",
                 "AMBIGUOUS_TEXT_RANGE",
             }
-            status = HTTPStatus.CONFLICT if recoverable else HTTPStatus.BAD_REQUEST
+            status = (
+                HTTPStatus.CONFLICT
+                if code in {"DOCUMENT_REVISION_CONFLICT", "DOCUMENT_PREVIEW_RESULT_MISMATCH"}
+                else HTTPStatus.BAD_REQUEST
+            )
             raise StudioError(
                 str(result.get("message") or result.get("error") or "文档变更失败"),
                 status,
@@ -4530,7 +4535,16 @@ class StudioApplication:
             if recommendation["status"] == "drafted" and not (
                 payload.get("run_id_v2") or payload.get("resume_from_draft")
             ):
-                raise StudioError("该章节已有正文，请从正文列表打开", HTTPStatus.CONFLICT)
+                raise StudioError(
+                    "该章节已有正文，请从正文列表打开",
+                    HTTPStatus.CONFLICT,
+                    code="CHAPTER_ALREADY_EXISTS",
+                    recoverable=True,
+                    details={
+                        "chapter_id": requested_chapter,
+                        "recovery": "open_manuscript_or_create_revision",
+                    },
+                )
         chapter_id = (
             str(recommendation["chapter_id"]) if isinstance(recommendation, dict) else "next"
         )
