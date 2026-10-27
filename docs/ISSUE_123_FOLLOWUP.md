@@ -35,3 +35,20 @@
 - #111：Android/Termux 真机及受信任外部 Studio 连接验收。
 
 #123 保持打开跟踪以上两项。代码、原始环境确认、CI 产物与正式发布分别记录。
+
+## 最终验收与合并
+
+[Core PR #131](https://github.com/LiPu-jpg/Openwrite/pull/131) 和 [插件 PR #132](https://github.com/LiPu-jpg/Openwrite/pull/132) 已合并。最终 **22 项 CI 全部成功**：[三系统回归](https://github.com/LiPu-jpg/Openwrite/actions/runs/40437762040)、[安装/客户端验收](https://github.com/LiPu-jpg/Openwrite/actions/runs/40437761963)、[插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40437762138)。
+
+| 项目 | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| 固定 Core 全量 | 1541 passed / 32 skipped | 1541 passed / 32 skipped | 1541 passed / 32 skipped |
+| 真实 HTTP dry-run / 归档历史 | 2 passed | 2 passed | 2 passed |
+| 真实 Electron 44.7.0 脚本 | 5 passed | 5 passed | 5 passed |
+| wheel 源码 / 应打包 Python 文件 | 498 / 163 一致 | 498 / 163 一致 | 498 / 163 一致 |
+
+32 项跳过均为缺失旧样例/checkout 的既有跳过，新增回归未跳过。另有混合行尾的公开 HTTP 预览/应用/撤销测试包含在 Core 全量中。本地插件完整检查、310 项组件、34 项原生预设/升级/运行时组合通过。最终 8 份安装/源码、5 份客户端、6 份原生报告已下载复核，安装包报告绑定同一 tarball，源码安装固定插件提交。
+
+Core 固定提交 `43cb604a7583b7268f47e54ceb8a0c30b95e82b2`，wheel SHA-256 `09f9baef5fe0d502510c8542f20c6abaf6893f02e2d069d7f0d7cc50c7aeea93`。候选 tarball SHA-256 `4bcde6d6f535906a5a04490218a0d972e84329ff750af6803a4214fbf609024e`；CI 来源提交 `ecfb7c34c5b0a29d395136da775bb964c3c91d11` 与主分支修复合并提交 `14dd3a5dbc7d1661adb9b684e0f137298bf2591f` 的 tree 同为 `67042838daf11f5c7fc27e0ffe158677a73c3196`。
+
+本轮没有发起真实付费模型请求，thinking 参数通过实际 LLMClient 到提供方请求边界的替身验证；不把它描述为真实服务商计费或输出质量验收。候选产物只保存为验收证据，**未发布 npm 或 GitHub Release，公开版本仍为 0.2.27**。

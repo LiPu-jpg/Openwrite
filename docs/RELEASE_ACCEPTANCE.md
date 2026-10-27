@@ -4,7 +4,11 @@
 
 本轮根据 #123 新回复捆绑 Core **5.8.18**，固定源码 `43cb604a7583b7268f47e54ceb8a0c30b95e82b2`。本地全量 **1541 passed / 32 skipped**，真实 HTTP 2 passed；wheel 的 498 个打包源文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `09f9baef5fe0d502510c8542f20c6abaf6893f02e2d069d7f0d7cc50c7aeea93`。
 
-写章/修订 thinking 模式的三个回归在旧冻结源码失败，新实现通过。原生预设/升级/运行时本地 34 passed。报告者已补齐旧会话与 B-13 的 Windows 验收；余下宿主正式发布和 Android/Termux 真机两项仍暂停新版本发布。具体修复、来源和边界见 [#123 回复补修](ISSUE_123_FOLLOWUP.md)。本轮跨平台最终结果完成后另行记录，不沿用下方前轮产物。
+写章/修订 thinking 模式的三个回归在旧冻结源码失败，新实现通过。原生预设/升级/运行时本地 34 passed。报告者已补齐旧会话与 B-13 的 Windows 验收；余下宿主正式发布和 Android/Termux 真机两项仍暂停新版本发布。具体修复、来源和边界见 [#123 回复补修](ISSUE_123_FOLLOWUP.md)。
+
+[PR #131](https://github.com/LiPu-jpg/Openwrite/pull/131) / [#132](https://github.com/LiPu-jpg/Openwrite/pull/132) 已合并，最终 22 项检查全部成功：[三系统回归](https://github.com/LiPu-jpg/Openwrite/actions/runs/40437762040)、[完整安装/客户端验收](https://github.com/LiPu-jpg/Openwrite/actions/runs/40437761963)、[插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40437762138)。三系统 Core 各 1541 passed / 32 skipped、HTTP 各 2 passed、真实 Electron 各 5 passed。8 份安装/源码、5 份客户端和 6 份原生报告下载后复核通过。
+
+本轮 tarball SHA-256 为 `4bcde6d6f535906a5a04490218a0d972e84329ff750af6803a4214fbf609024e`；CI 提交 `ecfb7c34c5b0a29d395136da775bb964c3c91d11` 与修复合并提交 `14dd3a5dbc7d1661adb9b684e0f137298bf2591f` 的源码 tree 同为 `67042838daf11f5c7fc27e0ffe158677a73c3196`。产物未发布；本轮未发起真实模型请求，不能把请求边界替身测试算作服务商实测。
 
 ### 前轮候选证据（Core 5.8.17，未发布）
 
