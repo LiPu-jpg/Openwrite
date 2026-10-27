@@ -1,6 +1,6 @@
 {
   "name": "dsh-openwrite",
-  "version": "0.2.28",
+  "version": "0.2.29",
   "description": "OpenWrite 长篇小说领域后端接入 DeepSeek Harness：统一创作 Agent 预设 + 原生创作工作台",
   "type": "module",
   "scripts": {
@@ -22,7 +22,7 @@
     "docs:check": "node scripts/gen-tools-md.mjs --check && node scripts/check-editor-coordinates.mjs",
     "test:profiles": "node scripts/profile-smoke.mjs",
     "prepare": "node scripts/prepare.mjs",
-    "test:managed": "node --test packages/openwrite-bridge/scripts/managed-runtime.test.mjs packages/openwrite-bridge/scripts/tool-policy.test.mjs packages/openwrite-bridge/scripts/followup-tools.test.mjs",
+    "test:managed": "node --test packages/openwrite-bridge/scripts/managed-runtime.test.mjs packages/openwrite-bridge/scripts/system-python.test.mjs packages/openwrite-bridge/scripts/tool-policy.test.mjs packages/openwrite-bridge/scripts/followup-tools.test.mjs",
     "test:release": "node scripts/release-smoke.mjs",
     "test:client-boot": "node scripts/client-boot-smoke.mjs"
   },

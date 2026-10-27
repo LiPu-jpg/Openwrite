@@ -27,6 +27,13 @@
 这是 [OpenWrite](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 的 dsh 插件版本。
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Agent 与交互界面，OpenWrite Core 提供小说领域能力；人物、设定、大纲、正文和评审保存在本地作品目录。
 
+## 开发中：0.2.29（未发布）
+
+增加 `pythonPath` / `OPENWRITE_PYTHON` 和显式依赖目录配置，允许使用已准备依赖的 Python，
+跳过 uv 与解释器下载；补充 Android/Termux 的本机 external Studio 步骤，以及旧版安装选择诊断。
+配置和边界见 [安装说明](docs/INSTALL.md#bring-your-own-python)。正式可安装版本仍为下方的 0.2.28；
+Android 完整工具验收与宿主升级保护发布继续在 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123) 跟踪。
+
 ## 0.2.28
 
 0.2.28 捆绑 Core 5.8.20，最终 22 项 CI 全部通过；修复正文最后输入漏存、审稿修订越过选区，以及真实 Markdown 编辑器格式转换导致的选区拒绝，见 [正文编辑与审稿补修](docs/EDITOR_SAFETY_REPAIRS.md)。并包含前轮 [选区与升级补修](docs/SELECTION_UPGRADE_REPAIRS.md)、[写作与审稿改进](docs/ISSUES_121_123.md)。

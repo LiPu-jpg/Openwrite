@@ -13,6 +13,7 @@ export async function acceptRuntime(installed, home, temporary) {
   const second = new ManagedRuntime(root, artifacts)
   try {
     const [a, b] = await Promise.all([first.ensure(), second.ensure()])
+    await acceptSystemPython(installed, first.child.spawnfile, temporary)
     const native = spawnSync(first.child.spawnfile, ['-I', '-X', 'utf8', '-c', 'import sys, onnxruntime, fastembed; from cryptography.hazmat.backends.openssl.backend import backend; assert sys.flags.utf8_mode; print("\\u2713"); assert "CPUExecutionProvider" in onnxruntime.get_available_providers(); assert backend.openssl_version_text()'], { cwd: root, encoding: 'utf8', timeout: 60_000 })
     assert.equal(native.status, 0, `Native dependency import failed: ${native.stderr}`)
     assert.notEqual(a.baseUrl, b.baseUrl, 'instances choose separate free ports')
@@ -124,6 +125,30 @@ export async function acceptRuntime(installed, home, temporary) {
     const rollback = new ManagedRuntime(root, artifacts)
     try { await rollback.ensure(); assert.equal(rollback.status().phase, 'ready') }
     finally { await rollback.dispose() }
-    return ['native-dependency-load', 'native-backend-project-init', 'project-metadata-update', 'readonly-post-invalidation', 'manuscript-mutation-invalidation', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
+    return ['supplied-python-runtime', 'native-dependency-load', 'native-backend-project-init', 'project-metadata-update', 'readonly-post-invalidation', 'manuscript-mutation-invalidation', 'multiple-instances', 'dynamic-ports', 'backend-auth', 'crash-recovery', 'owned-process-cleanup', 'failed-upgrade-preserves-active', 'rollback']
   } finally { await first.dispose(); await second.dispose() }
+}
+
+/** Exercise the exact bundled Core with an existing interpreter, without downloading or pip. */
+export async function acceptSystemPython(installed, pythonPath, temporary) {
+  const { ManagedRuntime } = await import(pathToFileURL(join(installed, 'packages/openwrite-bridge/lib/managed-runtime.js')).href)
+  const root = join(temporary, 'supplied-python-runtime')
+  const runtime = new ManagedRuntime(root, join(installed, 'release'), { pythonPath })
+  runtime.extract = async () => { throw new Error('Supplied Python must not download a runtime') }
+  try {
+    const connection = await runtime.ensure()
+    assert.equal(runtime.status().phase, 'ready')
+    assert.equal(runtime.child.spawnfile, pythonPath)
+    assert.equal((await fetch(connection.baseUrl + '/api/health')).status, 401)
+    const headers = { Authorization: `Bearer ${connection.token}` }
+    const response = await fetch(connection.baseUrl + '/api/health', { headers })
+    assert.equal(response.status, 200)
+    const manifest = JSON.parse(await readFile(join(installed, 'release/runtime-manifest.json')))
+    assert.equal((await response.json()).core_version, manifest.core_version)
+    const page = await fetch(connection.baseUrl + '/', { headers })
+    assert.equal(page.status, 200)
+    assert.match(await page.text(), /OpenWrite/)
+    assert.equal((await readdir(root)).includes('binaries'), false)
+    console.log('Supplied Python: real bundled Core health, authentication and Studio assets passed')
+  } finally { await runtime.dispose() }
 }

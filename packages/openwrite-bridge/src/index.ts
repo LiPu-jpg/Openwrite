@@ -23,6 +23,10 @@ export interface Config {
   mode?: 'managed' | 'external'
   runtimeRoot?: string
   artifacts?: string
+  /** Absolute path to a prepared Python >=3.10; skips uv and interpreter downloads. */
+  pythonPath?: string
+  /** Optional absolute directories containing dependencies for the supplied interpreter. */
+  pythonModulePaths?: string[]
   /** Base URL of the local OpenWrite Studio server. */
   baseUrl: string
   /** Optional instance token of an externally managed Studio server. */
@@ -37,6 +41,8 @@ export const Config: Schema<Config> = Schema.object({
   mode: Schema.union(['managed', 'external']),
   runtimeRoot: Schema.string(),
   artifacts: Schema.string(),
+  pythonPath: Schema.string(),
+  pythonModulePaths: Schema.array(Schema.string()),
   baseUrl: Schema.string().default('http://127.0.0.1:4567'),
   authToken: Schema.string().role('secret'),
   timeoutMs: Schema.number().default(600000),
@@ -57,6 +63,7 @@ export function apply(ctx: Context, config: Config) {
   const runtime = config.mode === 'managed' ? new ManagedRuntime(
     config.runtimeRoot ?? join(process.env['DSH_HOME']?.trim() || join(homedir(), '.dsh'), 'openwrite'),
     config.artifacts ?? fileURLToPath(new URL('../../../release/', import.meta.url)),
+    { pythonPath: config.pythonPath, pythonModulePaths: config.pythonModulePaths },
   ) : undefined
   const authorizeRequest = (headers: Record<string, string | string[] | undefined>): number | undefined => {
     const connection = ctx.get('connection')

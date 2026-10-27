@@ -200,6 +200,9 @@ export async function recoverUpgrade(home, operationId, options = {}) {
 /** Stage a complete profile beside the active tree, validate, then swap while stopped. */
 export async function upgradeProfile(home, profile, spec, options = {}) {
   if (typeof spec !== 'string' || !spec || spec.startsWith('-') || /[\r\n]/.test(spec)) throw new Error('A package spec or Release tarball is required')
+  // A bare add can preserve a profile's old exact dependency/lock selection
+  // even after npm latest moved (#142). An upgrade must request a new version.
+  if (spec === 'dsh-openwrite') spec = 'dsh-openwrite@latest'
   const target = profileDirectory(home, profile)
   const stopped = options.assertStopped || assertHostStopped
   await stopped(home, profile)

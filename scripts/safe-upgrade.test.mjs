@@ -35,6 +35,17 @@ async function installFake(home, profile, spec, log) {
   await log.write('pnpm fake stdout\npnpm fake stderr\n')
 }
 
+test('a bare OpenWrite upgrade explicitly requests latest instead of reusing a pinned old selection', async () => {
+  const { home, options } = await fixture()
+  try {
+    const result = await upgradeProfile(home, 'desktop', 'dsh-openwrite', { ...options, run: async (h, p, spec, log) => {
+      assert.equal(spec, 'dsh-openwrite@latest')
+      await installFake(h, p, 'dsh-openwrite@0.2.25', log)
+    } })
+    assert.equal(result.status, 'completed')
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
 test('staged upgrade retains the complete old profile and unrelated settings', async () => {
   const { home, profile, options } = await fixture()
   try {

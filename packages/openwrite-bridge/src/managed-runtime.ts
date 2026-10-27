@@ -28,12 +28,16 @@ export class UnsupportedRuntimePlatformError extends Error {
   readonly code = 'RUNTIME_PLATFORM_UNSUPPORTED'
   readonly status = 503
   constructor(readonly platform: string) {
-    super(`OpenWrite Studio managed runtime is unavailable on ${platform}. Configure the bridge with mode: external and baseUrl pointing to a supported Studio server; see docs/INSTALL.md#external-studio. File tools that do not require Studio remain available.`)
+    super(`OpenWrite Studio managed runtime is unavailable on ${platform}. Set pythonPath or OPENWRITE_PYTHON to a prepared Python interpreter, or configure the bridge with mode: external and baseUrl pointing to a supported Studio server; see docs/INSTALL.md#external-studio. File tools that do not require Studio remain available.`)
     this.name = 'UnsupportedRuntimePlatformError'
   }
 }
 export type SpawnFn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess
 export interface RuntimeOptions {
+  /** Prepared Python >=3.10. Dependencies belong to the author; Core stays in our own directory. */
+  pythonPath?: string
+  /** Explicit dependency directories, e.g. an Android author's prepared pyroot. */
+  pythonModulePaths?: string[]
   spawn?: SpawnFn
   delay?: typeof delay
   restartLimit?: number
@@ -189,8 +193,12 @@ export class ManagedRuntime {
   private readonly wait: typeof delay
   private readonly restartLimit: number
   private readonly backoffMs: number[]
+  private readonly pythonPath?: string
+  private readonly pythonModulePaths: string[]
 
   constructor(readonly root: string, readonly artifacts: string, options: RuntimeOptions = {}) {
+    this.pythonPath = options.pythonPath?.trim() || process.env['OPENWRITE_PYTHON']?.trim() || undefined
+    this.pythonModulePaths = [...(options.pythonModulePaths ?? [])]
     this.spawnFn = options.spawn ?? spawn
     this.wait = options.delay ?? delay
     this.restartLimit = options.restartLimit ?? DEFAULT_RESTART_LIMIT
@@ -495,7 +503,7 @@ export class ManagedRuntime {
   private async command(executable: string, args: string[], signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
     const child = this.spawnFn(executable, args, { cwd: this.root, detached: process.platform !== 'win32', windowsHide: true,
-      env: buildChildEnv(process.env, { UV_CACHE_DIR: join(this.root, 'cache', 'uv'), UV_PYTHON_DOWNLOADS: 'never', UV_NO_CONFIG: '1' }),
+      env: buildChildEnv(process.env, { ...this.pythonLibraryEnv(), UV_CACHE_DIR: join(this.root, 'cache', 'uv'), UV_PYTHON_DOWNLOADS: 'never', UV_NO_CONFIG: '1' }),
       stdio: ['ignore', 'ignore', 'pipe'] })
     let failure = ''
     child.stderr?.on('data', bytes => { failure = (failure + String(bytes)).slice(-2000) })
@@ -508,6 +516,13 @@ export class ManagedRuntime {
       })
       signal.throwIfAborted()
     } finally { signal.removeEventListener('abort', abort) }
+  }
+
+  /** Shared Android/embedded Python may need its host's native-library search paths. */
+  private pythonLibraryEnv(): Record<string, string | undefined> {
+    return this.pythonPath ? Object.fromEntries(
+      ['LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH'].map(key => [key, process.env[key]]),
+    ) : {}
   }
 
   private async lock(signal: AbortSignal): Promise<() => Promise<void>> {
@@ -529,7 +544,10 @@ export class ManagedRuntime {
   private async prepare(signal: AbortSignal): Promise<BackendConnection> {
     const manifest = JSON.parse(await readFile(join(this.artifacts, 'runtime-manifest.json'), 'utf8')) as RuntimeManifest
     const platform = manifest.platforms[`${process.platform}-${process.arch}`]
-    if (!platform) throw new UnsupportedRuntimePlatformError(`${process.platform}/${process.arch}`)
+    if (this.pythonPath && !isAbsolute(this.pythonPath)) throw new Error('pythonPath / OPENWRITE_PYTHON must be an absolute path to a Python executable, without command-line arguments')
+    if (this.pythonModulePaths.length && !this.pythonPath) throw new Error('pythonModulePaths requires pythonPath or OPENWRITE_PYTHON')
+    if (this.pythonModulePaths.some(path => !isAbsolute(path))) throw new Error('pythonModulePaths must contain absolute dependency directory paths')
+    if (!this.pythonPath && !platform) throw new UnsupportedRuntimePlatformError(`${process.platform}/${process.arch}`)
     if (!manifest.wheel || !manifest.requirements) throw new Error('The package is missing Core or dependency checksums')
     const wheel = join(this.artifacts, manifest.wheel.file)
     const requirements = join(this.artifacts, manifest.requirements.file)
@@ -543,26 +561,60 @@ export class ManagedRuntime {
     const unlock = await this.lock(signal)
     let python: string
     try {
-      const generation = createHash('sha256').update(JSON.stringify(manifest)).digest('hex').slice(0, 24)
+      const generation = createHash('sha256').update(JSON.stringify(manifest))
+        .update(this.pythonPath ? JSON.stringify({ pythonPath: this.pythonPath, pythonModulePaths: this.pythonModulePaths }) : '').digest('hex').slice(0, 24)
       const destination = join(this.root, 'environments', generation)
-      python = join(destination, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
-      if (await readFile(join(destination, '.complete'), 'utf8').catch(() => '') !== generation) {
-        const uv = await this.extract(platform.uv, signal)
-        const basePython = await this.extract(platform.python, signal)
-        this.update('installing', 'Installing isolated dependencies; first use may take several minutes')
-        await rm(destination, { recursive: true, force: true })
+      let coreRoot: string | undefined
+      if (this.pythonPath) {
+        python = this.pythonPath
+        coreRoot = join(destination, 'core')
+        const complete = await readFile(join(destination, '.complete'), 'utf8').catch(() => '') === generation
         try {
-          await this.command(uv, ['venv', '--python', basePython, destination], signal)
-          await this.command(uv, ['pip', 'sync', '--python', python, '--require-hashes', '--only-binary', ':all:',
-            ...(manifest.dependency_wheels?.length ? ['--find-links', join(this.artifacts, 'wheels')] : []), requirements], signal)
-          await this.command(uv, ['pip', 'install', '--python', python, '--no-deps', wheel], signal)
-          await this.command(python, ['-I', '-c', 'from tools.studio_http import health_payload; from tools.studio import create_server; assert health_payload()["contract_version"] == 1'], signal)
-          await writeFile(join(destination, '.complete'), generation)
-        } catch (error) { await rm(destination, { recursive: true, force: true }); throw error }
+          if (!complete) {
+            await rm(destination, { recursive: true, force: true })
+            await mkdir(coreRoot, { recursive: true })
+            // Core is a pure-Python wheel. Install only its verified contents in
+            // our directory: no pip/uv, dependency resolution, or author-site writes.
+            for (const [name, bytes] of Object.entries(unzipSync(await readFile(wheel)))) {
+              signal.throwIfAborted()
+              const target = resolve(coreRoot, name)
+              if (isAbsolute(name) || !target.startsWith(coreRoot + sep)) throw new Error('Invalid Core wheel path')
+              if (name.endsWith('/')) await mkdir(target, { recursive: true })
+              else { await mkdir(dirname(target), { recursive: true }); await writeFile(target, bytes) }
+            }
+          }
+          this.update('installing', 'Checking the supplied Python and its dependencies; no runtime downloads')
+          await this.command(python, ['-I', '-B', '-X', 'utf8', '-c',
+            'import json, sys; assert sys.version_info >= (3, 10), "Python >=3.10 is required"; sys.path[:0] = json.loads(sys.argv[1]); from tools.studio_http import health_payload; from tools.studio import create_server; h = health_payload(); assert h["core_version"] == sys.argv[2] and h["contract_version"] == int(sys.argv[3]), "Core version or API mismatch"',
+            JSON.stringify([coreRoot, ...this.pythonModulePaths]), manifest.core_version, String(manifest.contract_version)],
+          AbortSignal.any([signal, AbortSignal.timeout(120_000)]))
+          if (!complete) await writeFile(join(destination, '.complete'), generation)
+        } catch (error) {
+          if (!complete) await rm(destination, { recursive: true, force: true })
+          signal.throwIfAborted()
+          throw new Error(`Supplied Python is not ready: ${sanitizeDiagnostic(error instanceof Error ? error.message : String(error))}. Prepare its dependencies first; see docs/INSTALL.md#bring-your-own-python. No uv or Python download was attempted.`)
+        }
+      } else {
+        if (!platform) throw new UnsupportedRuntimePlatformError(`${process.platform}/${process.arch}`)
+        python = join(destination, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
+        if (await readFile(join(destination, '.complete'), 'utf8').catch(() => '') !== generation) {
+          const uv = await this.extract(platform.uv, signal)
+          const basePython = await this.extract(platform.python, signal)
+          this.update('installing', 'Installing isolated dependencies; first use may take several minutes')
+          await rm(destination, { recursive: true, force: true })
+          try {
+            await this.command(uv, ['venv', '--python', basePython, destination], signal)
+            await this.command(uv, ['pip', 'sync', '--python', python, '--require-hashes', '--only-binary', ':all:',
+              ...(manifest.dependency_wheels?.length ? ['--find-links', join(this.artifacts, 'wheels')] : []), requirements], signal)
+            await this.command(uv, ['pip', 'install', '--python', python, '--no-deps', wheel], signal)
+            await this.command(python, ['-I', '-c', 'from tools.studio_http import health_payload; from tools.studio import create_server; assert health_payload()["contract_version"] == 1'], signal)
+            await writeFile(join(destination, '.complete'), generation)
+          } catch (error) { await rm(destination, { recursive: true, force: true }); throw error }
+        }
       }
       signal.throwIfAborted()
       this.update(this.recovered ? 'recovering' : 'starting', this.recovered ? 'Recovering the writing environment' : 'Starting the writing environment')
-      const connection = await this.start(python, manifest, signal)
+      const connection = await this.start(python, manifest, signal, coreRoot)
       const pending = join(this.root, 'active.' + randomUUID() + '.json')
       try {
         await writeFile(pending, JSON.stringify({ generation, coreVersion: manifest.core_version }))
@@ -576,16 +628,19 @@ export class ManagedRuntime {
     } finally { await unlock() }
   }
 
-  private async start(python: string, manifest: RuntimeManifest, signal: AbortSignal): Promise<BackendConnection> {
+  private async start(python: string, manifest: RuntimeManifest, signal: AbortSignal, coreRoot?: string): Promise<BackendConnection> {
     signal.throwIfAborted()
     const token = randomBytes(32).toString('hex')
     const generation = ++this.generation
     // Windows defaults redirected stdout to its legacy locale encoding. Core
     // initialization logs and manuscript paths are Unicode; -I ignores Python
     // environment options, so set UTF-8 explicitly on the interpreter as well.
-    const child = this.spawnFn(python, ['-I', '-X', 'utf8', '-u', '-m', 'tools.managed_runtime'], {
+    const launch = coreRoot
+      ? ['-c', 'import json, runpy, sys; sys.path[:0] = json.loads(sys.argv[1]); sys.argv = sys.argv[2:]; runpy.run_module(sys.argv[0], run_name="__main__", alter_sys=True)', JSON.stringify([coreRoot, ...this.pythonModulePaths]), 'tools.managed_runtime']
+      : ['-m', 'tools.managed_runtime']
+    const child = this.spawnFn(python, ['-I', ...(coreRoot ? ['-B'] : []), '-X', 'utf8', '-u', ...launch], {
       cwd: this.root, detached: process.platform !== 'win32', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-      env: buildChildEnv(process.env, { PYTHONNOUSERSITE: '1', PYTHONUTF8: '1' }),
+      env: buildChildEnv(process.env, { ...this.pythonLibraryEnv(), PYTHONNOUSERSITE: '1', PYTHONUTF8: '1' }),
     })
     this.child = child
     // Mirror stderr to state/logs/backend.log (last 64 KiB): a stuck backend
