@@ -353,7 +353,7 @@ Write a project document (path relative to the novel data root). Uses a version-
 
 ## novel_document_change_plan
 
-Stage and review revision-gated changes to an existing novel document. Use action "preview" with path and edits to receive an immutable preview_token and real before/after summary. Use "apply" only after author acceptance, passing that token and confirm: true; "reject" discards it, "retry" rebuilds it against the current source, and "undo" safely applies an undo_preview_token returned by a prior apply. Each edit uses old_text/new_text or unique start_text/end_text/new_text anchors. The server rechecks the source revision and writes exactly the stored preview.
+Stage and review revision-gated changes to an existing novel document. Use action "preview" with path and edits to receive an immutable preview_token and real before/after summary. Use "apply" only after author acceptance, passing that token and confirm: true; "reject" discards it, "retry" rebuilds it against the current source, and "undo" safely applies an undo_preview_token returned by a prior apply. Each edit uses old_text/new_text or unique start_text/end_text/new_text anchors. Preview returns applied:false; changed/would_change describe only the proposed difference. OLD_TEXT_NOT_FOUND is an anchor mismatch (400), while revision conflicts are 409; use the exact suggested bytes and reread the source before retrying. The server rechecks the source revision and writes exactly the stored preview.
 
 影响：会提交操作或保存文件；具体取决于 action/参数。
 

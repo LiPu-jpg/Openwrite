@@ -33,6 +33,8 @@ node /path/to/package/scripts/safe-upgrade.mjs --profile desktop --package /abso
 
 可用 `npm pack dsh-openwrite@0.2.25` 下载官方包，或从对应 GitHub Release 获取相同字节的附件。`DSH_HOME` 必须指向实际宿主的 home；默认 `~/.dsh`。Windows 另设 `DSH_BIN` 为已验收宿主运行时的绝对 `lib/bin.js` 路径，使用 Node 直接执行而非 `.cmd` shell。其余平台可通过 DSH_BIN 指定同一受信任 CLI。
 
+候选 0.2.28 的工具可从解压目录读取所选已安装 profile 中的运行依赖；本地 tgz 会先保存到 `<DSH_HOME>/openwrite/packages/<sha256>.tgz`，再传给安装器，避免新依赖和锁文件指向临时下载。此改进尚未发布，旧包解压入口缺少依赖时应使用已安装包内的工具。pnpm 11 的 store/构建授权及既有失效锁文件仍属于宿主安装路径限制，失败时查看操作日志；不要把源码 tarball 与预编译发行包混用。详见 [#123 回复补修](ISSUE_123_FOLLOWUP.md)。
+
 安装在旁路 profile 中进行；整个旧 profile（包括其他插件、锁文件及设置）在切换前保持可用。只有 OpenWrite 的必要文件和 manifest 校验成功才进入目录切换。切换为两次同盘 rename，**不是整个目录树的单次原子交换**；停机状态避免读取窗口，中断由持久事务记录恢复。锁覆盖本工具的并发操作，不能阻止未经协调的原生安装器或用户重新启动宿主。
 
 记录保存在 `<DSH_HOME>/openwrite/upgrades/upgrade_*/`：`operation.json`、`pnpm.log`、成功切换后的 `previous-profile/`。stdout/stderr 实时落盘；安装 180 秒超时终止子进程。保留目录可能占用较多空间，确认升级稳定后再人工清理。
