@@ -63,7 +63,7 @@ function renderView(api: ReturnType<typeof makeApi>, initialReportId = '') {
   return render(<ResearchView {...({ ...api, t, initialReportId } as any)} />)
 }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('ResearchView M2d workbench', () => {
   it('filters by keyword, status, and source availability', async () => {
@@ -114,10 +114,15 @@ describe('ResearchView M2d workbench', () => {
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
     renderView(api, 'report_one')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'research.exportMarkdown' }))
+    const exportButton = await screen.findByRole('button', { name: 'research.exportMarkdown' })
+    vi.useFakeTimers()
+    fireEvent.click(exportButton)
     expect(createObjectURL).toHaveBeenCalledTimes(1)
     expect(click).toHaveBeenCalledTimes(1)
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(60_000)
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:research')
+    vi.useRealTimers()
 
     fireEvent.click(screen.getByRole('button', { name: /失败的制度核查/ }))
     const failure = await screen.findByTestId('research-failure')

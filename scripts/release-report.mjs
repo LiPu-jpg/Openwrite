@@ -44,7 +44,19 @@ for (const host of ['0.1.2-rc.1', '0.1.5-alpha.1', '0.2.0-rc.2', '0.2.1-rc.2', '
     assert.ok(report.checks.includes(check), `${host} client missing check: ${check}`)
   }
 }
-const result = { status: 'passed', artifact, sha256: manifest.sha256, host: manifest.host, source: manifest.source, workflow: process.env.GITHUB_RUN_ID ? `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : null, reports, clientReports, nativeRegressions, realModelValidation: { status: 'not-run', modelCalls: 0, countedAsPassed: false } }
+const mobileReports = await Promise.all(files.filter(file => /^mobile-browser-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
+for (const engine of ['chromium', 'webkit']) {
+  const report = mobileReports.find(report => report.engine === engine)
+  assert.equal(report?.status, 'passed', `Missing mobile browser regression: ${engine}`)
+  assert.equal(report.artifactSha256, manifest.sha256, 'Mobile Core tested different artifact')
+  assert.equal(report.coreInputs, 'packaged-wheel')
+  assert.equal(report.nativeInputs, 'checkout-source-matched-to-package')
+  assert.equal(report.realDevice, false, 'Browser fixtures do not certify a physical phone')
+  for (const check of ['native-pending-ime-pagehide', 'native-hidden-draft-flush', 'touch-selection-preserved', 'blob-download', 'small-viewports-and-hidden-drawers', 'core-pagehide-recovery', 'late-save-keeps-document-owner', 'recovery-reload-and-version-conflict', 'explicit-recovery-restores-editor', 'manual-save-flush-and-workspace-binding', 'newer-input-during-save-retained', 'core-small-viewports']) {
+    assert.ok(report.checks.includes(check), `${engine} missing ${check}`)
+  }
+}
+const result = { status: 'passed', artifact, sha256: manifest.sha256, host: manifest.host, source: manifest.source, workflow: process.env.GITHUB_RUN_ID ? `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : null, reports, clientReports, nativeRegressions, mobileReports, realModelValidation: { status: 'not-run', modelCalls: 0, countedAsPassed: false } }
 await writeFile(join(directory, 'release-acceptance.json'), JSON.stringify(result, null, 2) + '\n')
 await writeFile(join(directory, 'SHA256SUMS'), `${manifest.sha256}  ${artifact}\n`)
 console.log(`Release gate passed: ${artifact} ${manifest.sha256}`)

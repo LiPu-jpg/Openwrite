@@ -1918,7 +1918,8 @@
 @media (max-width: 900px) {
   .turnEntityChanges { min-width: min(340px, 76vw); }
   .turnValuePair { grid-template-columns: minmax(0, 1fr); }
-  .creationRoot {
+  .creationRoot,
+  .creationRoot[data-chapter-rail-visible='false'] {
     --chapter-column: minmax(160px, 25%);
     grid-template-columns: var(--chapter-column) minmax(0, 1fr);
   }
@@ -1933,10 +1934,12 @@
     bottom: 0;
     width: min(360px, 80vw);
     transform: translateX(100%);
+    visibility: hidden;
+    pointer-events: none;
     transition: transform 160ms ease;
   }
   .creationRoot[data-inspector-visible='false'] > .inspector[data-mobile-open='true'],
-  .inspector[data-mobile-open='true'] { transform: translateX(0); }
+  .inspector[data-mobile-open='true'] { transform: translateX(0); visibility: visible; pointer-events: auto; }
   .inspectorHeader { position: relative; }
   .inspectorTabs { padding-right: 34px; }
   .drawerClose.inspectorDrawerClose {
@@ -1989,11 +1992,13 @@
     min-width: 48px;
     white-space: nowrap;
   }
-  .creationRoot {
+  .creationRoot,
+  .creationRoot[data-chapter-rail-visible='false'] {
+    --mobile-bar-height: 54px;
     --chapter-column: 0px;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 44px minmax(0, 1fr);
-    height: calc(100dvh - 260px);
+    grid-template-rows: var(--mobile-bar-height) minmax(0, 1fr);
+    height: max(360px, calc(100dvh - 180px));
   }
   .tabletInspectorButton { display: none !important; }
   .mobileBar {
@@ -2015,14 +2020,16 @@
   .chapterRail {
     position: absolute;
     z-index: 4;
-    top: 44px;
+    top: var(--mobile-bar-height);
     bottom: 0;
     left: 0;
     width: min(300px, 84vw);
     transform: translateX(-100%);
+    visibility: hidden;
+    pointer-events: none;
     transition: transform 160ms ease;
   }
-  .chapterRail[data-mobile-open='true'] { transform: translateX(0); }
+  .chapterRail[data-mobile-open='true'] { transform: translateX(0); visibility: visible; pointer-events: auto; }
   .drawerClose.chapterDrawerClose {
     display: grid;
     width: 28px;
@@ -2056,7 +2063,15 @@
     float: none;
   }
   .manuscriptEditor :global(.vditor-ir) { padding: 18px 14px !important; }
-  .inspector { top: 44px; width: min(340px, 92vw); }
+  .inspector { top: var(--mobile-bar-height); width: min(340px, 92vw); }
+  .creationRoot button { min-height: 44px; }
+  .creationRoot input:not([type='checkbox']):not([type='radio']),
+  .creationRoot select,
+  .creationRoot textarea { font-size: 16px; }
+  .drawerClose.chapterDrawerClose,
+  .drawerClose.inspectorDrawerClose { width: 44px; height: 44px; }
+  .mobileBar { padding-top: 4px; padding-bottom: 4px; }
+  .creationRoot :global(.vditor-toolbar__item) { min-width: 40px; min-height: 40px; }
   .conflictBar { align-items: flex-start; flex-wrap: wrap; }
 
   .workspaceRoot {

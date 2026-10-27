@@ -1,3 +1,4 @@
+import { downloadBlob, downloadFilename } from './browser-download.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download, ExternalLink, FileUp, FlaskConical, Gauge, ListTodo, RefreshCw, Cpu } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -283,14 +284,8 @@ function TransferPanel(props: OperationsViewProps) {
       }
       const blob = await response.blob()
       const disposition = response.headers.get('content-disposition') ?? ''
-      const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)
-      const name = match?.[1] !== undefined ? decodeURIComponent(match[1]) : `book.${exportFormat}`
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = name
-      anchor.click()
-      URL.revokeObjectURL(url)
+      const name = downloadFilename(disposition, `book.${exportFormat}`)
+      downloadBlob(blob, name)
       say(t('tools.export.done').replace('{name}', name))
     } catch (cause: unknown) {
       say(`${t('tools.export.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, true)

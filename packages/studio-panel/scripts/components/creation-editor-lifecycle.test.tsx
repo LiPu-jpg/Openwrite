@@ -43,6 +43,23 @@ beforeEach(() => {
 })
 
 describe('manuscript lifecycle before the editor input callback', () => {
+  it.each(['pagehide', 'hidden'])('retains pending input when mobile enters %s without unloading', async event => {
+    setup()
+    fireEvent.input(await screen.findByLabelText('Live asset body'), { target: { value: '切后台之前最后输入\n' } })
+    if (event === 'hidden') {
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+      fireEvent(document, new Event('visibilitychange'))
+    } else fireEvent(window, new Event('pagehide'))
+    await waitFor(() => expect(harness.save).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'ws-a', path, content: '切后台之前最后输入\n' })))
+  })
+
+  it('does not create a recovery draft for an untouched editor on backgrounding', async () => {
+    setup()
+    await screen.findByLabelText('Live asset body')
+    fireEvent(window, new Event('pagehide'))
+    expect(harness.save).not.toHaveBeenCalled()
+  })
+
   it('leaves untouched source alone when the editor unmounts', async () => {
     const { view } = setup()
     await screen.findByLabelText('Live asset body')
