@@ -95,11 +95,21 @@ class RevisionService:
         start, end = self._validated_range(content, start, end)
         selected = content[start:end]
         if original_text and selected != original_text:
+            from tools.agent.tool_runtime import _document_edit_diagnostics
+
+            diagnostics = _document_edit_diagnostics(selected, original_text)
             raise RevisionError(
-                "所选原文已变化，请重新选择后再生成提案",
-                code="DOCUMENT_CONFLICT",
+                "所选范围与 original_text 不匹配，请重新读取当前原文和选择范围",
+                code="OLD_TEXT_NOT_FOUND",
                 recoverable=True,
-                details={"chapter_id": chapter_id},
+                details={
+                    "chapter_id": chapter_id,
+                    "field_path": "$.original_text",
+                    "start": start,
+                    "end": end,
+                    "retry_revision": self.fingerprint(content),
+                    **diagnostics,
+                },
             )
         clean_action = str(action or "rewrite").strip()
         if clean_action not in REVISION_ACTIONS:
@@ -632,6 +642,7 @@ class RevisionService:
             ],
             temperature=0.45,
             stream=long_generation_stream(),
+            operation="revision",
         )
         return self._parse_generation(response.content)
 

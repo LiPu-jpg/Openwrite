@@ -85,6 +85,10 @@ class WriterAgent(BaseAgent):
         from tools.llm.cancellation import check_model_cancellation
 
         check_model_cancellation()
+        # Every stage belongs to the chapter-write route, including segmented
+        # retries, observation and settlement. Usage stages are a separate axis.
+        if len(args) < 4:
+            kwargs.setdefault("operation", "chapter_write")
 
         def tagged(usage, *, error="", model=""):
             raw = dict(usage or {})

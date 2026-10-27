@@ -992,6 +992,7 @@ def _edit_project_document(
         "ok": True,
         "applied": False,
         "changed": revised != original,
+        "would_change": revised != original,
         "path": relative,
         "revision": revision,
         "edit_count": len(applied),
@@ -1214,6 +1215,14 @@ def _replace_document_text_range(
                 "missing_anchors": missing,
                 "start_occurrences": len(start_spans),
                 "end_occurrences": len(end_spans),
+                "anchor_diagnostics": {
+                    name: _document_edit_diagnostics(source, anchor)
+                    for name, anchor, spans in (
+                        ("start_text", start_anchor, start_spans),
+                        ("end_text", end_anchor, end_spans),
+                    )
+                    if not spans
+                },
             },
         }
 
@@ -1314,6 +1323,13 @@ def _document_edit_diagnostics(
         "suggested_old_text": suggested,
         "suggested_old_text_truncated": suggestion_truncated,
         "similarity": round(similarity, 3),
+        "similarity_basis": "whitespace_collapsed",
+        "mismatch_kind": (
+            "whitespace"
+            if suggested and suggested != submitted
+            and " ".join(suggested.split()) == " ".join(submitted.split())
+            else "content" if suggested else "unknown"
+        ),
     }
 
 
