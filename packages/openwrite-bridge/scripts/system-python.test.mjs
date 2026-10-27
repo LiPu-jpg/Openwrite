@@ -8,15 +8,17 @@ import { createHash } from 'node:crypto'
 import { zipSync, strToU8 } from 'fflate'
 import { ManagedRuntime, stopOwnedProcess } from '../lib/managed-runtime.js'
 
-const python = [process.env.OPENWRITE_TEST_PYTHON, 'python3', 'python'].filter(Boolean).map(command => {
-  const found = spawnSync(command, ['-I', '-c', 'import sys; print(sys.executable if sys.version_info >= (3, 10) else "")'], { encoding: 'utf8' })
-  return found.status === 0 ? found.stdout.trim() : ''
-}).find(Boolean)
+let python
+for (const command of [process.env.OPENWRITE_TEST_PYTHON, 'python3', 'python'].filter(Boolean)) {
+  const found = spawnSync(command, ['-I', '-c', 'import sys; print(sys.executable if sys.version_info >= (3, 10) else "")'], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
+  if (found.status === 0 && found.stdout.trim()) { python = found.stdout.trim(); break }
+}
 const realPython = { skip: python ? false : 'Python >=3.10 is needed for the real interpreter integration' }
 
 const backend = `
 import json, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import TCPServer
 from tools.studio_http import health_payload
 token = json.loads(sys.stdin.readline())['token']
 class Handler(BaseHTTPRequestHandler):
@@ -25,7 +27,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(health_payload()).encode())
     def log_message(self, *args): pass
-server = HTTPServer(('127.0.0.1', 0), Handler)
+# HTTPServer.server_bind calls getfqdn even for loopback. A local test
+# server must not depend on the CI runner's external reverse-DNS service.
+class Server(HTTPServer):
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name = 'localhost'
+        self.server_port = self.server_address[1]
+server = Server(('127.0.0.1', 0), Handler)
 print(json.dumps({'port': server.server_port}), flush=True)
 server.serve_forever()
 `
