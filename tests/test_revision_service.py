@@ -74,6 +74,80 @@ def _review_issue(root: Path, chapter: Path) -> tuple[str, str]:
     return revisioned[1], RevisionService.fingerprint(content)
 
 
+@pytest.mark.parametrize("length", [2, 5])
+def test_review_selection_survives_regeneration_and_apply_without_widening(tmp_path, length):
+    root, chapter = _project(tmp_path)
+    review_revision, revision = _review_issue(root, chapter)
+    raw = chapter.read_bytes().decode("utf-8")
+    start = raw.index("门后没有人")
+    selection = {
+        "start": start,
+        "end": start + length,
+        "original_text": raw[start : start + length],
+    }
+    calls = []
+
+    def generate(payload):
+        calls.append(payload)
+        return {"replacement_text": "门内", "rationale": "fixture", "risk_flags": []}
+
+    service = RevisionService(root, "demo", generator=generate, validator=lambda *_: [])
+    proposal = service.create_from_review(
+        chapter_id="ch_001",
+        issue_ids=["issue_door"],
+        selection=selection,
+        expected_document_revision=revision,
+        expected_review_revision=review_revision,
+    )
+    assert proposal["selection"] == selection
+    regenerated = service.regenerate(proposal["proposal_id"])
+    assert regenerated["selection"] == selection
+    assert [call["selection"] for call in calls] == [selection["original_text"]] * 2
+    service.apply(regenerated["proposal_id"])
+    assert chapter.read_bytes().decode("utf-8") == raw[:start] + "门内" + raw[start + length :]
+
+
+@pytest.mark.parametrize(
+    "selection,code",
+    [
+        ({"start": True, "end": 2, "original_text": "林舟"}, "INVALID_SELECTION"),
+        ({"start": "0", "end": 2, "original_text": "林舟"}, "INVALID_SELECTION"),
+        ({"start": 0, "end": 2}, "INVALID_SELECTION"),
+        ({"start": 0, "end": 2, "original_text": "不匹配"}, "OLD_TEXT_NOT_FOUND"),
+        ({"start": 0, "end": 2, "original_text": "林舟"}, "ISSUE_OUTSIDE_SELECTION"),
+    ],
+)
+def test_review_selection_rejects_invalid_or_unrelated_scopes_before_generation(
+    tmp_path, selection, code
+):
+    root, chapter = _project(tmp_path)
+    _review_issue(root, chapter)
+    # _save_chapter adds a Markdown title before the prose. Set a simple exact
+    # scope at the document start for the unrelated-issue case.
+    raw = chapter.read_bytes().decode("utf-8")
+    if code == "ISSUE_OUTSIDE_SELECTION":
+        selection = {**selection, "original_text": raw[:2]}
+    service = RevisionService(root, "demo", generator=lambda _: pytest.fail("no model"))
+    with pytest.raises(RevisionError) as error:
+        service.create_from_review(
+            chapter_id="ch_001", issue_ids=["issue_door"], selection=selection
+        )
+    assert error.value.code == code
+    assert service.list() == []
+    assert chapter.read_bytes().decode("utf-8") == raw
+
+
+def test_review_fix_refuses_a_legacy_quote_without_an_explicit_selection(tmp_path):
+    root, chapter = _project(tmp_path)
+    _review_issue(root, chapter)
+    service = RevisionService(root, "demo", generator=lambda _: pytest.fail("no model"))
+    with pytest.raises(RevisionError) as error:
+        service.create_from_review(
+            chapter_id="ch_001", issue_ids=["issue_door"], original_text="门后"
+        )
+    assert error.value.code == "INVALID_SELECTION"
+    assert service.list() == []
+
 def test_revision_store_persists_proposals_outside_canonical_source(tmp_path: Path):
     root, _ = _project(tmp_path)
     store = RevisionStore(root, "demo")

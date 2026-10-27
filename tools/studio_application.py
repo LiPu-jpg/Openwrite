@@ -4753,6 +4753,8 @@ class StudioApplication:
                     expected_document_revision=str(
                         payload.get("expected_document_revision") or ""
                     ),
+                    selection=payload.get("selection"),
+                    original_text=str(payload.get("original_text") or ""),
                 )
         except (TypeError, ValueError) as exc:
             raise StudioError("目标字数必须是整数", code="INVALID_INPUT") from exc
@@ -5623,6 +5625,8 @@ class StudioApplication:
                 expected_document_revision=str(
                     payload.get("expected_document_revision") or ""
                 ),
+                selection=payload.get("selection"),
+                original_text=str(payload.get("original_text") or ""),
             )
         context.phase("validating", "准备 diff 预览")
         if context.cancellation_requested():
