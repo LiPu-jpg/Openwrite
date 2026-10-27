@@ -151,6 +151,21 @@ export async function diagnose(home, profile) {
   const inspection = inspectProfile(manifest)
   const presets = await inspectPresets(home)
   const runtime = await readFile(join(home, 'openwrite', 'active.json'), 'utf8').then(JSON.parse).catch(() => null)
+  const installedPackage = await readFile(join(home, 'profiles', profile, 'node_modules', 'dsh-openwrite', 'package.json'), 'utf8').then(JSON.parse).catch(() => null)
+  const toolPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  const requestedSpec = manifest.dependencies?.['dsh-openwrite']
+  const packageSelection = {
+    // A private registry/git URL can contain credentials in its authority,
+    // query, fragment or path. Do not copy it into a shareable diagnostic.
+    requestedSpec: typeof requestedSpec === 'string'
+      ? requestedSpec.includes('://') || /^[^\s@]+@[^\s:]+:/.test(requestedSpec) ? '[remote package URL redacted]' : requestedSpec
+      : null,
+    resolvedVersion: installedPackage?.version ?? null,
+    diagnosticToolVersion: toolPackage.version,
+    matchesDiagnosticTool: installedPackage?.version === toolPackage.version,
+    reinstallTarget: `dsh-openwrite@${toolPackage.version}`,
+    instructions: 'After stopping dsh and backing up the profile, explicitly select a verified version or @latest; a bare add may preserve the existing dependency selection. See docs/INSTALL.md#stale-package-selection.',
+  }
   return {
     node: process.version, platform: process.platform, arch: process.arch, profile,
     installed: inspection.installed,
@@ -161,6 +176,7 @@ export async function diagnose(home, profile) {
     otherPlugins: inspection.otherPlugins,
     presets,
     runtimePrepared: runtime !== null,
+    packageSelection,
     instructions: inspection.leftover.length
       ? 'Stop dsh, run openwrite-maintenance migrate --profile web --apply, then install the Release package. Author-owned presets and historical sessions are preserved.'
       : 'OpenWrite → 诊断与帮助：查看实时健康状态；本命令不启动模型。',

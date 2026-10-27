@@ -107,6 +107,46 @@ dsh plugin --profile web remove -w dsh-openwrite
 
 bridge 的高级 `mode: external` / `baseUrl` 配置继续支持外部 Core，不接管外部进程。默认 `managed` 不需要配置端口。旧显式地址配置仍按外部模式解释。
 
+### Bring your own Python
+
+以下配置从 **0.2.29 候选版**提供，尚未发布；0.2.28 及更早版本请使用下节的 external 模式。
+
+已有 Python **3.10 或更高版本**及所需依赖时，可以在当前 profile 的 `cordis.patch.yml`
+修改已有 `openwrite-bridge` 行的配置：
+
+```yaml
+config:
+  mode: managed
+  pythonPath: /absolute/path/to/python3
+  # 依赖已安装在这个解释器的 site-packages 时，无须此项。
+  # Android 手工准备的 pyroot 可显式列出；路径必须是绝对目录。
+  pythonModulePaths:
+    - /absolute/path/to/pyroot
+```
+
+也可以在启动 dsh 的进程环境中设置 `OPENWRITE_PYTHON`，值为解释器的绝对路径，不能附带命令参数；
+显式 `pythonPath` 优先。桌面应用须从继承该变量的环境启动，也可直接使用上面的 profile 配置。
+`pythonModulePaths` 只在选定自备解释器后生效；external 模式继续由作者管理服务端。
+
+此路径不下载 uv 或 python-build-standalone，不执行 pip，也不安装或升级作者的依赖。
+插件校验随包 Core wheel 后，将其解包到自己的环境目录，使用所选解释器启动这一份 Core，
+无需作者另外安装相同版本的 `openwrite`。解释器和显式依赖目录加入环境标识，不会误用托管 Python 的缓存。
+运行时保留 `-I` 隔离和 UTF-8，使用 `-B` 禁止写入依赖目录的字节码；不继承 `PYTHONPATH`，
+需要额外依赖目录时使用 `pythonModulePaths`。Core 路径排在显式依赖目录之前。
+共享构建需要的 `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` / `DYLD_FALLBACK_LIBRARY_PATH`
+在此模式下从宿主传入；应选择可以用 `-I` 正常启动的解释器，不依赖 `PYTHONHOME` 或隐式用户 site。
+
+依赖须与随包 Core 的 wheel `METADATA` 相容，包括 pydantic 及与 Python/系统 ABI 对应的
+pydantic-core、PyYAML、httpx、Markdown-it-py 和需要使用的模型客户端等。
+桌面 Python 3.12 可在作者自己创建的 venv 中，使用随包的 `release/requirements.lock`
+与 `release/wheels/` 准备依赖；该锁文件的桌面二进制轮子不能直接套用到 Android Python 3.14。
+Android 的原生依赖由宿主或作者编译、提供，插件不会尝试安装 glibc 轮子来替代 bionic 产物。
+
+每次启动都会在所选解释器中检查 Python 版本、Core 导入和 API 版本；失败给出缺失依赖等诊断，
+不回退到运行时下载，不替换旧活动记录。健康检查成功后才标记就绪。进程鉴权、随机端口、
+取消、有限自动重启和卸载清理沿用托管模式；重启不重放写作或其他付费请求。
+通过启动检查只说明 Studio 启动链可用，各模型及原生依赖功能仍需分别验证。
+
 ### External Studio
 
 Android / Termux（bionic）和未列入 runtime manifest 的 ARM Linux 无托管 Python/ONNX 产物。
@@ -127,6 +167,41 @@ config:
 提供，勿贴入 issue。作品目录必须在 Studio 所在机器上存在，Workspace 路径也须与服务端
 一致，插件不会同步手机与电脑的文件。重启 dsh 后生效；外部进程由作者管理。
 
+#### Android / Termux
+
+可以连接受信任的电脑，也可以在手机已有 Python 的环境中自行启动 Studio。
+两者均使用上面的 external 配置，不要求插件下载 Android Python。
+Termux 使用其自身的 Python 包；DSH Mobile 的 Python 扩展应使用该宿主提供的实际解释器路径。
+不同发行方的路径、Python ABI 和依赖产物不能互换。
+
+[#140](https://github.com/LiPu-jpg/Openwrite/issues/140) 的报告者提供了 Android/aarch64/bionic、
+宿主 Python 3.14.8、pydantic 2.14.1 + 自编译 pydantic-core 2.50.1 的记录：
+插件 0.2.26 所含 Studio 启动成功，`GET /` 返回 200。
+这是一份第三方启动验证，不代表 0.2.28 或候选 0.2.29 已通过手机端完整工具验收。
+
+可按以下目录约定准备；命令在解压 Release 后的工作目录执行：
+
+1. 从 `package/release/runtime-manifest.json` 找到 `wheel.file`，用 Python 标准库解压到 `app/`。
+   例如，0.2.28 的 Core 是 `python3 -m zipfile -e package/release/openwrite-5.8.20-py3-none-any.whl app`。
+2. 在选定 Python 的 site-packages 或独立 `pyroot/` 中准备相容依赖。
+   pydantic-core 需要与解释器及 Android ABI 匹配；报告者使用 Rust/clang 本地构建。
+   其他原生依赖也可能需要对应构建，不能将 Linux/glibc 轮子直接改名使用。
+3. 如果使用独立 `pyroot/`，在手机 shell 中以前台进程启动：
+
+   ```sh
+   PYTHONPATH="$PWD/pyroot:$PWD/app" python3 -m tools.cli studio --port 4567
+   ```
+
+4. 确认 `http://127.0.0.1:4567/` 可以打开，再将当前 profile 的已有 bridge 行设为
+   `mode: external`、`baseUrl: http://127.0.0.1:4567`。此地址仅适用于 Studio 和 dsh
+   在同一设备的情况；跨设备使用受信任的私网或 SSH 隧道。
+5. 重启 dsh 后，继续验证 OpenWrite 面板、Workspace 路径绑定、实际文件工具和服务端鉴权。
+   `GET /` 返回 200 不能代替这些检查。候选 0.2.29 也可改用上节的自备 Python 模式，
+   把该 `pyroot` 绝对目录放入 `pythonModulePaths`，由插件负责启动和停止。
+
+没有 fastembed/ONNX 等可选语义依赖时，部分检索会降级，不能据此承诺所有模型、
+Embedding 或语义检索功能可用。平台 manifest 仍只列官方托管产物，不宣称提供 Android 原生构建。
+
 ## GitHub 源码安装
 
 源码安装使用 dsh 官方 GitHub source 机制：`dsh plugin --profile web add -w github:LiPu-jpg/Openwrite#v0.2.8`。仓库 `prepare` 自行构建三个插件，Core wheel 随固定提交提供，不访问相邻工作区。源码安装需要 Git 和构建依赖；建议普通用户优先使用已验收 Release 包。
@@ -142,6 +217,31 @@ config:
 小说工具的只读 / 计划模式 / Workspace 绑定是 **dsh 策略与桥接检查**，不是操作系统沙箱。受管理 Python 与安装子进程只继承启动、代理和证书所需环境变量，不把无关 API Key 传给子进程。
 
 反馈请提供宿主版本、系统与架构、Release 版本、安装阶段及脱敏错误。来源、许可证和校验值见 Release 附件及包内 `release/`。不要提交 API Key、浏览器登录 URL 或作品全文。
+
+### Stale package selection
+
+如果宿主是 `0.2.1-rc.3`，错误却显示 `dsh-openwrite@0.2.25` 不兼容，先确认实际选择的包版本。
+0.2.25 未声明该宿主；0.2.26 起根包和全部内嵌子包已声明精确支持，0.2.28 继续包含对应验收。
+不要给旧包添加版本豁免来掩盖取包问题。
+
+```sh
+npm view dsh-openwrite@latest version peerDependencies --registry=https://registry.npmjs.org
+```
+
+对照当前 profile 的 `package.json`、`pnpm-lock.yaml` 和已安装包的 `package.json`。
+不带版本的 `add dsh-openwrite` 可能沿用已有精确依赖；显式 `@latest` 或精确版本才清楚表达升级意图。
+商城显示的目录版本也不能替代 npm 实际解析结果。仅凭 #142 的报错不能确定用户侧是哪份锁或缓存。
+
+完全退出 dsh/Desktop（含托盘）、备份 profile 后，优先使用已验收 Release 包的停机升级工具：
+
+```sh
+node package/scripts/safe-upgrade.mjs --profile desktop --package dsh-openwrite@0.2.28
+```
+
+该例固定到已发布的 0.2.28；更新版本须先确认其验收结果。源码安装、tarball 和自定义 registry
+按各自来源排查，不直接清空整个 pnpm store 或删除 profile。停机升级工具失败会保留旧环境与日志。
+0.2.29 候选的 `maintenance.mjs doctor --profile desktop` 会另外显示请求 spec、实际已装版本及诊断工具版本，
+其停机升级工具也会把裸包名规范成 `dsh-openwrite@latest`；指定精确版本和本地 tarball 不受影响。
 
 ## dsh 0.2 客户端兼容排查
 

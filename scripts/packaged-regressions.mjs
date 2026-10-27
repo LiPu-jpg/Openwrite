@@ -21,6 +21,7 @@ try {
     'scripts/preset-lifecycle.test.mjs',
     'scripts/safe-upgrade.test.mjs',
     'packages/openwrite-bridge/scripts/managed-runtime.test.mjs',
+    'packages/openwrite-bridge/scripts/system-python.test.mjs',
   ]
   for (const file of tests) {
     await mkdir(dirname(join(root, file)), { recursive: true })
@@ -52,7 +53,7 @@ try {
   const report = {
     status: 'passed', platform: process.platform, arch: process.arch, node: process.version,
     artifactSha256: createHash('sha256').update(await readFile(resolve(artifact))).digest('hex'),
-    checks: ['durable-preset-identities', 'offline-profile-upgrade', 'managed-runtime'],
+    checks: ['durable-preset-identities', 'offline-profile-upgrade', 'managed-runtime', 'supplied-python'],
     editorSerialization,
   }
   await writeFile(`packaged-regressions-report-${process.platform}-${process.arch}-${process.versions.node}.json`, JSON.stringify(report, null, 2) + '\n')

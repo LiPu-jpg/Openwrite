@@ -45,6 +45,27 @@ function manifestWith(extra = {}) {
   }
 }
 
+test('doctor exposes requested and resolved plugin versions without changing a pinned profile', async t => {
+  const { home } = await homeFixture(t)
+  const file = join(home, 'profiles/web/package.json')
+  const original = JSON.stringify(manifestWith({ dependencies: { 'dsh-openwrite': '0.2.25' } }))
+  await writeFile(file, original)
+  await mkdir(join(home, 'profiles/web/node_modules/dsh-openwrite'), { recursive: true })
+  await writeFile(join(home, 'profiles/web/node_modules/dsh-openwrite/package.json'), '{"name":"dsh-openwrite","version":"0.2.25"}')
+  const { packageSelection } = await diagnose(home, 'web')
+  assert.equal(packageSelection.requestedSpec, '0.2.25')
+  assert.equal(packageSelection.resolvedVersion, '0.2.25')
+  assert.equal(packageSelection.matchesDiagnosticTool, false)
+  assert.equal(packageSelection.reinstallTarget, `dsh-openwrite@${packageSelection.diagnosticToolVersion}`)
+  assert.equal(await readFile(file, 'utf8'), original)
+  const privateManifest = JSON.stringify(manifestWith({ dependencies: { 'dsh-openwrite': 'https://user:private-password@example.test/pkg.tgz?token=private-token' } }))
+  await writeFile(file, privateManifest)
+  const privateReport = await diagnose(home, 'web')
+  assert.equal(privateReport.packageSelection.requestedSpec, '[remote package URL redacted]')
+  assert.doesNotMatch(JSON.stringify(privateReport), /private-password|private-token/)
+  assert.equal(await readFile(file, 'utf8'), privateManifest)
+})
+
 async function fakeRemove(home, profile, args) {
   assert.equal(args[0], 'plugin')
   assert.deepEqual(args.slice(1, 3), ['--profile', profile])
