@@ -1,6 +1,6 @@
 # 发布验收记录
 
-## 0.2.28 候选（未发布）
+## 0.2.28
 
 本轮捆绑 Core **5.8.20**，固定源码 `9611c654e5d77bcb5968105a7adfa8e9b4f9624a`。修复正文延迟输入漏存、按审稿修订越过作者选区，以及真实 Vditor 换行规范化导致的选区拒绝，详见[补修范围](EDITOR_SAFETY_REPAIRS.md)。
 
@@ -21,7 +21,9 @@ macOS ARM 首次 npm ci 从第三方镜像下载依赖超时；只重跑失败�
 
 候选 tarball SHA-256：`3a50ad3cb080eec50b28f3196d5c0cd476643db894b06df0dfc8c394fec1bcfd`。CI 提交 `9390c7826024ee78cc91d5a144825a55ca0016e0` 与插件合并提交 `6117a19a26b60ab6d55bff23fdfb46f84fd02320` 的源码 tree 同为 `d59236a0d5dd77ce0d960586cd7c59eeaf0b96c9`。Core 固定来源保留于 native-core 合并提交 `40e25b7a27a4b0f9430d0cc15b775c601f28a91e`。
 
-候选仍未发布，公开版本为 **0.2.27**；#123 的宿主正式发布和 Android/Termux 真机条件继续保留。
+[GitHub 0.2.28](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.28) 与 [npm 0.2.28](https://www.npmjs.com/package/dsh-openwrite/v/0.2.28) 均已正式发布，npm `latest` 为 **0.2.28**。GitHub 四份公开附件的服务端 digest 和无认证下载字节均与 CI 原件一致；官方 npm registry 无认证下载的完整 **10,232,555 字节**包也逐字节一致，SHA-256、SHA-1 及 SHA-512 integrity 已核对。发布使用上述 CI 原始包，没有重新构建。#123 的两项仍未验收，不因发行而标为完成。
+
+下方为形成最终版本之前的历史候选证据；早期暂停与未发布状态反映当时情况，各早期候选未单独发行，最终发布仅使用 Core 5.8.20 的上述产物。
 
 ### 前轮候选证据（Core 5.8.19，未发布）
 

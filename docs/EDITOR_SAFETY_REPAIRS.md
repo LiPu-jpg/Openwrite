@@ -1,6 +1,6 @@
 # 正文编辑与审稿选区补修
 
-候选 0.2.28 / Core 5.8.20，尚未发布。原先 22 项检查没有覆盖编辑器延迟回调、审稿选区上限与真实 Markdown 序列化；本轮三项均先复现，再修复并增加行为回归。
+0.2.28 / Core 5.8.20 已正式发布，见[发布验收](RELEASE_ACCEPTANCE.md)。原先 22 项检查没有覆盖编辑器延迟回调、审稿选区上限与真实 Markdown 序列化；本轮三项均先复现，再修复并增加行为回归。
 
 | 缺口 | 修复后行为 | 验证 |
 | --- | --- | --- |
@@ -14,4 +14,4 @@
 
 本地 Core 1550 passed / 32 skipped，真实 HTTP 14 passed，界面 336 passed，managed 34 passed，完整插件检查通过。Core wheel 的 499 个运行时源文件逐字节一致，163 个应打包 Python 文件无遗漏。原生安装矩阵额外对同一候选 tarball 中的真实 Vditor/独立编辑器和两端映射器运行 9 组场景，结果写入每份原生报告的 editorSerialization 字段。
 
-测试不调用付费模型，不写作者作品或真实 profile。最终跨平台回执见[发布验收](RELEASE_ACCEPTANCE.md)。#123 的宿主正式发布和 Android/Termux 真机验收仍保留，本次不发布。
+测试不调用付费模型，不写作者作品或真实 profile。最终跨平台回执见[发布验收](RELEASE_ACCEPTANCE.md)。#123 的宿主正式发布和 Android/Termux 真机验收仍保留，本次发行不将这两项标记完成。

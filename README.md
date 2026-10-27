@@ -27,9 +27,11 @@
 这是 [OpenWrite](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 的 dsh 插件版本。
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Agent 与交互界面，OpenWrite Core 提供小说领域能力；人物、设定、大纲、正文和评审保存在本地作品目录。
 
-## 开发中：0.2.28（未发布）
+## 0.2.28
 
-Core 5.8.20 候选补修已合并，最终 22 项 CI 全部通过；修复正文最后输入漏存、审稿修订越过选区，以及真实 Markdown 编辑器格式转换导致的选区拒绝，见 [正文编辑与审稿补修](docs/EDITOR_SAFETY_REPAIRS.md)。前轮修复见 [选区与升级补修](docs/SELECTION_UPGRADE_REPAIRS.md)。宿主正式发布与 Android/Termux 真机两项继续跟踪，本轮不发布；下面的 npm/GitHub 安装入口仍为已发布的 0.2.27。
+0.2.28 捆绑 Core 5.8.20，最终 22 项 CI 全部通过；修复正文最后输入漏存、审稿修订越过选区，以及真实 Markdown 编辑器格式转换导致的选区拒绝，见 [正文编辑与审稿补修](docs/EDITOR_SAFETY_REPAIRS.md)。并包含前轮 [选区与升级补修](docs/SELECTION_UPGRADE_REPAIRS.md)、[写作与审稿改进](docs/ISSUES_121_123.md)。
+
+[GitHub 0.2.28](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.28) 与 [npm 0.2.28](https://www.npmjs.com/package/dsh-openwrite/v/0.2.28) 均已发布，npm `latest` 已更新为 0.2.28；两处公开下载包均与 CI 原始安装包逐字节一致。#123 的宿主正式发布和 Android/Termux 真机两项仍未完成，作为已知限制继续跟踪。
 
 ## 0.2.27
 
@@ -46,12 +48,12 @@ Android/ARM 外部 Studio 诊断，以及连载写作可靠性、完整上下文
 
 ## 快速安装
 
-**0.2.27 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.1-rc.3**。五个版本均已完成 Web 工作台渲染与 DoG 数据读取验证，Windows Electron 桌面端启动/恢复链路尚未实机复测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
+**0.2.28 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.1-rc.3**。五个版本均已完成 Web 工作台渲染与 DoG 数据读取验证；三系统原生安装和 Electron 回归通过，报告者也补齐了 Windows 历史会话恢复实测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
 
-正式发行状态以 [npm 版本列表](https://www.npmjs.com/package/dsh-openwrite?activeTab=versions) 和 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 为准。以下是 0.2.27 精确版本的安装命令；发布时两处使用同一份验收产物：
+正式发行状态以 [npm 版本列表](https://www.npmjs.com/package/dsh-openwrite?activeTab=versions) 和 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 为准。以下是 0.2.28 精确版本的安装命令；发布时两处使用同一份验收产物：
 
 ```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.27/dsh-openwrite-0.2.27.tgz
+dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.28/dsh-openwrite-0.2.28.tgz
 dsh web
 ```
 
@@ -80,6 +82,8 @@ dsh web
 具体的源码安装、升级、迁移和卸载见 [安装指南](docs/INSTALL.md)。
 
 ### dsh 0.2 桌面端升级
+
+`0.2.28`（Core 5.8.20）已发布。升级前完全退出 Desktop（含托盘）及 dsh，备份 profile；宿主原生升级保护尚未正式发布，停机升级工具及限制见 [升级说明](docs/ISSUES_98_100.md#离线升级和损坏修复)。完成后重启宿主并刷新界面。
 
 `0.2.27`（Core 5.8.16）包含 Go 工作台认证、评审输出预算及后台重试补漏，并保留 #105–#113 与 #103/#104 的既有修复；原始场景仍待验证的条目见 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123)。升级前完全退出 dsh/桌面客户端；安装后重新启动并刷新浏览器。原有作品、凭据和会话继续保留，历史版本预设用于恢复旧会话。受限平台使用外部 Studio，OpenCode Go 的服务商使用范围和配置要求见上述文档。
 

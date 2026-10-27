@@ -24,7 +24,7 @@
 | #98.1 | 独立停机旁路升级工具已发布；宿主候选补丁通过 Windows/Linux 专项 CI。 | [fork PR #1](https://github.com/LiPu-jpg/deepseek-harness/pull/1) 尚未成为正式宿主；[上游讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/10745) 继续跟踪。原生安装命令不受插件工具保护。 |
 | #111 | 不支持平台返回明确错误并提供外部 Studio 配置；原报告接受此降级方向。 | Android/Termux 真机与外部 Studio 实测；当前没有 Android 原生运行时。 |
 
-后续独立反馈 [#121](https://github.com/LiPu-jpg/Openwrite/issues/121)、[#122](https://github.com/LiPu-jpg/Openwrite/issues/122) 已修复、验收并合并关闭；候选尚未发布。关闭代码报告不代替上述两项外部条件。
+后续独立反馈 [#121](https://github.com/LiPu-jpg/Openwrite/issues/121)、[#122](https://github.com/LiPu-jpg/Openwrite/issues/122) 已修复、验收并合并关闭；修复已包含于正式 0.2.28。发行和关闭代码报告不代替上述两项外部条件。
 
 ## 后续关闭条件
 
