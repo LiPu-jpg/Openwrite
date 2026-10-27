@@ -11,6 +11,16 @@ test('selection revisions forward the exact source version without changing offs
   assert.deepEqual(calls, [{path: '/api/revisions/selection', body}])
 })
 
+test('review fixes retain an explicit selection cap and both versions', async () => {
+  const calls = [], tools = []
+  const client = {postJson: async (path, body) => {calls.push({path, body}); return {ok: true}}, getJson: async () => {throw Error('no fixture')}}
+  registerNovelTools({tools: {register: tool => tools.push(tool)}}, () => client, {timeoutMs: 1000, outputDir: '/unused'})
+  const body = {chapter_id: 'ch_001', issue_ids: ['issue-second'], selection: {start: 8, end: 12, original_text: '密信还在'},
+    expected_document_revision: 'sha256:current', expected_review_revision: 'sha256:review'}
+  await tools.find(t => t.name === 'novel_revision_create_from_review').execute(body, {signal: new AbortController().signal, callId: 'bounded-review'})
+  assert.deepEqual(calls, [{path: '/api/revisions/from-review', body}])
+})
+
 test('write dry-run and archived history cross the tool boundary without losing options', async () => {
   const calls = []
   const tools = []

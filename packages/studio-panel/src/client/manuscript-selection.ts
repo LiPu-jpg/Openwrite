@@ -1,4 +1,4 @@
-import { mapEditorRange } from './selection-coordinates.ts'
+import { mapEditorRange, type EditorSerialization } from './selection-coordinates.ts'
 
 /** Editor UTF-16 positions, plus the exact editor value which produced them. */
 export type ManuscriptSelection = {
@@ -6,6 +6,7 @@ export type ManuscriptSelection = {
   end: number
   text: string
   source: string
+  serialization?: EditorSerialization | undefined
 }
 
 export type SelectionPolishKind = 'expand' | 'compress' | 'naturalize' | 'reviewFix'
@@ -42,14 +43,14 @@ export function shouldClearManuscriptSelection(options: {
   return !nodePreservesManuscriptSelection(options.preserveNode)
 }
 
-export function manuscriptSelectionFromRange(value: string, start: number, end: number): ManuscriptSelection | null {
+export function manuscriptSelectionFromRange(value: string, start: number, end: number, serialization?: EditorSerialization): ManuscriptSelection | null {
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > value.length || end <= start) return null
-  return { start, end, text: value.slice(start, end), source: value }
+  return { start, end, text: value.slice(start, end), source: value, ...(serialization ? { serialization } : {}) }
 }
 
 export function mapManuscriptSelection(source: string, selection: ManuscriptSelection): { start: number; end: number; text: string } | null {
   if (selection.source.slice(selection.start, selection.end) !== selection.text) return null
-  return mapEditorRange(source, selection.source, selection.start, selection.end)
+  return mapEditorRange(source, selection.source, selection.start, selection.end, selection.serialization)
 }
 
 /** Count non-overlapping occurrences of needle in haystack. */
@@ -87,15 +88,16 @@ export function locateSelectedMarkdown(
   value: string,
   selected: string,
   occurrence?: number,
+  serialization?: EditorSerialization,
 ): ManuscriptSelection | null {
   if (selected === '') return null
   if (occurrence !== undefined) {
     const start = nthIndexOf(value, selected, occurrence)
-    return start < 0 ? null : manuscriptSelectionFromRange(value, start, start + selected.length)
+    return start < 0 ? null : manuscriptSelectionFromRange(value, start, start + selected.length, serialization)
   }
   if (countOccurrences(value, selected) !== 1) return null
   const start = value.indexOf(selected)
-  return manuscriptSelectionFromRange(value, start, start + selected.length)
+  return manuscriptSelectionFromRange(value, start, start + selected.length, serialization)
 }
 
 export type QuoteAnchor =
@@ -140,9 +142,10 @@ function issueQuote(value: unknown): string {
 
 function issueRange(value: unknown): { start: number; end: number } | null {
   const item = asRecord(value)
-  const start = Number(item['start'] ?? asRecord(item['anchor'])['start'] ?? Number.NaN)
-  const end = Number(item['end'] ?? asRecord(item['anchor'])['end'] ?? Number.NaN)
-  return Number.isFinite(start) && Number.isFinite(end) ? { start, end } : null
+  const anchor = asRecord(item['anchor'])
+  const start = Number(item['start'] ?? anchor['start_hint'] ?? anchor['start'] ?? Number.NaN)
+  const end = Number(item['end'] ?? anchor['end_hint'] ?? anchor['end'] ?? Number.NaN)
+  return Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start ? { start, end } : null
 }
 
 /** Review issues whose evidence sits inside the current manuscript selection. */
@@ -152,13 +155,16 @@ export function reviewIssuesForSelection(issues: readonly unknown[], selection: 
     const item = asRecord(raw)
     const id = typeof item['id'] === 'string' ? item['id'] : ''
     if (id === '' || ids.includes(id)) continue
+    const range = issueRange(item)
+    if (range !== null) {
+      if (range.start < selection.end && range.end > selection.start) ids.push(id)
+      continue
+    }
     const quote = issueQuote(item)
     if (quote !== '' && (selection.text.includes(quote) || quote.includes(selection.text))) {
       ids.push(id)
       continue
     }
-    const range = issueRange(item)
-    if (range !== null && range.start < selection.end && range.end > selection.start) ids.push(id)
   }
   return ids
 }
@@ -193,6 +199,7 @@ export function selectionPolishRequest(input: {
         chapter_id: input.chapterId,
         issue_ids: input.issueIds,
         original_text: selected.text,
+        selection: { start: selected.start, end: selected.end, original_text: selected.text },
         expected_review_revision: input.reviewRevision,
         expected_document_revision: input.documentRevision,
       },

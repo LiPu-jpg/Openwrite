@@ -2,6 +2,7 @@ import type { AnnotationColor, ManuscriptAnnotation } from './manuscript-annotat
 import { liveAnnotationAnchor } from './manuscript-annotations.ts'
 import type { MarkerSpan } from './manuscript-markers.ts'
 import { countOccurrences } from './manuscript-selection.ts'
+import type { EditorSerialization } from './selection-coordinates.ts'
 
 export type OverlayKind = 'note' | 'state' | 'relation' | 'invalid'
 
@@ -16,11 +17,11 @@ export type OverlayBand = {
 }
 
 /** Display-only bands. Never written back into markdown. */
-export function overlayBands(content: string, notes: readonly ManuscriptAnnotation[], markers: readonly MarkerSpan[], source = content): OverlayBand[] {
+export function overlayBands(content: string, notes: readonly ManuscriptAnnotation[], markers: readonly MarkerSpan[], source = content, serialization?: EditorSerialization): OverlayBand[] {
   const bands: OverlayBand[] = []
   for (const note of notes) {
     if (note.status === 'resolved') continue
-    const anchor = liveAnnotationAnchor(content, note, source)
+    const anchor = liveAnnotationAnchor(content, note, source, serialization)
     if (anchor.state === 'detached') continue
     const needle = content.slice(anchor.start, anchor.end)
     const occurrence = countOccurrences(content.slice(0, anchor.start), needle)
