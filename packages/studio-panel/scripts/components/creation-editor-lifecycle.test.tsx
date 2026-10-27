@@ -107,4 +107,21 @@ describe('manuscript lifecycle before the editor input callback', () => {
     await act(async () => { await Promise.resolve() })
     expect(harness.save).toHaveBeenCalledTimes(calls)
   })
+
+  it('does not discard another workspace draft when its document failed to load', async () => {
+    const { props, view } = setup()
+    const editor = await screen.findByLabelText('Live asset body')
+    fireEvent.input(editor, { target: { value: '原工作区未回调的输入\n' } })
+    const fetch = props.fetchStudioApi.getMockImplementation()!
+    props.fetchStudioApi.mockImplementation(async url => {
+      if (url.startsWith('/document') && harness.snapshot.context.workspaceId === 'ws-b') throw Error('fixture unavailable')
+      return fetch(url)
+    })
+    harness.snapshot = { ...harness.snapshot, contextEpoch: 2, context: { workspaceId: 'ws-b', root: '/isolated/b', sessionId: 'session-b' } }
+    view.rerender(<CreationView {...(props as never)} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'retry' }))
+    await waitFor(() => expect(props.fetchStudioApi.mock.calls.filter(([url]) => url.startsWith('/document')).length).toBe(3))
+    await act(async () => { await Promise.resolve() })
+    expect(harness.remove.mock.calls.some(([identity]) => identity.workspaceId === 'ws-b')).toBe(false)
+  })
 })

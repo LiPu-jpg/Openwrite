@@ -946,6 +946,7 @@ export function CreationView(props: CreationViewProps) {
 
   useEffect(() => {
     documentRef.current = null
+    setPendingEditorInput(false)
     setRecoveryDraft(null)
     setDraftStorageError('')
     saveQueuedRef.current = false
@@ -1438,7 +1439,9 @@ export function CreationView(props: CreationViewProps) {
     saveTimerRef.current = null
     const identity = draftIdentityRef.current
     const content = draftRef.current
-    if (identity !== null) queueDraftOperation(identity, () => manuscriptDraftStore.removeIfContent(identity, content))
+    if (identity !== null && documentRef.current !== null && loadedDocumentIdentity === documentIdentityRef.current) {
+      queueDraftOperation(identity, () => manuscriptDraftStore.removeIfContent(identity, content))
+    }
   }
 
   const chooseChapter = (nextPath: string, nextOccurrenceId = '') => {

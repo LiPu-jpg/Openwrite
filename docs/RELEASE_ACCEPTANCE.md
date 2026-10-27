@@ -4,7 +4,7 @@
 
 本轮捆绑 Core **5.8.20**，固定源码 `9611c654e5d77bcb5968105a7adfa8e9b4f9624a`。修复正文延迟输入漏存、按审稿修订越过作者选区，以及真实 Vditor 换行规范化导致的选区拒绝，详见[补修范围](EDITOR_SAFETY_REPAIRS.md)。
 
-本地 Core **1550 passed / 32 skipped**、真实 HTTP **14 passed**、界面 **335 passed**、managed **34 passed**、完整插件检查通过。新增真实候选包编辑器浏览器场景 **9 组通过**。wheel 的 499 个运行时文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `aa1f25f3c615497cd73c3c059fd2acc4e71ba2e936765d02331d1382df4b201a`。跨平台最终结果在验收后补齐。
+本地 Core **1550 passed / 32 skipped**、真实 HTTP **14 passed**、界面 **336 passed**、managed **34 passed**、完整插件检查通过。新增真实候选包编辑器浏览器场景 **9 组通过**。wheel 的 499 个运行时文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `aa1f25f3c615497cd73c3c059fd2acc4e71ba2e936765d02331d1382df4b201a`。跨平台最终结果在验收后补齐。
 
 候选仍未发布，公开版本为 **0.2.27**；#123 的宿主正式发布和 Android/Termux 真机条件继续保留。
 
@@ -216,7 +216,7 @@ Core 5.8.7 由 `native-core` 分支干净树 `pip wheel` 构建，manifest 的 `
 
 ## 0.2.12
 
-[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.12) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37389772004)验收的同一份包。来源提交 a349ea964e43d75f9fc98d1f83354a237bc2ff51，SHA-256 为 2545031292d80689f80d4c0d8c99e007c18ff0c477d662e2813cf67bc876246c。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；详见 Release 的 release-acceptance.json。npm `dsh-openwrite@0.2.12` 和 GitHub Release 均已发布，`latest` 已更新到 0.2.12；从公共 npm registry 无认证重新下载后，SHA-256 与上述 CI / Release 包一致。合并后的[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37390503895)也已通过。
+[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.12) 已发布，直接使用[完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37389772004)验收的同一份包。来源提交 a349ea964e43d75f9fc98d1f83364a237bc2ff51，SHA-256 为 2545031292d80689f80d4c0d8c99e007c18ff0c477d662e2813cf67bc876246c。六组原生平台/Node、源码安装、alpha 兼容及三代宿主客户端共 11 份报告全部通过；详见 Release 的 release-acceptance.json。npm `dsh-openwrite@0.2.12` 和 GitHub Release 均已发布，`latest` 已更新到 0.2.12；从公共 npm registry 无认证重新下载后，SHA-256 与上述 CI / Release 包一致。合并后的[主分支完整 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/37390503895)也已通过。
 
 本版修复 #50–#52 的 0.2 宿主兼容问题及 #54 阅读模式刷新闪烁，纳入 #53 的导航和会话作用域改动，并保留旧宿主的预设插件。
 
