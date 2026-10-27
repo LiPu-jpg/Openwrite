@@ -23,7 +23,7 @@ Core 5.8.17 来源 [PR #126](https://github.com/LiPu-jpg/Openwrite/pull/126)，�
 
 真实 OpenCode Go 单次流式取消验收确认保留部分正文、关闭 HTTP 响应，后续请求在调用提供方前拒绝，作品文件未变；它与不调用模型的 CI 分开记录。新增 [95 项工具参考](TOOLS.md) 和 [上下文槽位参考](CONTEXT_SLOTS.md) 已核对运行时注册、固定 Core 源码及候选包内字节，修复 #128。
 
-**候选包只作验收证据保存，没有发布。** #123 的四项原场景/实机/上游待办继续保留，未满足用户要求的全部验收完成条件；#121/#122 保持打开。
+**候选包只作验收证据保存，没有发布。** #123 的四项原场景/实机/上游待办继续保留，未满足用户要求的全部验收完成条件。#121/#122 的报告条目已修复、验收并合并，现已关闭；关闭报告不代表候选版本已发行。
 
 ## 0.2.27
 
@@ -37,7 +37,7 @@ Core 5.8.17 来源 [PR #126](https://github.com/LiPu-jpg/Openwrite/pull/126)，�
 
 合并后的[主分支发布 CI](https://github.com/LiPu-jpg/Openwrite/actions/runs/40360046529) 和[插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40360046553) 同样全部通过。
 
-[未完成验收与上游依赖](CLOSED_ISSUE_FOLLOWUPS.md) 继续由 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123) 跟踪；新增 #121/#122 保持打开。
+[未完成验收与上游依赖](CLOSED_ISSUE_FOLLOWUPS.md) 继续由 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123) 跟踪；其后新增的 #121/#122 已由上方候选修复完成并关闭，尚未随新版本发行。
 
 ## CI 运行范围
 
