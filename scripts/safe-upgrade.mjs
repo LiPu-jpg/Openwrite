@@ -1,16 +1,29 @@
 #!/usr/bin/env node
 // Offline profile upgrades retain the previous complete dependency tree until commit.
-import { cp, mkdir, readFile, readdir, rename, writeFile, open, access, readlink, symlink, unlink } from 'node:fs/promises'
+import { cp, copyFile, mkdir, readFile, readdir, rename, writeFile, open, access, readlink, symlink, unlink } from 'node:fs/promises'
 import { spawn, spawnSync } from 'node:child_process'
 import { join, resolve, relative, isAbsolute, dirname, sep } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { lock as acquireLock } from 'proper-lockfile'
-import yaml from 'js-yaml'
+import { createRequire } from 'node:module'
 
 const PROFILE = /^[a-zA-Z0-9_-]+$/
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
+function upgradeDependencies(home, profile) {
+  // Release archives do not contain node_modules. Resolve the same dependencies
+  // from the explicitly selected installed profile, without loading its plugin.
+  const resolvers = [createRequire(import.meta.url), createRequire(join(profileDirectory(home, profile), 'package.json'))]
+  const load = name => {
+    for (const require of resolvers) {
+      try { return require(name) } catch (error) {
+        if (error.code !== 'MODULE_NOT_FOUND') throw error
+      }
+    }
+    throw new Error(`UPGRADE_DEPENDENCY_MISSING: ${name}; run this tool from an installed OpenWrite package or repair dependencies in the selected profile first`)
+  }
+  return { acquireLock: load('proper-lockfile').lock, yaml: load('js-yaml') }
+}
 async function exists(path) { try { await access(path); return true } catch (error) { if (error.code === 'ENOENT') return false; throw error } }
 async function save(path, value) {
   const pending = path + '.pending-' + randomUUID()
@@ -18,7 +31,7 @@ async function save(path, value) {
   await rename(pending, path)
 }
 
-async function relocateProfileLinks(staging, previous, replacementRoot = staging) {
+async function relocateProfileLinks(staging, previous, replacementRoot, yaml) {
   const visit = async directory => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name)
@@ -100,6 +113,7 @@ export async function recoverUpgrade(home, operationId, options = {}) {
   const target = profileDirectory(home, operation.profile)
   await (options.assertStopped || assertHostStopped)(home, operation.profile)
   const previous = join(root, 'previous-profile')
+  const { acquireLock } = upgradeDependencies(home, operation.profile)
   const release = await acquireLock(join(home, 'profiles'), { realpath: true, retries: 0 })
   try {
     if (!await exists(target) && await exists(previous)) {
@@ -122,6 +136,7 @@ export async function upgradeProfile(home, profile, spec, options = {}) {
   const target = profileDirectory(home, profile)
   const stopped = options.assertStopped || assertHostStopped
   await stopped(home, profile)
+  const { acquireLock, yaml } = upgradeDependencies(home, profile)
   const release = await acquireLock(join(home, 'profiles'), { realpath: true, retries: 0 })
   const id = 'upgrade_' + randomUUID()
   const root = join(resolve(home), 'openwrite', 'upgrades', id)
@@ -141,8 +156,24 @@ export async function upgradeProfile(home, profile, spec, options = {}) {
     await save(join(root, 'operation.json'), operation)
     await cp(target, staging, { recursive: true, dereference: false, verbatimSymlinks: true,
       filter: source => !source.includes('/.plugin-manager/') && !source.endsWith('/.plugin-manager') })
-    await relocateProfileLinks(staging, target)
-    await (options.run || runInstall)(home, stagingName, spec, log)
+    await relocateProfileLinks(staging, target, staging, yaml)
+    // A downloaded tarball may live in a disposable directory. Pin its bytes
+    // below DSH_HOME before the installer writes file: references into locks.
+    let installSpec = spec
+    const localPath = spec.startsWith('file:') ? spec.slice(5) : spec
+    if (/\.(?:tgz|tar\.gz)$/i.test(localPath) && await exists(resolve(localPath))) {
+      const archive = resolve(localPath)
+      const archiveHash = digest(await readFile(archive))
+      const cache = join(resolve(home), 'openwrite', 'packages')
+      await mkdir(cache, { recursive: true, mode: 0o700 })
+      installSpec = join(cache, archiveHash + '.tgz')
+      if (!await exists(installSpec)) await copyFile(archive, installSpec)
+      if (digest(await readFile(installSpec)) !== archiveHash) throw new Error('PACKAGE_CACHE_CONFLICT: cached archive bytes differ')
+      operation.install_spec = installSpec
+      operation.package_sha256 = archiveHash
+      await save(join(root, 'operation.json'), operation)
+    }
+    await (options.run || runInstall)(home, stagingName, installSpec, log)
     const installed = JSON.parse(await readFile(join(staging, 'node_modules', 'dsh-openwrite', 'package.json'), 'utf8'))
     if (installed.name !== 'dsh-openwrite' || !installed.version || !installed.dsh?.bundle?.patch) throw new Error('BUNDLE_INCOMPLETE: staged OpenWrite manifest is invalid')
     const bundleRoot = join(staging, 'node_modules', 'dsh-openwrite')
@@ -152,7 +183,7 @@ export async function upgradeProfile(home, profile, spec, options = {}) {
     operation.new_manifest_sha256 = digest(await readFile(join(staging, 'package.json')))
     if (digest(await readFile(join(target, 'package.json'))) !== operation.old_manifest_sha256) throw new Error('PROFILE_CHANGED: the active profile changed during staging')
     await stopped(home, profile)
-    await relocateProfileLinks(staging, staging, target)
+    await relocateProfileLinks(staging, staging, target, yaml)
     operation.status = 'swapping'
     await save(join(root, 'operation.json'), operation)
     await rename(target, previous)
@@ -187,6 +218,7 @@ export async function repairProfile(home, profile, apply = false, options = {}) 
   const enabled = manifest.dsh?.profile?.bundles?.includes('dsh-openwrite') === true
   if (!apply || !broken || !enabled) return { profile, incomplete: broken, enabled, changed: false }
   await (options.assertStopped || assertHostStopped)(home, profile)
+  const { acquireLock } = upgradeDependencies(home, profile)
   const release = await acquireLock(join(home, 'profiles'), { realpath: true, retries: 0 })
   try {
     if (await readFile(manifestPath, 'utf8') !== original) throw new Error('PROFILE_CHANGED: refresh repair inspection')

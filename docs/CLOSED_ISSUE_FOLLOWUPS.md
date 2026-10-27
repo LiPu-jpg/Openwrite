@@ -11,6 +11,10 @@
 - 运行时：跨平台回归发现自动恢复耗尽后的手动重试可能复用尚未清理的旧启动 promise，返回失效连接。现在等待旧启动结束后重新准备；并发重试共享新连接，后来发生的取消优先。五项可控时序回归在旧实现上失败，修复后通过。
 - #114：本版包含 Core 5.8.15 的工作台 Console 认证、自动工作区头与请求前凭据更新。此前真实工作台连接/流式写作通过；此次真实 Go 安全评审首次请求 max_tokens=24000，流式调用 4.424 秒通过，没有写入作者正文或作品配置。
 
+## 后续实机证据（2026-10-27）
+
+报告者已补充[旧会话恢复记录](https://github.com/LiPu-jpg/Openwrite/issues/123#issuecomment-6422870871)和 [B-13 Windows 实测](https://github.com/LiPu-jpg/Openwrite/issues/123#issuecomment-6423904648)：旧预设目录缺失时历史会话正常打开；行首/行中 `>`、混合行尾锚点预览通过。两项原场景验证据此完成，不再索要同一材料。此前“待最小复现/实机”的记录反映当时证据边界；新补修与候选状态见 [#123 回复补修](ISSUE_123_FOLLOWUP.md)。
+
 ## 保留的未完成工作
 
 统一跟踪：[issue #123](https://github.com/LiPu-jpg/Openwrite/issues/123)。
@@ -18,11 +22,9 @@
 | 来源 | 已有证据 | 尚待完成 |
 | --- | --- | --- |
 | #98.1 | 独立停机旁路升级工具已发布；宿主候选补丁通过 Windows/Linux 专项 CI。 | [fork PR #1](https://github.com/LiPu-jpg/deepseek-harness/pull/1) 尚未成为正式宿主；[上游讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/10745) 继续跟踪。原生安装命令不受插件工具保护。 |
-| #105 | 稳定 ID、永久别名、目录保留、原日志与自定义预设保护回归通过。 | 报告者 Windows Electron 历史会话完整恢复的实机验收。 |
-| #109 B-13 | 字面匹配及两层传输回归通过。 | 原始失败文件片段、完整参数和行尾/空格信息的最小复现。 |
 | #111 | 不支持平台返回明确错误并提供外部 Studio 配置；原报告接受此降级方向。 | Android/Termux 真机与外部 Studio 实测；当前没有 Android 原生运行时。 |
 
-新增的 [#121](https://github.com/LiPu-jpg/Openwrite/issues/121)、[#122](https://github.com/LiPu-jpg/Openwrite/issues/122) 属于独立反馈，保持打开，本次发布不将其列为已解决。
+后续独立反馈 [#121](https://github.com/LiPu-jpg/Openwrite/issues/121)、[#122](https://github.com/LiPu-jpg/Openwrite/issues/122) 已修复、验收并合并关闭；候选尚未发布。关闭代码报告不代替上述两项外部条件。
 
 ## 后续关闭条件
 

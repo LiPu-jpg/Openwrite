@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, readFile, writeFile, readdir, rename, rm } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, readFile, writeFile, readdir, rename, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { upgradeProfile, recoverUpgrade, repairProfile } from './safe-upgrade.mjs'
 
 async function fixture() {
@@ -92,4 +94,51 @@ test('an interrupted swap restores the previous profile without an installer', a
     assert.equal(result.status, 'rolled_back')
     assert.match(await readFile(join(profile, 'package.json'), 'utf8'), /0.2.24/)
   } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('an unpacked upgrade script resolves dependencies from the selected installed profile', async () => {
+  const { home, profile, options } = await fixture()
+  try {
+    const require = createRequire(import.meta.url)
+    await mkdir(join(profile, 'node_modules'))
+    for (const name of ['proper-lockfile', 'js-yaml']) {
+      await symlink(dirname(require.resolve(name + '/package.json')),
+        join(profile, 'node_modules', name), 'junction')
+    }
+    const unpacked = join(home, 'download', 'package', 'scripts', 'safe-upgrade.mjs')
+    await mkdir(dirname(unpacked), { recursive: true })
+    await copyFile(new URL('./safe-upgrade.mjs', import.meta.url), unpacked)
+    const standalone = await import(pathToFileURL(unpacked).href)
+    const result = await standalone.upgradeProfile(home, 'desktop', 'dsh-openwrite@0.2.25',
+      { ...options, run: installFake })
+    assert.equal(result.status, 'completed')
+    assert.equal(JSON.parse(await readFile(join(profile, 'package.json'))).dependencies.other, '1')
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('a local release archive is pinned outside disposable download directories before install', async () => {
+  const { home, profile, options } = await fixture()
+  const download = await mkdtemp(join(tmpdir(), 'openwrite-disposable-download-'))
+  const file = join(download, 'dsh-openwrite-0.2.25.tgz')
+  await writeFile(file, 'controlled tarball fixture')
+  try {
+    let cached
+    const result = await upgradeProfile(home, 'desktop', file, { ...options, run: async (h, p, spec, log) => {
+      cached = spec
+      assert.ok(spec.startsWith(join(home, 'openwrite', 'packages')))
+      assert.equal(await readFile(spec, 'utf8'), 'controlled tarball fixture')
+      await rm(download, { recursive: true, force: true })
+      await installFake(h, p, 'dsh-openwrite@0.2.25', log)
+      const path = join(h, 'profiles', p, 'package.json')
+      const manifest = JSON.parse(await readFile(path))
+      manifest.dependencies['dsh-openwrite'] = 'file:' + spec
+      await writeFile(path, JSON.stringify(manifest))
+    } })
+    assert.equal(result.status, 'completed')
+    assert.equal(await readFile(cached, 'utf8'), 'controlled tarball fixture')
+    assert.equal(JSON.parse(await readFile(join(profile, 'package.json'))).dependencies['dsh-openwrite'], 'file:' + cached)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(download, { recursive: true, force: true })
+  }
 })
