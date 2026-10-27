@@ -132,6 +132,13 @@ export const modelPresets = {
 
 export async function api(path, options = {}) {
   const headers = { Accept: "application/json", ...(options.headers || {}) };
+  const route = path.split("?", 1)[0];
+  const root = state.workspace?.project?.root;
+  if (root && route !== "/api/project/open" && route !== "/api/project/init"
+    && !headers["X-OpenWrite-Workspace-Root"]) {
+    headers["X-OpenWrite-Workspace-Root"] = encodeURIComponent(root);
+    headers["X-OpenWrite-Workspace-Root-Encoding"] = "uri";
+  }
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     headers["X-OpenWrite-Studio"] = "1";
