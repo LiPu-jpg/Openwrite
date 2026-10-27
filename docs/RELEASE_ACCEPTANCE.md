@@ -4,7 +4,22 @@
 
 本轮捆绑 Core **5.8.20**，固定源码 `9611c654e5d77bcb5968105a7adfa8e9b4f9624a`。修复正文延迟输入漏存、按审稿修订越过作者选区，以及真实 Vditor 换行规范化导致的选区拒绝，详见[补修范围](EDITOR_SAFETY_REPAIRS.md)。
 
-本地 Core **1550 passed / 32 skipped**、真实 HTTP **14 passed**、界面 **336 passed**、managed **34 passed**、完整插件检查通过。新增真实候选包编辑器浏览器场景 **9 组通过**。wheel 的 499 个运行时文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `aa1f25f3c615497cd73c3c059fd2acc4e71ba2e936765d02331d1382df4b201a`。跨平台最终结果在验收后补齐。
+本地 Core **1550 passed / 32 skipped**、真实 HTTP **14 passed**、界面 **336 passed**、managed **34 passed**、完整插件检查通过。新增真实候选包编辑器浏览器场景 **9 组通过**。wheel 的 499 个运行时文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `aa1f25f3c615497cd73c3c059fd2acc4e71ba2e936765d02331d1382df4b201a`。最终跨平台验收与产物复核结果如下。
+
+[Core PR #137](https://github.com/LiPu-jpg/Openwrite/pull/137) 和 [插件 PR #138](https://github.com/LiPu-jpg/Openwrite/pull/138) 已合并。最终 **22 项检查全部通过**：[三系统回归](https://github.com/LiPu-jpg/Openwrite/actions/runs/40453781968)、[安装/客户端验收](https://github.com/LiPu-jpg/Openwrite/actions/runs/40453781862)、[插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40453781876)。下载原始报告后核对：
+
+| 验收 | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| 固定 Core 全量 | 1550 passed / 32 skipped | 1550 passed / 32 skipped | 1550 passed / 32 skipped |
+| 真实 HTTP 路由与选区上限 | 14 passed | 14 passed | 14 passed |
+| 真实 Electron 44.7.0 | 5 passed / 0 skipped | 5 passed / 0 skipped | 5 passed / 0 skipped |
+| wheel 源码字节 / 应打包 Python 文件 | 499 / 163 一致 | 499 / 163 一致 | 499 / 163 一致 |
+
+8 份安装/源码、5 份客户端、6 份原生报告全部通过。每组原生验收运行 40 项预设/升级/运行时回归，并对同一 tarball 内的真实 Vditor、独立编辑器包装、Core 与原生面板映射器验证 9 组场景，editorSerialization 字段全部为通过。Core 的 32 项跳过仍来自缺失旧样例或外部 checkout，新增回归无跳过；本轮不调用付费模型。
+
+macOS ARM 首次 npm ci 从第三方镜像下载依赖超时；只重跑失败任务和依赖的汇总步骤后通过，构建产物保持相同。没有放宽验收或替换依赖版本。
+
+候选 tarball SHA-256：`3a50ad3cb080eec50b28f3196d5c0cd476643db894b06df0dfc8c394fec1bcfd`。CI 提交 `9390c7826024ee78cc91d5a144825a55ca0016e0` 与插件合并提交 `6117a19a26b60ab6d55bff23fdfb46f84fd02320` 的源码 tree 同为 `d59236a0d5dd77ce0d960586cd7c59eeaf0b96c9`。Core 固定来源保留于 native-core 合并提交 `40e25b7a27a4b0f9430d0cc15b775c601f28a91e`。
 
 候选仍未发布，公开版本为 **0.2.27**；#123 的宿主正式发布和 Android/Termux 真机条件继续保留。
 
