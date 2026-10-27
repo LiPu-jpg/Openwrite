@@ -130,7 +130,20 @@ test('interrupted downloads remove partial files; retry verifies and reuses the 
   t.after(() => { server.closeAllConnections(); server.close() })
   const item = { url: `http://127.0.0.1:${server.address().port}/uv.zip`, sha256: createHash('sha256').update(payload).digest('hex'), executable: 'uv' }
   const runtime = new ManagedRuntime(root, root)
-  await assert.rejects(runtime.download(item, AbortSignal.timeout(100)))
+  // Abort only after a partial response actually reaches the file writer.
+  // A fixed 100ms timer can fire before localhost receives the first request
+  // on busy Intel runners; the supposed retry then becomes request number 1.
+  const controller = new AbortController()
+  const rejected = assert.rejects(runtime.download(item, controller.signal), { name: 'AbortError' })
+  try {
+    const deadline = Date.now() + 8_000
+    while (runtime.status().downloadedBytes !== 16 && Date.now() < deadline) {
+      await new Promise(done => setTimeout(done, 10))
+    }
+    assert.equal(runtime.status().downloadedBytes, 16, 'must interrupt a real partial download')
+    assert.equal(calls, 1)
+  } finally { controller.abort() }
+  await rejected
   assert.deepEqual(await readdir(join(root, 'cache')), [])
   const path = await runtime.download(item, new AbortController().signal)
   assert.deepEqual(await readFile(path), payload)

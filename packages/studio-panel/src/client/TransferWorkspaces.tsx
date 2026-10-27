@@ -1,3 +1,4 @@
+import { downloadBlob, downloadFilename } from './browser-download.ts'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type Dispatch, type SetStateAction } from 'react'
 import { Archive, ChevronDown, ChevronUp, Download, FileInput, FolderOpen, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { API_PROXY_BASE, studioContextHeaders } from './api.ts'
@@ -447,14 +448,8 @@ export function ProjectArchiveWorkspace(props: ArchiveWorkspaceProps) {
       if (!response.ok) throw new Error(await response.text())
       const blob = await response.blob()
       const disposition = response.headers.get('content-disposition') ?? ''
-      const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)
-      const name = match?.[1] === undefined ? `${archiveId}.owarchive.zip` : decodeURIComponent(match[1])
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = name
-      anchor.click()
-      URL.revokeObjectURL(url)
+      const name = downloadFilename(disposition, `${archiveId}.owarchive.zip`)
+      downloadBlob(blob, name)
       say(t('tools.archive.downloaded').replace('{name}', name))
     } catch (cause: unknown) {
       say(`${t('tools.archive.failed')}: ${errorText(cause)}`, true)

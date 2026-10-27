@@ -25,3 +25,5 @@ release-report-*.json
 /release/source.json
 /release/licenses/
 packaged-regressions-report-*.json
+
+mobile-browser-report-*.json

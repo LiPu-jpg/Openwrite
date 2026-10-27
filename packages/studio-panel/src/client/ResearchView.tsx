@@ -1,3 +1,4 @@
+import { downloadBlob } from './browser-download.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, ExternalLink, RefreshCw, Search } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -282,12 +283,7 @@ export function ResearchView({ fetchStudioApi, postStudioApi, t, initialReportId
   const exportMarkdown = () => {
     if (report === null || selectedId === '') return
     const blob = new Blob([report.content], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${selectedId}.md`
-    anchor.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(blob, `${selectedId}.md`)
   }
 
   const selected = surface?.reports.find(item => item.id === selectedId)

@@ -17,6 +17,7 @@ import { loadPackagedEditorGlobal } from './packaged-editor-globals.ts'
 import type { EditorSerialization } from './selection-coordinates.ts'
 import {
   countOccurrences, locateSelectedMarkdown, shouldClearManuscriptSelection, type ManuscriptSelection,
+  nodePreservesManuscriptSelection,
 } from './manuscript-selection.ts'
 import type { ManuscriptAnnotation } from './manuscript-annotations.ts'
 import { parseMarkers } from './manuscript-markers.ts'
@@ -105,7 +106,7 @@ interface VditorBodyProps {
   onInputStateChange?: (pending: boolean) => void
   onSelectionChange?: (selection: ManuscriptSelection | null) => void
   onReady?: () => void
-  onFailed: () => void
+  onFailed: (cause?: unknown) => void
   disabled: boolean
   /** The consumer can synchronously retain callbacks delivered during cleanup. */
   flushOnLeave?: boolean
@@ -197,6 +198,7 @@ export function VditorBody({
     let lastPointerTarget: EventTarget | null = null
     const rememberPointer = (event: Event) => { lastPointerTarget = event.target }
     document.addEventListener('mousedown', rememberPointer, true)
+    document.addEventListener('pointerdown', rememberPointer, true)
     const host = hostRef.current
     let inputObserved = false
     let pendingInput = false
@@ -224,6 +226,11 @@ export function VditorBody({
     // Flush before the next button click so Save and leave guards also see
     // the latest body, without serializing long manuscripts every keystroke.
     if (flushOnLeave) host?.addEventListener('focusout', flush)
+    const background = () => { if (document.visibilityState === 'hidden') flush() }
+    if (flushOnLeave) {
+      document.addEventListener('visibilitychange', background)
+      window.addEventListener('pagehide', flush)
+    }
     void loadVditor()
       .then((Vditor) => {
         if (disposed || hostRef.current === null) return
@@ -322,7 +329,8 @@ export function VditorBody({
             try { refreshOverlay(current.getValue()) } catch { /* editor not ready */ }
           })
         }
-        refreshOverlay(instance.getValue())
+        // Lute is initialized asynchronously even when the scripts are
+        // cached. The `after` callback above owns the first serialization.
         emitSelection = () => {
           const current = instanceRef.current
           const editorHost = hostRef.current
@@ -341,6 +349,9 @@ export function VditorBody({
             return
           }
           const selected = (typeof current.getSelection === 'function' ? current.getSelection() : native?.toString()) ?? ''
+          // A touch on editor actions may collapse a range while its anchor
+          // still belongs to the editor. Retain that author-selected span.
+          if (selected === '' && nodePreservesManuscriptSelection(lastPointerTarget ?? document.activeElement)) return
           const value = current.getValue()
           notify(locateSelectedMarkdown(value, selected, occurrenceBeforeCaret(editorHost, selected), serializationRef.current))
         }
@@ -353,16 +364,19 @@ export function VditorBody({
         })
         observer.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
       })
-      .catch(() => { if (!disposed) onFailedRef.current() })
+      .catch(cause => { if (!disposed) onFailedRef.current(cause) })
     return () => {
       if (flushOnLeave) flush()
       disposed = true
       flushRef.current = null
       host?.removeEventListener('input', rememberInput, true)
       host?.removeEventListener('focusout', flush)
+      document.removeEventListener('visibilitychange', background)
+      window.removeEventListener('pagehide', flush)
       observer?.disconnect()
       unbindOverlay?.()
       document.removeEventListener('mousedown', rememberPointer, true)
+      document.removeEventListener('pointerdown', rememberPointer, true)
       if (emitSelection !== null) {
         host?.removeEventListener('mouseup', emitSelection)
         host?.removeEventListener('keyup', emitSelection)

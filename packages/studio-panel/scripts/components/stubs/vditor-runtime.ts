@@ -5,14 +5,16 @@ export const installVditorIcons = () => {}
 export default class DeferredVditor {
   readonly element = document.createElement('textarea')
   destroyed = false
+  initialized = false
   constructor(readonly host: HTMLElement, readonly options: Record<string, unknown>) {
     this.element.setAttribute('aria-label', 'Live asset body')
     this.element.value = String(options['value'] ?? '')
     host.append(this.element)
     instances.push(this)
-    queueMicrotask(() => { if (!this.destroyed) (options['after'] as () => void)() })
+    queueMicrotask(() => { if (!this.destroyed) { this.initialized = true; (options['after'] as () => void)() } })
   }
   getValue() {
+    if (!this.initialized) throw new Error('Lute is still initializing')
     if (!this.host.isConnected) throw new Error('Editor DOM already detached')
     return this.element.value
   }

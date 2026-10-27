@@ -208,8 +208,37 @@ jobs:
             .tmp-dsh-alpha/package-lock.json
           include-hidden-files: true
           if-no-files-found: warn
+  mobile-browsers:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
+      - run: |
+          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
+      - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps ${{ matrix.browser }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-package
+      - run: node packages/studio-panel/scripts/mobile-browser.mjs --browser=${{ matrix.browser }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-mobile-${{ matrix.browser }}
+          path: mobile-browser-report-*.json
+          if-no-files-found: error
   acceptance:
-    needs: [build, install, source-install, compatibility-alpha, client-contracts]
+    needs: [build, install, source-install, compatibility-alpha, client-contracts, mobile-browsers]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
