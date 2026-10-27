@@ -24,8 +24,11 @@ describe('the actual standalone editor shipped inside the Core wheel', () => {
   it.each([
     ['multiline CRLF', '前言\r\n选中\r\n正文\r\n尾部', '选中\n正文'],
     ['duplicate after emoji and mixed EOL', '选中文本\r\n😀\n选中文本\r\n尾部', '选中文本'],
-  ])('submits exact raw selection bytes for %s', async (_name, raw, quote) => {
-    const view = raw.replace(/\r\n?/g, '\n')
+    ['serialized final newline', '前言选中文本', '选中文本', '前言选中文本\n'],
+    ['serialized heading', '# 标题\r\n选中文本\r\n', '选中文本', '# 标题\n\n选中文本\n'],
+    ['serialized blank lines', '前文\n\n\n选中文本\n', '选中文本', '前文\n\n选中文本\n'],
+  ])('submits exact raw selection bytes for %s', async (_name, raw, quote, rendered) => {
+    const view = rendered ?? raw.replace(/\r\n?/g, '\n')
     const start = view.lastIndexOf(quote), end = start + quote.length
     const elements = new Map<string, HTMLElement>()
     const $ = (selector: string): any => {
@@ -41,7 +44,8 @@ describe('the actual standalone editor shipped inside the Core wheel', () => {
     const modules: Record<string, unknown> = {
       '/js/core.js': { $, state, showToast: vi.fn(), api: vi.fn(), formatNumber: String },
       '/js/tasks.js': { enqueueTask },
-      '/js/markdown-editor.js': { getPrimaryMarkdownEditor: () => ({ getValue: () => view, selection: () => ({ start, end }) }) },
+      '/js/markdown-editor.js': { getPrimaryMarkdownEditor: () => ({ getValue: () => view,
+        getSerialization: () => ({ source: raw, value: view }), selection: () => ({ start, end }) }) },
     }
     if (wheel['tools/studio_assets/js/selection-coordinates.js']) {
       modules['/js/selection-coordinates.js'] = load(source('selection-coordinates.js'))

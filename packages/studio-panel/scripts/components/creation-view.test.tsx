@@ -1314,6 +1314,7 @@ describe('CreationView selection polish', () => {
       chapter_id: 'ch_001',
       issue_ids: ['issue-letter'],
       original_text: '密信还在',
+      selection: { start: 0, end: 4, original_text: '密信还在' },
       expected_review_revision: 'review-revision-current',
       expected_document_revision: 'revision-current',
     })

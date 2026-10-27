@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen, ChevronLeft, ChevronRight, History, PanelLeft, PanelLeftClose, PanelLeftOpen, PanelRight,
   PanelRightClose, PanelRightOpen, RefreshCw, Save, Search, ShieldAlert, X,
@@ -639,6 +639,14 @@ export function CreationView(props: CreationViewProps) {
   const [insertDescription, setInsertDescription] = useState('')
   const [insertError, setInsertError] = useState('')
   const [editorApi, setEditorApi] = useState<ManuscriptEditorApi | null>(null)
+  const editorApiRef = useRef<ManuscriptEditorApi | null>(null)
+  const bindEditorApi = useCallback((api: ManuscriptEditorApi | null) => {
+    editorApiRef.current = api
+    setEditorApi(api)
+  }, [])
+  const [loadedDocumentIdentity, setLoadedDocumentIdentity] = useState('')
+  const [pendingEditorInput, setPendingEditorInput] = useState(false)
+  const discardedEditorsRef = useRef(new Set<string>())
   const [readingOrder, setReadingOrder] = useState<ReadingOrderDto | null>(null)
   const [readingOrderState, setReadingOrderState] = useState<LoadState>('idle')
   const [readingOrderError, setReadingOrderError] = useState('')
@@ -714,6 +722,9 @@ export function CreationView(props: CreationViewProps) {
   const documentIdentity = `${String(workbench.contextEpoch)}:${workspaceId ?? ''}:${activeChapter?.occurrenceId ?? ''}:${activeDocumentId}:${path}`
   const documentIdentityRef = useRef(documentIdentity)
   documentIdentityRef.current = documentIdentity
+  const editorSessionKey = `${documentIdentity}:${editorEpoch}`
+  const editorSessionKeyRef = useRef(editorSessionKey)
+  editorSessionKeyRef.current = editorSessionKey
   const novelId = manuscriptNovelId(workbench.workspace, path)
   const draftIdentity = workspaceId !== undefined && novelId !== '' && path !== ''
     ? { workspaceId, novelId, path }
@@ -762,7 +773,7 @@ export function CreationView(props: CreationViewProps) {
     .filter(({ chapter }) => normalizedQuery === '' ||
       `${chapter.title} ${chapter.subtitle} ${chapter.path}`.toLocaleLowerCase().includes(normalizedQuery))
   const inspectorRequested = compactLayout ? rightOpen : inspectorVisible
-  const hasUnsavedDraft = document_ !== null && draft !== savedContentRef.current
+  const hasUnsavedDraft = pendingEditorInput || document_ !== null && draft !== savedContentRef.current
   const openContextSource = useCallback((relativePath: string) => {
     if (relativePath === '' || relativePath.endsWith('/')) return
     const match = /^(data\/novels\/[^/]+)\//.exec(path)
@@ -787,7 +798,7 @@ export function CreationView(props: CreationViewProps) {
     return () => { cancelled = true }
   }, [workspaceId, workbench.contextEpoch, workbench.epochs.assets, workbench.epochs.workspace])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
@@ -877,6 +888,7 @@ export function CreationView(props: CreationViewProps) {
   const loadDocument = useCallback(async (allowDiscard = false) => {
     if (path === '') return
     const requestIdentity = documentIdentity
+    if (!allowDiscard) editorApiRef.current?.flush?.()
     if (dirtyRef.current && !allowDiscard) {
       workbenchStore.setEditorStatus('conflict', t('creation.changedElsewhere'))
       return
@@ -892,10 +904,12 @@ export function CreationView(props: CreationViewProps) {
       if (!mountedRef.current || documentIdentityRef.current !== requestIdentity) return
       setDocument(data)
       documentRef.current = data
+      setLoadedDocumentIdentity(requestIdentity)
       setDraft(data.content)
       draftRef.current = data.content
       savedContentRef.current = data.content
       dirtyRef.current = false
+      setPendingEditorInput(false)
       setEditorFailed(false)
       setEditorEpoch(value => value + 1)
       setManuscriptSelection(null)
@@ -906,6 +920,7 @@ export function CreationView(props: CreationViewProps) {
       const requestDraftIdentity = draftIdentity
       if (requestDraftIdentity !== null) {
         try {
+          await draftWriteChainRef.current
           const stored = await manuscriptDraftStore.load(requestDraftIdentity)
           if (!mountedRef.current || documentIdentityRef.current !== requestIdentity) return
           if (stored !== null && stored.content !== data.content) {
@@ -931,6 +946,7 @@ export function CreationView(props: CreationViewProps) {
 
   useEffect(() => {
     documentRef.current = null
+    setPendingEditorInput(false)
     setRecoveryDraft(null)
     setDraftStorageError('')
     saveQueuedRef.current = false
@@ -1191,6 +1207,7 @@ export function CreationView(props: CreationViewProps) {
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
+      editorApiRef.current?.flush?.()
       if (!dirtyRef.current) return
       event.preventDefault()
       event.returnValue = ''
@@ -1211,6 +1228,7 @@ export function CreationView(props: CreationViewProps) {
   }, [leftOpen, rightOpen])
 
   const save = useCallback(async (force = false, origin: 'autosave' | 'manual' = 'autosave') => {
+    editorApiRef.current?.flush?.()
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
@@ -1335,11 +1353,14 @@ export function CreationView(props: CreationViewProps) {
     }
   }, [acceptance, acceptanceBusy, path, postStudioApi, t])
 
-  const persistDraft = (value: string, previousValue: string) => {
-    const identity = draftIdentityRef.current
-    const currentDocument = documentRef.current
+  const editorOwner = document_ === null ? null : {
+    key: editorSessionKey, document: document_, draftIdentity, draft,
+  }
+  const persistDraft = (value: string, previousValue: string, owner?: NonNullable<typeof editorOwner>) => {
+    const identity = owner === undefined ? draftIdentityRef.current : owner.draftIdentity
+    const currentDocument = owner === undefined ? documentRef.current : owner.document
     if (identity === null || currentDocument === null) return
-    if (value === savedContentRef.current) {
+    if (value === (owner === undefined ? savedContentRef.current : owner.document.content)) {
       queueDraftOperation(identity, () => manuscriptDraftStore.removeIfContent(identity, previousValue))
       return
     }
@@ -1356,7 +1377,12 @@ export function CreationView(props: CreationViewProps) {
     queueDraftOperation(identity, () => manuscriptDraftStore.save(record))
   }
 
-  const updateDraft = (value: string) => {
+  const updateDraft = (value: string, owner?: NonNullable<typeof editorOwner>) => {
+    if (owner && discardedEditorsRef.current.has(owner.key)) return
+    if (owner && (!mountedRef.current || owner.key !== editorSessionKeyRef.current)) {
+      persistDraft(value, owner.draft, owner)
+      return
+    }
     const previousValue = draftRef.current
     setDraft(value)
     draftRef.current = value
@@ -1369,11 +1395,17 @@ export function CreationView(props: CreationViewProps) {
     if (dirty) saveTimerRef.current = window.setTimeout(() => { void saveRef.current() }, 1_200)
   }
 
+  const markEditorInput = (pending: boolean, key: string) => {
+    if (!mountedRef.current || key !== editorSessionKeyRef.current || discardedEditorsRef.current.has(key)) return
+    setPendingEditorInput(pending)
+  }
+
   const restoreRecoveryDraft = () => {
     const stored = recoveryDraft
     const currentDocument = documentRef.current
     if (stored === null || currentDocument === null) return
     const staleBase = stored.baseRevision !== currentDocument.revision
+    discardedEditorsRef.current.add(editorSessionKeyRef.current)
     setRecoveryDraft(null)
     setDraft(stored.content)
     draftRef.current = stored.content
@@ -1400,6 +1432,18 @@ export function CreationView(props: CreationViewProps) {
     queueDraftOperation(identity, () => manuscriptDraftStore.removeIfContent(identity, stored.content))
   }
 
+  const discardEditorDraft = () => {
+    discardedEditorsRef.current.add(editorSessionKeyRef.current)
+    setPendingEditorInput(false)
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = null
+    const identity = draftIdentityRef.current
+    const content = draftRef.current
+    if (identity !== null && documentRef.current !== null && loadedDocumentIdentity === documentIdentityRef.current) {
+      queueDraftOperation(identity, () => manuscriptDraftStore.removeIfContent(identity, content))
+    }
+  }
+
   const chooseChapter = (nextPath: string, nextOccurrenceId = '') => {
     if (nextPath === path) {
       setActiveOccurrenceId(nextOccurrenceId)
@@ -1407,7 +1451,11 @@ export function CreationView(props: CreationViewProps) {
       setLeftOpen(false)
       return
     }
-    if (dirtyRef.current && !window.confirm(t('creation.discardConfirm'))) return
+    editorApiRef.current?.flush?.()
+    if (dirtyRef.current) {
+      if (!window.confirm(t('creation.discardConfirm'))) return
+      discardEditorDraft()
+    }
     dirtyRef.current = false
     setActiveOccurrenceId(nextOccurrenceId)
     workbenchStore.setActiveChapter(nextPath)
@@ -1426,6 +1474,7 @@ export function CreationView(props: CreationViewProps) {
 
   const moveActiveChapter = async () => {
     if (readingOrder === null || activeChapter === undefined || moveBusy || moveVolumeId === '') return
+    editorApiRef.current?.flush?.()
     if (dirtyRef.current) {
       await saveRef.current(false, 'manual')
       if (dirtyRef.current) return
@@ -1513,7 +1562,9 @@ export function CreationView(props: CreationViewProps) {
   }
 
   const reload = () => {
+    editorApiRef.current?.flush?.()
     if (dirtyRef.current && !window.confirm(t('creation.discardConfirm'))) return
+    discardEditorDraft()
     dirtyRef.current = false
     void loadDocument(true)
   }
@@ -1539,6 +1590,7 @@ export function CreationView(props: CreationViewProps) {
 
   const createNamedSnapshot = async () => {
     if (historyBusy !== '') return
+    editorApiRef.current?.flush?.()
     if (dirtyRef.current) {
       await saveRef.current(false, 'manual')
       if (dirtyRef.current) return
@@ -1646,6 +1698,7 @@ export function CreationView(props: CreationViewProps) {
     const selection = manuscriptSelectionRef.current
     const id = chapterId(path)
     if (selection === null || selectionBusy !== '' || id === '') return
+    editorApiRef.current?.flush?.()
     if (dirtyRef.current) {
       await saveRef.current(false, 'manual')
       if (dirtyRef.current) {
@@ -1694,6 +1747,7 @@ export function CreationView(props: CreationViewProps) {
     const selection = manuscriptSelectionRef.current
     const id = chapterId(path)
     if (selection === null || annotateBusy || id === '') return
+    editorApiRef.current?.flush?.()
     if (unsavedAnnotationGuard(dirtyRef.current) === 'save-first') {
       await saveRef.current(false, 'manual')
       if (dirtyRef.current) {
@@ -1703,7 +1757,9 @@ export function CreationView(props: CreationViewProps) {
     }
     const editorContent = editorApi?.getValue() ?? draftRef.current
     const current = revalidateAnnotationRange(editorContent, selection)
-    const live = current && mapManuscriptSelection(documentRef.current?.content ?? '', { ...current, source: editorContent })
+    const live = current && mapManuscriptSelection(documentRef.current?.content ?? '', {
+      ...current, source: editorContent, serialization: editorApi?.getSerialization?.(),
+    })
     if (live === null) {
       setSelectionNotice(t('creation.notes.rangeLost'))
       return
@@ -1740,12 +1796,13 @@ export function CreationView(props: CreationViewProps) {
 
   const locateAnnotation = (item: ManuscriptAnnotation) => {
     const editorContent = editorApi?.getValue() ?? draftRef.current
-    const live = liveAnnotationAnchor(editorContent, item, documentRef.current?.content)
+    const serialization = editorApi?.getSerialization?.()
+    const live = liveAnnotationAnchor(editorContent, item, documentRef.current?.content, serialization)
     if (live.state === 'detached') {
       setSelectionNotice(t('creation.notes.detached'))
       return
     }
-    const next = manuscriptSelectionFromRange(editorContent, live.start, live.end)!
+    const next = manuscriptSelectionFromRange(editorContent, live.start, live.end, serialization)!
     manuscriptSelectionRef.current = next
     setManuscriptSelection(next)
     editorApi?.revealQuote(next.text, live.start)
@@ -2277,7 +2334,7 @@ export function CreationView(props: CreationViewProps) {
             <button type="button" className={css.commandButton} onClick={reload}><RefreshCw size={15} />{t('retry')}</button>
           </div>
         )}
-        {!readerMode && documentState === 'ready' && document_ !== null && (
+        {!readerMode && documentState === 'ready' && document_ !== null && loadedDocumentIdentity === documentIdentity && (
           <div className={css.manuscriptEditor} aria-busy={!editorReady && !editorFailed}>
             {recoveryDraft !== null && (
               <section className={css.recoveryBar}
@@ -2328,11 +2385,13 @@ export function CreationView(props: CreationViewProps) {
                   event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd,
                 ))} />
             ) : (
-              <VditorBody key={`${path}:${editorEpoch}`} initial={draft} disabled={false} onChange={updateDraft}
+              <VditorBody key={editorSessionKey} initial={draft} disabled={false}
+                onChange={value => updateDraft(value, editorOwner!)} flushOnLeave
+                onInputStateChange={pending => markEditorInput(pending, editorSessionKey)}
                 onSelectionChange={updateManuscriptSelection}
                 annotations={annotations} annotationSource={document_?.content}
                 onInsertMarker={() => { setInsertOpen(true); setInsertError('') }}
-                onEditorApi={setEditorApi}
+                onEditorApi={bindEditorApi}
                 onReady={() => setEditorReady(true)} onFailed={() => { setEditorReady(true); setEditorFailed(true) }} />
             )}
             {!editorReady && !editorFailed && (

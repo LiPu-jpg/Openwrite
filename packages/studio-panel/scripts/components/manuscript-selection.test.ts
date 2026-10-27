@@ -58,6 +58,7 @@ describe('manuscript selection polish mapping', () => {
         chapter_id: 'ch_001',
         issue_ids: ['issue-letter'],
         original_text: '密信还在',
+        selection: { start: 0, end: 4, original_text: '密信还在' },
         expected_review_revision: 'review',
         expected_document_revision: 'rev',
       },
@@ -91,6 +92,39 @@ describe('manuscript selection polish mapping', () => {
 })
 
 describe('editor/source coordinate boundary', () => {
+  it.each([
+    ['前文。选中文本。', '前文。选中文本。\n'],
+    ['# 标题\r\n选中文本\r\n', '# 标题\n\n选中文本\n'],
+    ['选中文本\n\n\n😀\n\n\n选中文本\n', '选中文本\n\n😀\n\n选中文本\n'],
+  ])('maps a witnessed editor serialization without changing source bytes', (source, view) => {
+    const serialization = { source, value: view }
+    const start = view.lastIndexOf('选中文本'), end = start + 4
+    const mapped = mapEditorRange(source, view, start, end, serialization)!
+    expect(mapped).toEqual({ start: Array.from(source.slice(0, source.lastIndexOf('选中文本'))).length,
+      end: Array.from(source.slice(0, source.lastIndexOf('选中文本'))).length + 4, text: '选中文本' })
+    expect(mapSourceRange(source, view, mapped.start, mapped.end, serialization)).toEqual({ start, end, text: '选中文本' })
+    expect(mapEditorRange(source, view, start, end)).toBeNull()
+    expect(mapEditorRange(source, view + '\n', start, end, serialization)).toBeNull()
+    expect(mapEditorRange(source + '\n外改', view, start, end, serialization)).toBeNull()
+  })
+
+  it('preserves raw multiline gaps and refuses invented text or NBSP equivalence', () => {
+    const source = '前\r\n\r\n\r\n后', view = '前\n\n后\n', serialization = { source, value: view }
+    expect(mapEditorRange(source, view, 0, view.length, serialization)?.text).toBe(source)
+    expect(mapEditorRange(source, view, 2, 4, serialization)).toBeNull()
+    for (const [raw, rendered] of [['原文', '已改\n'], ['a\u00a0b', 'a b\n']]) {
+      expect(mapEditorRange(raw!, rendered!, 0, 1, { source: raw!, value: rendered! })).toBeNull()
+    }
+  })
+
+  it('selects review evidence by position before comparing duplicate quotes', () => {
+    const text = '密信还在。中间。密信还在'
+    const selection = manuscriptSelectionFromRange(text, text.lastIndexOf('密信'), text.length)!
+    expect(reviewIssuesForSelection([
+      { id: 'first', evidence: { quote: '密信还在' }, anchor: { start_hint: 0, end_hint: 4 } },
+      { id: 'second', evidence: { quote: '密信还在' }, anchor: { start_hint: selection.start, end_hint: selection.end } },
+    ], selection)).toEqual(['second'])
+  })
   it.each([
     ['LF', '前言\n选中文本\n尾部', '选中文本'],
     ['emoji', '前😀后选中文本尾部', '选中文本'],

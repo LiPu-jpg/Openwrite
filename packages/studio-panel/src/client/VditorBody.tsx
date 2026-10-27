@@ -14,6 +14,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import VditorRuntime, { installVditorIcons } from 'dsh-vditor-runtime'
 import { loadPackagedEditorGlobal } from './packaged-editor-globals.ts'
+import type { EditorSerialization } from './selection-coordinates.ts'
 import {
   countOccurrences, locateSelectedMarkdown, shouldClearManuscriptSelection, type ManuscriptSelection,
 } from './manuscript-selection.ts'
@@ -91,6 +92,8 @@ export function loadVditor(): Promise<VditorCtor> {
 
 export type ManuscriptEditorApi = {
   getValue: () => string
+  getSerialization: () => EditorSerialization | undefined
+  flush: () => void
   insertAtCaret: (markdown: string) => void
   revealQuote: (quote: string, start: number) => boolean
 }
@@ -99,6 +102,7 @@ interface VditorBodyProps {
   /** Initial markdown (the editor is the source of truth afterwards). */
   initial: string
   onChange: (value: string) => void
+  onInputStateChange?: (pending: boolean) => void
   onSelectionChange?: (selection: ManuscriptSelection | null) => void
   onReady?: () => void
   onFailed: () => void
@@ -151,12 +155,13 @@ function paintOverlay(host: HTMLElement, overlay: HTMLElement, bands: readonly O
 
 /** One Vditor IR instance bound to the shell theme; destroyed on unmount. */
 export function VditorBody({
-  initial, onChange, onSelectionChange, onReady = () => {}, onFailed, disabled, flushOnLeave = false,
+  initial, onChange, onInputStateChange, onSelectionChange, onReady = () => {}, onFailed, disabled, flushOnLeave = false,
   annotations = [], annotationSource = initial, onInsertMarker, onEditorApi,
 }: VditorBodyProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const instanceRef = useRef<VditorInstance | null>(null)
+  const serializationRef = useRef<EditorSerialization | undefined>(undefined)
   const annotationsRef = useRef(annotations)
   annotationsRef.current = annotations
   const annotationSourceRef = useRef(annotationSource)
@@ -169,6 +174,8 @@ export function VditorBody({
   // ref so the Vditor `input` closure stays stable for the instance lifetime.
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const onInputStateRef = useRef(onInputStateChange)
+  onInputStateRef.current = onInputStateChange
   const onFailedRef = useRef(onFailed)
   onFailedRef.current = onFailed
   const onReadyRef = useRef(onReady)
@@ -192,13 +199,19 @@ export function VditorBody({
     document.addEventListener('mousedown', rememberPointer, true)
     const host = hostRef.current
     let inputObserved = false
+    let pendingInput = false
     let lastValue = initial
     const emitChange = (value: string) => {
-      if (disposed || value === lastValue) return
+      if (disposed) return
+      if (pendingInput) { pendingInput = false; onInputStateRef.current?.(false) }
+      if (value === lastValue) return
       lastValue = value
       onChangeRef.current(value)
     }
-    const rememberInput = () => { inputObserved = true }
+    const rememberInput = () => {
+      inputObserved = true
+      if (!pendingInput) { pendingInput = true; onInputStateRef.current?.(true) }
+    }
     const flush = () => {
       const current = instanceRef.current
       if (!inputObserved || current === null) return
@@ -253,7 +266,13 @@ export function VditorBody({
               path: CONTENT_THEME_PATH,
             },
           },
-          after: () => { onReadyRef.current() },
+          after: () => {
+            if (disposed) return
+            const value = instanceRef.current!.getValue()
+            serializationRef.current = inputObserved ? undefined : { source: initial, value }
+            refreshOverlay(value)
+            onReadyRef.current()
+          },
           input: (value: string) => { inputObserved = true; emitChange(value); refreshOverlay(value) },
         })
         instanceRef.current = instance
@@ -265,12 +284,14 @@ export function VditorBody({
           paintOverlay(
             editorHost,
             overlay,
-            overlayBands(value, annotationsRef.current, parseMarkers(value), annotationSourceRef.current),
+            overlayBands(value, annotationsRef.current, parseMarkers(value), annotationSourceRef.current, serializationRef.current),
             document.body.hasAttribute('data-ds-dark-theme'),
           )
         }
         onEditorApiRef.current?.({
           getValue: () => instanceRef.current?.getValue() ?? '',
+          getSerialization: () => serializationRef.current,
+          flush,
           insertAtCaret: (markdown: string) => {
             const current = instanceRef.current
             if (current === null || typeof current.insertValue !== 'function') return
@@ -288,7 +309,7 @@ export function VditorBody({
             const ir = editorHost.querySelector('.vditor-ir') ?? editorHost
             const range = revealNeedle(ir, quote, occurrence)
             if (range === null) return false
-            onSelectionChangeRef.current?.(locateSelectedMarkdown(value, quote, occurrence))
+            onSelectionChangeRef.current?.(locateSelectedMarkdown(value, quote, occurrence, serializationRef.current))
             refreshOverlay(value)
             return true
           },
@@ -321,7 +342,7 @@ export function VditorBody({
           }
           const selected = (typeof current.getSelection === 'function' ? current.getSelection() : native?.toString()) ?? ''
           const value = current.getValue()
-          notify(locateSelectedMarkdown(value, selected, occurrenceBeforeCaret(editorHost, selected)))
+          notify(locateSelectedMarkdown(value, selected, occurrenceBeforeCaret(editorHost, selected), serializationRef.current))
         }
         hostRef.current.addEventListener('mouseup', emitSelection)
         hostRef.current.addEventListener('keyup', emitSelection)
@@ -366,7 +387,7 @@ export function VditorBody({
     const instance = instanceRef.current
     if (host === null || overlay === null || instance === null) return
     try {
-      paintOverlay(host, overlay, overlayBands(instance.getValue(), annotations, parseMarkers(instance.getValue()), annotationSource), document.body.hasAttribute('data-ds-dark-theme'))
+      paintOverlay(host, overlay, overlayBands(instance.getValue(), annotations, parseMarkers(instance.getValue()), annotationSource, serializationRef.current), document.body.hasAttribute('data-ds-dark-theme'))
     } catch { /* editor not ready */ }
   }, [annotations, annotationSource])
 

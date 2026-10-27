@@ -1259,10 +1259,15 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     name: 'novel_revision_create_from_review',
     description:
       'Create a revision proposal that addresses selected issues from a chapter review (LONG-RUNNING, model-generated). ' +
-      'Issue ids come from novel_review_chapter\'s issue_details. The proposal is only staged — apply it with novel_revision_apply.',
+      'Issue ids come from novel_review_chapter\'s issue_details. Pass selection to constrain rewriting to an exact manuscript range; overlapping issue evidence never expands that range. The proposal is only staged — apply it with novel_revision_apply.',
     parameters: {
       chapter_id: { type: 'string', required: true, description: 'Chapter id (ch_<digits>).' },
       issue_ids: { type: 'array', required: true, items: { type: 'string' }, description: 'Review issue ids to fix.' },
+      selection: { type: 'object', additionalProperties: false, description: 'Optional exact saved-text range in Unicode code points; preserve raw CR/LF characters.', properties: {
+        start: { type: 'integer', required: true, description: 'Inclusive source code-point offset.' },
+        end: { type: 'integer', required: true, description: 'Exclusive source code-point offset.' },
+        original_text: { type: 'string', required: true, description: 'Exact saved text inside this range.' },
+      } },
       instruction: { type: 'string', description: 'Additional revision instruction.' },
       target_units: { type: 'integer', description: 'Target length in writing units (0 = keep similar).' },
       expected_review_revision: { type: 'string', description: 'Exact review file revision from the chapter work brief.' },
@@ -1275,6 +1280,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       if (!CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
       if (args.issue_ids.length === 0) throw new Error('issue_ids must be a non-empty array')
       const body: JsonObject = { chapter_id: args.chapter_id, issue_ids: args.issue_ids }
+      if (args.selection !== undefined) body['selection'] = args.selection
       if (args.instruction !== undefined) body['instruction'] = args.instruction
       if (args.target_units !== undefined) body['target_units'] = args.target_units
       if (args.expected_review_revision !== undefined) body['expected_review_revision'] = args.expected_review_revision

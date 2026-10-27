@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { x as extract } from 'tar'
+import { checkEditorSelections } from '../packages/studio-panel/scripts/editor-selection-browser.mjs'
 
 const checkout = fileURLToPath(new URL('../', import.meta.url))
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url)))
@@ -47,10 +48,12 @@ try {
       else reject(new Error(`Packaged regressions failed: ${timedOut ? 'timeout' : signal ?? code}`))
     })
   })
+  const editorSerialization = await checkEditorSelections(root)
   const report = {
     status: 'passed', platform: process.platform, arch: process.arch, node: process.version,
     artifactSha256: createHash('sha256').update(await readFile(resolve(artifact))).digest('hex'),
     checks: ['durable-preset-identities', 'offline-profile-upgrade', 'managed-runtime'],
+    editorSerialization,
   }
   await writeFile(`packaged-regressions-report-${process.platform}-${process.arch}-${process.versions.node}.json`, JSON.stringify(report, null, 2) + '\n')
 } finally {

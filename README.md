@@ -29,7 +29,7 @@
 
 ## 开发中：0.2.28（未发布）
 
-Core 5.8.19 候选补修已合并，22 项 CI 全部通过；修复 CRLF/emoji 选区坐标，以及中断升级恢复和损坏安装包缓存重试，见 [选区与升级补修](docs/SELECTION_UPGRADE_REPAIRS.md)。前轮修复及 #123 的 Windows 回执见 [回复补修记录](docs/ISSUE_123_FOLLOWUP.md)。剩余宿主正式发布与 Android/Termux 实机两项继续跟踪，本轮不发布；下面的 npm/GitHub 安装入口仍为已发布的 0.2.27。
+Core 5.8.20 候选继续修复正文最后输入漏存、审稿修订越过选区，以及真实 Markdown 编辑器格式转换导致的选区拒绝，见 [正文编辑与审稿补修](docs/EDITOR_SAFETY_REPAIRS.md)。前轮修复见 [选区与升级补修](docs/SELECTION_UPGRADE_REPAIRS.md)。宿主正式发布与 Android/Termux 真机两项继续跟踪，本轮不发布；下面的 npm/GitHub 安装入口仍为已发布的 0.2.27。
 
 ## 0.2.27
 

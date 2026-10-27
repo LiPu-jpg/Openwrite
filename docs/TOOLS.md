@@ -967,7 +967,7 @@ Apply a staged revision proposal to the manuscript. Optionally override the gene
 
 ## novel_revision_create_from_review
 
-Create a revision proposal that addresses selected issues from a chapter review (LONG-RUNNING, model-generated). Issue ids come from novel_review_chapter's issue_details. The proposal is only staged — apply it with novel_revision_apply.
+Create a revision proposal that addresses selected issues from a chapter review (LONG-RUNNING, model-generated). Issue ids come from novel_review_chapter's issue_details. Pass selection to constrain rewriting to an exact manuscript range; overlapping issue evidence never expands that range. The proposal is only staged — apply it with novel_revision_apply.
 
 影响：会提交操作或保存文件；具体取决于 action/参数。
 
@@ -975,6 +975,7 @@ Create a revision proposal that addresses selected issues from a chapter review 
 | --- | --- | --- | --- |
 | chapter_id | string | 是 | Chapter id (ch_<digits>). |
 | issue_ids | array[string] | 是 | Review issue ids to fix. |
+| selection | object | 否 | Optional exact saved-text range in Unicode code points; preserve raw CR/LF characters. |
 | instruction | string | 否 | Additional revision instruction. |
 | target_units | integer | 否 | Target length in writing units (0 = keep similar). |
 | expected_review_revision | string | 否 | Exact review file revision from the chapter work brief. |
