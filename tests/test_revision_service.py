@@ -24,6 +24,25 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     return tmp_path, chapter
 
 
+def test_selection_revision_rejects_a_changed_document_before_generation(tmp_path):
+    root, chapter = _project(tmp_path)
+    original = chapter.read_bytes().decode("utf-8")
+    service = RevisionService(root, "demo", generator=lambda _: pytest.fail("no model"))
+    expected = service.fingerprint(original)
+    chapter.write_bytes((original + "\n外部变更").encode("utf-8"))
+    with pytest.raises(RevisionError) as failed:
+        service.create_selection(
+            chapter_id="ch_001",
+            start=0,
+            end=1,
+            original_text=original[:1],
+            expected_document_revision=expected,
+        )
+    assert failed.value.code == "DOCUMENT_CONFLICT"
+    assert failed.value.details["current"] == service.fingerprint(original + "\n外部变更")
+    assert service.list() == []
+
+
 def _review_issue(root: Path, chapter: Path) -> tuple[str, str]:
     content = chapter.read_text(encoding="utf-8")
     quote = "门后没有人"

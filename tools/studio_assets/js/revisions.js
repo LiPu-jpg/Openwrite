@@ -1,10 +1,12 @@
 import { $, api, formatNumber, showToast, state } from "/js/core.js";
 import { enqueueTask } from "/js/tasks.js";
 import { getPrimaryMarkdownEditor } from "/js/markdown-editor.js";
+import { mapEditorRange } from "/js/selection-coordinates.js";
 
 let refreshWorkspace = async () => {};
 let reopenDocument = async () => {};
 let pendingAnnotation = null;
+let pendingRevisionSelection = null;
 
 export function bindRevisionUI(callbacks = {}) {
   refreshWorkspace = callbacks.refreshWorkspace || refreshWorkspace;
@@ -75,10 +77,13 @@ function openRevisionRequest(fullChapter) {
     showToast("请先选择需要修改的文字", true);
     return;
   }
+  const mapped = mapEditorRange(state.document.content, value, start, end);
+  if (!mapped) { showToast("选区与当前原文不一致，请保存或重新读取后选择", true); return; }
+  pendingRevisionSelection = { ...mapped, revision: state.document.revision };
   $("#revision-full-mode").value = fullChapter ? "1" : "0";
-  $("#revision-selection-start").value = String(codePointOffset(value, start));
-  $("#revision-selection-end").value = String(codePointOffset(value, end));
-  $("#revision-original-text").value = value.slice(start, end);
+  $("#revision-selection-start").value = String(mapped.start);
+  $("#revision-selection-end").value = String(mapped.end);
+  $("#revision-original-text").value = mapped.text;
   $("#revision-request-title").textContent = fullChapter ? "整章修订" : "修订所选文字";
   $("#revision-selection-preview").textContent = value.slice(start, end);
   $("#revision-request-status").textContent = fullChapter
@@ -88,6 +93,7 @@ function openRevisionRequest(fullChapter) {
 }
 
 function closeRevisionRequest() {
+  pendingRevisionSelection = null;
   $("#revision-request-dialog").close();
 }
 
@@ -97,13 +103,16 @@ async function submitRevisionRequest(event) {
   button.disabled = true;
   $("#revision-request-status").textContent = "正在生成修订提案…";
   try {
+    const selection = pendingRevisionSelection;
+    if (!selection || selection.revision !== state.document?.revision) throw new Error("原文已变化，请重新选择修订范围");
     await enqueueTask(
       "revision_selection",
       {
         chapter_id: chapterId(),
-        start: Number($("#revision-selection-start").value),
-        end: Number($("#revision-selection-end").value),
-        original_text: $("#revision-original-text").value,
+        start: selection.start,
+        end: selection.end,
+        original_text: selection.text,
+        expected_document_revision: selection.revision,
         action: $("#revision-action").value,
         instruction: $("#revision-instruction").value,
         target_units: Number($("#revision-target-units").value || 0),
@@ -344,13 +353,14 @@ function createManuscriptAnnotation() {
   const selection = editor.selection();
   const start = selection.start;
   const end = selection.end;
-  const quote = value.slice(start, end);
-  if (!quote) { showToast("请先在正文中选择要批注的文字", true); return; }
+  const mapped = mapEditorRange(state.document?.content || "", value, start, end);
+  if (!mapped) { showToast("请重新读取原文并选择要批注的文字", true); return; }
+  const quote = mapped.text;
   pendingAnnotation = {
     revision: state.document.revision,
     quote,
-    start_hint: codePointOffset(value, start),
-    end_hint: codePointOffset(value, end),
+    start_hint: mapped.start,
+    end_hint: mapped.end,
   };
   $("#revision-history-dialog").close();
   $("#manuscript-annotation-quote").textContent = quote;
