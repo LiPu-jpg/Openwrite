@@ -41,7 +41,13 @@ server.serve_forever()
 
 async function fixture(t, { missingDependency = false, reportedVersion = 'test-core' } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'openwrite-system-作者 '))
-  t.after(() => rm(root, { recursive: true, force: true }))
+  const runtimes = []
+  // Windows will not remove a live child's working directory. One teardown
+  // owns every instance and stops them all before removing the fixture.
+  t.after(async () => {
+    await Promise.all(runtimes.map(runtime => runtime.dispose()))
+    await rm(root, { recursive: true, force: true })
+  })
   const artifacts = join(root, 'artifacts')
   const modules = join(root, 'prepared dependencies')
   await mkdir(artifacts)
@@ -61,10 +67,14 @@ async function fixture(t, { missingDependency = false, reportedVersion = 'test-c
     wheel: { file: 'core.whl', sha256: hash(wheel) }, requirements: { file: 'requirements.lock', sha256: hash(requirements) } }
   await writeFile(join(artifacts, 'runtime-manifest.json'), JSON.stringify(manifest))
   const runtimeRoot = join(root, 'owned runtime')
-  const runtime = new ManagedRuntime(runtimeRoot, artifacts, { pythonPath: python, pythonModulePaths: [modules], backoffMs: [1] })
-  t.after(() => runtime.dispose())
+  const createRuntime = options => {
+    const runtime = new ManagedRuntime(runtimeRoot, artifacts, options)
+    runtimes.push(runtime)
+    return runtime
+  }
+  const runtime = createRuntime({ pythonPath: python, pythonModulePaths: [modules], backoffMs: [1] })
   runtime.extract = async () => { throw new Error('A supplied Python must never download a runtime') }
-  return { root, artifacts, modules, runtimeRoot, runtime }
+  return { root, artifacts, modules, runtimeRoot, runtime, createRuntime }
 }
 
 test('supplied Python starts without a platform artifact, preserves dependencies, authenticates and recovers', realPython, async t => {
@@ -128,13 +138,12 @@ test('missing supplied dependencies fail before promotion, without downloads or 
 })
 
 test('dependency preflight runs again for a cached supplied environment', realPython, async t => {
-  const { runtime, runtimeRoot, modules, artifacts } = await fixture(t)
+  const { runtime, runtimeRoot, modules, createRuntime } = await fixture(t)
   await runtime.ensure()
   await runtime.dispose()
   const active = await readFile(join(runtimeRoot, 'active.json'))
   await rm(join(modules, 'supplied_dependency.py'))
-  const next = new ManagedRuntime(runtimeRoot, artifacts, { pythonPath: python, pythonModulePaths: [modules] })
-  t.after(() => next.dispose())
+  const next = createRuntime({ pythonPath: python, pythonModulePaths: [modules] })
   await assert.rejects(next.ensure(), /supplied_dependency/)
   assert.deepEqual(await readFile(join(runtimeRoot, 'active.json')), active)
 })
@@ -145,39 +154,36 @@ test('a mismatched bundled Core fails the supplied-Python preflight', realPython
 })
 
 test('environment interpreter selection works and explicit config takes precedence', realPython, async t => {
-  const { runtimeRoot, artifacts, modules } = await fixture(t)
+  const { runtimeRoot, modules, createRuntime } = await fixture(t)
   const previous = process.env.OPENWRITE_PYTHON
   process.env.OPENWRITE_PYTHON = join(runtimeRoot, 'nonexistent-python')
   t.after(() => { if (previous === undefined) delete process.env.OPENWRITE_PYTHON; else process.env.OPENWRITE_PYTHON = previous })
-  const explicit = new ManagedRuntime(runtimeRoot, artifacts, { pythonPath: python, pythonModulePaths: [modules] })
-  t.after(() => explicit.dispose())
+  const explicit = createRuntime({ pythonPath: python, pythonModulePaths: [modules] })
   await explicit.ensure()
   await explicit.dispose()
   process.env.OPENWRITE_PYTHON = python
-  const fromEnv = new ManagedRuntime(runtimeRoot, artifacts, { pythonModulePaths: [modules] })
-  t.after(() => fromEnv.dispose())
+  const fromEnv = createRuntime({ pythonModulePaths: [modules] })
   assert.equal((await fromEnv.ensure()).baseUrl.startsWith('http://127.0.0.1:'), true)
 })
 
 test('supplied interpreter validation rejects command strings and relative dependency paths', async t => {
-  const { runtimeRoot, artifacts } = await fixture(t)
+  const { runtimeRoot, createRuntime } = await fixture(t)
   for (const options of [{ pythonPath: 'python3 --flag' }, { pythonPath: join(runtimeRoot, 'python'), pythonModulePaths: ['relative'] }]) {
-    const runtime = new ManagedRuntime(runtimeRoot, artifacts, options)
+    const runtime = createRuntime(options)
     await assert.rejects(runtime.ensure(), /absolute/)
     await runtime.dispose()
   }
 })
 
 test('supplied setup can be cancelled without promoting partial state', async t => {
-  const { runtimeRoot, artifacts } = await fixture(t)
+  const { runtimeRoot, createRuntime } = await fixture(t)
   let child, started
   const spawned = new Promise(resolve => { started = resolve })
-  const runtime = new ManagedRuntime(runtimeRoot, artifacts, { pythonPath: join(runtimeRoot, 'python'), spawn: (_command, _args, options) => {
+  const runtime = createRuntime({ pythonPath: join(runtimeRoot, 'python'), spawn: (_command, _args, options) => {
     child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], options)
     child.once('spawn', started)
     return child
   } })
-  t.after(() => runtime.dispose())
   const pending = assert.rejects(runtime.ensure(), { name: 'AbortError' })
   await spawned
   await runtime.cancel()
