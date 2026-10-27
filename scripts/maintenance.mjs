@@ -153,8 +153,13 @@ export async function diagnose(home, profile) {
   const runtime = await readFile(join(home, 'openwrite', 'active.json'), 'utf8').then(JSON.parse).catch(() => null)
   const installedPackage = await readFile(join(home, 'profiles', profile, 'node_modules', 'dsh-openwrite', 'package.json'), 'utf8').then(JSON.parse).catch(() => null)
   const toolPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  const requestedSpec = manifest.dependencies?.['dsh-openwrite']
   const packageSelection = {
-    requestedSpec: manifest.dependencies?.['dsh-openwrite'] ?? null,
+    // A private registry/git URL can contain credentials in its authority,
+    // query, fragment or path. Do not copy it into a shareable diagnostic.
+    requestedSpec: typeof requestedSpec === 'string'
+      ? requestedSpec.includes('://') || /^[^\s@]+@[^\s:]+:/.test(requestedSpec) ? '[remote package URL redacted]' : requestedSpec
+      : null,
     resolvedVersion: installedPackage?.version ?? null,
     diagnosticToolVersion: toolPackage.version,
     matchesDiagnosticTool: installedPackage?.version === toolPackage.version,

@@ -58,6 +58,12 @@ test('doctor exposes requested and resolved plugin versions without changing a p
   assert.equal(packageSelection.matchesDiagnosticTool, false)
   assert.equal(packageSelection.reinstallTarget, `dsh-openwrite@${packageSelection.diagnosticToolVersion}`)
   assert.equal(await readFile(file, 'utf8'), original)
+  const privateManifest = JSON.stringify(manifestWith({ dependencies: { 'dsh-openwrite': 'https://user:private-password@example.test/pkg.tgz?token=private-token' } }))
+  await writeFile(file, privateManifest)
+  const privateReport = await diagnose(home, 'web')
+  assert.equal(privateReport.packageSelection.requestedSpec, '[remote package URL redacted]')
+  assert.doesNotMatch(JSON.stringify(privateReport), /private-password|private-token/)
+  assert.equal(await readFile(file, 'utf8'), privateManifest)
 })
 
 async function fakeRemove(home, profile, args) {
