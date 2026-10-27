@@ -4,7 +4,20 @@
 
 本轮捆绑 Core **5.8.19**，固定源码 `d2b3cbe6009a1ab4f1064dca0115cb44ba080a3f`。修复 CRLF/emoji 选区坐标、独立 Studio 原始片段保留、中断升级无依赖恢复与损坏 tgz 缓存重试，详见 [补修记录](SELECTION_UPGRADE_REPAIRS.md)。
 
-本地 Core 全量 **1542 passed / 32 skipped**，修订服务与真实 HTTP 23 passed，原生预设/升级/运行时 40 passed，managed 33 passed，界面 319 passed，插件完整检查通过。wheel 的 499 个运行时文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `9d5307201bea47be3675b2d968ab444503479ff71d2b7ad9b3922a998889ba3a`。跨平台最终结果待下方验收回执补齐；本地测试不计作 Windows/Android 真机验收。
+本地 Core 全量 **1542 passed / 32 skipped**，修订服务与真实 HTTP 23 passed，原生预设/升级/运行时 40 passed，managed 33 passed，界面 319 passed，插件完整检查通过。wheel 的 499 个运行时文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `9d5307201bea47be3675b2d968ab444503479ff71d2b7ad9b3922a998889ba3a`。本地测试不计作 Windows/Android 真机验收。
+
+[Core PR #134](https://github.com/LiPu-jpg/Openwrite/pull/134) 与 [插件 PR #135](https://github.com/LiPu-jpg/Openwrite/pull/135) 已合并，最终 **22 项检查全部成功**：[三系统回归](https://github.com/LiPu-jpg/Openwrite/actions/runs/40446870919)、[完整安装/客户端验收](https://github.com/LiPu-jpg/Openwrite/actions/runs/40446870931)、[插件检查](https://github.com/LiPu-jpg/Openwrite/actions/runs/40446870954)。下载原始报告后再次核对：
+
+| 验收 | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| 固定 Core 全量 | 1542 passed / 32 skipped | 1542 passed / 32 skipped | 1542 passed / 32 skipped |
+| 真实 HTTP 路由与选区保护 | 10 passed | 10 passed | 10 passed |
+| 真实 Electron 44.7.0 脚本 | 5 passed / 0 skipped | 5 passed / 0 skipped | 5 passed / 0 skipped |
+| wheel 源码字节 / 应打包 Python 文件 | 499 / 163 一致 | 499 / 163 一致 | 499 / 163 一致 |
+
+8 份安装/源码、5 份精确宿主客户端、6 份原生回归报告全部通过。六组原生安装测试对同一 tarball 中的预设、升级与运行时脚本运行 40 项回归。32 项 Core 跳过项沿用缺失样例/外部 checkout 限制，新增回归没有跳过；测试不调用真实模型。
+
+候选 tarball SHA-256：`b73ed0a87da44f93f804ded3c5fffe6c83c29a9d6bf9c64fe9141eefc5a3a85b`。CI 提交 `7c91429693dd672bd1d426fa54a1bc075cad13b4` 与插件合并提交 `3c51627bf2a21a4e7c22fc3e77ab0e61f0db891f` 的源码 tree 均为 `879b9f30ed0c812d5b3aca34571a186f86670471`。Core 来源提交保留于 native-core 合并提交 `1ff7d699a456b90b7315eccfcf63c042cbf37d99`；候选包保留为验收证据，未发布。
 
 #123 的宿主正式发布与 Android/Termux 真机两项继续保留，暂停发布。公开 npm/GitHub 版本仍为 **0.2.27**。
 
