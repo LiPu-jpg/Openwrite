@@ -1226,13 +1226,14 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     name: 'novel_revision_create_selection',
     description:
       'Create a revision proposal for a text selection in a chapter (LONG-RUNNING, model-generated). ' +
-      'start/end are character offsets; pass the selected text as original_text. The proposal is only staged — ' +
+      'start/end are Unicode code-point offsets in the exact saved text, including original CR/LF characters; pass the selected text as original_text and the current expected_document_revision. The proposal is only staged — ' +
       'apply it with novel_revision_apply.',
     parameters: {
       chapter_id: { type: 'string', required: true, description: 'Chapter id (ch_<digits>).' },
       start: { type: 'integer', required: true, description: 'Selection start offset.' },
       end: { type: 'integer', required: true, description: 'Selection end offset.' },
       original_text: { type: 'string', description: 'The selected original text.' },
+      expected_document_revision: { type: 'string', description: 'Current exact manuscript revision; reject before generation if the source changed.' },
       instruction: { type: 'string', description: 'Revision instruction (max 4000 characters).' },
       action: { type: 'string', enum: ['rewrite', 'expand', 'compress', 'pace', 'dialogue', 'naturalize', 'custom'], description: 'Revision mode (default "rewrite").' },
       target_units: { type: 'integer', description: 'Target length in writing units (0 = keep similar).' },
@@ -1245,6 +1246,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       if (!CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
       const body: JsonObject = { chapter_id: args.chapter_id, start: args.start, end: args.end }
       if (args.original_text !== undefined) body['original_text'] = args.original_text
+      if (args.expected_document_revision !== undefined) body['expected_document_revision'] = args.expected_document_revision
       if (args.instruction !== undefined) body['instruction'] = args.instruction
       if (args.action !== undefined) body['action'] = args.action
       if (args.target_units !== undefined) body['target_units'] = args.target_units

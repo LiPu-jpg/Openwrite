@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Offline profile upgrades retain the previous complete dependency tree until commit.
-import { cp, copyFile, mkdir, readFile, readdir, rename, writeFile, open, access, readlink, symlink, unlink } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rename, writeFile, open, access, readlink, symlink, unlink, realpath, lstat, rmdir, utimes } from 'node:fs/promises'
 import { spawn, spawnSync } from 'node:child_process'
 import { join, resolve, relative, isAbsolute, dirname, sep } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
@@ -29,6 +29,69 @@ async function save(path, value) {
   const pending = path + '.pending-' + randomUUID()
   await writeFile(pending, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 })
   await rename(pending, path)
+}
+
+// Recovery cannot load dependencies through a profile which is between renames.
+// Use proper-lockfile's same canonical <profiles>.lock directory and fresh mtime
+// protocol, without importing any code from the missing or backup profile.
+export async function acquireRecoveryLock(home) {
+  const path = (await realpath(join(resolve(home), 'profiles'))) + '.lock'
+  const locked = () => Object.assign(new Error('ELOCKED: another profile operation holds the upgrade lock'), { code: 'ELOCKED' })
+  const same = (a, b) => a.dev === b.dev && a.ino === b.ino && a.birthtimeMs === b.birthtimeMs
+  let owner
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { await mkdir(path, { mode: 0o700 }); owner = await lstat(path); break }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      let observed
+      try { observed = await lstat(path) } catch (cause) { if (cause.code === 'ENOENT') continue; throw cause }
+      if (!observed.isDirectory() || Date.now() - observed.mtimeMs <= 30_000) throw locked()
+      const current = await lstat(path)
+      if (!same(observed, current) || observed.mtimeMs !== current.mtimeMs) throw locked()
+      try { await rmdir(path) } catch (cause) { if (cause.code !== 'ENOENT') throw locked() }
+    }
+  }
+  if (!owner) throw locked()
+  let pending = Promise.resolve(), compromised
+  const assertOwned = async () => {
+    if (compromised) throw compromised
+    const current = await lstat(path)
+    if (!same(owner, current)) throw locked()
+  }
+  const timer = setInterval(() => {
+    pending = pending.then(async () => {
+      await assertOwned()
+      const now = new Date()
+      await utimes(path, now, now)
+    }).catch(error => { compromised = error })
+  }, 1000)
+  timer.unref()
+  return {
+    async assertOwned() { await pending; await assertOwned() },
+    async release() {
+      clearInterval(timer)
+      await pending
+      await assertOwned()
+      await rmdir(path)
+    },
+  }
+}
+
+async function pinArchive(home, archive) {
+  const bytes = await readFile(archive)
+  const sha256 = digest(bytes)
+  const cache = join(resolve(home), 'openwrite', 'packages')
+  await mkdir(cache, { recursive: true, mode: 0o700 })
+  const destination = join(cache, sha256 + '.tgz')
+  if (await exists(destination) && digest(await readFile(destination)) === sha256) return { path: destination, sha256 }
+  const pending = join(cache, '.' + sha256 + '-' + randomUUID() + '.pending')
+  try {
+    const handle = await open(pending, 'wx', 0o600)
+    try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+    if (digest(await readFile(pending)) !== sha256) throw new Error('PACKAGE_CACHE_CONFLICT: temporary archive verification failed')
+    await rename(pending, destination)
+    return { path: destination, sha256 }
+  } finally { try { await unlink(pending) } catch (error) { if (error.code !== 'ENOENT') throw error } }
 }
 
 async function relocateProfileLinks(staging, previous, replacementRoot, yaml) {
@@ -113,10 +176,13 @@ export async function recoverUpgrade(home, operationId, options = {}) {
   const target = profileDirectory(home, operation.profile)
   await (options.assertStopped || assertHostStopped)(home, operation.profile)
   const previous = join(root, 'previous-profile')
-  const { acquireLock } = upgradeDependencies(home, operation.profile)
-  const release = await acquireLock(join(home, 'profiles'), { realpath: true, retries: 0 })
+  const lease = await acquireRecoveryLock(home)
   try {
     if (!await exists(target) && await exists(previous)) {
+      if (!operation.old_manifest_sha256 || digest(await readFile(join(previous, 'package.json'))) !== operation.old_manifest_sha256) {
+        throw new Error('PROFILE_CHANGED: backup manifest differs from the approved operation; no profile restored')
+      }
+      await lease.assertOwned()
       await rename(previous, target)
       operation.status = 'rolled_back'
     } else if (await exists(target)) {
@@ -125,9 +191,10 @@ export async function recoverUpgrade(home, operationId, options = {}) {
       else if (actual === operation.old_manifest_sha256) operation.status = 'rolled_back'
       else throw new Error('PROFILE_CHANGED: preserve the backup and reconcile the profile manually')
     } else throw new Error('RECOVERY_REQUIRED: neither active nor previous profile is available')
+    await lease.assertOwned()
     await save(join(root, 'operation.json'), operation)
     return { operation_id: operationId, status: operation.status, backup: previous }
-  } finally { await release() }
+  } finally { await lease.release() }
 }
 
 /** Stage a complete profile beside the active tree, validate, then swap while stopped. */
@@ -163,14 +230,10 @@ export async function upgradeProfile(home, profile, spec, options = {}) {
     const localPath = spec.startsWith('file:') ? spec.slice(5) : spec
     if (/\.(?:tgz|tar\.gz)$/i.test(localPath) && await exists(resolve(localPath))) {
       const archive = resolve(localPath)
-      const archiveHash = digest(await readFile(archive))
-      const cache = join(resolve(home), 'openwrite', 'packages')
-      await mkdir(cache, { recursive: true, mode: 0o700 })
-      installSpec = join(cache, archiveHash + '.tgz')
-      if (!await exists(installSpec)) await copyFile(archive, installSpec)
-      if (digest(await readFile(installSpec)) !== archiveHash) throw new Error('PACKAGE_CACHE_CONFLICT: cached archive bytes differ')
+      const pinned = await pinArchive(home, archive)
+      installSpec = pinned.path
       operation.install_spec = installSpec
-      operation.package_sha256 = archiveHash
+      operation.package_sha256 = pinned.sha256
       await save(join(root, 'operation.json'), operation)
     }
     await (options.run || runInstall)(home, stagingName, installSpec, log)

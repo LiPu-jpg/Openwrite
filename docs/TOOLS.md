@@ -982,7 +982,7 @@ Create a revision proposal that addresses selected issues from a chapter review 
 
 ## novel_revision_create_selection
 
-Create a revision proposal for a text selection in a chapter (LONG-RUNNING, model-generated). start/end are character offsets; pass the selected text as original_text. The proposal is only staged — apply it with novel_revision_apply.
+Create a revision proposal for a text selection in a chapter (LONG-RUNNING, model-generated). start/end are Unicode code-point offsets in the exact saved text, including original CR/LF characters; pass the selected text as original_text and the current expected_document_revision. The proposal is only staged — apply it with novel_revision_apply.
 
 影响：会提交操作或保存文件；具体取决于 action/参数。
 
@@ -992,6 +992,7 @@ Create a revision proposal for a text selection in a chapter (LONG-RUNNING, mode
 | start | integer | 是 | Selection start offset. |
 | end | integer | 是 | Selection end offset. |
 | original_text | string | 否 | The selected original text. |
+| expected_document_revision | string | 否 | Current exact manuscript revision; reject before generation if the source changed. |
 | instruction | string | 否 | Revision instruction (max 4000 characters). |
 | action | string | 否 | ["rewrite","expand","compress","pace","dialogue","naturalize","custom"]；Revision mode (default "rewrite"). |
 | target_units | integer | 否 | Target length in writing units (0 = keep similar). |

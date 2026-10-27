@@ -1,8 +1,11 @@
-/** Author-visible manuscript range used by selection polish and the editor. */
+import { mapEditorRange } from './selection-coordinates.ts'
+
+/** Editor UTF-16 positions, plus the exact editor value which produced them. */
 export type ManuscriptSelection = {
   start: number
   end: number
   text: string
+  source: string
 }
 
 export type SelectionPolishKind = 'expand' | 'compress' | 'naturalize' | 'reviewFix'
@@ -41,7 +44,12 @@ export function shouldClearManuscriptSelection(options: {
 
 export function manuscriptSelectionFromRange(value: string, start: number, end: number): ManuscriptSelection | null {
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > value.length || end <= start) return null
-  return { start, end, text: value.slice(start, end) }
+  return { start, end, text: value.slice(start, end), source: value }
+}
+
+export function mapManuscriptSelection(source: string, selection: ManuscriptSelection): { start: number; end: number; text: string } | null {
+  if (selection.source.slice(selection.start, selection.end) !== selection.text) return null
+  return mapEditorRange(source, selection.source, selection.start, selection.end)
 }
 
 /** Count non-overlapping occurrences of needle in haystack. */
@@ -138,7 +146,7 @@ function issueRange(value: unknown): { start: number; end: number } | null {
 }
 
 /** Review issues whose evidence sits inside the current manuscript selection. */
-export function reviewIssuesForSelection(issues: readonly unknown[], selection: ManuscriptSelection): string[] {
+export function reviewIssuesForSelection(issues: readonly unknown[], selection: { start: number; end: number; text: string }): string[] {
   const ids: string[] = []
   for (const raw of issues) {
     const item = asRecord(raw)
@@ -157,19 +165,22 @@ export function reviewIssuesForSelection(issues: readonly unknown[], selection: 
 
 export type SelectionPolishRequest =
   | { ok: true; path: '/revisions/selection' | '/revisions/from-review'; body: Record<string, unknown> }
-  | { ok: false; reason: 'empty' | 'no-review' | 'no-issues' }
+  | { ok: false; reason: 'empty' | 'no-review' | 'no-issues' | 'source-changed' }
 
 /** Map one author action onto the existing Studio revision-create routes. */
 export function selectionPolishRequest(input: {
   kind: SelectionPolishKind
   chapterId: string
   selection: ManuscriptSelection
+  documentContent: string
   documentRevision: string
   reviewRevision: string
   reviewFresh: boolean
   issueIds: string[]
 }): SelectionPolishRequest {
   if (input.chapterId === '' || input.selection.text.trim() === '') return { ok: false, reason: 'empty' }
+  const selected = mapManuscriptSelection(input.documentContent, input.selection)
+  if (selected === null) return { ok: false, reason: 'source-changed' }
   if (input.kind === 'reviewFix') {
     if (!input.reviewFresh || input.reviewRevision === '' || input.documentRevision === '') {
       return { ok: false, reason: 'no-review' }
@@ -181,7 +192,7 @@ export function selectionPolishRequest(input: {
       body: {
         chapter_id: input.chapterId,
         issue_ids: input.issueIds,
-        original_text: input.selection.text,
+        original_text: selected.text,
         expected_review_revision: input.reviewRevision,
         expected_document_revision: input.documentRevision,
       },
@@ -192,10 +203,11 @@ export function selectionPolishRequest(input: {
     path: '/revisions/selection',
     body: {
       chapter_id: input.chapterId,
-      start: input.selection.start,
-      end: input.selection.end,
-      original_text: input.selection.text,
+      start: selected.start,
+      end: selected.end,
+      original_text: selected.text,
       action: SELECTION_ACTION_MODE[input.kind],
+      expected_document_revision: input.documentRevision,
     },
   }
 }

@@ -90,6 +90,7 @@ export function loadVditor(): Promise<VditorCtor> {
 }
 
 export type ManuscriptEditorApi = {
+  getValue: () => string
   insertAtCaret: (markdown: string) => void
   revealQuote: (quote: string, start: number) => boolean
 }
@@ -105,6 +106,7 @@ interface VditorBodyProps {
   /** The consumer can synchronously retain callbacks delivered during cleanup. */
   flushOnLeave?: boolean
   annotations?: readonly ManuscriptAnnotation[]
+  annotationSource?: string
   onInsertMarker?: () => void
   onEditorApi?: (api: ManuscriptEditorApi | null) => void
 }
@@ -150,13 +152,15 @@ function paintOverlay(host: HTMLElement, overlay: HTMLElement, bands: readonly O
 /** One Vditor IR instance bound to the shell theme; destroyed on unmount. */
 export function VditorBody({
   initial, onChange, onSelectionChange, onReady = () => {}, onFailed, disabled, flushOnLeave = false,
-  annotations = [], onInsertMarker, onEditorApi,
+  annotations = [], annotationSource = initial, onInsertMarker, onEditorApi,
 }: VditorBodyProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const instanceRef = useRef<VditorInstance | null>(null)
   const annotationsRef = useRef(annotations)
   annotationsRef.current = annotations
+  const annotationSourceRef = useRef(annotationSource)
+  annotationSourceRef.current = annotationSource
   const onInsertMarkerRef = useRef(onInsertMarker)
   onInsertMarkerRef.current = onInsertMarker
   const onEditorApiRef = useRef(onEditorApi)
@@ -261,11 +265,12 @@ export function VditorBody({
           paintOverlay(
             editorHost,
             overlay,
-            overlayBands(value, annotationsRef.current, parseMarkers(value)),
+            overlayBands(value, annotationsRef.current, parseMarkers(value), annotationSourceRef.current),
             document.body.hasAttribute('data-ds-dark-theme'),
           )
         }
         onEditorApiRef.current?.({
+          getValue: () => instanceRef.current?.getValue() ?? '',
           insertAtCaret: (markdown: string) => {
             const current = instanceRef.current
             if (current === null || typeof current.insertValue !== 'function') return
@@ -361,9 +366,9 @@ export function VditorBody({
     const instance = instanceRef.current
     if (host === null || overlay === null || instance === null) return
     try {
-      paintOverlay(host, overlay, overlayBands(instance.getValue(), annotations, parseMarkers(instance.getValue())), document.body.hasAttribute('data-ds-dark-theme'))
+      paintOverlay(host, overlay, overlayBands(instance.getValue(), annotations, parseMarkers(instance.getValue()), annotationSource), document.body.hasAttribute('data-ds-dark-theme'))
     } catch { /* editor not ready */ }
-  }, [annotations])
+  }, [annotations, annotationSource])
 
   return (
     <div className={css.vditorFrame} aria-disabled={disabled}>

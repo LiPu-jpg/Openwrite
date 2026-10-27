@@ -2,6 +2,14 @@
 
 ## 0.2.28 候选（未发布）
 
+本轮捆绑 Core **5.8.19**，固定源码 `d2b3cbe6009a1ab4f1064dca0115cb44ba080a3f`。修复 CRLF/emoji 选区坐标、独立 Studio 原始片段保留、中断升级无依赖恢复与损坏 tgz 缓存重试，详见 [补修记录](SELECTION_UPGRADE_REPAIRS.md)。
+
+本地 Core 全量 **1542 passed / 32 skipped**，修订服务与真实 HTTP 23 passed，原生预设/升级/运行时 40 passed，managed 33 passed，界面 319 passed，插件完整检查通过。wheel 的 499 个运行时文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `9d5307201bea47be3675b2d968ab444503479ff71d2b7ad9b3922a998889ba3a`。跨平台最终结果待下方验收回执补齐；本地测试不计作 Windows/Android 真机验收。
+
+#123 的宿主正式发布与 Android/Termux 真机两项继续保留，暂停发布。公开 npm/GitHub 版本仍为 **0.2.27**。
+
+### 前轮候选证据（Core 5.8.18，未发布）
+
 本轮根据 #123 新回复捆绑 Core **5.8.18**，固定源码 `43cb604a7583b7268f47e54ceb8a0c30b95e82b2`。本地全量 **1541 passed / 32 skipped**，真实 HTTP 2 passed；wheel 的 498 个打包源文件与固定源码逐字节一致，163 个应打包 Python 文件无遗漏，SHA-256 为 `09f9baef5fe0d502510c8542f20c6abaf6893f02e2d069d7f0d7cc50c7aeea93`。
 
 写章/修订 thinking 模式的三个回归在旧冻结源码失败，新实现通过。原生预设/升级/运行时本地 34 passed。报告者已补齐旧会话与 B-13 的 Windows 验收；余下宿主正式发布和 Android/Termux 真机两项仍暂停新版本发布。具体修复、来源和边界见 [#123 回复补修](ISSUE_123_FOLLOWUP.md)。

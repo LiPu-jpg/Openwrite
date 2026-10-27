@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { copyFile, mkdtemp, mkdir, readFile, writeFile, readdir, rename, rm, symlink } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, readFile, writeFile, readdir, rename, rm, symlink, utimes, access, lstat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { upgradeProfile, recoverUpgrade, repairProfile } from './safe-upgrade.mjs'
+import { createHash } from 'node:crypto'
+import { upgradeProfile, recoverUpgrade, repairProfile, acquireRecoveryLock } from './safe-upgrade.mjs'
+
+const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'openwrite-upgrade-'))
@@ -88,7 +91,8 @@ test('an interrupted swap restores the previous profile without an installer', a
   const root = join(home, 'openwrite', 'upgrades', id)
   try {
     await mkdir(root, { recursive: true })
-    await writeFile(join(root, 'operation.json'), JSON.stringify({ profile: 'desktop', status: 'swapping' }))
+    const manifest = await readFile(join(profile, 'package.json'))
+    await writeFile(join(root, 'operation.json'), JSON.stringify({ profile: 'desktop', status: 'swapping', old_manifest_sha256: digest(manifest) }))
     await rename(profile, join(root, 'previous-profile'))
     const result = await recoverUpgrade(home, id, options)
     assert.equal(result.status, 'rolled_back')
@@ -141,4 +145,105 @@ test('a local release archive is pinned outside disposable download directories 
     await rm(home, { recursive: true, force: true })
     await rm(download, { recursive: true, force: true })
   }
+})
+
+test('an unpacked recovery restores the verified backup without loading profile dependencies', async () => {
+  const { home, profile, options } = await fixture()
+  const root = join(home, 'openwrite', 'upgrades', 'upgrade_aaaa-bbbb')
+  try {
+    const before = await readFile(join(profile, 'package.json'))
+    await mkdir(join(profile, 'node_modules'), { recursive: true })
+    // The absolute target will be missing between the two profile renames.
+    await symlink(join(profile, 'missing-dependency'), join(profile, 'node_modules', 'proper-lockfile'), 'junction')
+    await mkdir(root, { recursive: true })
+    await writeFile(join(root, 'operation.json'), JSON.stringify({ profile: 'desktop', status: 'swapping', old_manifest_sha256: digest(before) }))
+    await rename(profile, join(root, 'previous-profile'))
+    const script = join(home, 'unpacked', 'safe-upgrade.mjs')
+    await mkdir(dirname(script), { recursive: true })
+    await copyFile(new URL('./safe-upgrade.mjs', import.meta.url), script)
+    const standalone = await import(pathToFileURL(script).href)
+    const result = await standalone.recoverUpgrade(home, 'upgrade_aaaa-bbbb', options)
+    assert.equal(result.status, 'rolled_back')
+    assert.deepEqual(await readFile(join(profile, 'package.json')), before)
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('recovery refuses a modified backup and leaves its bytes untouched', async () => {
+  const { home, profile, options } = await fixture()
+  const root = join(home, 'openwrite', 'upgrades', 'upgrade_cccc-dddd')
+  try {
+    await mkdir(root, { recursive: true })
+    const approved = await readFile(join(profile, 'package.json'))
+    await writeFile(join(root, 'operation.json'), JSON.stringify({ profile: 'desktop', old_manifest_sha256: digest(approved) }))
+    const previous = join(root, 'previous-profile')
+    await rename(profile, previous)
+    await writeFile(join(previous, 'package.json'), '{}')
+    await assert.rejects(recoverUpgrade(home, 'upgrade_cccc-dddd', options), /PROFILE_CHANGED/)
+    assert.equal(await readFile(join(previous, 'package.json'), 'utf8'), '{}')
+    await assert.rejects(access(profile), { code: 'ENOENT' })
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('recovery and the normal upgrader exclude one another through the same lock', async () => {
+  const { home } = await fixture()
+  const require = createRequire(import.meta.url)
+  try {
+    const release = await require('proper-lockfile').lock(join(home, 'profiles'))
+    try { await assert.rejects(acquireRecoveryLock(home), { code: 'ELOCKED' }) } finally { await release() }
+    const lease = await acquireRecoveryLock(home)
+    try { await assert.rejects(require('proper-lockfile').lock(join(home, 'profiles')), { code: 'ELOCKED' }) }
+    finally { await lease.release() }
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('recovery lease refreshes its mtime and never removes a replacement lock', async () => {
+  const { home } = await fixture()
+  const path = join(home, 'profiles.lock')
+  try {
+    const lease = await acquireRecoveryLock(home)
+    const before = (await lstat(path)).mtimeMs
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    await lease.assertOwned()
+    assert.ok((await lstat(path)).mtimeMs > before)
+    await rm(path, { recursive: true })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    await mkdir(path)
+    await assert.rejects(lease.release())
+    await access(path)
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('an abandoned recovery lock can be reclaimed after its lease expires', async () => {
+  const { home } = await fixture()
+  const path = join(home, 'profiles.lock')
+  try {
+    await mkdir(path)
+    const old = new Date(Date.now() - 60_000)
+    await utimes(path, old, old)
+    const lease = await acquireRecoveryLock(home)
+    await lease.assertOwned()
+    await lease.release()
+    await assert.rejects(access(path), { code: 'ENOENT' })
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('a partial cached archive is rebuilt atomically from the verified source', async () => {
+  const { home, profile, options } = await fixture()
+  try {
+    const bytes = Buffer.from('complete controlled archive')
+    const file = join(home, 'release.tgz')
+    await writeFile(file, bytes)
+    const cache = join(home, 'openwrite', 'packages')
+    await mkdir(cache, { recursive: true })
+    const pinned = join(cache, digest(bytes) + '.tgz')
+    await writeFile(pinned, 'interrupted partial copy')
+    const result = await upgradeProfile(home, 'desktop', file, { ...options, run: async (h, p, spec, log) => {
+      assert.equal(spec, pinned)
+      assert.deepEqual(await readFile(pinned), bytes)
+      assert.deepEqual(await readdir(cache), [digest(bytes) + '.tgz'])
+      await installFake(h, p, 'dsh-openwrite@0.2.25', log)
+    } })
+    assert.equal(result.status, 'completed')
+    assert.equal(JSON.parse(await readFile(join(profile, 'package.json'))).dependencies.other, '1')
+  } finally { await rm(home, { recursive: true, force: true }) }
 })

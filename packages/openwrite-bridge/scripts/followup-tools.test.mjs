@@ -2,6 +2,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { registerNovelTools } from '../lib/tools.js'
 
+test('selection revisions forward the exact source version without changing offsets', async () => {
+  const calls = [], tools = []
+  const client = {postJson: async (path, body) => {calls.push({path, body}); return {ok: true}}}
+  registerNovelTools({tools: {register: tool => tools.push(tool)}}, () => client, {timeoutMs: 1000, outputDir: '/unused'})
+  const body = {chapter_id: 'ch_001', start: 7, end: 12, original_text: '选中\r\n文', expected_document_revision: 'sha256:current'}
+  await tools.find(t => t.name === 'novel_revision_create_selection').execute(body, {signal: new AbortController().signal, callId: 'selection-version'})
+  assert.deepEqual(calls, [{path: '/api/revisions/selection', body}])
+})
+
 test('write dry-run and archived history cross the tool boundary without losing options', async () => {
   const calls = []
   const tools = []

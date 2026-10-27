@@ -16,18 +16,19 @@ export type OverlayBand = {
 }
 
 /** Display-only bands. Never written back into markdown. */
-export function overlayBands(content: string, notes: readonly ManuscriptAnnotation[], markers: readonly MarkerSpan[]): OverlayBand[] {
+export function overlayBands(content: string, notes: readonly ManuscriptAnnotation[], markers: readonly MarkerSpan[], source = content): OverlayBand[] {
   const bands: OverlayBand[] = []
   for (const note of notes) {
     if (note.status === 'resolved') continue
-    const anchor = liveAnnotationAnchor(content, note)
+    const anchor = liveAnnotationAnchor(content, note, source)
     if (anchor.state === 'detached') continue
-    const occurrence = countOccurrences(content.slice(0, anchor.start), note.quote)
+    const needle = content.slice(anchor.start, anchor.end)
+    const occurrence = countOccurrences(content.slice(0, anchor.start), needle)
     bands.push({
       kind: 'note',
       start: anchor.start,
       end: anchor.end,
-      needle: note.quote,
+      needle,
       occurrence,
       color: note.color,
       title: note.note,

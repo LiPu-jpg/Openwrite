@@ -70,8 +70,8 @@ vi.mock('../../src/client/VditorBody.tsx', () => ({
     initial: string
     onChange: (value: string) => void
     onReady: () => void
-    onSelectionChange?: (selection: { start: number; end: number; text: string } | null) => void
-    onEditorApi?: (api: { insertAtCaret: (markdown: string) => void } | null) => void
+    onSelectionChange?: (selection: { start: number; end: number; text: string; source: string } | null) => void
+    onEditorApi?: (api: { getValue: () => string; insertAtCaret: (markdown: string) => void; revealQuote: typeof harness.revealQuote } | null) => void
   }) => {
     const editorRef = useRef<HTMLTextAreaElement>(null)
     const onChangeRef = useRef(onChange)
@@ -81,6 +81,7 @@ vi.mock('../../src/client/VditorBody.tsx', () => ({
     useEffect(() => { onReady() }, [onReady])
     useEffect(() => {
       onEditorApiRef.current?.({
+        getValue: () => editorRef.current?.value ?? '',
         insertAtCaret: (markdown: string) => {
           const node = editorRef.current
           if (node === null) return
@@ -98,7 +99,7 @@ vi.mock('../../src/client/VditorBody.tsx', () => ({
       const start = event.currentTarget.selectionStart
       const end = event.currentTarget.selectionEnd
       onSelectionChange?.(end > start
-        ? { start, end, text: event.currentTarget.value.slice(start, end) }
+        ? { start, end, text: event.currentTarget.value.slice(start, end), source: event.currentTarget.value }
         : null)
     }
     return <textarea ref={editorRef} aria-label="manuscript-editor" defaultValue={initial}
@@ -1301,13 +1302,13 @@ describe('CreationView selection polish', () => {
     await act(async () => { await Promise.resolve() })
 
     expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
-      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'expand',
+      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'expand', expected_document_revision: 'revision-current',
     })
     expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
-      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'compress',
+      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'compress', expected_document_revision: 'revision-current',
     })
     expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
-      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'naturalize',
+      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'naturalize', expected_document_revision: 'revision-current',
     })
     expect(postStudioApi).toHaveBeenCalledWith('/revisions/from-review', {
       chapter_id: 'ch_001',
@@ -1342,7 +1343,7 @@ describe('CreationView selection polish', () => {
     fireEvent.click(expand)
     await act(async () => { await Promise.resolve() })
     expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
-      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'expand',
+      chapter_id: 'ch_001', start: 0, end: 4, original_text: '密信还在', action: 'expand', expected_document_revision: 'revision-current',
     })
   })
 
@@ -1669,6 +1670,26 @@ describe('CreationView selection notes and marker insert', () => {
     expect(editor.selectionStart).toBe(0)
     expect(editor.selectionEnd).toBe(4)
     expect(screen.getAllByText('creation.notes.attached').length).toBeGreaterThan(0)
+  })
+
+  it('locates a multiline CRLF note after emoji and reuses its exact raw selection', async () => {
+    const raw = '😀前言\r\n密信\r\n还在\r\n尾部'
+    const quote = '密信\r\n还在'
+    const start = Array.from(raw.slice(0, raw.indexOf('密信'))).length
+    const record = { ...annotationRecord, quote, start_hint: start, end_hint: start + Array.from(quote).length,
+      current_start: start, current_end: start + Array.from(quote).length }
+    const postStudioApi = vi.fn(async (_url: string, body?: Record<string, unknown>) => {
+      if (body?.['action'] === 'annotations') return { annotations: [record] }
+      return {}
+    })
+    render(<CreationView {...(viewProps({ fetchStudioApi: editingFetch(raw), putStudioApi: vi.fn(), postStudioApi }) as never)} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'creation.notes.locate: 查来源' }))
+    expect(harness.revealQuote).toHaveBeenCalledWith('密信\n还在', raw.replace(/\r\n/g, '\n').indexOf('密信'))
+    fireEvent.click(await screen.findByRole('button', { name: 'creation.selection.expand' }))
+    await waitFor(() => expect(postStudioApi).toHaveBeenCalledWith('/revisions/selection', {
+      chapter_id: 'ch_001', start, end: start + Array.from(quote).length, original_text: quote,
+      action: 'expand', expected_document_revision: 'revision-current',
+    }))
   })
 
   it('refuses to bind a note after save if the original span no longer matches', async () => {
