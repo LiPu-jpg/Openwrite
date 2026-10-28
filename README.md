@@ -32,6 +32,7 @@
 增加 `pythonPath` / `OPENWRITE_PYTHON` 和显式依赖目录配置，允许使用已准备依赖的 Python，
 跳过 uv 与解释器下载；补充 Android/Termux 的本机 external Studio 步骤，以及旧版安装选择诊断。
 配置和边界见 [安装说明](docs/INSTALL.md#bring-your-own-python)。同时补齐手机后台输入保留、独立 Studio 正文草稿恢复、触屏选区与下载，并加入 Chromium / WebKit 发布回归，见 [手机验收说明](docs/MOBILE_READINESS.md)。正式可安装版本仍为下方的 0.2.28；
+同时修复审稿证据漏填误判与机器批注污染，候选捆绑 Core 5.8.22，见 [#146 修复说明](docs/ISSUE_146_REVIEW_EVIDENCE.md)。
 Android 完整工具验收与宿主升级保护发布继续在 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123) 跟踪。
 
 ## 0.2.28
