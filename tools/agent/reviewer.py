@@ -23,6 +23,7 @@ import yaml
 
 from models.context_package import estimate_text_tokens
 
+from ..character_state_index import strip_character_state_annotations
 from ..llm import Message
 from ..llm.context import ContextBudgetPolicy
 from ..review_rubric import (
@@ -160,8 +161,11 @@ class ReviewerAgent(BaseAgent):
             ReviewResult 审核结果
         """
         all_issues: list[ReviewIssue] = []
-        from tools.writing_assets import WritingAssets, term_findings, manuscript_metrics
+        from tools.writing_assets import WritingAssets, manuscript_metrics, term_findings
 
+        # Review the same reader-facing prose that export and context assembly
+        # use. Machine state/relation registrations are not narration or dialogue.
+        content = strip_character_state_annotations(content)
         context = dict(context)
         root = Path(getattr(getattr(self, "ctx", None), "project_root", "."))
         config_path = root / "novel_config.yaml"
@@ -406,6 +410,7 @@ class ReviewerAgent(BaseAgent):
     ) -> tuple[dict, list[ReviewIssue]]:
         from ..llm.response import ProviderResponseError
 
+        content = strip_character_state_annotations(content)
         criteria_contract = "\n".join(
             f"- {criterion.id}: {criterion.name}, max={criterion.max_points:g}, "
             f"legacy_check_ids={list(criterion.legacy_check_ids)}"
@@ -418,6 +423,7 @@ class ReviewerAgent(BaseAgent):
 
 每个 criterion 必须返回且只能返回一次。status 只能是 evaluated、not_applicable、inconclusive。
 evaluated 时 earned 必须在 0 与 max 之间；earned>0 必须提供至少一段可在正文中逐字定位的短引用。
+证据必须写在该 criterion 的 evidence 数组；即使 issues 中已有相同引用，也要在 evidence 中列出。
 not_applicable 表示题材或正典条件确实不适用；缺少必要上下文必须用 inconclusive，不能按 0 分。
 问题不参与扣分。只报告有正文证据的问题，severity 只能是 critical、warning、info。
 critical 仅用于明确事实矛盾、连续性破坏或使章节不可用的问题。
@@ -488,6 +494,16 @@ critical 仅用于明确事实矛盾、连续性破坏或使章节不可用的�
             allowed_dimensions=set(domain.legacy_check_ids),
             content=content,
         )
+        # Some providers place findings inside a criterion instead of the
+        # domain-level list. Keep those findings, including critical blockers.
+        for criterion in raw["criteria"]:
+            for issue in self._parse_v2_issues(
+                criterion["issues"],
+                allowed_dimensions=set(domain.legacy_check_ids),
+                content=content,
+            ):
+                if issue not in issues:
+                    issues.append(issue)
         return raw, issues
 
     def _llm_review_gate(
@@ -498,6 +514,7 @@ critical 仅用于明确事实矛盾、连续性破坏或使章节不可用的�
     ) -> tuple[dict, list[ReviewIssue]]:
         from ..llm.response import ProviderResponseError
 
+        content = strip_character_state_annotations(content)
         system_prompt = """你是小说交付硬门禁评审员。只检查敏感内容政策和明确使章节不可交付的事实。
 普通题材描写、人物讨论或可选优化不得阻断。只输出 JSON：
 {"id":"safety","status":"pass|blocked|inconclusive","findings":[{"dimension":27,"severity":"critical","category":"敏感内容","description":"原因","suggestion":"建议","evidence":"正文短引用"}]}。
@@ -577,11 +594,33 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
         validated: list[dict] = []
         for spec in domain.criteria:
             item = by_id.get(spec.id, {"id": spec.id, "status": "inconclusive"})
-            evidence = [
-                str(quote).strip()
-                for quote in item.get("evidence") or []
-                if str(quote).strip() and str(quote).strip() in content
-            ]
+            item.pop("evidence_source", None)
+            quotes = item.get("evidence")
+            # A string is a single quote, never a list of character-sized
+            # "evidence" fragments. Other malformed shapes supply no evidence.
+            if isinstance(quotes, str):
+                quotes = [quotes]
+            evidence = list(dict.fromkeys(
+                quote.strip()
+                for quote in (quotes if isinstance(quotes, list) else [])
+                if isinstance(quote, str) and quote.strip() and quote.strip() in content
+            ))
+            nested = item.get("issues")
+            scoped_issues = []
+            for finding in nested if isinstance(nested, list) else []:
+                if not isinstance(finding, dict):
+                    continue
+                finding = dict(finding)
+                if "dimension" not in finding and spec.legacy_check_ids:
+                    finding["dimension"] = spec.legacy_check_ids[0]
+                scoped_issues.extend(ReviewerAgent._parse_v2_issues(
+                    [finding], allowed_dimensions=set(spec.legacy_check_ids), content=content,
+                ))
+            item["issues"] = [ReviewerAgent._issue_payload(issue) for issue in scoped_issues]
+            if not evidence:
+                evidence = list(dict.fromkeys(issue.evidence for issue in scoped_issues))
+                if evidence:
+                    item["evidence_source"] = "criterion_issues"
             item["evidence"] = evidence
             validated.append(item)
         return validated
@@ -601,12 +640,13 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
                 continue
             dimension = item.get("dimension")
             severity = str(item.get("severity") or "").lower()
-            evidence = str(item.get("evidence") or "").strip()
-            if dimension not in allowed_dimensions or severity not in {
-                "critical",
-                "warning",
-                "info",
-            }:
+            quote = item.get("evidence")
+            evidence = quote.strip() if isinstance(quote, str) else ""
+            if (
+                type(dimension) is not int
+                or dimension not in allowed_dimensions
+                or severity not in {"critical", "warning", "info"}
+            ):
                 continue
             if not evidence or evidence not in content:
                 continue
@@ -842,6 +882,7 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
 
         from ..llm.response import ProviderResponseError
 
+        content = strip_character_state_annotations(content)
         dimension_contract = "\n".join(
             f"{number}. {self.DIMENSION_MAP[number]}" for number in requested
         )
