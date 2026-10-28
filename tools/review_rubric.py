@@ -403,6 +403,10 @@ def normalize_criterion(raw: Mapping[str, Any], spec: CriterionSpec) -> dict[str
         "earned": earned,
         "max": spec.max_points,
         "evidence": evidence,
+        **(
+            {"evidence_source": "criterion_issues"}
+            if raw.get("evidence_source") == "criterion_issues" else {}
+        ),
         "rationale": str(raw.get("rationale") or "").strip(),
         "legacy_check_ids": list(spec.legacy_check_ids),
         "issues": [dict(item) for item in raw.get("issues") or [] if isinstance(item, Mapping)],
