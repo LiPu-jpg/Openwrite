@@ -205,6 +205,30 @@ class AssetPackageService:
             )
         package = self._read_package(source_path)
         decisions = resolutions or {}
+        # A dependency that is in the package but skipped by a resolution is just
+        # as missing as one that was never packaged: `missing_dependencies` only
+        # checked package/existing membership, so the gate passed and the imported
+        # asset was left pointing at an asset that does not exist.
+        preview_skipped = {
+            str(item["id"])
+            for item in preview["assets"]
+            if str((decisions.get(str(item["id"])) or {}).get("action") or item["default_action"]) == "skip"
+        }
+        packaged_dependencies = {
+            str(value)
+            for item in package["manifest"]["assets"]
+            for value in (item.get("dependencies") or [])
+        }
+        dangling = sorted(
+            set(preview["missing_dependencies"]) | (packaged_dependencies & preview_skipped)
+        )
+        if dangling and not allow_missing_dependencies:
+            raise AssetPackageError(
+                "资产包存在缺失依赖",
+                code="ASSET_DEPENDENCY_MISSING",
+                recoverable=True,
+                details={"missing_dependencies": dangling},
+            )
         id_map: dict[str, str] = {}
         skipped: list[str] = []
         for item in preview["assets"]:

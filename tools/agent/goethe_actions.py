@@ -19,7 +19,7 @@ from ..story_planning import StoryPlanningStore
 from ..truth_manager import TruthFilesManager
 from ..utils import generate_id
 from .base import AgentContext
-from .book_state import BookStage, BookStateStore
+from .book_state import BookStage, BookStateError, BookStateStore
 from .orchestrator import OpenWriteOrchestrator, OrchestratorResult
 
 
@@ -269,7 +269,43 @@ class GoethePlanningRuntime:
             compose_toml_document(draft_meta, character_md),
             encoding="utf-8",
         )
-        state = self.book_state_store.load_or_create()
+        # Strict read: `load_or_create` quarantines a damaged state file and
+        # returns a fresh one, which reads as "nothing pending" and would let this
+        # guard pass on a corrupted store - the same class of failure K3 guards
+        # against, reached by a different route.
+        try:
+            state = self.book_state_store.load_strict()
+        except BookStateError:
+            draft_path.unlink(missing_ok=True)
+            return {
+                "ok": False,
+                "blocked": True,
+                "error": "BOOK_STATE_UNREADABLE",
+                "message": (
+                    "书籍状态文件损坏，无法判断是否还有未确认的大纲草案。"
+                    "请先修复或删除该文件后重试。"
+                ),
+                "next_action": "repair_book_state",
+            }
+        # K3: a pending outline confirmation must not be overwritten. The staged
+        # outline draft stays on disk while `pending_confirmation` moves to this
+        # character, so the next `confirm_outline_scope()` falls into the
+        # "existing outline" branch and promotes the OLD src/outline.md — the
+        # author believes the new outline is confirmed and Dante plans against a
+        # superseded one. Refuse instead: the author confirms or discards the
+        # outline first.
+        if state.pending_confirmation == "outline_scope":
+            draft_path.unlink(missing_ok=True)
+            return {
+                "ok": False,
+                "blocked": True,
+                "error": "OUTLINE_CONFIRMATION_PENDING",
+                "message": (
+                    "还有一份暂存的大纲草案等待确认。请先确认或丢弃它，再生成角色，"
+                    "否则下一步确认会把旧大纲升格。"
+                ),
+                "next_action": "confirm_outline_scope",
+            }
         state.pending_confirmation = f"character:{character_id}"
         state.blocking_reason = ""
         state.last_agent_action = "generated_character_draft"
@@ -541,6 +577,35 @@ class GoethePlanningRuntime:
                 "message": str(exc),
             }
 
+    def _handoff_asset_revisions(self, readiness: dict[str, Any]) -> dict[str, str]:
+        # Content revision for every canonical asset the handoff hands over.
+        # `StoryPlanningStore.outline_source_revision()` already exists for exactly
+        # this purpose; the handoff simply never recorded it.
+        store = self.story_planning_store
+        revisions: dict[str, str] = {"outline": store.outline_source_revision()}
+        for label, path in (
+            ("ideation_summary", store.ideation_summary_path),
+            ("background", store.story_src_dir / "background.md"),
+            ("foundation", store.story_src_dir / "foundation.md"),
+        ):
+            try:
+                revisions[label] = store._hash_text(path.read_text(encoding="utf-8")) if path.exists() else ""
+            except OSError:
+                revisions[label] = ""
+        for index, path in enumerate(readiness.get("persona_paths") or []):
+            target = Path(path)
+            try:
+                revisions["persona_%d" % index] = store._hash_text(target.read_text(encoding="utf-8")) if target.exists() else ""
+            except OSError:
+                revisions["persona_%d" % index] = ""
+        return revisions
+
+    @staticmethod
+    def _now_iso() -> str:
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).isoformat()
+
     def prepare_dante_handoff(self) -> dict[str, Any]:
         readiness = self._evaluate_handoff_readiness()
         if readiness["missing_items"]:
@@ -581,6 +646,13 @@ class GoethePlanningRuntime:
             "current_arc": book_state.current_arc,
             "current_section": book_state.current_section,
             "current_chapter": book_state.current_chapter,
+            # K4: content signatures of the assets this handoff describes. Without
+            # them a handoff stays "ready" after src/outline.md is rewritten, and
+            # Dante silently plans against a superseded outline.
+            "generated_at": self._now_iso(),
+            "novel_id": book_state.novel_id,
+            "project_root": str(self.project_root),
+            "asset_revisions": self._handoff_asset_revisions(readiness),
             "book_state": {
                 "novel_id": book_state.novel_id,
                 "stage": book_state.stage.value,

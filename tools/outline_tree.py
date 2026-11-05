@@ -12,9 +12,24 @@ from pathlib import Path
 from typing import Any
 
 from tools.frontmatter import parse_toml_front_matter
+from tools.outline_fields import (
+    CHAPTER_ARRAY_INPUT_FIELDS,
+    CHAPTER_FIELD_INPUT_ALIASES,
+    CHAPTER_FIELD_LABELS,
+    CHAPTER_LIST_FIELDS,
+    CHAPTER_WORD_FIELDS,
+    chapter_field_labels,
+    chapter_field_pattern,
+    merge_field_items,
+)
 from tools.writing_targets import normalize_writing_targets
 
 HEADING_RE = re.compile(r"^(#{1,4})\s+(.+?)\s*$")
+# The bold labels that open a structured list inside a chapter body.
+STRUCTURED_LIST_LABELS_RE = re.compile(
+    r"^\*\*(节拍|悬念|涉及人物|出场角色|本章目标|beats|hooks)",
+    re.IGNORECASE,
+)
 NUMBER_TOKEN = r"[零〇一二三四五六七八九十百千万两\d]+"
 CHAPTER_RE = re.compile(rf"第\s*({NUMBER_TOKEN})\s*章")
 CHAPTER_ID_RE = re.compile(r"\bch[_-]?(\d+)\b", re.IGNORECASE)
@@ -109,6 +124,34 @@ def build_outline_structure(
     }
 
 
+def _write_chapter_field(body: str, key: str, value: Any) -> str:
+    """Write one chapter field, replacing every line that carries it.
+
+    The contract label wins. A legacy label left by an older outline is
+    dropped instead of kept as a second line for the same field, so a
+    structured write can neither duplicate a field nor hide the data the
+    file already carried. Writing a value the file already has leaves the
+    chapter body byte-identical.
+    """
+    label = CHAPTER_FIELD_LABELS[key]
+    replacement = f"> {label}: {value}"
+    labels = "|".join(re.escape(item) for item in chapter_field_labels(key))
+    pattern = re.compile(rf"^>\s*(?:{labels})\s*[:：]")
+    out: list[str] = []
+    written = False
+    for raw in body.splitlines(keepends=True):
+        line = raw.rstrip("\r\n")
+        if pattern.match(line):
+            if not written:
+                out.append(replacement + raw[len(line):])
+                written = True
+            continue
+        out.append(raw)
+    if written:
+        return "".join(out)
+    return body.rstrip("\r\n") + "\n" + replacement + "\n\n"
+
+
 def mutate_outline_structure(
     novel_root: Path,
     *,
@@ -139,6 +182,17 @@ def mutate_outline_structure(
         )
 
     nodes = _flatten_nodes(structure["roots"])
+    # A duplicate id makes the target ambiguous: the dict below silently keeps
+    # the last one, so an edit aimed at the first 第一章 landed on the second.
+    # Refuse rather than guess.
+    counts: dict[str, int] = {}
+    for node in nodes:
+        counts[str(node["id"])] = counts.get(str(node["id"]), 0) + 1
+    if node_id and counts.get(node_id, 0) > 1:
+        raise OutlineEditError(
+            f"大纲中存在重复节点 ID {node_id}（{counts[node_id]} 个）；请先修正标题编号",
+            code="conflict",
+        )
     by_id = {node["id"]: node for node in nodes}
     target = by_id.get(node_id)
     operation = str(operation or "").strip()
@@ -177,29 +231,40 @@ def mutate_outline_structure(
             start = int(target["line"])
             end = _direct_body_end(lines, start)
             body = "".join(lines[start:end])
-            labels = {
-                "target_words": "预估字数",
-                "beats": "节拍",
-                "hooks": "悬念",
-                "characters": "涉及人物",
-                "promise": "章节承诺",
-                "payoff_of": "回收伏笔",
-                "word_budget": "字数预算",
-                "function": "章节功能",
-            }
             values: dict[str, Any] = {}
-            for key, label in labels.items():
-                match = re.search(rf"^>\s*{label}\s*[:：]\s*(.*?)\s*$", body, re.M)
-                if match:
-                    values[key] = (
-                        int(match.group(1).replace(",", ""))
-                        if key in {"target_words", "word_budget"}
-                        else match.group(1)
-                    )
+            for key in CHAPTER_FIELD_LABELS:
+                raw = chapter_field_pattern(key).findall(body)
+                if not raw:
+                    continue
+                if key in CHAPTER_WORD_FIELDS:
+                    for item in raw:
+                        try:
+                            values[key] = int(item.replace(",", ""))
+                            break
+                        except ValueError:
+                            continue
+                    continue
+                if key in CHAPTER_LIST_FIELDS:
+                    items = merge_field_items(raw)
+                    if items:
+                        values[key] = ", ".join(items)
+                    continue
+                values[key] = next((item for item in raw if item != ""), raw[0])
             if operation == "set_meta":
-                if not isinstance(metadata, dict) or not metadata or set(metadata) - set(labels):
+                if not isinstance(metadata, dict) or not metadata:
+                    raise OutlineEditError("metadata requires supported chapter fields")
+                unsupported = set(metadata) - set(CHAPTER_FIELD_LABELS) - set(
+                    CHAPTER_FIELD_INPUT_ALIASES
+                )
+                if unsupported:
                     raise OutlineEditError("metadata requires supported chapter fields")
                 metadata = dict(metadata)
+                for alias, field in CHAPTER_FIELD_INPUT_ALIASES.items():
+                    if alias not in metadata:
+                        continue
+                    if field in metadata:
+                        raise OutlineEditError(f"metadata repeats one chapter field: {field}")
+                    metadata[field] = metadata.pop(alias)
                 if "word_budget" in metadata:
                     if "target_words" in metadata and int(metadata["target_words"]) != int(metadata["word_budget"]):
                         raise OutlineEditError("word_budget must match target_words")
@@ -207,22 +272,33 @@ def mutate_outline_structure(
                 elif "target_words" in metadata and "word_budget" in values:
                     metadata["word_budget"] = metadata["target_words"]
                 for key, value in metadata.items():
-                    if key in {"target_words", "word_budget"}:
+                    if key in CHAPTER_WORD_FIELDS:
                         from tools.writing_policy import resolve_target_words
 
                         value = resolve_target_words(value)["target_words"]
-                    elif key in {"function", "payoff_of"} and isinstance(value, list) and all(isinstance(v, str) for v in value):
+                    elif key in CHAPTER_ARRAY_INPUT_FIELDS and isinstance(value, list):
+                        # A list field accepts an array of strings or one
+                        # comma-separated string. Anything else is a shape the
+                        # caller cannot guess, so say which field and which
+                        # shapes are allowed instead of "must be a single line".
+                        if not all(isinstance(item, str) for item in value):
+                            raise OutlineEditError(
+                                f"{key} takes an array of strings; "
+                                f"got {type(value[0]).__name__ if value else 'an empty array'}"
+                            )
                         value = ", ".join(value)
                     if not isinstance(value, int) and (not isinstance(value, str) or "\n" in value or "\r" in value):
-                        raise OutlineEditError("Metadata text must be a single line")
+                        raise OutlineEditError(
+                            f"{key} takes "
+                            + (
+                                "a string or an array of strings, on one line"
+                                if key in CHAPTER_ARRAY_INPUT_FIELDS
+                                else "a single-line string"
+                            )
+                        )
                     if key == "function" and set(re.split(r"[,，、]\s*", value)) - {"推进", "揭示", "关系", "代价"}:
                         raise OutlineEditError("function must contain 推进/揭示/关系/代价")
-                    pattern = rf"^>\s*{labels[key]}\s*[:：].*$"
-                    replacement = f"> {labels[key]}: {value}"
-                    if re.search(pattern, body, re.M):
-                        body = re.sub(pattern, lambda _match: replacement, body, flags=re.M)
-                    else:
-                        body = body.rstrip("\r\n") + "\n" + replacement + "\n\n"
+                    body = _write_chapter_field(body, key, value)
                     values[key] = value
                 lines[start:end] = (
                     body.replace("\r\n", "\n").replace("\n", newline).splitlines(keepends=True)
@@ -245,10 +321,18 @@ def mutate_outline_structure(
         # The tree attaches surviving children to their nearest ancestor.
         start = int(target["line"]) - 1
         end = _direct_body_end(lines, start + 1)
+        # Renumber before deleting: the plan's line indices refer to the original
+        # file, and skipping it used to leave a permanent gap in the chapter
+        # numbering (promoting 第一卷 left the outline starting at 第二卷).
+        renumbered, skipped = _deletion_renumber_plan(nodes, target)
+        for change in renumbered:
+            line_index = int(change["line"]) - 1
+            marker = "#" * int(change["level"])
+            ending = _line_ending(lines[line_index])
+            lines[line_index] = f"{marker} {change['new_title']}{ending}"
         del lines[start:end]
         selection_hint = {"parent_id": target.get("parent_id", "")}
-        renumbered, skipped = [], []
-        message = "Container removed; child chapter IDs and prose preserved"
+        message = "Container removed; child chapters renumbered"
     elif operation == "rename":
         target = _editable_target(target)
         clean_title = _validate_title(title, target["kind"])
@@ -364,8 +448,10 @@ def mutate_outline_structure(
         "content": updated,
         "message": message,
         "selection_hint": selection_hint,
-        "renumbered": renumbered if operation == "delete" else [],
-        "skipped_renumbering": skipped if operation == "delete" else [],
+        # `promote` (a non-cascade delete) renumbers too; reporting it only for
+        # `delete` left the author's applied renumbering invisible.
+        "renumbered": renumbered if operation in {"delete", "promote"} else [],
+        "skipped_renumbering": skipped if operation in {"delete", "promote"} else [],
     }
 
 
@@ -664,13 +750,7 @@ def _direct_summary_span(lines: list[str], start: int, end: int) -> tuple[int, i
 
 def _is_structured_outline_line(line: str) -> bool:
     stripped = line.strip()
-    return stripped.startswith(">") or bool(
-        re.match(
-            r"^\*\*(节拍|悬念|涉及人物|本章目标|beats|hooks)",
-            stripped,
-            re.IGNORECASE,
-        )
-    )
+    return stripped.startswith(">") or bool(STRUCTURED_LIST_LABELS_RE.match(stripped))
 
 
 def _line_ending(line: str) -> str:
@@ -753,13 +833,15 @@ def _summarize_block(
             if match:
                 metadata[match.group(1).strip()] = match.group(2).strip()
             continue
-        if re.match(r"^\*\*(节拍|悬念|涉及人物|本章目标|beats|hooks)", line, re.IGNORECASE):
+        if STRUCTURED_LIST_LABELS_RE.match(line):
             in_structured_list = True
             continue
         if in_structured_list and re.match(r"^(?:[-*]|\d+\.)\s+", line):
             continue
         in_structured_list = False
-        line = re.sub(r"^[-*\d.\s]+", "", line)
+        # Only a bullet or an ordered marker is a list prefix. A bare digit run
+        # is not: `1878 年取得…` is a year, not the number 1878.
+        line = re.sub(r"^(?:[-*]|\d+\.)\s+", "", line)
         line = re.sub(r"[*_`]", "", line).strip()
         if line:
             content.append(line)

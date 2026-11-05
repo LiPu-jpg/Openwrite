@@ -7,6 +7,8 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from tools.file_ops import atomic_write
 from typing import Any
 
 import yaml
@@ -73,9 +75,9 @@ def write_content_project_metadata(project_root: Path) -> Path:
             "debounce_minutes": 15,
         },
     }
-    path.write_text(
+    atomic_write(
+        path,
         yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
     )
     return path
 

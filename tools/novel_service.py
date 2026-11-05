@@ -195,11 +195,19 @@ class NovelApplicationService:
         )
         self.refresh()
         earliest = min(imported, key=lambda item: self._chapter_number(item.chapter_id))
-        acceptance = acceptance_service.start_acceptance(
-            earliest.chapter_id,
-            source="import",
-            expected_previous_revision=accepted_before.get(earliest.chapter_id, ""),
-        )
+        # Serialize the acceptance start against other writers: this path has
+        # just written chapter files, and an unlocked start can interleave with
+        # another acceptance start so the loser's heads vanish.
+        from tools.project_lock import ProjectWriteLock
+
+        with ProjectWriteLock(
+            self.project_root, self.novel_id, operation=f"accept:import:{earliest.chapter_id}"
+        ):
+            acceptance = acceptance_service.start_acceptance(
+                earliest.chapter_id,
+                source="import",
+                expected_previous_revision=accepted_before.get(earliest.chapter_id, ""),
+            )
         return {
             "arc_id": target_arc,
             "next_chapter": next_chapter,
@@ -602,6 +610,9 @@ class NovelApplicationService:
                     ),
                 },
             ]
+            from tools.chapter_pipeline import build_review_payload
+
+            result["review_payload"] = build_review_payload(packet, context=generation)
             result["payload_scope"] = (
                 "Current canonical writer input, including the supplied guidance and target. "
                 "Subsequent segment/retry messages and transport budgets can differ. "
@@ -683,9 +694,16 @@ class NovelApplicationService:
         return payload
 
     def write_chapter(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from tools.manuscript_acceptance import ManuscriptAcceptanceError
+
         chapter_id = self.resolve_chapter_id(str(payload.get("chapter_id") or "next"))
         try:
             return self._write_chapter(payload)
+        except ManuscriptAcceptanceError as exc:
+            # The commit path re-raises acceptance errors after rolling back.
+            # Only `NovelServiceError` is translated upstream, so these used to
+            # escape as unmapped 500s instead of the recoverable 409 they are.
+            raise NovelServiceError(str(exc), code=exc.code, details=exc.details) from exc
         except NovelServiceError as exc:
             if not exc.details.get("run_id_v2"):
                 from tools.chapter_run_store import ChapterRunStore
@@ -894,6 +912,7 @@ class NovelApplicationService:
             self._task_lock.release()
         self._ensure_ok(result, fallback="审稿失败")
         if self._review_executor is not None:
+            from tools.project_lock import ProjectWriteLock
             from tools.review_store import ReviewStore, validate_review_v2_record
 
             # Validate before persistence. A present review_v2 key is
@@ -908,19 +927,36 @@ class NovelApplicationService:
                     ) from exc
 
             store = ReviewStore(self.project_root, self.novel_id)
-            store.save(target, result)
-            persisted = store.load(target)
-            if isinstance(persisted, dict):
-                persisted_v2 = persisted.get("review_v2")
-                result = {
-                    **result,
-                    "source_revision": persisted.get("source_revision", ""),
-                    "reviewed_at": persisted.get("reviewed_at", ""),
-                    "issue_delta": persisted.get("issue_delta", result.get("issue_delta", {})),
-                }
-                if isinstance(persisted_v2, dict) and persisted_v2:
-                    result["review_v2"] = persisted_v2
-            self._record_review_lifecycle(target, result)
+            # Persist under the project write lock. `store.save` recomputes
+            # `source_revision` from the manuscript at save time, so persisting
+            # after the lock was released let a writer that landed in between
+            # stamp the review with the new revision while its content still
+            # described the old text — the freshness gate then read it as
+            # current for text it never reviewed. The lifecycle bookkeeping
+            # reads the same state and must move with it.
+            with ProjectWriteLock(
+                self.project_root, self.novel_id, operation=f"review_save:{target}"
+            ):
+                reviewed_revision = store._source_revision(target)
+                store.save(target, result)
+                persisted = store.load(target)
+                if isinstance(persisted, dict):
+                    persisted_v2 = persisted.get("review_v2")
+                    result = {
+                        **result,
+                        "source_revision": persisted.get("source_revision", ""),
+                        "reviewed_at": persisted.get("reviewed_at", ""),
+                        "issue_delta": persisted.get("issue_delta", result.get("issue_delta", {})),
+                    }
+                    if isinstance(persisted_v2, dict) and persisted_v2:
+                        result["review_v2"] = persisted_v2
+                self._record_review_lifecycle(target, result)
+            # If the manuscript moved while we were saving, the review is not
+            # about the text on disk any more; say so rather than letting the
+            # freshness gate approve it.
+            if reviewed_revision and reviewed_revision != store._source_revision(target):
+                result["stale"] = True
+                result["stale_reason"] = "chapter_changed_during_review_save"
         return result
 
     def multi_write(self, payload: dict[str, Any]) -> dict[str, Any]:

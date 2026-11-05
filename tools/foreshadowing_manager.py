@@ -18,11 +18,20 @@ from datetime import datetime
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from tools.file_ops import atomic_write
 from models.foreshadowing import (
     ForeshadowingNode,
     ForeshadowingEdge,
     ForeshadowingGraph,
 )
+
+
+class ForeshadowingDagError(RuntimeError):
+    """The foreshadowing DAG could not be read or written.
+
+    Raised rather than swallowed: an unreadable DAG used to degrade to an empty
+    graph, which silently erased every foreshadowing record.
+    """
 
 
 class ForeshadowingDAGManager:
@@ -97,22 +106,26 @@ class ForeshadowingDAGManager:
                 data = yaml.safe_load(f) or {}
                 return ForeshadowingGraph.model_validate(data)
         except Exception as e:
-            print(f"加载 DAG 配置失败: {e}")
-            return ForeshadowingGraph()
+            # An unreadable DAG used to be swallowed into an empty graph, so a
+            # truncated write made every foreshadowing record vanish with no
+            # error anywhere. Preserve the file and refuse instead.
+            raise ForeshadowingDagError(
+                f"伏笔 DAG 无法读取（文件已保留，未覆盖）: {e}"
+            ) from e
 
     def _save_dag(self, dag: ForeshadowingGraph) -> None:
         """保存 DAG 配置"""
-        try:
-            with open(self.dag_file, "w", encoding="utf-8") as f:
-                yaml.dump(
-                    dag.model_dump(by_alias=True),
-                    f,
-                    allow_unicode=True,
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
-        except Exception as e:
-            print(f"保存 DAG 配置失败: {e}")
+        # Atomic replace: a bare open(...,"w") truncates in place, so a crash
+        # mid-dump left a half-written DAG that the next read parsed as empty.
+        atomic_write(
+            self.dag_file,
+            yaml.dump(
+                dag.model_dump(by_alias=True),
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            ),
+        )
 
     # ── 节点操作 ──────────────────────────────────────────────────
 

@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from tools.file_ops import atomic_write
 from models.chapter_run_v2 import (
     ChapterRunV2Manifest,
     ChapterRunV2Stage,
@@ -39,6 +39,18 @@ V2_STAGE_DEPENDENCIES = {
     "commit": ("validate",),
     "review": ("commit",),
 }
+
+
+def _bounded_limit(value: Any) -> int:
+    """Coerce a caller-supplied limit instead of letting int() raise.
+
+    `int("abc")` is a bare ValueError with no `.code`, so the caller's
+    `except ChapterRunV2Error` missed it and the request became a 500.
+    """
+    try:
+        return max(1, min(500, int(value or 20)))
+    except (TypeError, ValueError):
+        return 20
 
 
 class ChapterRunV2Error(RuntimeError):
@@ -514,20 +526,9 @@ class ChapterRunV2Store:
         if existing and existing.cancel_requested:
             manifest.cancel_requested = True
         target = self.path_for(manifest.run_id)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.root,
-            prefix=f".{manifest.run_id}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            handle.write(manifest.model_dump_json(indent=2))
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-            temporary = Path(handle.name)
-        temporary.replace(target)
+        # atomic_write cleans up its temporary file in a finally block, so a
+        # failed replace cannot leave a stray .tmp behind.
+        atomic_write(target, manifest.model_dump_json(indent=2) + "\n")
         return target
 
     def write_artifact(
@@ -563,7 +564,7 @@ class ChapterRunV2Store:
     def path_for(self, run_id: str) -> Path:
         clean = str(run_id or "")
         if not clean.startswith("runv2_") or any(part in clean for part in ("/", "\\", "..")):
-            raise ValueError("无效 Chapter Run V2 ID")
+            raise ChapterRunV2Error("无效 Chapter Run V2 ID", code="INVALID_RUN_ID")
         return self.root / f"{clean}.json"
 
     @staticmethod
@@ -642,7 +643,7 @@ def chapter_run_v2_action(
         runs = store.list(
             chapter_id=str(payload.get("chapter_id") or ""),
             statuses=statuses,
-            limit=int(payload.get("limit") or 20),
+            limit=_bounded_limit(payload.get("limit")),
             since=str(payload.get("since") or ""),
             include_archived=payload.get("include_archived") is True,
         )

@@ -183,6 +183,8 @@ class ModelProfileStore:
         }
 
     def surface(self, project_routes: dict[str, Any] | None = None) -> dict[str, Any]:
+        from tools.host_llm import host_llm_available
+
         payload = self.load()
         persisted_credentials = self._credentials()
         routes = dict(payload["routes"])
@@ -219,15 +221,28 @@ class ModelProfileStore:
                     "last_test": item.get("last_test") or None,
                 }
             )
+        known_ids = {str(profile["id"]) for profile in profiles}        # Report routes pointing at a profile that does not exist. Without this,
+        # `used_by_routes` attributes those keys to whichever profile holds them
+        # while the route itself is unresolvable, and `resolve` now refuses to
+        # guess — so the author has to be able to see it.
+        unresolved_routes = {
+            key: str(value)
+            for key, value in routes.items()
+            if key in ROUTE_KEYS and str(value) not in known_ids
+        }
         return {
             "schema_version": "openwrite.model-profile.v1",
             "profiles": profiles,
             "presets": model_preset_catalog(),
             "routes": routes,
+            "unresolved_routes": unresolved_routes,
             "default_profile_id": default_id,
             "embedding_profiles": embedding_profiles,
             "active_embedding_profile_id": str(payload.get("active_embedding_profile_id") or ""),
             "legacy_mapped": not self.profiles_path.is_file() and bool(profiles),
+            # Whether the host's own model directory is reachable from this
+            # process. The panel offers the host models only when it is.
+            "host_llm": {"available": host_llm_available()},
         }
 
     def _profile_configured(
@@ -237,6 +252,12 @@ class ModelProfileStore:
             from tools.llm.opencode_console import console_available
 
             return console_available()
+        if profile.get("auth_source") == "host_relay":
+            from tools.host_llm import host_llm_available
+
+            # The relay is the credential: without it the profile cannot run,
+            # so it is configured exactly as long as the host offers one.
+            return host_llm_available()
         credential_ref = str(profile.get("credential_ref") or "")
         return bool(
             self._session_credentials.get(credential_ref)
@@ -259,6 +280,18 @@ class ModelProfileStore:
         api_key: str = "",
         remember_api_key: bool = True,
     ) -> dict[str, Any]:
+        with self._mutation_lock:
+            return self._save_profile_locked(
+                profile, api_key=api_key, remember_api_key=remember_api_key
+            )
+
+    def _save_profile_locked(
+        self,
+        profile: dict[str, Any],
+        *,
+        api_key: str,
+        remember_api_key: bool,
+    ) -> dict[str, Any]:
         payload = self.load()
         metadata = self._profile_metadata(profile)
         profile_id = metadata["id"]
@@ -276,7 +309,11 @@ class ModelProfileStore:
                 for field, default in (("auth_source", "api_key"), ("workspace_id", ""))
             ):
                 metadata[test_field] = existing[test_field]
-        credential_ref = str(metadata.get("credential_ref") or f"key_{profile_id}")
+        # The credential slot is derived from the profile id, never taken from the
+        # payload: a client-supplied ref let one profile name another's slot, so
+        # saving its own key overwrote that profile's key and per-profile
+        # credential isolation broke with no signal.
+        credential_ref = f"key_{profile_id}"
         metadata["credential_ref"] = credential_ref
         secret = str(api_key or "").strip()
         if existing.get("credential_ref") == credential_ref and existing.get(
@@ -286,6 +323,11 @@ class ModelProfileStore:
         if metadata.get("auth_source") == "opencode_console":
             secret = ""
             remember_api_key = True
+        if metadata.get("auth_source") == "host_relay":
+            # The relay token is a live machine secret: it is never written to
+            # the credential file, and a client-supplied key is discarded.
+            secret = ""
+            remember_api_key = False
         if secret:
             metadata["credential_updated_at"] = self._utc_timestamp()
             self._session_credentials[credential_ref] = secret
@@ -319,6 +361,14 @@ class ModelProfileStore:
     def save_embedding_profile(
         self, profile: dict[str, Any], *, api_key: str = "", remember_api_key: bool = True
     ) -> dict[str, Any]:
+        with self._mutation_lock:
+            return self._save_embedding_profile_locked(
+                profile, api_key=api_key, remember_api_key=remember_api_key
+            )
+
+    def _save_embedding_profile_locked(
+        self, profile: dict[str, Any], *, api_key: str, remember_api_key: bool
+    ) -> dict[str, Any]:
         payload = self.load()
         metadata = self._embedding_metadata(profile)
         existing = next(
@@ -333,7 +383,9 @@ class ModelProfileStore:
         # save may omit them but must neither erase nor forge existing state.
         metadata.pop("credential_updated_at", None)
         metadata.pop("last_test", None)
-        ref = metadata["credential_ref"]
+        # Same rule as the chat path: the slot is derived, not client-supplied.
+        ref = f"embedding_key_{metadata['id']}"
+        metadata["credential_ref"] = ref
         if existing.get("credential_ref") == ref and existing.get("credential_updated_at"):
             metadata["credential_updated_at"] = existing["credential_updated_at"]
         if existing.get("last_test") is not None:
@@ -365,26 +417,28 @@ class ModelProfileStore:
         return metadata
 
     def select_embedding_profile(self, profile_id: str) -> dict[str, Any]:
-        payload = self.load()
-        if profile_id not in {item["id"] for item in payload.get("embedding_profiles", [])}:
-            raise ModelProfileError("Embedding 档案不存在", code="MODEL_PROFILE_NOT_FOUND")
-        payload["active_embedding_profile_id"] = profile_id
-        self._write_payload(payload)
+        with self._mutation_lock:
+            payload = self.load()
+            if profile_id not in {item["id"] for item in payload.get("embedding_profiles", [])}:
+                raise ModelProfileError("Embedding 档案不存在", code="MODEL_PROFILE_NOT_FOUND")
+            payload["active_embedding_profile_id"] = profile_id
+            self._write_payload(payload)
         return {"active_embedding_profile_id": profile_id}
 
     def delete_embedding_profile(self, profile_id: str) -> dict[str, Any]:
-        payload = self.load()
-        items = payload.get("embedding_profiles", [])
-        if profile_id not in {item["id"] for item in items}:
-            raise ModelProfileError("Embedding 档案不存在", code="MODEL_PROFILE_NOT_FOUND")
-        if len(items) <= 1:
-            raise ModelProfileError(
-                "至少保留一个 Embedding 档案", code="MODEL_PROFILE_LAST_PROFILE"
-            )
-        removed = next(item for item in items if item["id"] == profile_id)
-        payload["embedding_profiles"] = [item for item in items if item["id"] != profile_id]
-        if payload.get("active_embedding_profile_id") == profile_id:
-            payload["active_embedding_profile_id"] = payload["embedding_profiles"][0]["id"]
+        with self._mutation_lock:
+            payload = self.load()
+            items = payload.get("embedding_profiles", [])
+            if profile_id not in {item["id"] for item in items}:
+                raise ModelProfileError("Embedding 档案不存在", code="MODEL_PROFILE_NOT_FOUND")
+            if len(items) <= 1:
+                raise ModelProfileError(
+                    "至少保留一个 Embedding 档案", code="MODEL_PROFILE_LAST_PROFILE"
+                )
+            payload["embedding_profiles"] = [item for item in items if item["id"] != profile_id]
+            if payload.get("active_embedding_profile_id") == profile_id:
+                payload["active_embedding_profile_id"] = payload["embedding_profiles"][0]["id"]
+            self._write_payload(payload)
         ref = str(removed.get("credential_ref") or "")
         self._session_credentials.pop(ref, None)
         credentials = self._credentials()
@@ -506,6 +560,10 @@ class ModelProfileStore:
         """Resolve a connection-test candidate without exposing stored credentials."""
         profile = self._resolve_probe_profile("profiles", profile)
         metadata = self._profile_metadata(profile)
+        if metadata.get("auth_source") == "host_relay":
+            # A host-relay profile is probed through the live relay, exactly the
+            # way it will be used.
+            return self._apply_host_relay(metadata)
         credential_ref = str(metadata.get("credential_ref") or "")
         secret = (
             str(api_key or "").strip()
@@ -675,16 +733,16 @@ class ModelProfileStore:
             None,
         )
         if profile is None:
-            profile = next(
-                (
-                    item
-                    for item in surface["profiles"]
-                    if item["id"] == surface["default_profile_id"]
-                ),
-                None,
+            # A route naming a profile that does not exist must not silently fall
+            # back to the default: that is a different model *and a different API
+            # key* than the author configured, and it is invisible because
+            # `surface` still reports the route as configured. Project routes
+            # come from novel_config.yaml, which `save_routes` never validated,
+            # so a restored archive or a hand edit can reach this.
+            raise ModelProfileError(
+                f"任务路由 {operation} 指向的模型档案不存在: {profile_id}",
+                code="MODEL_PROFILE_NOT_FOUND",
             )
-        if profile is None:
-            raise ModelProfileError("尚未配置模型档案", code="MODEL_PROFILE_NOT_CONFIGURED")
         credential_ref = str(profile.get("credential_ref") or "")
         api_key = (
             self._session_credentials.get(credential_ref)
@@ -697,7 +755,13 @@ class ModelProfileStore:
         console_auth = profile.get("auth_source") == "opencode_console"
         if console_auth:
             api_key = ""
-        if not api_key and not vector_search_without_chat and not console_auth:
+        if profile.get("auth_source") == "host_relay":
+            # The relay address and token are live facts, not stored ones: the
+            # host binds an ephemeral port, so a persisted copy would point at
+            # a dead socket after the next restart.
+            profile = self._apply_host_relay(profile)
+            api_key = str(profile.get("api_key") or "")
+        if not api_key and not vector_search_without_chat and not console_auth and profile.get("auth_source") != "host_relay":
             raise ModelProfileError(
                 f"模型档案 {profile['label']} 缺少 API Key",
                 code="MODEL_CREDENTIAL_MISSING",
@@ -739,7 +803,10 @@ class ModelProfileStore:
         console_auth = profile.get("auth_source") == "opencode_console"
         if console_auth:
             api_key = ""
-        if not api_key and not console_auth:
+        if profile.get("auth_source") == "host_relay":
+            profile = self._apply_host_relay(profile)
+            api_key = str(profile.get("api_key") or "")
+        if not api_key and not console_auth and profile.get("auth_source") != "host_relay":
             raise ModelProfileError(
                 f"模型档案 {profile['label']} 缺少 API Key",
                 code="MODEL_CREDENTIAL_MISSING",
@@ -747,6 +814,19 @@ class ModelProfileStore:
         if str(profile.get("model") or "").startswith(AUTO_SELECT_PREFIX):
             profile = self._resolve_auto_model(profile, api_key)
         return {**profile, "api_key": api_key, "operation": operation}
+
+    @staticmethod
+    def _apply_host_relay(profile: dict[str, Any]) -> dict[str, Any]:
+        """Resolve a host-relay profile against the live relay coordinates."""
+        from tools.host_llm import host_llm
+
+        relay = host_llm()
+        if relay is None:
+            raise ModelProfileError(
+                "宿主模型通道未连接，请重启宿主后重试",
+                code="MODEL_HOST_RELAY_UNAVAILABLE",
+            )
+        return {**profile, "base_url": relay["url"], "api_key": relay["token"]}
 
     def _resolve_auto_model(self, profile: dict[str, Any], api_key: str) -> dict[str, Any]:
         """Resolve an ``auto:<strategy>`` model into a concrete model ID."""
@@ -812,7 +892,10 @@ class ModelProfileStore:
             if prompt_price <= 0 or completion_price <= 0:
                 continue
             score = prompt_price + completion_price
-            if best is None or score < best[0]:
+            # Deterministic tie-break on the model id: comparing the score
+            # alone kept the first equal-price model in catalog order, so the same
+            # set in a different order resolved to a different model.
+            if best is None or (score, model_id) < best:
                 best = (score, model_id)
         if best is None:
             raise ModelProfileError(
@@ -868,11 +951,23 @@ class ModelProfileStore:
 
     @staticmethod
     def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-        handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, ensure_ascii=False)
-            stream.flush()
-            os.fsync(stream.fileno())
+        # Temp + replace, not O_TRUNC in place: a crash between the truncate and
+        # the fsync left a truncated file that the next read silently treated as
+        # an empty cache. The name promised atomicity it did not have.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, 0o600)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @staticmethod
     def _profile_metadata(value: dict[str, Any]) -> dict[str, Any]:
@@ -892,28 +987,53 @@ class ModelProfileStore:
                 code="INVALID_MODEL_PROFILE",
             )
         base_url = str(value.get("base_url") or "").strip().rstrip("/")
-        if provider == "custom" and not base_url:
-            raise ModelProfileError(
-                "自定义模型必须填写 Base URL",
-                code="INVALID_MODEL_PROFILE",
-            )
-        if not base_url:
-            base_url = (
-                "https://api.anthropic.com"
-                if provider == "anthropic"
-                else "https://api.openai.com/v1"
-            )
-        parsed_url = urlparse(base_url)
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            raise ModelProfileError(
-                "Base URL 必须是有效的 HTTP(S) 地址",
-                code="INVALID_MODEL_PROFILE",
-            )
-        from tools.llm.opencode_console import is_go_url
-
         auth_source = str(value.get("auth_source") or "api_key")
         workspace_id = str(value.get("workspace_id") or "").strip()
-        if auth_source not in {"api_key", "opencode_console"}:
+        if auth_source == "host_relay":
+            # A host-relay profile is served by the host's own loopback relay.
+            # Its address is ephemeral and its token is a machine secret, so
+            # neither is stored: both are resolved at call time instead.
+            if provider not in {"openai", "custom"} or api_format != "chat":
+                raise ModelProfileError(
+                    "宿主模型档案仅支持 OpenAI 兼容的对话接口",
+                    code="INVALID_MODEL_PROFILE",
+                )
+            if model.startswith(AUTO_SELECT_PREFIX):
+                raise ModelProfileError(
+                    "宿主模型档案请选择明确的模型",
+                    code="INVALID_MODEL_PROFILE",
+                )
+            base_url = ""
+        else:
+            if provider == "custom" and not base_url:
+                raise ModelProfileError(
+                    "自定义模型必须填写 Base URL",
+                    code="INVALID_MODEL_PROFILE",
+                )
+            if not base_url:
+                base_url = (
+                    "https://api.anthropic.com"
+                    if provider == "anthropic"
+                    else "https://api.openai.com/v1"
+                )
+            parsed_url = urlparse(base_url)
+            if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                raise ModelProfileError(
+                    "Base URL 必须是有效的 HTTP(S) 地址",
+                    code="INVALID_MODEL_PROFILE",
+                )
+            # A URL carrying credentials is both a leak and a second auth path: it is
+            # returned verbatim by `surface()`, so a `?api_key=` or `user:pass@host`
+            # value would be echoed straight to the browser. Keys belong in the
+            # credential store, not in the URL.
+            if parsed_url.username or parsed_url.password or parsed_url.query:
+                raise ModelProfileError(
+                    "Base URL 不能包含账号、密码或查询参数（密钥请填入密钥字段）",
+                    code="INVALID_MODEL_PROFILE",
+                )
+        from tools.llm.opencode_console import is_go_url
+
+        if auth_source not in {"api_key", "opencode_console", "host_relay"}:
             raise ModelProfileError("认证方式无效", code="INVALID_MODEL_PROFILE")
         if workspace_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", workspace_id):
             raise ModelProfileError("工作区 ID 格式无效", code="INVALID_MODEL_PROFILE")
@@ -1167,20 +1287,27 @@ class ModelProfileStore:
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.directory,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            temp_path = Path(handle.name)
-        temp_path.chmod(0o600)
-        temp_path.replace(path)
-        path.chmod(0o600)
+        temp_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.directory,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temp_path = handle.name
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+            Path(temp_path).chmod(0o600)
+            Path(temp_path).replace(path)
+            path.chmod(0o600)
+        finally:
+            # Credentials land here, so a failed replace must not leave a
+            # world-readable temporary file behind.
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
 
 
 @contextmanager

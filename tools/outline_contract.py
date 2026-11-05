@@ -92,12 +92,54 @@ OUTLINE_JSON_FIELDS = """每个章节 JSON 对象必须包含：
 人物与设定名称必须来自已提供的规范资料；不要用“团队”“众人”等群体词代替具体人物。"""
 
 
+def _duplicate_field_lines(content: str) -> list[str]:
+    """Chapters that carry the same field on more than one line.
+
+    A structured write that appended a second line for a field the file
+    already carried left the project with two sources of truth for one fact:
+    the parser merged both lines and the metadata view showed only one of
+    them. The writer no longer does that, but a draft - or a file written
+    before the fix - still can, and the completeness check used to pass it.
+    """
+    import re
+
+    from .outline_fields import CHAPTER_FIELD_LABELS, chapter_field_for_label
+
+    errors: list[str] = []
+    chapter = ""
+    counter = 0
+    seen: dict[str, list[str]] = {}
+    for raw in str(content or "").splitlines():
+        line = raw.strip()
+        heading = re.match(r"^(#{1,4})\s+(.+)$", line)
+        if heading:
+            if len(heading.group(1)) == 4:
+                counter += 1
+                chapter = f"ch_{counter:03d}"
+                seen = {}
+            continue
+        metadata = re.match(r"^>\s*(.+?):\s*(.*)$", line)
+        if not metadata or not chapter:
+            continue
+        field = chapter_field_for_label(metadata.group(1))
+        if field is None:
+            continue
+        seen.setdefault(field, []).append(metadata.group(1).strip())
+    for field, labels in seen.items():
+        if len(labels) > 1:
+            errors.append(
+                f"{chapter} 的「{CHAPTER_FIELD_LABELS[field]}」重复出现 {len(labels)} 次"
+                f"（{' / '.join(labels)}）；一个字段只能有一行"
+            )
+    return errors
+
+
 def validate_outline_markdown(content: str, novel_id: str) -> list[str]:
     """Return parser-aligned completeness errors for a writable outline."""
     from .outline_parser import OutlineMdParser
 
+    errors = _duplicate_field_lines(content)
     hierarchy = OutlineMdParser().parse(str(content or ""), novel_id)
-    errors: list[str] = []
     if hierarchy.master is None:
         errors.append("缺少一级作品标题")
     if not hierarchy.arcs:

@@ -397,28 +397,42 @@ class WriterAgent(BaseAgent):
 
     async def _creative_chat(self, **kwargs):
         """Bound retries to transient generation failures; cancellation propagates."""
+        from tools.llm.retry import (
+            GENERATION_RETRYABLE,
+            classify_failure,
+            wait_before_retry_async,
+        )
+
         failures = []
         for attempt in range(3):
             from tools.llm.cancellation import check_model_cancellation
 
             check_model_cancellation()
             try:
-                response = self.chat(**kwargs, attempt_index=attempt + 1)
+                response = self.chat(
+                    **kwargs,
+                    attempt_index=attempt + 1,
+                    # This loop is the only retry layer: LiteLLM's own retry
+                    # would stack on top of it.
+                    max_retries=0,
+                )
                 if failures:
                     response.usage = self._merge_usage(*failures, response.usage)
                 return response
             except Exception as exc:
-                if (
-                    getattr(exc, "code", "")
-                    not in {"PROVIDER_NETWORK_ERROR", "MODEL_OUTPUT_TRUNCATED"}
-                    or attempt == 2
-                ):
+                # A provider hiccup (rate limit, network, timeout) is worth
+                # another ask, and so is an answer that was cut short. The
+                # rate limit used to be missing from this list, so one 429
+                # killed the chapter. Everything else is final for this call:
+                # the same request would produce the same answer.
+                failure = classify_failure(exc, attempt=attempt + 1)
+                if failure.code not in GENERATION_RETRYABLE or attempt == 2:
                     if failures:
                         exc.usage = self._merge_usage(*failures, getattr(exc, "usage", {}) or {})
                     raise
                 failures.append(getattr(exc, "usage", None) or {"cost_reported": False})
-                self.log.info("Generation retry %s after %s", attempt + 2, exc.code)
-                await asyncio.sleep(2**attempt)
+                self.log.info("Generation retry %s after %s", attempt + 2, failure.code)
+                await wait_before_retry_async(attempt + 1)
 
     def _serial_context(self, context: dict, chapter_number: int) -> dict:
         import yaml

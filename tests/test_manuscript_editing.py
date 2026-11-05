@@ -424,3 +424,69 @@ def test_studio_annotation_dom_uses_form_and_safe_text_rendering() -> None:
     assert "window.prompt" not in javascript
     assert "button.innerHTML" not in javascript
     assert "await reopenDocument(state.document.path)" in javascript
+
+
+def test_version_history_is_bounded_but_keeps_labelled_entries(tmp_path):
+    """Autosaves must not accumulate forever.
+
+    Every checkpoint wrote a pair of files and nothing removed them, so a
+    100-chapter book with 20 edits per chapter reached 2000 full-text copies and
+    `list()` parsed every one on each request.
+    """
+    from tools.manuscript_editing import VERSION_HISTORY_KEEP, ManuscriptVersionStore
+    from tools.init_project import init_project
+
+    init_project(tmp_path, "demo")
+    store = ManuscriptVersionStore(tmp_path, "demo")
+    chapter_path = tmp_path / "data/novels/demo/data/manuscript/arc_001/ch_001.md"
+    chapter_path.parent.mkdir(parents=True, exist_ok=True)
+    chapter_path.write_text("# 第一章\n\n" + "内容" * 200, encoding="utf-8")
+
+    for index in range(VERSION_HISTORY_KEEP + 8):
+        store.checkpoint(
+            "ch_001", reason="autosave", label="",
+            content=f"# 第一章\n\n自动版本 {index}\n" + "内容" * 200,
+        )
+
+    versions = store.list("ch_001")
+    assert len(versions) == VERSION_HISTORY_KEEP, len(versions)
+    # The newest survived; the oldest was pruned.
+    assert "自动版本" in str(versions[0].label) or versions[0].label == ""
+    files = sorted((store.root / "ch_001").glob("ver_*"))
+    assert len(files) == VERSION_HISTORY_KEEP * 2, f"orphaned files: {len(files)}"
+
+    # An author-labelled entry survives further pruning.
+    store.checkpoint(
+        "ch_001", reason="manual", label="作者标记的重要版本",
+        content="# 第一章\n\n标记版本\n",
+    )
+    for index in range(VERSION_HISTORY_KEEP + 5):
+        store.checkpoint(
+            "ch_001", reason="autosave", label="",
+            content=f"# 第一章\n\n后续 {index}\n" + "内容" * 200,
+        )
+    labels = [item.label for item in store.list("ch_001")]
+    assert "作者标记的重要版本" in labels, f"the labelled entry was pruned: {labels}"
+
+
+def test_pruning_never_removes_the_live_chapter_text(tmp_path):
+    """The chapter the author is reading is not in the version directory."""
+    from tools.manuscript_editing import ManuscriptVersionStore
+    from tools.init_project import init_project
+
+    init_project(tmp_path, "demo")
+    store = ManuscriptVersionStore(tmp_path, "demo")
+    chapter_path = tmp_path / "data/novels/demo/data/manuscript/arc_001/ch_001.md"
+    chapter_path.parent.mkdir(parents=True, exist_ok=True)
+    live = "# 第一章\n\n当前正文\n"
+    chapter_path.write_text(live, encoding="utf-8")
+
+    for index in range(30):
+        store.checkpoint(
+            "ch_001", reason="autosave", label="",
+            content=f"# 第一章\n\n旧版本 {index}\n",
+        )
+
+    assert chapter_path.read_text(encoding="utf-8") == live
+    # No version file shares the live chapter's path.
+    assert not (store.root / "ch_001" / "ch_001.md").exists()

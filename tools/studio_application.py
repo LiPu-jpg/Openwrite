@@ -221,6 +221,15 @@ class StudioApplication:
         self.novel_id = str(self.config.get("novel_id") or "")
         if self.initialized and not self.novel_id:
             raise StudioError("novel_config.yaml 缺少 novel_id")
+        # The id comes from a file on disk, so it must satisfy the same rule
+        # initialize_project enforces. Without it, a config naming `../..`
+        # relocates novel_root outside project_root — and with it the
+        # containment anchor every document path is checked against.
+        if self.initialized and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{1,63}", self.novel_id):
+            raise StudioError(
+                "novel_config.yaml 的 novel_id 无效，需为 2-64 位字母、数字、横线或下划线",
+                code="INVALID_PROJECT",
+            )
         self.novel_root = (
             novel_root(self.project_root, self.novel_id).resolve()
             if self.initialized
@@ -862,6 +871,7 @@ class StudioApplication:
             "recent": recent,
             "metadata": {key: str(metadata_config.get(key) or ("zh-CN" if key == "language" else "")) for key in ("title", "author", "language")},
             "metadata_revision": RevisionService.fingerprint(metadata_text) if self.initialized else "",
+            "config_revision": RevisionService.fingerprint(self.config_path.read_text(encoding="utf-8")) if self.initialized else "",
             "writing_targets": normalize_writing_targets(
                 self.config.get("writing_targets") if self.initialized else {}
             ),
@@ -1006,6 +1016,37 @@ class StudioApplication:
             "EXPORT_PREFLIGHT_CHANGED": HTTPStatus.CONFLICT,
             "EPUB_VALIDATION_FAILED": HTTPStatus.UNPROCESSABLE_ENTITY,
             "EXPORT_OUTPUT_INVALID": HTTPStatus.UNPROCESSABLE_ENTITY,
+            # Manuscript-acceptance codes. Every one of them used to fall through
+            # to BAD_GATEWAY, so a stale revision or a facts-pending chapter was
+            # reported to the author as an upstream failure instead of the
+            # recoverable conflict it is.
+            "ACCEPTANCE_BASELINE_REQUIRED": HTTPStatus.PRECONDITION_FAILED,
+            "ACCEPTED_SOURCE_CHANGED": HTTPStatus.CONFLICT,
+            "BASELINE_ALREADY_EXISTS": HTTPStatus.CONFLICT,
+            "CHARACTER_INDEX_REBUILD_FAILED": HTTPStatus.INTERNAL_SERVER_ERROR,
+            "EXTERNAL_MANUSCRIPT_CHANGE": HTTPStatus.CONFLICT,
+            "FACT_BASELINE_REQUIRED": HTTPStatus.PRECONDITION_FAILED,
+            "INVALID_ANALYSIS_RESULT": HTTPStatus.UNPROCESSABLE_ENTITY,
+            "INVALID_CHAPTER_ID": HTTPStatus.BAD_REQUEST,
+            "INVALID_DOMAIN": HTTPStatus.BAD_REQUEST,
+            "INVALID_OPERATION_ID": HTTPStatus.BAD_REQUEST,
+            "INVALID_OPERATION_STATE": HTTPStatus.CONFLICT,
+            "INVALID_SOURCE": HTTPStatus.BAD_REQUEST,
+            "MANUSCRIPT_DEPENDENCIES_NEED_REVIEW": HTTPStatus.CONFLICT,
+            "MANUSCRIPT_FACTS_PENDING": HTTPStatus.CONFLICT,
+            "OPERATION_NOT_FOUND": HTTPStatus.NOT_FOUND,
+            "STALE_ACCEPTED_REVISION": HTTPStatus.CONFLICT,
+            # NovelServiceError codes for the export/run paths. Every one of them
+            # used to fall through to BAD_GATEWAY, so a rejected export target
+            # (a symlink) or an already-written chapter was reported to the
+            # author as an upstream failure and retried as if transient.
+            "EXPORT_AUDIT_FAILED": HTTPStatus.INTERNAL_SERVER_ERROR,
+            "INVALID_EXPORT_OUTPUT": HTTPStatus.BAD_REQUEST,
+            "EXPORT_OUTPUT_CHANGED": HTTPStatus.CONFLICT,
+            "EXPORT_OUTPUT_RECOVERY_REQUIRED": HTTPStatus.CONFLICT,
+            "RUN_NOT_RESUMABLE": HTTPStatus.CONFLICT,
+            "RUN_TARGET_MISMATCH": HTTPStatus.CONFLICT,
+            "CHAPTER_ALREADY_EXISTS": HTTPStatus.CONFLICT,
         }.get(exc.code, HTTPStatus.BAD_GATEWAY)
         return StudioError(str(exc), status, code=exc.code, details=getattr(exc, "details", {}))
 
@@ -1710,11 +1751,19 @@ class StudioApplication:
             self.novel_root if record.get("target_scope") == "novel" else self.project_root
         )
         target = (target_base / str(record.get("target_path") or "")).resolve()
-        checkpoint = GitCheckpointManager(self.project_root).checkpoint(
-            [target.relative_to(self.project_root).as_posix()],
-            f"structured {action}: {kind}",
-        )
-        supplement["checkpoint"] = checkpoint.to_dict()
+        try:
+            checkpoint_path: str | None = target.relative_to(self.project_root).as_posix()
+        except ValueError:
+            # A target outside the project root is not ours to checkpoint; the
+            # checkpoint manager's own path allowlist would drop it anyway, and
+            # raising here would fail the whole structured change.
+            checkpoint_path = None
+        if checkpoint_path is not None:
+            checkpoint = GitCheckpointManager(self.project_root).checkpoint(
+                [checkpoint_path],
+                f"structured {action}: {kind}",
+            )
+            supplement["checkpoint"] = checkpoint.to_dict()
         return supplement
 
     def list_manuscript_versions(self, chapter_id: str) -> dict[str, Any]:
@@ -1980,10 +2029,11 @@ class StudioApplication:
                 CharacterStateIndex(self.project_root, self.novel_id).refresh()
             except Exception as exc:
                 logger.warning("Failed to refresh character state index: %s", exc)
-        checkpoint_path = path.resolve().relative_to(self.project_root).as_posix()
-        checkpoint = GitCheckpointManager(self.project_root).checkpoint(
-            [checkpoint_path], self._checkpoint_message(path)
-        )
+        checkpoint_path = self._project_relative(path)
+        if checkpoint_path is not None:
+            checkpoint = GitCheckpointManager(self.project_root).checkpoint(
+                [checkpoint_path], self._checkpoint_message(path)
+            )
         saved["checkpoint"] = checkpoint.to_dict()
         self._debug_event(
             "document_write_completed",
@@ -2033,7 +2083,7 @@ class StudioApplication:
         from tools.truth_manager import TruthFilesManager
 
         previous_chapter = chapters[-2].chapter_id if len(chapters) > 1 else ""
-        checkpoint_path = path.resolve().relative_to(self.project_root).as_posix()
+        checkpoint_path = self._project_relative(path)
 
         with (
             self._write_lock,
@@ -2292,6 +2342,13 @@ class StudioApplication:
         self.require_project()
         current = normalize_writing_targets(self.config.get("writing_targets"))
         before_config = self.config_path.read_bytes().decode("utf-8")
+        # Optimistic concurrency, mirroring `update_project_metadata`: without it
+        # two concurrent updates both succeeded and the last writer won with no
+        # conflict signal. `expected_revision` is optional so an author editing a
+        # single field by hand is not blocked, but a client that read the config
+        # can detect that it moved underneath it.
+        if payload.get("expected_revision") is not None and payload["expected_revision"] != RevisionService.fingerprint(before_config):
+            raise StudioError("写作目标已变化，请重新载入后保存", HTTPStatus.CONFLICT)
         try:
             targets = normalize_writing_targets(
                 payload,
@@ -2468,6 +2525,77 @@ class StudioApplication:
                 raise self._translate_model_profile_error(exc) from exc
             raise StudioError("任务路由保存失败，请检查配置目录权限") from exc
         return {"model_profiles": self.model_profiles(), "impact": saved["impact"]}
+
+    def host_model_catalog(self) -> dict[str, Any]:
+        """The host's own model directory, as far as this process can reach it."""
+        from tools.host_llm import fetch_host_models
+
+        catalog = fetch_host_models()
+        return {
+            "schema_version": "openwrite.host-model-catalog.v1",
+            **catalog,
+        }
+
+    @staticmethod
+    def _host_profile_id(model: str) -> str:
+        """A stable, unique profile id for one host model route."""
+        import hashlib
+
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "-", model).strip("-").lower()[:36].strip("-")
+        digest = hashlib.sha1(model.encode("utf-8")).hexdigest()[:6]
+        return f"host-{slug or 'model'}-{digest}"
+
+    def save_host_model_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create a profile that calls one model of the host's own directory.
+
+        The profile stores no address and no key: the relay coordinates are
+        live facts that the backend resolved at call time.
+        """
+        from tools.host_llm import fetch_host_models
+
+        model = str(payload.get("model") or "").strip()
+        if not model:
+            raise StudioError("请选择宿主模型", code="INVALID_REQUEST_BODY")
+        catalog = fetch_host_models()
+        if not catalog.get("available"):
+            raise StudioError(
+                str(catalog.get("error") or "宿主模型通道不可用"),
+                code="MODEL_HOST_RELAY_UNAVAILABLE",
+            )
+        known = {str(entry.get("id") or "") for entry in catalog.get("models") or []}
+        if model not in known:
+            raise StudioError(f"宿主模型不可用: {model}", code="MODEL_PROFILE_NOT_FOUND")
+        entry = next(
+            (item for item in catalog.get("models") or [] if str(item.get("id")) == model),
+            {},
+        )
+        label = str(payload.get("label") or "").strip() or str(entry.get("label") or model)
+        context_tokens = int(entry.get("context_tokens") or 64000)
+        try:
+            profile = self._model_profile_store.save_profile(
+                {
+                    "id": self._host_profile_id(model),
+                    "label": label,
+                    "provider": "custom",
+                    "base_url": "",
+                    "model": model,
+                    "api_format": "chat",
+                    "auth_source": "host_relay",
+                    "context_tokens": context_tokens,
+                    "max_output_tokens": 24000,
+                },
+                api_key="",
+                remember_api_key=False,
+            )
+        except (ModelProfileError, OSError) as exc:
+            if isinstance(exc, ModelProfileError):
+                raise self._translate_model_profile_error(exc) from exc
+            raise StudioError("宿主模型档案保存失败，请检查配置目录权限") from exc
+        return {
+            "profile": profile,
+            "model_profiles": self.model_profiles(),
+            "workspace": self.workspace(),
+        }
 
     def delete_model_profile_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -2853,6 +2981,7 @@ class StudioApplication:
             "MODEL_PROFILE_LAST_PROFILE": HTTPStatus.CONFLICT,
             "MODEL_PROFILE_FALLBACK_INVALID": HTTPStatus.CONFLICT,
             "MODEL_PROFILE_FALLBACK_UNCONFIGURED": HTTPStatus.CONFLICT,
+            "MODEL_HOST_RELAY_UNAVAILABLE": HTTPStatus.PRECONDITION_FAILED,
         }.get(exc.code, HTTPStatus.BAD_REQUEST)
         return StudioError(
             str(exc),
@@ -5010,7 +5139,12 @@ class StudioApplication:
     def establish_manuscript_baseline(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             service = self._manuscript_acceptance()
-            operation = service.establish_baseline(confirm=payload.get("confirm") is True)
+            # Hold the project write lock across the whole read-modify-write.
+            # This was the only acceptance mutator on the HTTP surface without
+            # one, so two concurrent baselines (or a baseline racing an import)
+            # both read the pre-update state and the loser's heads vanished.
+            with ProjectWriteLock(self.project_root, self.novel_id, operation="accept:baseline"):
+                operation = service.establish_baseline(confirm=payload.get("confirm") is True)
             return self._manuscript_acceptance_result(service, operation)
         except ManuscriptAcceptanceError as exc:
             raise self._translate_manuscript_acceptance_error(exc) from exc
@@ -5416,6 +5550,7 @@ class StudioApplication:
         self, payload: dict[str, Any], context: TaskContext
     ) -> dict[str, Any]:
         """结算回填：把既有/导入章节的正文结算为记忆/真相/角色状态。"""
+        from tools.llm.cancellation import ModelCancelledError
         from tools.settle_backfill import run as run_settle_backfill
 
         chapter_ids = payload.get("chapter_ids")
@@ -5437,22 +5572,49 @@ class StudioApplication:
         context.phase("model", "逐章结算既有正文")
         profile = self._operation_profile("chapter_write")
         with self._model_context(profile):
-            summary = run_settle_backfill(
-                self.project_root,
-                self.novel_id,
-                chapter_ids=chapter_ids,
-                only_missing=only_missing,
-                profile=profile,
-                progress=context.progress_callback,
-                cancelled=context.cancellation_requested,
-                report=context.report_progress,
+            try:
+                summary = run_settle_backfill(
+                    self.project_root,
+                    self.novel_id,
+                    chapter_ids=chapter_ids,
+                    only_missing=only_missing,
+                    profile=profile,
+                    progress=context.progress_callback,
+                    cancelled=context.cancellation_requested,
+                    report=context.report_progress,
+                )
+            except ModelCancelledError as exc:
+                # The model call itself noticed the cancel request. Report it as
+                # a cancellation so the task stops now instead of finishing the
+                # remaining chapters.
+                raise TaskCancelled("任务已取消，结算已停止") from exc
+        degraded_chapters = [
+            {
+                "chapter_id": str(item.get("chapter_id") or ""),
+                "reason": str(item.get("reason") or "MODEL_OUTPUT_INVALID"),
+                "attempts": len(item.get("failures") or []),
+            }
+            for item in summary.get("degraded") or []
+        ]
+        if degraded_chapters:
+            logger.warning(
+                "settle_backfill 降级章节: %s",
+                ", ".join(
+                    f"{item['chapter_id']}({item['reason']})" for item in degraded_chapters
+                ),
             )
-        return {"ok": True, "summary": summary}
+        return {
+            "ok": True,
+            "summary": summary,
+            "degraded": bool(degraded_chapters),
+            "degraded_chapters": degraded_chapters,
+        }
 
     def _task_manuscript_reconcile(
         self, payload: dict[str, Any], context: TaskContext
     ) -> dict[str, Any]:
         """Resume one durable acceptance operation inside the persistent queue."""
+        from tools.llm.cancellation import ModelCancelledError
         from tools.settle_backfill import analyze_existing_chapter
 
         operation_id = str(payload.get("operation_id") or "")
@@ -5494,14 +5656,21 @@ class StudioApplication:
             nonlocal completed_units
             context.checkpoint()
             context.phase("model", f"Extracting facts for {chapter_id}")
-            result = analyze_existing_chapter(
-                self.project_root,
-                self.novel_id,
-                chapter_id=chapter_id,
-                title=title,
-                content=content,
-                truth_context=prior_context,
-            )
+            try:
+                result = analyze_existing_chapter(
+                    self.project_root,
+                    self.novel_id,
+                    chapter_id=chapter_id,
+                    title=title,
+                    content=content,
+                    truth_context=prior_context,
+                    # Bind the cancellation check into the model call itself: a
+                    # cancel request only stops the run between chapters otherwise,
+                    # and the in-flight call runs to completion.
+                    cancelled=context.cancellation_requested,
+                )
+            except ModelCancelledError as exc:
+                raise TaskCancelled("任务已取消，事实提取已停止") from exc
             completed_units += 1
             context.report_progress(completed_units, total_units, "chapters")
             return result
@@ -5515,12 +5684,31 @@ class StudioApplication:
             raise self._translate_manuscript_acceptance_error(exc) from exc
         context.phase("validating", "校验接纳版本与事实来源")
         context.phase("committing", "提交重建后的派生事实")
+        analysis_results = completed.get("analysis_results", {}) or {}
+        degraded_chapters = [
+            {
+                "chapter_id": chapter_id,
+                "reason": str(item.get("degraded_reason") or "MODEL_OUTPUT_INVALID"),
+                "attempts": len(item.get("failures") or []),
+            }
+            for chapter_id, item in analysis_results.items()
+            if item.get("degraded")
+        ]
+        if degraded_chapters:
+            # The task itself succeeded, but these chapters carry a placeholder
+            # recap instead of facts. Say it out loud: a silent "completed"
+            # is what made this look like a mysterious failure.
+            logger.warning(
+                "manuscript_reconcile 降级章节: %s",
+                ", ".join(
+                    f"{item['chapter_id']}({item['reason']})" for item in degraded_chapters
+                ),
+            )
         return {
             "operation_id": operation_id,
             "operation": completed,
-            "degraded": any(
-                item.get("degraded") for item in completed.get("analysis_results", {}).values()
-            ),
+            "degraded": bool(degraded_chapters),
+            "degraded_chapters": degraded_chapters,
             "acceptance": service.inspect(),
         }
 
@@ -5561,7 +5749,14 @@ class StudioApplication:
                 else self._operation_profile("chapter_write")
             )
             with self._model_context(profile):
-                snapshot = self._service().context_preview(chapter_id)
+                # Creative execution calls the agents directly, so it needs the
+                # same writer/review payloads the production pipeline builds.
+                # The raw context packet's `outline` is the whole context
+                # markdown, not the chapter outline.
+                snapshot = self._service().context_preview(
+                    chapter_id,
+                    include_agent_payload=target["execution_mode"] == "creative",
+                )
         return benchmark.run(
             {**payload, **target},
             snapshot,
@@ -5912,12 +6107,49 @@ class StudioApplication:
             raise StudioError("成本上限必须是数字") from exc
         completed = list(payload.get("_already_completed") or [])
         failed_chapters: list[dict[str, Any]] = []
+        # The chapters that failed at least once and were written afterwards.
+        # A recovered chapter is not a failed chapter: it is in the log, but
+        # the task is not a partial failure because of it.
+        recovered_chapters: list[dict[str, Any]] = []
+        # The last failure of every chapter, so the next attempt at that chapter
+        # can read why it failed instead of repeating the same request. It
+        # survives the task's own retry: a retry that does not know why the
+        # last one failed is the same request, and it makes the same mistake.
+        raw_memory = payload.get("_failure_memory")
+        failure_memory: dict[str, dict[str, Any]] = (
+            dict(raw_memory) if isinstance(raw_memory, dict) else {}
+        )
         already_used = payload.get("_already_used")
         usage = dict(already_used) if isinstance(already_used, dict) else {}
         total_tokens = int(usage.get("total_tokens") or 0)
         total_cost_usd = float(usage.get("cost_usd") or 0)
         consecutive_failures = int(usage.get("consecutive_failures") or 0)
         stop_reason = "max_chapters_reached"
+
+        def _mark_failed(entry: dict[str, Any]) -> None:
+            """One failed attempt at a chapter that is not written yet."""
+            failed_chapters.append(entry)
+
+        def _mark_recovered(chapter: str) -> None:
+            """A chapter that failed and was written afterwards.
+
+            It leaves the failed list: the author has nothing missing, and a
+            task that only contains recovered chapters is not a partial failure.
+            The attempts stay in the log, under `recovered_chapters`.
+            """
+            moved = [
+                item for item in failed_chapters if item.get("chapter_id") == chapter
+            ]
+            if not moved:
+                return
+            failed_chapters[:] = [
+                item for item in failed_chapters if item.get("chapter_id") != chapter
+            ]
+            recovered_chapters[:] = [
+                item for item in recovered_chapters if item.get("chapter_id") != chapter
+            ]
+            recovered_chapters.extend(moved)
+
         # 按“已完成章节数”驱动而非固定尝试次数：单章失败不计入章节预算，
         # 由 consecutive_failures 上限（max_failures）兜底防死循环。
         while len(completed) < max_chapters:
@@ -5962,9 +6194,26 @@ class StudioApplication:
                 else:
                     stop_reason = "outline_gap"
                     break
+            guidance_text = str(
+                payload.get("guidance") or recommendation.get("guidance") or ""
+            )
+            # A chapter that already failed is attempted again with the reason
+            # attached. Without it the retry is the identical request, and the
+            # model makes the identical mistake - which is how a single bad
+            # answer used to cost three attempts and still lose the chapter.
+            previous = failure_memory.get(chapter_id)
+            if previous:
+                guidance_text = "\n\n".join(
+                    part
+                    for part in (
+                        guidance_text.strip(),
+                        str(previous.get("guidance") or "").strip(),
+                    )
+                    if part
+                )
             write_payload = {
                 "chapter_id": chapter_id,
-                "guidance": str(payload.get("guidance") or recommendation.get("guidance") or ""),
+                "guidance": guidance_text,
                 **(
                     {"target_words": payload["target_words"]}
                     if payload.get("target_words") is not None
@@ -5989,6 +6238,8 @@ class StudioApplication:
                         {
                             "completed_chapters": completed,
                             "failed_chapters": failed_chapters,
+                            "recovered_chapters": recovered_chapters,
+                            "failure_memory": failure_memory,
                             "usage": usage,
                             "stop_reason": "deferred",
                         }
@@ -5996,18 +6247,33 @@ class StudioApplication:
                     raise
                 consecutive_failures += 1
                 usage["consecutive_failures"] = consecutive_failures
-                failed_chapters.append(
+                from tools.failure_diagnosis import diagnose, diagnose_exception, guidance_for
+
+                details = dict(getattr(exc, "details", {}) or {})
+                diagnosis = details.get("diagnosis")
+                if not isinstance(diagnosis, dict):
+                    diagnosis = diagnose_exception(exc).as_dict()
+                failure_memory[chapter_id] = {
+                    "error": str(exc) or exc.__class__.__name__,
+                    "code": str(getattr(exc, "code", "TASK_FAILED")),
+                    "diagnosis": diagnosis,
+                    "guidance": guidance_for(diagnosis, str(exc)),
+                }
+                _mark_failed(
                     {
                         "chapter_id": chapter_id,
                         "error": str(exc) or exc.__class__.__name__,
                         "code": str(getattr(exc, "code", "TASK_FAILED")),
-                        **dict(getattr(exc, "details", {}) or {}),
+                        "diagnosis": diagnosis,
+                        **details,
                     }
                 )
                 context.persist_progress(
                     {
                         "completed_chapters": completed,
                         "failed_chapters": failed_chapters,
+                        "recovered_chapters": recovered_chapters,
+                        "failure_memory": failure_memory,
                         "usage": usage,
                         "stop_reason": "chapter_failure",
                     }
@@ -6016,11 +6282,16 @@ class StudioApplication:
                     return {
                         "completed_chapters": completed,
                         "failed_chapters": failed_chapters,
+                        "recovered_chapters": recovered_chapters,
+                        "failure_memory": failure_memory,
                         "usage": usage,
                         "stop_reason": "max_failures_reached",
                     }
                 # 未达上限：记录该章失败并继续下一章，而不是中止整个队列。
                 continue
+            # The chapter is written. If it had failed before, it is no longer
+            # failed - it is recovered.
+            _mark_recovered(chapter_id)
             completed.append(
                 {
                     "chapter_id": chapter_id,
@@ -6042,6 +6313,9 @@ class StudioApplication:
             context.persist_progress(
                 {
                     "completed_chapters": completed,
+                    "failed_chapters": failed_chapters,
+                    "recovered_chapters": recovered_chapters,
+                    "failure_memory": failure_memory,
                     "usage": usage,
                     "stop_reason": "in_progress",
                 }
@@ -6091,6 +6365,8 @@ class StudioApplication:
         return {
             "completed_chapters": completed,
             "failed_chapters": failed_chapters,
+            "recovered_chapters": recovered_chapters,
+            "failure_memory": failure_memory,
             "usage": usage,
             "stop_reason": stop_reason,
         }
@@ -6781,6 +7057,16 @@ class StudioApplication:
     def _resolve_document(self, relative_path: str, *, write: bool) -> Path:
         if not isinstance(relative_path, str) or not relative_path.strip():
             raise StudioError("缺少文档路径")
+        # Reject over-long components first: every filesystem call below (stat,
+        # is_symlink, resolve, read, write) raises OSError ENAMETOOLONG on them,
+        # and that escapes as a 500 instead of a 400.
+        if any(len(part) > 255 for part in Path(relative_path).parts):
+            raise StudioError("文档路径组件过长", HTTPStatus.BAD_REQUEST)
+        # Check the symlink BEFORE resolving: `resolve()` follows the link, so
+        # testing `candidate.is_symlink()` afterwards is always False and the
+        # write silently clobbers the link's target.
+        if write and (self.novel_root / relative_path).is_symlink():
+            raise StudioError("不允许写入符号链接", HTTPStatus.FORBIDDEN)
         candidate = (self.novel_root / relative_path).resolve()
         allowed_roots = [
             (self.novel_root / "src").resolve(),
@@ -6790,9 +7076,27 @@ class StudioApplication:
             raise StudioError("文档路径不在 Studio 可访问范围", HTTPStatus.FORBIDDEN)
         if candidate.suffix.lower() != ".md":
             raise StudioError("Studio 仅编辑 Markdown 文档")
+        # A single component longer than the filesystem's NAME_MAX makes the
+        # write fail with an OSError that escapes as a 500. Reject it here so
+        # both reads and writes answer 400 instead of crashing the handler.
+        if any(len(part) > 255 for part in candidate.parts):
+            raise StudioError("文档路径组件过长", HTTPStatus.BAD_REQUEST)
         if write and candidate.is_symlink():
             raise StudioError("不允许写入符号链接", HTTPStatus.FORBIDDEN)
         return candidate
+
+    def _project_relative(self, path: Path) -> str | None:
+        """Path relative to the project root, or None when it lies outside.
+
+        Used only for the git checkpoint, which is best-effort: a document whose
+        resolved path escapes the project root must not turn a committed write
+        into a 500 by raising after the fact.
+        """
+        try:
+            return path.resolve().relative_to(self.project_root).as_posix()
+        except ValueError:
+            logger.warning("Checkpoint skipped: %s is outside the project root", path)
+            return None
 
     def _relative(self, path: Path) -> str:
         return path.resolve().relative_to(self.novel_root).as_posix()

@@ -92,6 +92,10 @@ class SceneStructureService:
                 "SCENE_STRUCTURE_ABSENT",
                 severity="info",
                 blocking=False,
+                message=(
+                    "还没有原生场景结构：初始化只建了规划骨架，"
+                    "写出章节稿件后才会生成。"
+                ),
             )
             return self._empty_surface(reading, status="absent", issues=[issue])
         if sidecar is None:
@@ -563,11 +567,31 @@ class SceneStructureService:
                 str(existing.get("revision") or "") if existing is not None else ""
             ),
         }
+        # An empty plan means no chapter carries manuscript text, so a migration
+        # would write a sidecar with zero chapters and zero scenes. That flips
+        # `surface()` from `absent` to `current` and removes the migration path
+        # while leaving the user with a structure that has nothing to edit, so
+        # the preview must refuse it instead of reporting success.
+        if not plan:
+            migration_issues.append(
+                self._issue(
+                    "MIGRATION_PLAN_EMPTY",
+                    message=(
+                        "规划章节还没有稿件正文，暂时无法迁移。"
+                        "先写出章节稿件，再回到此处刷新。"
+                    ),
+                    details={"input_chapters": len(input_chapters)},
+                )
+            )
         core = {
             "schema_version": PREVIEW_SCHEMA_VERSION,
             "novel_id": self.novel_id,
             "reading_order_revision": reading["revision"],
-            "can_apply": self._reading_allows_scene_edits(reading) and not migration_issues,
+            "can_apply": (
+                self._reading_allows_scene_edits(reading)
+                and not migration_issues
+                and bool(plan)
+            ),
             "input_chapters": input_chapters,
             "plan": plan,
             "rollback_evidence": rollback_evidence,
@@ -604,6 +628,15 @@ class SceneStructureService:
                         },
                     )
                 if not preview["can_apply"]:
+                    # `can_apply` is refused for more than one reason now; report
+                    # the one that actually holds instead of always blaming the
+                    # reading order.
+                    if not preview["plan"]:
+                        raise SceneStructureError(
+                            "没有可迁移的章节正文，请先为规划章节创建稿件",
+                            code="SCENE_MIGRATION_PLAN_EMPTY",
+                            details={"input_chapters": len(preview["input_chapters"])},
+                        )
                     raise SceneStructureError(
                         "正文顺序存在歧义，不能迁移场景结构",
                         code="SCENE_READING_ORDER_BLOCKED",
@@ -667,14 +700,6 @@ class SceneStructureService:
                 record = self._read_json(record_path)
                 if record is None or record.get("schema_version") != MIGRATION_SCHEMA_VERSION:
                     raise SceneStructureError("迁移记录不存在", code="SCENE_MIGRATION_NOT_FOUND")
-                if (
-                    record.get("status") != "applied"
-                    or record.get("result_revision") != current["revision"]
-                ):
-                    raise SceneStructureError(
-                        "迁移结果已被后续编辑，不能直接回滚",
-                        code="SCENE_MIGRATION_DIVERGED",
-                    )
                 try:
                     previous = (
                         b64decode(
@@ -695,6 +720,38 @@ class SceneStructureService:
                         "迁移回滚证据损坏", code="SCENE_MIGRATION_EVIDENCE_INVALID"
                     )
                 current_bytes = self.sidecar_path.read_bytes()
+                # A crash between restoring the sidecar and stamping the record
+                # used to leave the record at "applied" forever: every retry
+                # answered SCENE_MIGRATION_DIVERGED. If the sidecar already holds
+                # the pre-migration bytes, the rollback is in fact complete —
+                # stamp it instead of refusing.
+                already_restored = (
+                    previous is None and not self.sidecar_path.exists()
+                ) or (previous is not None and current_bytes == previous)
+                if already_restored:
+                    if record.get("status") != "rolled_back":
+                        stamped = {
+                            **record,
+                            "status": "rolled_back",
+                            "rolled_back_at": self._now(),
+                            "rollback_revision": self._digest(current_bytes),
+                        }
+                        self._atomic_bytes(record_path, self._json_bytes(stamped))
+                    # Same response shape as the normal path; `scene_structure`
+                    # now reflects the restored sidecar.
+                    return {
+                        "schema_version": MIGRATION_SCHEMA_VERSION,
+                        "migration_id": clean,
+                        "scene_structure": self.surface(),
+                    }
+                if (
+                    record.get("status") != "applied"
+                    or record.get("result_revision") != current["revision"]
+                ):
+                    raise SceneStructureError(
+                        "迁移结果已被后续编辑，不能直接回滚",
+                        code="SCENE_MIGRATION_DIVERGED",
+                    )
                 updated_record = {
                     **record,
                     "status": "rolled_back",
@@ -1074,10 +1131,16 @@ class SceneStructureService:
         sidecar_temp = self._temporary(self.sidecar_path, sidecar_after)
         record_temp = self._temporary(record_path, self._json_bytes(record))
         try:
-            sidecar_temp.replace(self.sidecar_path)
-            self._fault("sidecar_replaced")
+            # Record first: it is a new file, so there is no overwrite risk, and
+            # it is the only durable evidence that this sidecar was produced by a
+            # migration. Swapping first left a crash window in which the new
+            # sidecar was live with no record, the previous bytes survived only
+            # in an orphaned temp file, and rollback then reported
+            # SCENE_MIGRATION_NOT_FOUND — the author's metadata was unrecoverable.
             record_temp.replace(record_path)
             self._fault("migration_record_replaced")
+            sidecar_temp.replace(self.sidecar_path)
+            self._fault("sidecar_replaced")
         except Exception as exc:
             if sidecar_before is None:
                 self.sidecar_path.unlink(missing_ok=True)
@@ -1106,6 +1169,11 @@ class SceneStructureService:
             self._temporary(self.sidecar_path, previous) if previous is not None else None
         )
         try:
+            # Restore the sidecar first and the record second, so a crash between
+            # the two leaves the *record* as the lagging half. A record still
+            # saying "applied" while the sidecar already matches the pre-migration
+            # bytes is a completed rollback, not a divergence — see
+            # `rollback_migration`, which stamps it instead of refusing forever.
             if sidecar_temp is None:
                 self.sidecar_path.unlink()
             else:
@@ -1452,6 +1520,7 @@ class SceneStructureService:
         *,
         severity: str = "error",
         blocking: bool = True,
+        message: str = "",
         chapter_id: str = "",
         document_id: str = "",
         occurrence_id: str = "",
@@ -1464,6 +1533,10 @@ class SceneStructureService:
             "code": code,
             "severity": severity,
             "blocking": blocking,
+            # The browser has no other source for this wording: without a
+            # message it falls back to a generic "需要处理", which reads as a
+            # failure even when the code only reports a not-yet state.
+            "message": message,
             "chapter_id": chapter_id,
             "document_id": document_id,
             "occurrence_id": occurrence_id,

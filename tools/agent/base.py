@@ -81,6 +81,7 @@ class BaseAgent(ABC):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         operation: str = "",
+        max_retries: Optional[int] = None,
     ) -> LLMResponse:
         """调用 LLM 进行对话
 
@@ -88,6 +89,9 @@ class BaseAgent(ABC):
             messages: 对话消息列表
             temperature: 温度参数
             max_tokens: 最大 token 数
+            max_retries: 覆盖 LiteLLM 自身的重试次数。调用方自己跑分类重试
+                策略时传 0：两层重试叠在一起就是一次突发，而突发正是限流器
+                要惩罚的东西。
 
         Returns:
             LLMResponse 响应对象
@@ -105,6 +109,11 @@ class BaseAgent(ABC):
             }
             if operation:
                 kwargs["operation"] = operation
+            if max_retries is not None:
+                from ..llm.client import accepts_parameter
+
+                if accepts_parameter(self.ctx.client, "chat", "max_retries"):
+                    kwargs["max_retries"] = max_retries
             response = self.ctx.client.chat(**kwargs)
             from ..llm.response import ProviderResponseError, classify_response
 

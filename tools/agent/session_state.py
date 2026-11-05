@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
-import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +22,7 @@ from .session_limits import (
     MAX_TURN_CONTENT_BYTES,
     MAX_WORKING_MEMORY_KEYS,
 )
+from tools.file_ops import atomic_write
 
 DEFAULT_ACTIVE_AGENT = "dante"
 
@@ -54,6 +55,11 @@ class DanteSessionState:
     updated_at: str = ""
 
 
+# Transcript budget: the rolling YAML is capped at MAX_SESSION_BYTES, so keep the
+# append-only JSONL to a small multiple of it rather than letting it grow forever.
+MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024
+
+
 class SessionStateStore:
     def __init__(
         self,
@@ -79,7 +85,7 @@ class SessionStateStore:
         self.transcript_path = self.path.with_suffix(".jsonl")
 
     def append_turn(self, role: str, content: str) -> None:
-        """Archive the full turn; the rolling YAML state remains bounded."""
+        # Archive the full turn; the rolling YAML state remains bounded.
         record = {
             "session_id": self.session_id,
             "agent": DEFAULT_ACTIVE_AGENT,
@@ -90,6 +96,41 @@ class SessionStateStore:
         self.transcript_path.parent.mkdir(parents=True, exist_ok=True)
         with self.transcript_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._rotate_transcript_if_needed()
+
+    def _rotate_transcript_if_needed(self) -> None:
+        # Rotate the transcript once it grows past a byte budget. The rolling YAML
+        # is carefully bounded (_compress_for_size, _hard_truncate_state), but the
+        # JSONL transcript had no cap at all: 500 turns of 4 KB each produced an
+        # 18 KB YAML beside a 2 MB JSONL, and the file only ever grew.
+        try:
+            size = self.transcript_path.stat().st_size
+        except OSError:
+            return
+        if size <= MAX_TRANSCRIPT_BYTES:
+            return
+        rotated = self.transcript_path.with_name(self.transcript_path.name + ".1")
+        try:
+            os.replace(self.transcript_path, rotated)
+        except OSError:
+            logger.warning("Could not rotate session transcript %s", self.transcript_path)
+            return
+        self._record_rotation_marker(size)
+
+    def _record_rotation_marker(self, previous_size: int) -> None:
+        # Leave a marker so a reader can tell the live file starts fresh here.
+        try:
+            with self.transcript_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({
+                    "session_id": self.session_id,
+                    "agent": DEFAULT_ACTIVE_AGENT,
+                    "role": "system",
+                    "content": "transcript rotated; %d bytes moved to %s.1" % (previous_size, self.transcript_path.name),
+                    "timestamp": datetime.now().isoformat(),
+                    "rotation": True,
+                }, ensure_ascii=False) + "\n")
+        except OSError:
+            logger.warning("Could not record session transcript rotation marker")
 
     def load_or_create(self) -> DanteSessionState:
         if not self.path.exists():
@@ -99,7 +140,10 @@ class SessionStateStore:
 
         try:
             data = yaml.safe_load(self.path.read_text(encoding="utf-8"))
-        except (yaml.YAMLError, UnicodeDecodeError):
+        except (yaml.YAMLError, UnicodeDecodeError, RecursionError):
+            # RecursionError is included because a deeply-nested document
+            # overflows the parser's stack; without it every session start would
+            # fail on the same damaged file instead of rebuilding.
             state = self._default_state()
             self.save(state)
             return state
@@ -128,18 +172,9 @@ class SessionStateStore:
         if len(content.encode("utf-8")) > MAX_SESSION_BYTES:
             raise ValueError("session state exceeded MAX_SESSION_BYTES after serialization")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.path.parent,
-            delete=False,
-            prefix=f".{self.path.name}.",
-            suffix=".tmp",
-        ) as handle:
-            handle.write(content)
-            temp_path = Path(handle.name)
-
-        temp_path.replace(self.path)
+        # atomic_write cleans up its temporary file in a finally block, so a
+        # failed replace cannot leak one.
+        atomic_write(self.path, content)
 
     def _default_state(self) -> DanteSessionState:
         return DanteSessionState(session_id=self.session_id)

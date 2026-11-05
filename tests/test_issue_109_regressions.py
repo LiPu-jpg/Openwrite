@@ -115,10 +115,15 @@ def test_transient_generation_retry_is_bounded_and_uses_exponential_delays(
         waits.append(seconds)
 
     monkeypatch.setattr("tools.agent.writer.asyncio.sleep", wait)
+    monkeypatch.setenv("OW_RETRY_BASE_SECONDS", "1")
     writer = WriterAgent(AgentContext(SimpleNamespace(chat=chat), "fake", str(tmp_path)))
     result = asyncio.run(writer._creative_write({}, 1, 0.7, 1000))
     assert result["word_count"] == 1000
-    assert len(calls) == 3 and waits == [1, 2]
+    assert len(calls) == 3 and len(waits) == 2
+    # The backoff grows, and it carries jitter: a fixed delay would make every
+    # chapter retry in lockstep and repeat the burst that caused the failure.
+    assert waits[1] > waits[0]
+    assert waits[0] >= 0.7 and waits[1] <= 2.6
     assert calls[0]["messages"] == calls[2]["messages"]
     assert result["usage"]["cost_reported"] is False
 
@@ -217,6 +222,7 @@ def test_consumed_preview_tokens_can_be_rejected_but_never_replayed(tmp_path):
 
 def test_project_busy_returns_retry_hint():
     payload = studio_error_payload(StudioError("busy", 409, code="PROJECT_BUSY"), "test")
+    assert payload["message"] == "Project is busy; wait or retry the queued task"
     assert payload["recoverable"]
     assert payload["details"]["retry_after_seconds"] == 30
 
@@ -312,3 +318,29 @@ def test_retry_superseded_preview_can_be_rejected_without_affecting_new_preview(
         {"action": "apply", "confirm": True, "preview_token": second["preview_token"]},
     )
     assert applied["ok"] and path.read_text() == "新文。\n额外一句。"
+
+
+def test_every_anchor_file_is_loaded_without_a_count_cap(tmp_path: Path):
+    """The overlap gate must check every anchor, not the first hundred.
+
+    `anchors()` used to stop at `[:100]`, so a verbatim copy stored as anchor
+    #101 was reported clean — the plagiarism gate silently stopped working past
+    the hundredth reference.
+    """
+    from tools.writing_assets import WritingAssets
+
+    root = tmp_path / "project" / "data" / "novels" / "demo"
+    (root / "anchor").mkdir(parents=True)
+    for index in range(150):
+        (root / "anchor" / f"anchor_{index:03d}.md").write_text(
+            f"# 锚点 {index}\n\n独有段落 {index}。\n", encoding="utf-8"
+        )
+
+    assets = WritingAssets(tmp_path / "project", "demo")
+
+    assert len(assets.anchors()) == 150
+    assert assets.anchors()["anchor/anchor_149.md"].endswith("独有段落 149。\n")
+    # The rotation sample must be able to reach any anchor, not just the first
+    # hundred: chapter 150 rotates onto anchor #50, and chapter 151 onto #51.
+    assert assets.context("ch_150")["anchor_samples"]
+    assert assets.context("ch_151")["anchor_samples"]

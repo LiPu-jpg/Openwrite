@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +21,7 @@ from .session_limits import (
     MAX_TURN_CONTENT_BYTES,
     MAX_WORKING_MEMORY_KEYS,
 )
+from tools.file_ops import atomic_write
 
 DEFAULT_ACTIVE_AGENT = "goethe"
 
@@ -99,7 +99,10 @@ class GoetheSessionStateStore:
 
         try:
             data = yaml.safe_load(self.path.read_text(encoding="utf-8"))
-        except (yaml.YAMLError, UnicodeDecodeError):
+        except (yaml.YAMLError, UnicodeDecodeError, RecursionError):
+            # RecursionError is included because a deeply-nested document
+            # overflows the parser's stack; without it every session start would
+            # fail on the same damaged file instead of rebuilding.
             state = self._default_state()
             self.save(state)
             return state
@@ -128,18 +131,9 @@ class GoetheSessionStateStore:
         if len(content.encode("utf-8")) > MAX_SESSION_BYTES:
             raise ValueError("goethe session state exceeded MAX_SESSION_BYTES after serialization")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.path.parent,
-            delete=False,
-            prefix=f".{self.path.name}.",
-            suffix=".tmp",
-        ) as handle:
-            handle.write(content)
-            temp_path = Path(handle.name)
-
-        temp_path.replace(self.path)
+        # atomic_write cleans up its temporary file in a finally block, so a
+        # failed replace cannot leak one.
+        atomic_write(self.path, content)
 
     def _default_state(self) -> GoetheSessionState:
         return GoetheSessionState(session_id=self.session_id)

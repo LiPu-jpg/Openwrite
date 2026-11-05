@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from threading import Thread
 from urllib.request import ProxyHandler, Request, build_opener
@@ -44,8 +45,9 @@ def _analyze_existing(
     content: str,
     truth_context: str = "",
     profile: dict | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> dict:
-    del project_root, novel_id, profile, truth_context
+    del project_root, novel_id, profile, truth_context, cancelled
     return {
         "chapter_summary": f"{chapter_id} {title}：{content.strip()}",
         "observations": content.strip(),

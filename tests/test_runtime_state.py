@@ -2,8 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from models.runtime_state import RuntimeStateDelta
-from tools.runtime_state import RuntimeStateError, RuntimeStateManager
+from models.runtime_state import RuntimeNote, RuntimeStateDelta
+from tools.runtime_state import (
+    RuntimeStateError,
+    RuntimeStateManager,
+    legacy_updates_to_delta,
+)
 from tools.truth_manager import TruthFiles, TruthFilesManager
 
 
@@ -216,6 +220,48 @@ def test_explicit_legacy_replacement_becomes_new_baseline(tmp_path: Path):
     assert state.revision == 2
     assert state.current_state_notes == []
     assert truth_manager.load_truth_files().current_state == "作者手工校正后的完整状态"
+
+
+def test_repeated_legacy_settle_keeps_one_note_per_chapter(tmp_path: Path):
+    manager = RuntimeStateManager(tmp_path, "demo")
+    first = manager.apply(
+        manager.load(),
+        legacy_updates_to_delta(
+            {"current_state": "第一次结算：华生抵达。"}, chapter_id="ch_001"
+        ),
+    )
+    manager.save_with_projections(first)
+    second = manager.apply(
+        first,
+        legacy_updates_to_delta(
+            {"current_state": "第二次结算：华生离开。"}, chapter_id="ch_001"
+        ),
+    )
+    manager.save_with_projections(second)
+
+    rendered = (
+        tmp_path / "data" / "novels" / "demo" / "data" / "world" / "current_state.md"
+    ).read_text(encoding="utf-8")
+    assert rendered.count("### ch_001") == 1
+    assert "第二次结算" in rendered
+    assert "第一次结算" not in rendered
+    assert len([note for note in second.current_state_notes if note.status == "active"]) == 1
+
+
+def test_render_keeps_latest_active_note_when_history_has_duplicates(tmp_path: Path):
+    manager = RuntimeStateManager(tmp_path, "demo")
+    state = manager.load()
+    state.current_state_notes.extend(
+        [
+            RuntimeNote(id="note_old", text="旧事实", source_chapter="ch_001"),
+            RuntimeNote(id="note_new", text="新事实", source_chapter="ch_001"),
+        ]
+    )
+
+    rendered = manager.render(state)["current_state"]
+
+    assert "旧事实" not in rendered
+    assert "新事实" in rendered
 
 
 def test_snapshot_restores_canonical_state_and_markdown_projection(tmp_path: Path):

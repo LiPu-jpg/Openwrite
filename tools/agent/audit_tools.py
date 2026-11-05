@@ -223,6 +223,51 @@ def _get_task_activity(
     return _safe_payload({"ok": True, "count": len(summaries), "tasks": summaries})
 
 
+def _handoff_is_stale(manifest: dict[str, Any]) -> bool:
+    """Whether any asset changed since the handoff was prepared."""
+    recorded = manifest.get("asset_revisions")
+    if not isinstance(recorded, dict) or not recorded:
+        return False
+    current = _current_asset_revisions(manifest)
+    return any(current.get(key) != value for key, value in recorded.items())
+
+
+def _stale_assets(manifest: dict[str, Any]) -> list[str]:
+    recorded = manifest.get("asset_revisions")
+    if not isinstance(recorded, dict):
+        return []
+    current = _current_asset_revisions(manifest)
+    return sorted(key for key, value in recorded.items() if current.get(key) != value)
+
+
+def _current_asset_revisions(manifest: dict[str, Any]) -> dict[str, str]:
+    """Recompute the same signatures `prepare_dante_handoff` recorded."""
+    from ..story_planning import StoryPlanningStore
+
+    revisions: dict[str, str] = {}
+    try:
+        project_root = Path(str(manifest.get("project_root") or "")) if manifest.get("project_root") else None
+        novel_id = str(manifest.get("novel_id") or "")
+        if project_root is None or not novel_id:
+            return revisions
+        store = StoryPlanningStore(project_root, novel_id)
+        revisions["outline"] = store.outline_source_revision()
+        for label, path in (
+            ("ideation_summary", store.ideation_summary_path),
+            ("background", store.story_src_dir / "background.md"),
+            ("foundation", store.story_src_dir / "foundation.md"),
+        ):
+            revisions[label] = store._hash_text(path.read_text(encoding="utf-8")) if path.exists() else ""
+        for index, path in enumerate(manifest.get("persona_paths") or []):
+            target = Path(str(path))
+            revisions["persona_%d" % index] = store._hash_text(target.read_text(encoding="utf-8")) if target.exists() else ""
+    except Exception:
+        # An unreadable project must not crash the audit; report nothing rather
+        # than guessing, and let the caller see the manifest as-is.
+        return {}
+    return revisions
+
+
 def _get_goethe_handoff(
     project_root: Path, novel_id: str, args: dict[str, Any]
 ) -> dict[str, Any]:
@@ -242,13 +287,21 @@ def _get_goethe_handoff(
             manifest = {}
     markdown = markdown_path.read_text(encoding="utf-8") if markdown_path.is_file() else ""
     max_chars = _bounded_int(args.get("max_chars"), 12000, 1000, 80000)
+    # K4: report staleness instead of answering "ready" for a handoff whose
+    # assets have since been rewritten. The revision hashes the whole manifest,
+    # not the rendered Markdown — the Markdown template drops current_arc,
+    # current_section, current_chapter and every path, so two handoffs differing
+    # only in those produced an identical revision.
+    stale = _handoff_is_stale(manifest)
     return _safe_payload(
         {
             "ok": True,
             "manifest": manifest,
             "markdown": markdown[:max_chars],
             "truncated": len(markdown) > max_chars,
-            "revision": _revision(markdown or json.dumps(manifest, ensure_ascii=False)),
+            "revision": _revision(json.dumps(manifest, ensure_ascii=False, sort_keys=True)),
+            "stale": stale,
+            "stale_assets": [] if not stale else _stale_assets(manifest),
             "paths": {
                 "markdown": str(markdown_path),
                 "yaml": str(yaml_path),

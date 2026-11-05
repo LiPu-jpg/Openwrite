@@ -287,3 +287,63 @@ def test_writer_prompt_receives_inline_character_state_context():
 
     assert "## 人物当前状态（内联批注）" in prompt
     assert "位置：归墟港" in prompt
+
+
+def test_one_unreadable_manuscript_does_not_drop_every_annotation(tmp_path: Path):
+    """A single unreadable file must not discard all manuscript contributions.
+
+    The scan caught per-file decode errors and re-raised, so one corrupt .md
+    (partial write, wrong encoding) removed every accepted manuscript from the
+    candidate set and the index fell back to `src/` only.
+    """
+    root, novel_root = _project(tmp_path)
+    manuscript = novel_root / "data" / "manuscript" / "arc_001"
+    (manuscript / "ch_010.md").write_text(
+        "# 第十章\n\n//**沈烬[伤势]：左臂轻伤 -> 已恢复**\n", encoding="utf-8"
+    )
+    (manuscript / "ch_012.md").write_text(
+        "# 第十二章\n\n//**沈烬[位置]：贫民区工坊 -> 归墟港**\n", encoding="utf-8"
+    )
+    _accept_manuscript(root)
+    # Only now corrupt a third file: the scan lists every .md under manuscript,
+    # so this one is enumerated and then fails to decode.
+    (manuscript / "ch_011.md").write_bytes(b"# \xff\xfe not utf-8\n")
+
+    result = CharacterStateIndex(root, "demo").query("沈烬", lookback=50)
+
+    current = {item["field"]: item["state"] for item in result["current"]}
+    assert current.get("伤势") == "已恢复", "the readable file was dropped with the corrupt one"
+    assert current.get("位置") == "归墟港"
+
+
+def test_an_acceptance_store_error_does_not_discard_every_annotation(tmp_path, monkeypatch):
+    """A store error must not silently remove all manuscript contributions.
+
+    The scan's outer guard keeps going when the acceptance store fails, exactly
+    as `refresh` does per file. Without it one store error dropped every accepted
+    manuscript and the index answered from `src/` only.
+    """
+    import tools.manuscript_acceptance as acceptance_module
+
+    root, novel_root = _project(tmp_path)
+    manuscript = novel_root / "data" / "manuscript" / "arc_001"
+    (manuscript / "ch_010.md").write_text(
+        "# 第十章\n\n//**沈烬[伤势]：左臂轻伤 -> 已恢复**\n", encoding="utf-8"
+    )
+    (manuscript / "ch_012.md").write_text(
+        "# 第十二章\n\n//**沈烬[位置]：贫民区工坊 -> 归墟港**\n", encoding="utf-8"
+    )
+
+    real_service = acceptance_module.ManuscriptAcceptanceService
+
+    class FailingService(real_service):
+        def _read_json(self, *args, **kwargs):
+            raise RuntimeError("acceptance store unavailable")
+
+    monkeypatch.setattr(acceptance_module, "ManuscriptAcceptanceService", FailingService)
+
+    result = CharacterStateIndex(root, "demo").query("沈烬", lookback=50)
+
+    current = {item["field"]: item["state"] for item in result["current"]}
+    assert current.get("伤势") == "已恢复", "a store error dropped every manuscript annotation"
+    assert current.get("位置") == "归墟港"

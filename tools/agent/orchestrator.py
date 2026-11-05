@@ -202,17 +202,31 @@ class OpenWriteOrchestrator:
             and self.story_planning_store.outline_edit_state_path.exists()
         ):
             return self._handle_outline_confirmation()
+        # DRAFTING / SETTLEMENT / MILESTONE_REVIEW are defined but never assigned
+        # by any code path; BookStateStore still accepts them from disk. Listed
+        # here so a hand-edited or legacy state file cannot dead-end the book:
+        # without them every route was blocked and the advice contradicted itself
+        # ("confirm the outline scope" vs "there is no scope to confirm").
+        recoverable_stages = {
+            BookStage.DISCOVERY,
+            BookStage.FOUNDATION,
+            BookStage.ROLLING_OUTLINE,
+            BookStage.CHAPTER_PREFLIGHT,
+            BookStage.REVIEW_AND_REVISE,
+            BookStage.DRAFTING,
+            BookStage.SETTLEMENT,
+            BookStage.MILESTONE_REVIEW,
+        }
         if (
-            self.state.stage
-            in {
-                BookStage.DISCOVERY,
-                BookStage.FOUNDATION,
-                BookStage.ROLLING_OUTLINE,
-                BookStage.CHAPTER_PREFLIGHT,
-                BookStage.REVIEW_AND_REVISE,
-            }
+            self.state.stage in recoverable_stages
             and self.story_planning_store.outline_src_path.exists()
             and not self.story_planning_store.outline_source_is_placeholder()
+            # K2: promoting from a bare outline must not skip the foundation or an
+            # unfinished edit batch. Without these two the author reached
+            # CHAPTER_PREFLIGHT with no background.md/foundation.md at all, and
+            # with staged batches never applied.
+            and self._foundation_is_promoted()
+            and self.story_planning_store.outline_edit_batches_complete()
         ):
             return self._confirm_existing_outline_scope()
         if self.state.pending_confirmation == "outline_scope":
@@ -381,7 +395,7 @@ class OpenWriteOrchestrator:
                 "reason": "",
                 "next_stage": next_stage,
                 "next_action": next_action,
-                "workflow_stage": scheduler.load_workflow(chapter_id).current_stage,
+                "workflow_stage": self._workflow_stage_or_empty(scheduler, chapter_id),
                 "review": review_result,
             }
         except Exception as exc:
@@ -619,6 +633,38 @@ class OpenWriteOrchestrator:
             next_action="request_outline_confirmation",
         )
 
+    @staticmethod
+    def _workflow_stage_or_empty(scheduler: Any, chapter_id: str) -> str:
+        """Report the workflow stage, tolerating a damaged state file.
+
+        The outer handler already reports the failure, so an unreadable state
+        must not also erase the stage from this response.
+        """
+        try:
+            state = scheduler.load_workflow(chapter_id)
+        except Exception:
+            return ""
+        return state.current_stage if state is not None else ""
+
+    def _foundation_is_promoted(self) -> bool:
+        """Whether the canonical story assets exist and are not still templates.
+
+        `_confirm_existing_outline_scope` promotes straight to CHAPTER_PREFLIGHT,
+        so it must not be reachable from a project whose `background.md` /
+        `foundation.md` were never written: the author would start writing with
+        no canonical foundation at all.
+        """
+        story_src = self.story_planning_store.story_src_dir
+        for path in (story_src / "background.md", story_src / "foundation.md"):
+            if not path.exists():
+                return False
+            try:
+                if not path.read_text(encoding="utf-8").strip():
+                    return False
+            except OSError:
+                return False
+        return True
+
     def _handle_outline_confirmation(self) -> OrchestratorResult:
         if self.state.pending_confirmation != "outline_scope":
             return self._stage_blocked_result(
@@ -667,6 +713,12 @@ class OpenWriteOrchestrator:
             BookStage.FOUNDATION,
             BookStage.ROLLING_OUTLINE,
             BookStage.REVIEW_AND_REVISE,
+            # Recoverable stages reach here through the allow-set above; without
+            # them the promotion silently left the stage unchanged and the book
+            # stayed stuck.
+            BookStage.DRAFTING,
+            BookStage.SETTLEMENT,
+            BookStage.MILESTONE_REVIEW,
         }
         if advanced_to_preflight:
             self.state.stage = BookStage.CHAPTER_PREFLIGHT

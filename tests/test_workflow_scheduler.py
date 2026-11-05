@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from tools.workflow_scheduler import (
     WorkflowScheduler,
     WorkflowState,
+    WorkflowStateError,
     StageRecord,
     STAGE_NAMES,
 )
@@ -296,3 +297,73 @@ class TestPersistence:
         assert loaded.current_stage == "writing"
         ctx_stage = next(s for s in loaded.stages if s.name == "context_assembly")
         assert ctx_stage.status == "completed"
+
+
+def test_a_damaged_workflow_state_is_refused_instead_of_restarting(tmp_path):
+    """An unreadable state file must not silently restart the chapter.
+
+    `load_workflow` swallowed parse failures into `None`, so `load_or_create`
+    started a fresh workflow from stage 0 - and the next save overwrote the file,
+    discarding every approved stage with no diagnostic.
+    """
+    scheduler = WorkflowScheduler(tmp_path, "demo")
+    state = scheduler.load_or_create("ch_001")
+    state.current_stage = "polish"
+    state.user_approved = True
+    scheduler._save_state(state)
+
+    path = scheduler._state_path("ch_001")
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original[: len(original) // 2], encoding="utf-8")
+
+    with pytest.raises(WorkflowStateError):
+        scheduler.load_or_create("ch_001")
+    # The damaged file is preserved so the author can repair it.
+    assert path.is_file()
+
+
+def test_saving_the_workflow_state_is_atomic(tmp_path, monkeypatch):
+    """A crash mid-dump must not destroy the previous state."""
+    scheduler = WorkflowScheduler(tmp_path, "demo")
+    state = scheduler.load_or_create("ch_001")
+    state.current_stage = "review"
+    scheduler._save_state(state)
+    path = scheduler._state_path("ch_001")
+    previous = path.read_text(encoding="utf-8")
+
+    import tools.file_ops as file_ops
+
+    def failing_replace(source, target):
+        raise OSError("simulated crash before the rename")
+
+    monkeypatch.setattr(file_ops, "replace_file", failing_replace)
+    with pytest.raises(OSError):
+        scheduler._save_state(state)
+
+    assert path.read_text(encoding="utf-8") == previous, "the previous state was truncated"
+    assert sorted(p.name for p in path.parent.iterdir() if p.name.startswith('.')) == []
+
+
+def test_one_damaged_state_file_does_not_blank_the_workflow_listing(tmp_path):
+    """Listing every workflow must survive a single unreadable file.
+
+    The list branch read each state file inline, so one damaged file raised out
+    of the comprehension and the whole status call failed.
+    """
+    from tools.agent.tool_runtime import _workflow
+
+    scheduler = WorkflowScheduler(tmp_path, "demo")
+    good = scheduler.load_or_create("ch_001")
+    good.current_stage = "polish"
+    scheduler._save_state(good)
+    scheduler._state_path("ch_002").write_text("novel_id: demo\n  broken: [\n", encoding="utf-8")
+
+    listing = _workflow(tmp_path, "demo", "list", {})
+
+    assert listing["active_count"] >= 1
+    assert listing["damaged"] == ["ch_002"], "the damaged file must be reported, not fatal"
+
+    # And a single damaged chapter is reported as damaged, not as "not found".
+    single = _workflow(tmp_path, "demo", "get", {"chapter_id": "ch_002"})
+    assert single["ok"] is False
+    assert "损坏" in single["error"]

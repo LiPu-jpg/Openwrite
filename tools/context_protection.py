@@ -118,6 +118,21 @@ def generation_protected_items(context: Any) -> dict[str, Any]:
     scene_context = getattr(context, "scene_context", {})
     if not isinstance(scene_context, Mapping) or scene_context.get("status") != "current":
         scene_context = {}
+    foreshadowing = getattr(context, "foreshadowing", None)
+    open_foreshadowing = {
+        "pending": [
+            {"id": str(node.get("id") or ""), "content": str(node.get("content") or "")}
+            for node in (getattr(foreshadowing, "pending", None) or [])
+            if isinstance(node, dict)
+        ],
+        "planted": [
+            {"id": str(node.get("id") or ""), "content": str(node.get("content") or "")}
+            for node in (getattr(foreshadowing, "planted", None) or [])
+            if isinstance(node, dict)
+        ],
+    }
+    if not open_foreshadowing["pending"] and not open_foreshadowing["planted"]:
+        open_foreshadowing = {}
     return _nonempty(
         {
             "author_intent": getattr(context, "author_intent", ""),
@@ -129,6 +144,9 @@ def generation_protected_items(context: Any) -> dict[str, Any]:
             "world_rules_constraints": getattr(world_rules, "constraints", []),
             "chapter_requirements": chapter_requirements,
             "scene_context": scene_context,
+            # An outstanding hook is an author commitment, not a rendering
+            # detail: dropping it must be visible, not silently absorbed.
+            "open_foreshadowing": open_foreshadowing,
         }
     )
 

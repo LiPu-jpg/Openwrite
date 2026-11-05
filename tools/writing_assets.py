@@ -153,6 +153,11 @@ def overlap_report(
     }
 
 
+# A tail that ends on a sentence terminator. Double-quoted so the CJK closing
+# brackets need no escaping inside the character class.
+SENTENCE_END = re.compile("[。！？!?…」』\"']$")
+
+
 def join_segment(previous: str, continuation: str, *, similarity_threshold: float = 0.96) -> str:
     """Remove repeated prose while preserving short dialogue and changed numbers."""
     from difflib import SequenceMatcher
@@ -165,10 +170,22 @@ def join_segment(previous: str, continuation: str, *, similarity_threshold: floa
         if old.endswith(new[:length]):
             new = new[length:].lstrip()
             break
+    else:
+        # Below the 12-character floor a repeated tail used to survive and the
+        # author's text was duplicated ("……天亮了。\n\n天亮了。"). Only a tail that
+        # ends on a sentence terminator qualifies, so ordinary word overlap inside
+        # a sentence is still left alone.
+        for length in range(min(len(old), len(new), 11), 1, -1):
+            tail = new[:length]
+            if old.endswith(tail) and SENTENCE_END.search(tail):
+                new = new[length:].lstrip()
+                break
     existing = {p.strip() for p in re.split(r"\n\s*\n", old) if len(p.strip()) >= 12}
     paragraphs = []
     for paragraph in re.split(r"\n\s*\n", new):
         key = paragraph.strip()
+        # An exact paragraph repeat is a repeat whatever its length; the 12-char
+        # floor only belongs on the fuzzy branch below.
         repeated = key in existing
         if not repeated and len(key) >= 40:
             repeated = any(
@@ -191,8 +208,15 @@ class WritingAssets:
         self.path = self.root / "src" / "writing" / "assets.yaml"
 
     def load(self) -> dict[str, Any]:
-        raw = yaml.safe_load(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
-        return self.validate(raw or {})
+        if not self.path.is_file():
+            return self.validate({})
+        try:
+            raw = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            # A raw ParserError here took out load/surface/context/inspect_chapter
+            # and mark_usage at once, with no hint of which file was unreadable.
+            raise ValueError(f"Writing assets are unreadable: {exc}") from exc
+        return self.validate(raw)
 
     @staticmethod
     def validate(raw: Any) -> dict[str, Any]:
@@ -306,11 +330,26 @@ class WritingAssets:
         return {"chapter_id": chapter_id, "used": groups}
 
     def anchors(self) -> dict[str, str]:
-        result = {}
-        # Bounded deterministic sampling; every reference remains available to overlap checks.
-        for path in sorted((self.root / "anchor").glob("*.md"))[:100]:
-            if path.is_file() and not path.is_symlink() and path.stat().st_size <= 1_000_000:
+        """Every usable anchor, keyed by its project-relative path.
+
+        No truncation: the caller uses this as the overlap-gate reference set, and
+        a cap silently skipped everything past it — a verbatim copy stored as
+        anchor #101 was reported clean. The 1 MB per-file cap already bounds the
+        total, and each file is read lazily so the set stays streamable.
+        """
+        result: dict[str, str] = {}
+        directory = self.root / "anchor"
+        if not directory.is_dir():
+            return result
+        for path in sorted(directory.glob("*.md")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                if path.stat().st_size > 1_000_000:
+                    continue
                 result[path.relative_to(self.root).as_posix()] = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
         return result
 
     def context(self, chapter_id: str) -> dict[str, Any]:

@@ -56,7 +56,7 @@ DEFAULT_DANTE_SYSTEM_PROMPT = (
     "用户要求修改大纲时，先用 get_outline_structure 获取 revision，"
     "再用 edit_outline_structure(confirm=false) 预览；"
     "只有用户明确确认后才用相同 revision 和 confirm=true 写入；"
-    "不要用 create_outline 重写整份大纲。"
+    "不要整篇重写或覆盖已有大纲；局部修改按下面的 revision 预览流程处理。"
     "用户要求删除已写正文、现有章节或全部章节时，不得调用大纲编辑或文档编辑工具绕过，"
     "也不得声称重写 src/outline.md 可以删除正文；应说明为避免 AI 误删，"
     "必须由用户在 Studio 正文页打开最新章节并点击“删除正文”，按章节 ID 手动确认，"
@@ -241,7 +241,7 @@ class DanteChatAgent:
 
     def build_recovery_prompt(self) -> str:
         session_state = self._require_session_state()
-        book_state = self._require_book_state()
+        book_state = self._refresh_book_state()
         onboarding = self._load_onboarding_snapshot()
         is_first_run = not (
             session_state.conversation_summary
@@ -487,7 +487,10 @@ class DanteChatAgent:
 
     def _build_context_messages(self, *, include_recent_turns: bool = True) -> list[Message]:
         session_state = self._require_session_state()
-        book_state = self._require_book_state()
+        # Reload: the snapshot taken in startup() goes stale as soon as any tool
+        # action advances the book, and the LLM was then told a stage and chapter
+        # the book had already left.
+        book_state = self._refresh_book_state()
         context_messages: list[Message] = []
 
         if session_state.conversation_summary:
@@ -632,6 +635,21 @@ class DanteChatAgent:
         if self.session_state is None:
             raise RuntimeError("Dante session has not been started")
         return self.session_state
+
+    def _refresh_book_state(self) -> BookState:
+        """Re-read the book state, keeping the in-memory copy as a fallback.
+
+        `startup()` loads the state once; every tool action can advance it after
+        that, and a stale snapshot makes the prompt describe a stage and chapter
+        the book has already left.
+        """
+        try:
+            self.book_state = self.book_state_store.load_or_create()
+        except Exception:
+            # A transient read failure must not break the turn; the last known
+            # state is better than none.
+            pass
+        return self._require_book_state()
 
     def _require_book_state(self) -> BookState:
         if self.book_state is None:

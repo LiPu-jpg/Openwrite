@@ -160,7 +160,30 @@ class ManuscriptAcceptanceService:
                 )
             except ManuscriptAcceptanceError:
                 pass
+        # A review the author has not acknowledged must not become invisible just
+        # because a newer operation moved `latest_operation_id`. Deriving the
+        # pending reviews from that pointer alone meant a fresh chapter write
+        # silently dropped every unacknowledged item from an earlier operation,
+        # and `require_current` then let the next chapter generate against an
+        # outline the author was explicitly told to review.
         needs_review = [item for item in impacts if str(item.get("status") or "") == "needs_review"]
+        for operation_id in sorted(
+            {
+                str(head.get("operation_id") or "")
+                for head in heads.values()
+                if isinstance(head, dict) and str(head.get("operation_id") or "")
+            }
+            - {latest_id}
+        ):
+            try:
+                earlier = self.operation(operation_id)
+            except ManuscriptAcceptanceError:
+                continue
+            if earlier.get("status") in {"abandoned", "completed"}:
+                continue
+            for item in earlier.get("impacts") or []:
+                if str(item.get("status") or "") == "needs_review":
+                    needs_review.append(item)
         if "external_change" in statuses:
             status = "external_change"
         elif "baseline_required" in statuses:
@@ -253,8 +276,14 @@ class ManuscriptAcceptanceService:
         ]
         if not untracked:
             raise ManuscriptAcceptanceError("正文基线已经存在", code="BASELINE_ALREADY_EXISTS")
+        # Only the untracked chapters. Passing all of them reset already-accepted,
+        # fact-current heads to pending, invalidated their facts and re-ran the
+        # analyzer on text that never changed — paid calls plus invalidation for
+        # nothing. It also took over the heads of in-flight operations, which
+        # turned their `abandon` into a silent no-op and left `resume` unable to
+        # reach its own heads.
         return self._start(
-            chapter_ids=[chapter_id for chapter_id, _path in chapters],
+            chapter_ids=[chapter_id for chapter_id, _path in untracked],
             source="baseline",
             expected_previous_revision="",
             baseline=True,
@@ -265,7 +294,10 @@ class ManuscriptAcceptanceService:
             raise ManuscriptAcceptanceError(
                 "接纳外部修改需要显式确认", code="CONFIRMATION_REQUIRED"
             )
-        clean = self._chapter_id(chapter_id)
+        requested = str(chapter_id or "").strip()
+        # The tool contract offers a project-level external acceptance: an empty
+        # chapter id accepts the whole book, which starts at the first chapter.
+        clean = self._chapter_id(requested) if requested else self._first_chapter_id()
         state = self._state()
         head = dict((state.get("chapters") or {}).get(clean) or {})
         expected = str(head.get("pending_revision") or head.get("accepted_revision") or "")
@@ -425,7 +457,18 @@ class ManuscriptAcceptanceService:
                     continue
                 if head.get("accepted_revision"):
                     head.pop("pending_revision", None)
-                    head["status"] = "current"
+                    # `accepted_revision` is not sufficient for "current": the
+                    # facts must also describe those bytes. `accept_without_model`
+                    # deliberately leaves `facts_revision` at the previous
+                    # revision, so promoting such a head to `current` claims a
+                    # freshness the derived facts do not have — and the next
+                    # acceptance on any chapter then fails with
+                    # ACCEPTED_SOURCE_CHANGED, which no new operation repairs.
+                    head["status"] = (
+                        "current"
+                        if head.get("facts_revision") == head.get("accepted_revision")
+                        else "stale"
+                    )
                     head["operation_id"] = ""
                 else:
                     del heads[chapter_id]
@@ -452,6 +495,15 @@ class ManuscriptAcceptanceService:
             }:
                 operation.update(status="abandoned", updated_at=self._now(), reason=reason)
                 self._write_operation(operation)
+        # The chapter's snapshots outlive the head otherwise: nothing else will
+        # ever read them, and they are the largest part of this store.
+        for snapshot_dir in self.snapshots_dir.glob("accept_*"):
+            stale = snapshot_dir / f"{clean}.md"
+            if stale.is_file():
+                try:
+                    stale.unlink()
+                except OSError:
+                    continue
         now = self._now()
         operation_id = (
             f"accept_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:12]}"
@@ -587,6 +639,7 @@ class ManuscriptAcceptanceService:
                     "snapshot": snapshot.relative_to(self.root).as_posix(),
                 }
             )
+        self._prune_operations()
         stages = {
             name: {
                 "status": "pending",
@@ -957,6 +1010,13 @@ class ManuscriptAcceptanceService:
             raise ManuscriptAcceptanceError("章节 ID 必须形如 ch_001", code="INVALID_CHAPTER_ID")
         return clean
 
+    def _first_chapter_id(self) -> str:
+        """The lowest-numbered chapter: where a project-level operation starts."""
+        chapters = self._chapters()
+        if not chapters:
+            raise ManuscriptAcceptanceError("当前没有正文", code="DOCUMENT_NOT_FOUND")
+        return str(chapters[0][0])
+
     @staticmethod
     def _chapter_number(value: str) -> int:
         match = re.search(r"(\d+)", str(value or ""))
@@ -981,6 +1041,51 @@ class ManuscriptAcceptanceService:
         if clean not in allowed:
             raise ManuscriptAcceptanceError("正文接纳来源无效", code="INVALID_SOURCE")
         return clean
+
+    def _prune_operations(self, keep: int = 24) -> None:
+        """Retain the newest `keep` operations plus any still owning a head.
+
+        Each operation stores one snapshot per affected chapter, so an unpruned
+        store grows as O(revisions x affected chapters x chapter size) — a
+        12-chapter book with 30 autosave revisions of one chapter reached 31
+        operation directories and 1.9 MB, 1.34 MB of it snapshots. Anything still
+        referenced by a head is kept so `resume` can always finish its work.
+        """
+        try:
+            operations = sorted(
+                (path for path in self.operations_dir.glob("accept_*.json") if path.is_file()),
+                key=lambda path: path.stem,
+                reverse=True,
+            )
+        except OSError:
+            return
+        live = {
+            str(head.get("operation_id") or "")
+            for head in (self._state().get("chapters") or {}).values()
+            if isinstance(head, dict) and str(head.get("operation_id") or "")
+        }
+        retained = 0
+        for path in operations:
+            operation_id = path.stem
+            if retained < keep or operation_id in live:
+                retained += 1
+                continue
+            self._read_json(path)
+            try:
+                path.unlink()
+            except OSError:
+                continue
+            snapshots = self.snapshots_dir / operation_id
+            if snapshots.is_dir():
+                for snapshot in sorted(snapshots.glob("*.md")):
+                    try:
+                        snapshot.unlink()
+                    except OSError:
+                        continue
+                try:
+                    snapshots.rmdir()
+                except OSError:
+                    continue
 
     def _impacts(self, chapter_id: str, *, baseline: bool) -> list[dict[str, Any]]:
         reason = "baseline_rebuild" if baseline else f"{chapter_id}_content_changed"
@@ -1023,6 +1128,11 @@ class ManuscriptAcceptanceService:
             "observations": str(result.get("observations") or "").strip(),
             "word_count": count_writing_units(full_content),
             "degraded": bool(result.get("degraded")),
+            # Why the chapter was degraded: a degraded chapter carries a
+            # placeholder recap, not facts, and the reason decides whether a
+            # re-run is worth anything.
+            "degraded_reason": str(result.get("degraded_reason") or ""),
+            "failures": list(result.get("failures") or []),
             "state_delta": dict(result.get("state_delta") or {}),
             "legacy_updates": dict(
                 result.get("legacy_updates") or result.get("state_updates") or {}

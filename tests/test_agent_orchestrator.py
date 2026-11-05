@@ -1650,3 +1650,168 @@ def test_delegate_writing_advances_book_state_and_creates_workflow(
     assert loaded_state.stage == BookStage.REVIEW_AND_REVISE
     assert workflow is not None
     assert workflow.current_stage == "review"
+
+
+@pytest.mark.parametrize("stage", [BookStage.DRAFTING, BookStage.SETTLEMENT, BookStage.MILESTONE_REVIEW])
+def test_unassigned_stages_do_not_dead_end_outline_confirmation(tmp_path: Path, stage):
+    """The three stages defined but never assigned must stay recoverable.
+
+    `BookStateStore` accepts them from disk, and every route used to be blocked
+    once one was set: chapter requests demanded CHAPTER_PREFLIGHT, and both
+    outline-confirmation paths omitted the three stages, so the advice
+    contradicted itself ("confirm the outline scope" vs "there is no scope to
+    confirm") while src/outline.md was present and valid.
+    """
+    init_project(tmp_path, "demo")
+    state_store = BookStateStore(tmp_path, "demo")
+    planning_store = StoryPlanningStore(tmp_path, "demo")
+    planning_store.outline_src_path.parent.mkdir(parents=True, exist_ok=True)
+    planning_store.outline_src_path.write_text(
+        "# 测试小说\n\n## 第一篇\n\n### 第一节\n\n#### 第一章 起点\n\n甲\n",
+        encoding="utf-8",
+    )
+    state = state_store.load_or_create()
+    state.stage = stage
+    state_store.save(state)
+
+    orchestrator = OpenWriteOrchestrator.for_testing(
+        tmp_path,
+        "demo",
+        state_store=state_store,
+        planning_store=planning_store,
+    )
+
+    result = orchestrator.confirm_outline_scope()
+
+    assert result.blocked is False, f"{stage.value} dead-ended: {result.message}"
+    assert state_store.load_or_create().stage == BookStage.CHAPTER_PREFLIGHT
+    assert result.next_action != "prepare_outline_document"
+
+
+def test_outline_confirmation_requires_a_promoted_foundation(tmp_path: Path):
+    """Promoting from a bare outline must not skip the canonical foundation.
+
+    `_confirm_existing_outline_scope` used to reach CHAPTER_PREFLIGHT with
+    background.md and foundation.md absent, so the author started writing with no
+    canonical foundation at all.
+    """
+    init_project(tmp_path, "demo")
+    state_store = BookStateStore(tmp_path, "demo")
+    planning_store = StoryPlanningStore(tmp_path, "demo")
+    novel_root = tmp_path / "data" / "novels" / "demo"
+    planning_store.outline_src_path.parent.mkdir(parents=True, exist_ok=True)
+    planning_store.outline_src_path.write_text(
+        "# 测试小说\n\n## 第一篇\n\n### 第一节\n\n#### 第一章 起点\n\n甲\n",
+        encoding="utf-8",
+    )
+    # Remove the canonical foundation but keep a valid outline.
+    (novel_root / "src" / "story" / "background.md").unlink()
+    (novel_root / "src" / "story" / "foundation.md").unlink()
+
+    orchestrator = OpenWriteOrchestrator.for_testing(
+        tmp_path,
+        "demo",
+        state_store=state_store,
+        planning_store=planning_store,
+    )
+
+    result = orchestrator.confirm_outline_scope()
+
+    assert result.blocked is True
+    assert state_store.load_or_create().stage != BookStage.CHAPTER_PREFLIGHT
+
+
+def test_handoff_records_asset_signatures_that_detect_a_rewritten_outline(tmp_path: Path):
+    """A stale handoff must be reported, not answered "ready".
+
+    The manifest used to carry no outline revision or asset signatures, so after
+    `prepare_dante_handoff()` returned ready=True, rewriting src/outline.md left
+    `get_goethe_handoff` reporting ready=True with no stale signal at all.
+    """
+    _, novel_root = _bootstrap_novel(tmp_path)
+    planning_store = StoryPlanningStore(tmp_path, "demo")
+    planning_store.append_ideation("已有正文项目继续维护")
+    planning_store.save_ideation_summary("# 当前想法汇总\n\n- 沿用现有正典资产")
+    manuscript = novel_root / "data" / "manuscript" / "arc_001" / "ch_001.md"
+    manuscript.parent.mkdir(parents=True, exist_ok=True)
+    manuscript.write_text("# 第一章\n\n已有正文。\n", encoding="utf-8")
+
+    runtime = GoethePlanningRuntime(tmp_path, "demo")
+    assert runtime.prepare_dante_handoff()["ok"] is True
+
+    # A fresh handoff is not stale.
+    from tools.agent.audit_tools import _get_goethe_handoff
+
+    fresh = _get_goethe_handoff(tmp_path, "demo", {})
+    assert fresh["stale"] is False
+
+    # Rewriting the outline must make the handoff stale and name the asset.
+    planning_store.outline_src_path.write_text(
+        planning_store.outline_src_path.read_text(encoding="utf-8") + "\n#### 第二章 转折\n\n乙\n",
+        encoding="utf-8",
+    )
+    stale = _get_goethe_handoff(tmp_path, "demo", {})
+    assert stale["stale"] is True
+    assert "outline" in stale["stale_assets"]
+
+
+def test_character_generation_refuses_to_overwrite_a_pending_outline_confirmation(tmp_path: Path):
+    """Generating a character must not silently discard a staged outline.
+
+    The staged outline draft stays on disk while `pending_confirmation` moves to
+    the character, so the next `confirm_outline_scope()` promotes the OLD
+    src/outline.md and the author believes the new one is confirmed.
+    """
+    init_project(tmp_path, "demo")
+    state_store = BookStateStore(tmp_path, "demo")
+    planning_store = StoryPlanningStore(tmp_path, "demo")
+    planning_store.save_outline_draft(
+        "# 测试小说\n\n## 第一篇\n\n### 第一节\n\n#### 第一章 起点\n\n甲\n",
+    )
+    state = state_store.load_or_create()
+    state.stage = BookStage.ROLLING_OUTLINE
+    state.pending_confirmation = "outline_scope"
+    state_store.save(state)
+
+    runtime = GoethePlanningRuntime(tmp_path, "demo")
+
+    result = runtime.generate_character_draft("林岑：钟楼守夜人")
+
+    assert result["ok"] is False
+    assert result["blocked"] is True
+    assert result["error"] == "OUTLINE_CONFIRMATION_PENDING"
+    # The staged draft survives for the author to confirm.
+    assert planning_store.outline_draft_path.is_file()
+    assert state_store.load_or_create().pending_confirmation == "outline_scope"
+
+
+def test_character_generation_refuses_when_the_book_state_is_unreadable(tmp_path: Path):
+    """A damaged state file must not read as "nothing pending".
+
+    `load_or_create` quarantines the damaged file and returns a fresh state, so
+    the K3 guard would pass and the next `confirm_outline_scope()` would promote
+    the OLD src/outline.md while the author believes the new one is confirmed.
+    """
+    init_project(tmp_path, "demo")
+    state_store = BookStateStore(tmp_path, "demo")
+    planning_store = StoryPlanningStore(tmp_path, "demo")
+    planning_store.save_outline_draft(
+        "# 测试小说\n\n## 第一篇\n\n### 第一节\n\n#### 第一章 起点\n\n甲\n",
+    )
+    state = state_store.load_or_create()
+    state.stage = BookStage.ROLLING_OUTLINE
+    state.pending_confirmation = "outline_scope"
+    state_store.save(state)
+
+    # Corrupt the state file the way a crash during a bare write leaves it: a
+    # document cut mid-value is what the old `open(..., "w")` produced.
+    state_store.path.write_text('pending_confirmation: "outline_scope\n', encoding="utf-8")
+
+    runtime = GoethePlanningRuntime(tmp_path, "demo")
+    result = runtime.generate_character_draft("林岑：钟楼守夜人")
+
+    assert result["ok"] is False
+    assert result["blocked"] is True
+    assert result["error"] == "BOOK_STATE_UNREADABLE"
+    # The damaged file is preserved, not overwritten by a fresh state.
+    assert state_store.path.is_file()

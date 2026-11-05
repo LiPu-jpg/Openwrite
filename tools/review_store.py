@@ -7,6 +7,7 @@ import json
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 
@@ -119,10 +120,28 @@ def review_delivery_status(
         return "blocked"
     if review.get("passed") is False:
         return "revise"
+    # An explicitly stale legacy review (the manuscript changed after it) is not
+    # a pass, whatever its score says. The v2 path enforces this through
+    # freshness_status; the v1 path had no equivalent, so a stale review stayed
+    # deliverable and export preflight / acceptance approved the chapter anyway.
+    if review.get("stale"):
+        return "stale"
     score = review_quality_score(review)
     if score is None:
         return "inconclusive"
     return "pass" if score >= quality_threshold else "revise"
+
+
+def _freshness_status(source_revision: str, current_source_revision: str) -> str:
+    """Compare a review's source revision against the manuscript's current one.
+
+    Shared by the v2 branch and the legacy adapter so the two cannot disagree:
+    "current" only when both are known and equal, "stale" when both are known and
+    differ, "unknown" when either side is missing.
+    """
+    if not source_revision or not current_source_revision:
+        return "unknown"
+    return "current" if source_revision == current_source_revision else "stale"
 
 
 def canonical_review_decision(
@@ -144,7 +163,12 @@ def canonical_review_decision(
             "gate_status": review_gate_status(review),
             "delivery_status": review_delivery_status(review, quality_threshold=70.0),
             "production_gate_status": "disabled_uncalibrated",
-            "freshness_status": "unknown",
+            # Same freshness computation the v2 branch uses, instead of a
+            # hardcoded "unknown": a caller that knows the current manuscript
+            # revision must be able to see that this review no longer matches.
+            "freshness_status": _freshness_status(
+                str(review.get("source_revision") or ""), str(current_source_revision or "")
+            ),
             "source_revision": str(review.get("source_revision") or ""),
             "current_source_revision": str(current_source_revision or ""),
         }
@@ -152,13 +176,7 @@ def canonical_review_decision(
     assert decision is not None
     source_revision = str(review.get("source_revision") or "")
     current = str(current_source_revision or "")
-    freshness = (
-        "current"
-        if source_revision and current and source_revision == current
-        else "stale"
-        if source_revision and current
-        else "unknown"
-    )
+    freshness = _freshness_status(source_revision, current)
     return {
         "schema_version": decision["schema_version"],
         "execution_status": decision["execution_status"],
@@ -248,6 +266,11 @@ def normalize_review_issues(chapter_id: str, issues: Any) -> list[dict[str, Any]
     return normalized
 
 
+# Retained review history per chapter: enough to compare against recent
+# revisions without growing without bound.
+REVIEW_HISTORY_KEEP = 20
+REVIEW_CLOSURES_KEEP = 20
+
 class ReviewStore:
     def __init__(self, project_root: Path, novel_id: str):
         self.project_root = Path(project_root).resolve()
@@ -260,8 +283,23 @@ class ReviewStore:
             / "data"
             / "reviews"
         )
+        # `save` is a read -> merge -> write sequence on one chapter's record.
+        # Without a lock two concurrent saves (a review completing while
+        # `mark_stale` runs — novel_service releases the project write lock
+        # *before* calling store.save) interleave and one history entry is
+        # silently dropped. Per chapter, because that is the unit of contention.
+        self._chapter_locks: dict[str, RLock] = {}
+        self._chapter_locks_guard = RLock()
+
+    def _lock_for(self, chapter_id: str) -> RLock:
+        with self._chapter_locks_guard:
+            return self._chapter_locks.setdefault(chapter_id, RLock())
 
     def save(self, chapter_id: str, result: dict[str, Any]) -> Path:
+        with self._lock_for(chapter_id):
+            return self._save_locked(chapter_id, result)
+
+    def _save_locked(self, chapter_id: str, result: dict[str, Any]) -> Path:
         self.review_dir.mkdir(parents=True, exist_ok=True)
         previous_revisioned = self.load_revisioned(chapter_id)
         previous = previous_revisioned[0] if previous_revisioned is not None else None
@@ -290,7 +328,7 @@ class ReviewStore:
                     dict(item)
                     for item in previous.get("revision_history", [])
                     if isinstance(item, dict)
-                ]
+                ][-REVIEW_HISTORY_KEEP:]
             if not payload.get("stale") or not isinstance(payload.get("revision_closures"), list):
                 payload["revision_closures"] = [
                     dict(item)
@@ -298,8 +336,19 @@ class ReviewStore:
                     if isinstance(item, dict)
                 ]
         payload.setdefault("revision_closures", [])
-        source_revision = str(payload.get("source_revision") or self._source_revision(chapter_id))
-        payload["source_revision"] = source_revision
+        # `source_revision` is the revision the review was taken *against*, and
+        # it is what makes staleness detectable. Recompute it from the manuscript
+        # whenever the review is not being marked stale, so a caller cannot stamp
+        # a review as current for text it never reviewed. A stale marking is the
+        # one case that must *preserve* the reviewed revision: overwriting it with
+        # the new manuscript's revision would erase the very signal that says the
+        # review no longer describes the text.
+        computed = self._source_revision(chapter_id)
+        if payload.get("stale"):
+            payload["source_revision"] = str(payload.get("source_revision") or computed or "")
+        else:
+            payload["source_revision"] = computed or str(payload.get("source_revision") or "")
+        source_revision = payload["source_revision"]
         review_v2 = review_v2_contract(payload)
         if review_v2:
             canonical = dict(review_v2)
@@ -345,6 +394,29 @@ class ReviewStore:
                 handle.write(content)
                 temporary = Path(handle.name)
             temporary.replace(destination)
+        self._prune_history(directory)
+
+    def _prune_history(self, directory: Path) -> None:
+        """Keep the most recent REVIEW_HISTORY_KEEP revisions per chapter.
+
+        Every distinct payload used to be retained forever, and `versions()`
+        parses each one on every request, so a long-lived chapter degraded
+        linearly. The live record is never in this directory, so pruning cannot
+        affect the current review.
+        """
+        try:
+            entries = sorted(
+                (path for path in directory.glob("*.json") if path.is_file()),
+                key=lambda path: path.stat().st_mtime_ns,
+                reverse=True,
+            )
+        except OSError:
+            return
+        for stale in entries[REVIEW_HISTORY_KEEP:]:
+            try:
+                stale.unlink()
+            except OSError:
+                continue
 
     def versions(self, chapter_id: str) -> list[dict[str, Any]]:
         self.path_for(chapter_id)
@@ -373,7 +445,14 @@ class ReviewStore:
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ValueError("Invalid review history revision")
         path = self.review_dir / "history" / chapter_id / f"{digest}.json"
-        before = json.loads(path.read_bytes())
+        content = path.read_bytes()
+        # Verify the content matches the digest it is filed under. Without this a
+        # renamed or hand-edited history file produced a diff attributed to a
+        # revision that is not the hash of those bytes.
+        actual = hashlib.sha256(content).hexdigest()
+        if actual != digest:
+            raise ValueError("Review history content does not match its revision")
+        before = json.loads(content)
         after = self.load(chapter_id)
         if after is None:
             raise ValueError("Current review not found")
@@ -481,6 +560,9 @@ class ReviewStore:
             "closed_at": str(payload.get("reviewed_at") or ""),
         }
         closures = payload.setdefault("revision_closures", [])
+        # The in-record lists are re-serialized on every save, so cap them to the
+        # most recent entries rather than growing forever.
+        del closures[:-REVIEW_CLOSURES_KEEP:]
         if not any(
             isinstance(item, dict) and item.get("closure_id") == closure_id
             for item in closures
@@ -508,6 +590,25 @@ class ReviewStore:
         return result
 
     def mark_stale(
+        self,
+        chapter_id: str,
+        *,
+        reason: str,
+        current_source_revision: str = "",
+        history_entry: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        # Re-entrant: `save` below takes the same per-chapter lock, and this
+        # method's own load must be inside it too, or two concurrent markings
+        # both read the pre-update history and one entry is silently dropped.
+        with self._lock_for(chapter_id):
+            return self._mark_stale_locked(
+                chapter_id,
+                reason=reason,
+                current_source_revision=current_source_revision,
+                history_entry=history_entry,
+            )
+
+    def _mark_stale_locked(
         self,
         chapter_id: str,
         *,

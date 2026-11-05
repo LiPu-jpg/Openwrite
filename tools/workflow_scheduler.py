@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from tools.file_ops import atomic_write
+
 
 # ── 数据结构 ────────────────────────────────────────────────────
 
@@ -121,6 +123,14 @@ class WorkflowState:
 
 # ── 调度器 ──────────────────────────────────────────────────────
 
+class WorkflowStateError(RuntimeError):
+    """A persisted workflow state exists but cannot be read.
+
+    Raised rather than degraded to `None`: the caller's `load_or_create` would
+    otherwise start over from stage 0 and overwrite the file.
+    """
+
+
 class WorkflowScheduler:
     """写作流程调度器（状态管理器版）
 
@@ -155,6 +165,8 @@ class WorkflowScheduler:
             self.project_root / "data" / "novels" / novel_id / "data" / "workflows"
         )
         self.workflow_dir.mkdir(parents=True, exist_ok=True)
+        # Chapters whose state file could not be read during the last listing.
+        self.last_listing_damaged: List[str] = []
 
     # ── 工作流生命周期 ────────────────────────────────────────
 
@@ -173,7 +185,13 @@ class WorkflowScheduler:
         return state
 
     def load_workflow(self, chapter_id: str) -> Optional[WorkflowState]:
-        """加载已有工作流（跨会话恢复）"""
+        """加载已有工作流（跨会话恢复）
+
+        Raises WorkflowStateError when the file exists but cannot be parsed.
+        Returning `None` here used to make `load_or_create` start a brand-new
+        workflow from stage 0 and then overwrite the file, so every approved
+        stage was lost with no diagnostic.
+        """
         path = self._state_path(chapter_id)
         if not path.exists():
             return None
@@ -181,8 +199,10 @@ class WorkflowScheduler:
             with path.open("r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return WorkflowState.from_dict(data)
-        except Exception:
-            return None
+        except Exception as exc:
+            raise WorkflowStateError(
+                f"章节 {chapter_id} 的工作流状态无法读取（文件已保留，未覆盖）: {exc}"
+            ) from exc
 
     def load_or_create(self, chapter_id: str) -> WorkflowState:
         """加载或创建工作流"""
@@ -313,12 +333,21 @@ class WorkflowScheduler:
         return state.current_stage == "user_confirm"
 
     def list_active_workflows(self) -> List[WorkflowState]:
-        """列出所有未完成的工作流"""
+        """列出所有未完成的工作流
+
+        A single unreadable state file must not fail the whole listing: it is
+        skipped and reported through `last_listing_damaged`.
+        """
         results = []
+        self.last_listing_damaged = []
         if not self.workflow_dir.exists():
             return results
         for path in sorted(self.workflow_dir.glob("wf_*.yaml")):
-            state = self._load_from_path(path)
+            try:
+                state = self._load_from_path(path)
+            except WorkflowStateError:
+                self.last_listing_damaged.append(path.stem.removeprefix("wf_"))
+                continue
             if state and not self.is_complete(state):
                 results.append(state)
         return results
@@ -348,19 +377,26 @@ class WorkflowScheduler:
     def _save_state(self, state: WorkflowState) -> None:
         path = self._state_path(state.chapter_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
+        # Atomic replace: a bare open(..., "w") truncates in place, so a crash
+        # mid-dump left a half-written state file that the next load could not
+        # parse - and `load_or_create` then silently started over from stage 0,
+        # discarding every approved stage before overwriting the file.
+        atomic_write(
+            path,
             yaml.dump(
                 state.to_dict(),
-                f,
                 allow_unicode=True,
                 default_flow_style=False,
                 sort_keys=False,
-            )
+            ),
+        )
 
     def _load_from_path(self, path: Path) -> Optional[WorkflowState]:
         try:
             with path.open("r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return WorkflowState.from_dict(data)
-        except Exception:
-            return None
+        except Exception as exc:
+            raise WorkflowStateError(
+                f"工作流状态无法读取（文件已保留，未覆盖）: {path.name}: {exc}"
+            ) from exc

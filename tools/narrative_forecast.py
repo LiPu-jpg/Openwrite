@@ -253,6 +253,33 @@ class NarrativeForecastService:
             "不要替作者选择分支，也不要修改 canonical 大纲或正文。"
         )
 
+    # Retain only the most recent forecast_* entries. Every `create` writes a new
+    # directory and nothing ever deleted one, so a long-lived project
+    # accumulated them without bound.
+    MAX_RETAINED = 50
+
+    def _prune(self) -> None:
+        if not self.root.is_dir():
+            return
+        entries = sorted(
+            (path for path in self.root.glob('forecast_*') if path.is_dir()),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+        for stale in entries[self.MAX_RETAINED:]:
+            for child in sorted(stale.rglob('*'), reverse=True):
+                try:
+                    if child.is_file() or child.is_symlink():
+                        child.unlink()
+                    else:
+                        child.rmdir()
+                except OSError:
+                    continue
+            try:
+                stale.rmdir()
+            except OSError:
+                continue
+
     def save(self, forecast: NarrativeForecastV1) -> Path:
         directory = self.forecast_dir(forecast.forecast_id)
         directory.mkdir(parents=True, exist_ok=True)
@@ -263,6 +290,7 @@ class NarrativeForecastService:
                 self.comparison_path(forecast.forecast_id),
                 self.render_comparison(forecast),
             )
+        self._prune()
         return target
 
     def revision(self, forecast: NarrativeForecastV1) -> str:

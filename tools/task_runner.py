@@ -218,6 +218,11 @@ class PersistentTaskRunner:
             payload["_already_completed"] = list(result["completed_chapters"])
         if result.get("usage"):
             payload["_already_used"] = dict(result["usage"])
+        if isinstance(result.get("failure_memory"), dict) and result["failure_memory"]:
+            # The retry has to know why the last attempt failed. Without it the
+            # retry is the identical request, and it makes the identical
+            # mistake.
+            payload["_failure_memory"] = dict(result["failure_memory"])
         return self.submit(
             str(previous["type"]),
             payload,

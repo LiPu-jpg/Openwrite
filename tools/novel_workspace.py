@@ -24,6 +24,17 @@ CHAPTER_HEADING_RE = re.compile(
     r"[^\n]*)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+# A chapter marker at the start of a line is necessary but not sufficient: a
+# prose line such as “第二章正文。” also starts with 第X章. Plain-text headings
+# are therefore limited to short lines without sentence punctuation; explicit
+# Markdown headings keep the old, permissive behaviour.
+CHAPTER_MARKER_RE = re.compile(
+    r"^(?:第[0-9零〇一二两三四五六七八九十百千万]+章|Chapter\s+\d+|序章|楔子|前言|后记|尾声)",
+    re.IGNORECASE,
+)
+MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s*(.+?)\s*$")
+_HEADING_SEPARATORS = " \t:：·.．-—–、"
+_SENTENCE_PUNCTUATION = "。；，,;"
 
 
 @dataclass
@@ -250,18 +261,52 @@ def import_manuscript(
     return imported
 
 
+def _chapter_heading_text(line: str) -> str | None:
+    """Return the heading text when a line really is a chapter heading.
+
+    Markdown headings are trusted.  Plain lines must look like a heading: short,
+    without sentence punctuation, and either using a separator after the chapter
+    marker or carrying a short title directly (e.g. “第一章归国的伤兵”).
+    """
+    stripped = line.strip()
+    if not stripped:
+        return None
+    markdown = MARKDOWN_HEADING_RE.match(stripped)
+    if markdown is not None:
+        body = markdown.group(2).strip()
+        return body if CHAPTER_MARKER_RE.match(body) else None
+    if len(stripped) > 40:
+        return None
+    marker = CHAPTER_MARKER_RE.match(stripped)
+    if marker is None:
+        return None
+    rest = stripped[marker.end():].strip()
+    if not rest:
+        return stripped
+    if rest[0] in _HEADING_SEPARATORS:
+        title = rest.lstrip(_HEADING_SEPARATORS).strip()
+        return None if any(char in title for char in _SENTENCE_PUNCTUATION) else stripped
+    # No separator: allow only a short title with no sentence punctuation.
+    if any(char in rest for char in _SENTENCE_PUNCTUATION):
+        return None
+    return stripped if len(stripped) <= 25 else None
+
+
 def split_manuscript(text: str, *, fallback_title: str) -> list[tuple[str, str]]:
-    matches = list(CHAPTER_HEADING_RE.finditer(text))
-    if not matches:
+    lines = text.splitlines()
+    headings: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        title = _chapter_heading_text(line)
+        if title is not None:
+            headings.append((index, title))
+    if not headings:
         return [(fallback_title.strip() or "导入章节", text.strip())]
 
     chunks: list[tuple[str, str]] = []
-    prefix = text[: matches[0].start()].strip()
-    for index, match in enumerate(matches):
-        title = match.group(1).strip().lstrip("#").strip()
-        content_start = match.end()
-        content_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        content = text[content_start:content_end].strip()
+    prefix = "\n".join(lines[: headings[0][0]]).strip()
+    for index, (line_index, title) in enumerate(headings):
+        end = headings[index + 1][0] if index + 1 < len(headings) else len(lines)
+        content = "\n".join(lines[line_index + 1:end]).strip()
         if index == 0 and prefix:
             content = f"{prefix}\n\n{content}".strip()
         chunks.append((title, content))

@@ -495,8 +495,18 @@ class ReferenceLibraryService:
                     f"项目文件 {relative_ref} 已变化，请重新预览",
                     code="DOCUMENT_CONFLICT",
                 )
-        for relative_ref, proposed in preview.proposed_files.items():
-            self._atomic_write_text(novel_root / relative_ref, proposed)
+        from tools.project_lock import ProjectWriteLock
+
+        # Validate and write under the project lock. Without it two concurrent
+        # adopts both pass the same pre-write baseline check and both write: one
+        # adoption lands on disk but is missing from data/style/recipe.yaml, so
+        # its style rules never reach the synthesized recipe. The lock is the
+        # same one every other mutating project operation takes.
+        with ProjectWriteLock(
+            project_root, novel_id, operation=f"reference_library:adopt:{preview.preview_id}"
+        ):
+            for relative_ref, proposed in preview.proposed_files.items():
+                self._atomic_write_text(novel_root / relative_ref, proposed)
 
         from tools.style_synthesizer import synthesize_style_document
 

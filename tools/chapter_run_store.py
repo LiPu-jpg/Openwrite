@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from tools.file_ops import atomic_write
 from models.chapter_run import ChapterRunManifest, ChapterRunStage
 
 
@@ -153,20 +153,9 @@ class ChapterRunStore:
     def save(self, manifest: ChapterRunManifest) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         target = self.path_for(manifest.run_id)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.root,
-            prefix=f".{manifest.run_id}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            handle.write(manifest.model_dump_json(indent=2))
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-            temporary = Path(handle.name)
-        temporary.replace(target)
+        # atomic_write cleans up its temporary file in a finally block, so a
+        # failed replace cannot leave a stray .tmp behind.
+        atomic_write(target, manifest.model_dump_json(indent=2) + "\n")
         return target
 
     def path_for(self, run_id: str) -> Path:

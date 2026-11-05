@@ -26,13 +26,33 @@ ToolExecutor = Callable[[dict[str, Any]], dict[str, Any]]
 DOCUMENT_LONG_OLD_TEXT_CHARS = 240
 
 
-def _service_error(exc: NovelServiceError) -> dict[str, Any]:
+def _tool_failure(code: str, error: str, *, blocked: bool = False) -> dict[str, Any]:
+    """The failure shape every tool returns.
+
+    It carries a diagnosis, because the agent in front of the tool has to be
+    able to tell a provider hiccup from an unusable answer from a missing
+    confirmation - a bare error string does not say which.
+    """
+    from tools.failure_diagnosis import diagnose
+
     return {
         "ok": False,
-        "blocked": exc.code == "PROJECT_BUSY",
-        "code": exc.code,
-        "error": str(exc),
+        "blocked": blocked,
+        "code": code,
+        "error": error,
+        "diagnosis": diagnose(code, error).as_dict(),
     }
+
+
+def _service_error(exc: NovelServiceError) -> dict[str, Any]:
+    details = dict(getattr(exc, "details", {}) or {})
+    diagnosis = details.get("diagnosis")
+    payload = _tool_failure(
+        exc.code, str(exc), blocked=exc.code == "PROJECT_BUSY"
+    )
+    if isinstance(diagnosis, dict):
+        payload["diagnosis"] = diagnosis
+    return payload
 
 
 def _service_executor(project_root: Path, operation: str) -> ToolExecutor:
@@ -581,35 +601,27 @@ def _application_executor(project_root: Path, operation: str) -> ToolExecutor:
             from tools.rolling_planning import RollingPlanningError
 
             if isinstance(exc, ChapterRunV2Error):
-                return {
-                    "ok": False,
-                    "blocked": exc.code
+                return _tool_failure(
+                    exc.code,
+                    str(exc),
+                    blocked=exc.code
                     in {"REVISION_REQUIRED", "STALE_REVISION", "CONFIRMATION_REQUIRED"},
-                    "code": exc.code,
-                    "error": str(exc),
-                }
+                )
             if isinstance(exc, RollingPlanningError):
-                return {
-                    "ok": False,
-                    "blocked": exc.code.startswith("STALE_"),
-                    "code": exc.code,
-                    "error": str(exc),
-                }
+                return _tool_failure(
+                    exc.code, str(exc), blocked=exc.code.startswith("STALE_")
+                )
             if isinstance(exc, NarrativeForecastError):
-                return {
-                    "ok": False,
-                    "blocked": exc.code.startswith("STALE_"),
-                    "code": exc.code,
-                    "error": str(exc),
-                }
+                return _tool_failure(
+                    exc.code, str(exc), blocked=exc.code.startswith("STALE_")
+                )
             if isinstance(exc, ManuscriptEditingError):
-                return {
-                    "ok": False,
-                    "blocked": exc.code
+                return _tool_failure(
+                    exc.code,
+                    str(exc),
+                    blocked=exc.code
                     in {"CONFIRMATION_REQUIRED", "STALE_REVISION"},
-                    "code": exc.code,
-                    "error": str(exc),
-                }
+                )
             raise
 
     return execute
@@ -1703,7 +1715,7 @@ def _workflow(
     operation: str,
     args: dict[str, Any],
 ) -> dict[str, Any]:
-    from tools.workflow_scheduler import WorkflowScheduler
+    from tools.workflow_scheduler import WorkflowScheduler, WorkflowStateError
 
     scheduler = WorkflowScheduler(project_root, novel_id)
     chapter_id = str(args.get("chapter_id") or "")
@@ -1715,7 +1727,10 @@ def _workflow(
             "message": f"工作流已创建: {chapter_id}",
         }
     if operation == "advance_workflow":
-        state = scheduler.load_workflow(chapter_id)
+        try:
+            state = scheduler.load_workflow(chapter_id)
+        except WorkflowStateError as exc:
+            return {"ok": False, "error": f"工作流状态损坏: {chapter_id}", "detail": str(exc)}
         if state is None:
             return {"ok": False, "error": f"未找到工作流: {chapter_id}"}
         stage = str(args.get("stage_name") or "")
@@ -1733,7 +1748,10 @@ def _workflow(
             "message": f"已推进到: {state.current_stage}",
         }
     if chapter_id:
-        state = scheduler.load_workflow(chapter_id)
+        try:
+            state = scheduler.load_workflow(chapter_id)
+        except WorkflowStateError as exc:
+            return {"ok": False, "error": f"工作流状态损坏: {chapter_id}", "detail": str(exc)}
         if state is None:
             return {"ok": False, "error": f"未找到工作流: {chapter_id}"}
         return {
@@ -1744,13 +1762,19 @@ def _workflow(
         }
     active_states = scheduler.list_active_workflows()
     active = [state.chapter_id for state in active_states]
-    complete = [
-        path.stem.removeprefix("wf_")
-        for path in sorted(scheduler.workflow_dir.glob("wf_*.yaml"))
-        if (state := scheduler.load_workflow(path.stem.removeprefix("wf_")))
-        and scheduler.is_complete(state)
-    ]
-    return {"active": active, "complete": complete, "active_count": len(active)}
+    complete = []
+    for path in sorted(scheduler.workflow_dir.glob("wf_*.yaml")):
+        try:
+            state = scheduler.load_workflow(path.stem.removeprefix("wf_"))
+        except WorkflowStateError:
+            continue
+        if state and scheduler.is_complete(state):
+            complete.append(path.stem.removeprefix("wf_"))
+    listing = {"active": active, "complete": complete, "active_count": len(active)}
+    # Both listing passes skip unreadable files; report them once, here.
+    if scheduler.last_listing_damaged:
+        listing["damaged"] = list(scheduler.last_listing_damaged)
+    return listing
 
 
 def build_tool_executors(project_root: Path) -> dict[str, ToolExecutor]:

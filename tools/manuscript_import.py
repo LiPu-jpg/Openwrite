@@ -128,6 +128,21 @@ class ManuscriptImportService:
             "counts": counts,
         }
 
+    @staticmethod
+    def _assert_not_final(operation: Mapping[str, Any]) -> None:
+        """A discarded import is terminal: the author's "throw this away" must not
+        be silently undone by a later preview revision or structure confirmation,
+        which would re-publish the chapters into the canonical manuscript."""
+        status = str(operation.get("status") or "")
+        if status == "discarded":
+            raise ManuscriptImportError(
+                "旧稿导入已丢弃，不能再修改或确认", code="IMPORT_DISCARDED", recoverable=False
+            )
+        if status == "completed":
+            raise ManuscriptImportError(
+                "旧稿导入已完成，不能再修改或确认", code="IMPORT_ALREADY_FINAL", recoverable=False
+            )
+
     def discard(self, import_id: str, *, confirm: bool = False) -> dict[str, Any]:
         if not confirm:
             raise ManuscriptImportError("丢弃旧稿导入需要显式确认", code="CONFIRMATION_REQUIRED")
@@ -157,6 +172,9 @@ class ManuscriptImportService:
                 operation["discarded_at"] = self._now()
                 operation["updated_at"] = operation["discarded_at"]
                 operation["last_error"] = None
+                # Clear the confirmation token so a stale preview cannot be
+                # replayed by any path that reaches past the final-state guard.
+                operation["confirmed_preview_revision"] = ""
                 self._write_operation(operation)
                 return self._operation_summary(operation)
         except ProjectBusyError as exc:
@@ -283,6 +301,7 @@ class ManuscriptImportService:
         chapters: Iterable[Mapping[str, Any]],
     ) -> dict[str, Any]:
         operation = self.operation(import_id)
+        self._assert_not_final(operation)
         if operation["stages"]["published"]["status"] != "pending":
             raise ManuscriptImportError(
                 "旧稿发布已经开始，不能再修改切分预览",
@@ -317,6 +336,7 @@ class ManuscriptImportService:
                 "发布旧稿切分结构需要显式确认", code="CONFIRMATION_REQUIRED"
             )
         operation = self.operation(import_id)
+        self._assert_not_final(operation)
         preview = self._load_preview(operation)
         self._require_preview_revision(preview, expected_preview_revision)
         stage = operation["stages"]["structure_confirmed"]
@@ -801,6 +821,22 @@ class ManuscriptImportService:
         acceptance_status = str(acceptance.get("status") or "")
         operation["acceptance_status"] = acceptance_status
         input_sha = self._json_fingerprint(acceptance)
+        # An acceptance that can never reach "completed" is not a state to wait
+        # in: it is a terminal outcome for this import. Waiting on it looped
+        # forever, and every escape route (`discard`, `revise_preview`) refused
+        # an `awaiting_reconciliation` operation — the only way out was hand-
+        # editing journal.json. Fail the import instead, which opens `discard`'s
+        # `failed_without_commit` path (see `discard`).
+        if acceptance_status in {"abandoned", "failed", "stale"}:
+            raise ManuscriptImportError(
+                f"旧稿验收已{acceptance_status}，导入无法继续调和。已发布的章节保留在正文中，"
+                "如需重来请新建一次导入",
+                code="IMPORT_RECONCILIATION_ABANDONED",
+                details={
+                    "acceptance_operation_id": acceptance_id,
+                    "acceptance_status": acceptance_status,
+                },
+            )
         if acceptance_status != "completed":
             stage = operation["stages"]["reconcile"]
             if stage["status"] != "waiting" or stage.get("input_sha256") != input_sha:

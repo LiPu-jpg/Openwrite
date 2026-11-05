@@ -243,6 +243,62 @@ def test_legacy_project_without_outline_can_migrate_deterministic_disk_order(
     assert outline_issue["blocking"] is False
 
 
+def test_plan_without_manuscript_is_not_migratable(tmp_path: Path) -> None:
+    """An empty plan must not be applicable.
+
+    Applying it writes a sidecar with zero chapters and zero scenes, which flips
+    `surface()` from `absent` to `current` and removes the migration path while
+    leaving the user with a structure that has nothing to edit.
+    """
+    novel = _project(tmp_path)
+    for path in sorted(novel.rglob("ch_*.md")):
+        path.unlink()
+    service = SceneStructureService(tmp_path, "demo")
+
+    preview = service.migration_preview()
+
+    assert preview["plan"] == []
+    assert preview["input_chapters"] == []
+    assert preview["can_apply"] is False
+    codes = {item["code"] for item in preview["issues"]}
+    assert "MIGRATION_PLAN_EMPTY" in codes
+
+    with pytest.raises(SceneStructureError) as excinfo:
+        service.apply_migration(
+            expected_preview_revision=preview["preview_revision"], confirm=True
+        )
+    assert excinfo.value.code == "SCENE_MIGRATION_PLAN_EMPTY"
+    # The refusal is total: no sidecar, no migration record.
+    assert not (novel / "data/story_structure/scenes.json").exists()
+    assert service.surface()["status"] == "absent"
+
+
+def test_not_yet_issues_carry_their_own_wording(tmp_path: Path) -> None:
+    """A project that only has a planning skeleton is not a broken project.
+
+    Both "not yet" issues must say so in their own words. The browser has no
+    other source for the wording and falls back to a generic "需要处理", which
+    made a freshly initialized project read like a failed one.
+    """
+    novel = _project(tmp_path)
+    for path in sorted(novel.rglob("ch_*.md")):
+        path.unlink()
+    service = SceneStructureService(tmp_path, "demo")
+
+    surface_issue = next(
+        item for item in service.surface()["issues"] if item["code"] == "SCENE_STRUCTURE_ABSENT"
+    )
+    assert surface_issue["severity"] == "info"
+    assert surface_issue["blocking"] is False
+    assert "规划骨架" in surface_issue["message"]
+
+    preview_issue = next(
+        item for item in service.migration_preview()["issues"] if item["code"] == "MIGRATION_PLAN_EMPTY"
+    )
+    assert preview_issue["message"]
+    assert "稿件正文" in preview_issue["message"]
+
+
 def test_metadata_update_is_cas_bound_and_controls_story_time_order(tmp_path: Path) -> None:
     _project(tmp_path)
     service = SceneStructureService(tmp_path, "demo")

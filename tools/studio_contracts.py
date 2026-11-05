@@ -105,11 +105,13 @@ def studio_error_payload(error: StudioError, request_id: str) -> dict[str, Any]:
         "INVALID_PROJECT": "Open a valid OpenWrite project first",
     }
     original = str(error)
-    message = (
-        messages.get(error.code, f"Request failed ({error.code}, HTTP {int(error.status)})")
-        if any("\u3400" <= char <= "\u9fff" for char in original)
-        else original
-    )
+    # The detailed reason is the actionable text. Previously a Chinese reason
+    # was replaced by a generic English sentence, so every client that displays
+    # `message` lost the cause. Keep the friendly mapping only for short
+    # English/internal messages; otherwise surface the original text.
+    message = original if any(
+        "\u3400" <= char <= "\u9fff" for char in original
+    ) else messages.get(error.code, original)
     return {
         "error": original,
         "message": message,

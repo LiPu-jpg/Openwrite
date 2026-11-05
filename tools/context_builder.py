@@ -56,6 +56,14 @@ from .truth_manager import TruthFilesManager
 logger = logging.getLogger(__name__)
 
 
+# Statuses that close a foreshadowing node. Kept identical to
+# `chapter_work_brief._CLOSED_FORESHADOW_STATUSES` so the two surfaces cannot
+# disagree about whether a hook is still open.
+_CLOSED_FORESHADOW_STATUSES = frozenset(
+    {"已收", "resolved", "废弃", "abandoned", "discarded", "paid-off"}
+)
+
+
 class ContextBuilder:
     """上下文构建器
 
@@ -833,17 +841,21 @@ class ContextBuilder:
         dag_path = self.data_dir / "foreshadowing" / "dag.yaml"
         if dag_path.exists():
             dag_data = self._load_yaml(dag_path)
-            state = self._parse_foreshadowing_dag(dag_data, chapter_id)
-            if state.pending or state.planted:
-                return state
+            if isinstance(dag_data, dict):
+                # The DAG parsed, so it is the source of truth — even when every
+                # node in it is closed. Falling through to the legacy outline list
+                # in that case resurrected resolved/abandoned hooks as pending and
+                # told the writer to resolve them again.
+                return self._parse_foreshadowing_dag(dag_data, chapter_id)
 
-        # 2. 从大纲的 key_foreshadowing 字段
+        # 2. 从大纲的 key_foreshadowing 字段（仅在 DAG 缺失或不可解析时回退）
         hierarchy_path = self.data_dir / "hierarchy.yaml"
         if hierarchy_path.exists():
             outline_data = self._load_yaml(hierarchy_path)
-            fore_data = outline_data.get("key_foreshadowing", [])
-            if fore_data:
-                state = self._parse_outline_foreshadowing(fore_data, chapter_id)
+            if isinstance(outline_data, dict):
+                fore_data = outline_data.get("key_foreshadowing", [])
+                if fore_data:
+                    state = self._parse_outline_foreshadowing(fore_data, chapter_id)
 
         return state
 
@@ -872,7 +884,7 @@ class ContextBuilder:
             planted_idx = self._parse_chapter_index(planted_in)
             target_idx = self._parse_chapter_index(target_chapter)
 
-            if status == "已收" or status == "resolved":
+            if status in _CLOSED_FORESHADOW_STATUSES:
                 state.resolved.append(node)
             elif status == "待收" or status == "pending":
                 state.pending.append(node)
@@ -880,6 +892,11 @@ class ContextBuilder:
                 state.planted.append(node)
             elif target_idx >= current_idx:
                 state.pending.append(node)
+            elif target_idx > 0 and target_idx < current_idx:
+                # Overdue and never reported as planted: without this bucket the
+                # node fell through every branch and vanished from the writer's
+                # context entirely.
+                state.planted.append(node)
 
         return state
 
@@ -1087,7 +1104,9 @@ class ContextBuilder:
             items = self._extract_md_list(text, "禁用")
             banned.extend(items[:20])
 
-        return list(set(banned))[:50]  # 去重，最多50个
+        # Deterministic order: `set` iteration order varies between runs, so the
+        # writer used to see a different subset of the banned phrases each time.
+        return list(dict.fromkeys(banned))[:50]  # 去重，最多50个
 
     def _get_world_rules(self, chapter_id: str, hierarchy: OutlineHierarchy) -> WorldRules:
         """获取相关世界观规则

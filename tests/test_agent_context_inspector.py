@@ -156,3 +156,34 @@ def test_context_cli_prints_agent_level_json(
     assert '"agent": "writer"' in output
     assert '"messages"' in output
     assert "保留钟声" in output
+
+
+def test_inspection_restores_derived_caches_instead_of_leaving_them_behind(tmp_path: Path):
+    """An inspection must not leave derived caches that mask real staleness.
+
+    The module advertises itself as read-only, but assembling a packet runs the
+    auto-sync chain and refreshes the character-state index. Leaving those behind
+    makes source_sync's freshness check believe the caches are current, so a
+    later writer sees stale content as fresh.
+    """
+    root = _project(tmp_path)
+    novel_root = root / "data" / "novels" / "demo"
+    cards = novel_root / "data" / "characters" / "cards"
+    index = novel_root / ".openwrite" / "character-state-index.json"
+
+    # Capture the pre-inspection bytes of everything the sync chain owns.
+    watched: dict[Path, bytes] = {}
+    for path in list(cards.glob("*.yaml")) + [index]:
+        if path.is_file():
+            watched[path] = path.read_bytes()
+
+    inspector = AgentContextInspector(root)
+    inspector.inspect(agent="dante")
+
+    for path, content in watched.items():
+        assert path.is_file(), f"{path.name} disappeared during inspection"
+        assert path.read_bytes() == content, f"{path.name} was rewritten by a read-only inspection"
+
+    # A card that did not exist before must not appear because of the inspection.
+    for path in cards.glob("*.yaml"):
+        assert path in watched, f"inspection created a derived card {path.name}"

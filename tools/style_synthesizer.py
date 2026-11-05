@@ -15,11 +15,16 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .file_ops import atomic_write
+
+logger = logging.getLogger("tools.style_synthesizer")
 
 from .frontmatter import render_toml_front_matter
 from .llm.client import LLMClient, LLMConfig, Message
@@ -103,7 +108,10 @@ def build_style_manifest(project_root: Path, novel_id: str, style_id: str) -> di
         ],
     }
 
-    (style_dir / "manifest.toml").write_text(_render_toml_file(manifest), encoding="utf-8")
+    # Atomic write: a crash mid-write used to leave a truncated manifest.toml,
+    # which render_style_manifest_summary then swallowed into an empty summary,
+    # so the writer and reviewer silently lost the whole style manifest.
+    atomic_write(style_dir / "manifest.toml", _render_toml_file(manifest))
     return manifest
 
 
@@ -186,7 +194,11 @@ def render_style_manifest_summary(manifest: dict[str, Any] | str, *, max_items: 
     if isinstance(manifest, str):
         try:
             manifest_data = tomllib.loads(manifest)
-        except Exception:
+        except Exception as exc:
+            # Swallowing this returned "", which the caller could not tell apart
+            # from 'no style manifest yet' - the writer and reviewer then ran with
+            # no style guidance at all and no diagnostic.
+            logger.warning("Style manifest is unreadable, using an empty one: %s", exc)
             manifest_data = {}
     else:
         manifest_data = dict(manifest or {})
@@ -256,16 +268,44 @@ def _build_fallback_style_document(
     style_id: str,
     note: str,
 ) -> str:
-    priority_signals = _dedupe_preserve(
-        list(manifest.get("primary_signals", []))
-        + list(manifest.get("reusable_signals", []))
-    )[:8]
-    narration = list(manifest.get("narration_rules", []))[:8]
-    dialogue = list(manifest.get("dialogue_rules", []))[:8]
-    rhythm = list(manifest.get("rhythm_rules", []))[:8]
-    work_constraints = list(manifest.get("work_constraints", []))[:8]
-    craft_rules = list(manifest.get("craft_rules", []))[:8]
-    negative = list(manifest.get("negative_rules", []))[:20]
+    # No truncation. Every section used to be hard-capped, which silently dropped
+    # 15 of 23 craft rules (all of rhythm_craft: chapter-end hooks / POV switches /
+    # information density / acceleration-braking) and 5 of 25 negative rules on
+    # the default path taken whenever no LLM key is configured. The manifest
+    # carries its own `priority_order`; honour it rather than discarding by
+    # position.
+    ordered = [
+        "work_constraints",
+        "primary_signals",
+        "narration_rules",
+        "dialogue_rules",
+        "rhythm_rules",
+        "craft_rules",
+        "negative_rules",
+    ]
+    sections = {
+        "work_constraints": list(manifest.get("work_constraints", [])),
+        "primary_signals": _dedupe_preserve(
+            list(manifest.get("primary_signals", []))
+            + list(manifest.get("reusable_signals", []))
+        ),
+        "narration_rules": list(manifest.get("narration_rules", [])),
+        "dialogue_rules": list(manifest.get("dialogue_rules", [])),
+        "rhythm_rules": list(manifest.get("rhythm_rules", [])),
+        "craft_rules": list(manifest.get("craft_rules", [])),
+        "negative_rules": list(manifest.get("negative_rules", [])),
+    }
+    # Sections the manifest does not rank keep the old conservative cap.
+    for name, value in list(sections.items()):
+        if name not in ordered:
+            sections[name] = value[:8]
+    priority_signals = sections["primary_signals"]
+    work_constraints = sections["work_constraints"]
+    narration = sections["narration_rules"]
+    dialogue = sections["dialogue_rules"]
+    rhythm = sections["rhythm_rules"]
+    craft_rules = sections["craft_rules"]
+    negative = sections["negative_rules"]
 
     parts = [
         f"# 最终风格文档：{novel_id}",
@@ -324,12 +364,24 @@ def _render_toml_file(data: dict[str, Any]) -> str:
 
 
 def _remove_source_bound_signals(text: str, source_bound_signals: list[str]) -> str:
-    result = text
-    for item in source_bound_signals:
-        signal = str(item).strip()
-        if signal:
-            result = result.replace(signal, "")
-    return result
+    """Drop the list items that carry a source-bound signal.
+
+    A blind text.replace(signal, "") spliced the signal out of the middle of
+    legitimate rules: a rule reading 'keep the cold narrative voice' became 'keep
+    the cold' when the signal was 'narrative voice'. Removing the whole bullet
+    keeps every other rule intact.
+    """
+    if not source_bound_signals:
+        return text
+    blocked = {str(item).strip() for item in source_bound_signals if str(item).strip()}
+    if not blocked:
+        return text
+    kept = [
+        line
+        for line in text.split("\n")
+        if not any(signal in line for signal in blocked)
+    ]
+    return "\n".join(kept)
 
 
 def _collect_summary_reusable(project_root: Path, novel_id: str, style_id: str) -> list[str]:

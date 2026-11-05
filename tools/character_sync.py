@@ -1,5 +1,7 @@
 import yaml
 import re
+import os
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -18,10 +20,23 @@ def sync_all_profiles_to_cards(src_dir: Path, data_dir: Path) -> None:
         card_data = parse_profile_to_card(md_file)
         if card_data:
             card_path = cards_dir / f"{md_file.stem}.yaml"
-            with open(card_path, "w", encoding="utf-8") as f:
-                yaml.dump(
-                    card_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False
-                )
+            # Atomic write: a bare open(...,"w") truncates in place, and the
+            # freshness check is mtime-based, so a crash mid-write leaves a card
+            # that reads as current but is only half there.
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix="." + md_file.stem + ".", suffix=".tmp", dir=str(cards_dir)
+            )
+            temporary = Path(temporary_name)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    yaml.dump(
+                        card_data, handle, allow_unicode=True, default_flow_style=False, sort_keys=False
+                    )
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, card_path)
+            finally:
+                temporary.unlink(missing_ok=True)
 
 
 def parse_profile_to_card(md_file: Path) -> Optional[Dict[str, Any]]:

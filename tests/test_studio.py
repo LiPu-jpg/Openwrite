@@ -250,6 +250,7 @@ def test_studio_error_contract_preserves_legacy_error_string():
     payload = studio_error_payload(error, "req_test")
 
     assert payload["error"] == "原文已变化"
+    assert payload["message"] == "原文已变化"
     assert payload["code"] == "DOCUMENT_CONFLICT"
     assert payload["recoverable"] is True
     assert payload["details"] == {"chapter_id": "ch_001"}

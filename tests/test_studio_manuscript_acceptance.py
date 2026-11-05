@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from threading import Thread
 from urllib.error import HTTPError
@@ -44,8 +45,9 @@ def _analyze_existing(
     content: str,
     truth_context: str = "",
     profile: dict | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> dict:
-    del project_root, novel_id, profile
+    del project_root, novel_id, profile, cancelled
     return _analyze(chapter_id, title, content, truth_context)
 
 

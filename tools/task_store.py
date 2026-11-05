@@ -219,7 +219,7 @@ class TaskStore:
                     task[key] = self._sanitize(origin[key])
         with self._lock:
             self._save_unlocked(task)
-            self._write_index_unlocked()
+            self._write_index_unlocked(task)
             event_id = self._append_event_unlocked(
                 task_id,
                 "task_created",
@@ -229,7 +229,7 @@ class TaskStore:
             )
             task["last_event_id"] = event_id
             self._save_unlocked(task)
-            self._write_index_unlocked()
+            self._write_index_unlocked(task)
         self._notify_change(task)
         return normalize_task_record(task)
 
@@ -260,10 +260,12 @@ class TaskStore:
         *,
         statuses: set[str] | None = None,
         limit: int = 100,
+        chapter_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clean_limit = min(500, max(1, int(limit)))
         if statuses is not None and not statuses.issubset(TASK_STATUSES):
             raise TaskStoreError("Invalid task status filter")
+        clean_chapter = str(chapter_id or "").strip()
         tasks: list[dict[str, Any]] = []
         if self.root.is_dir():
             for path in self.root.glob("task_tsk_*.yaml"):
@@ -272,12 +274,25 @@ class TaskStore:
                     continue
                 if statuses is not None and record.get("status") not in statuses:
                     continue
+                if clean_chapter and self._task_chapter(record) != clean_chapter:
+                    continue
                 tasks.append(record)
         return sorted(
             tasks,
             key=lambda item: str(item.get("created_at") or ""),
             reverse=True,
         )[:clean_limit]
+
+    @staticmethod
+    def _task_chapter(record: dict[str, Any]) -> str:
+        """The chapter a task belongs to, whether named directly or in its input."""
+        chapter = str(record.get("chapter_id") or "")
+        if chapter:
+            return chapter
+        payload = record.get("input")
+        if isinstance(payload, dict):
+            return str(payload.get("chapter_id") or "")
+        return ""
 
     def transition(
         self,
@@ -288,15 +303,28 @@ class TaskStore:
         updates: dict[str, Any] | None = None,
         event: str = "task_updated",
         details: dict[str, Any] | None = None,
+        expected_status: str | None = None,
     ) -> dict[str, Any]:
         if status is not None and status not in TASK_STATUSES:
             raise TaskStoreError(f"Invalid task status: {status}")
         if phase is not None and phase not in TASK_PHASES:
             raise TaskStoreError(f"Invalid task phase: {phase}")
+        if expected_status is not None and expected_status not in TASK_STATUSES:
+            raise TaskStoreError(f"Invalid expected task status: {expected_status}")
         with self._lock:
             task = self._load_raw(task_id)
             if task is None:
                 raise TaskStoreError("Task not found")
+            # Compare-and-set. Without it a caller holding a stale snapshot could
+            # overwrite a status it never observed — most damagingly a terminal
+            # one: `recover_interrupted` lists `running` tasks at startup, and a
+            # task that completed meanwhile used to be flipped back to
+            # `interrupted`, contradicting its own completion event.
+            if expected_status is not None and str(task.get("status") or "") != expected_status:
+                raise TaskStoreError(
+                    "Task status changed concurrently: "
+                    f"expected {expected_status}, found {task.get('status')}"
+                )
             now = self._now()
             if status is not None:
                 task["status"] = status
@@ -330,7 +358,13 @@ class TaskStore:
             )
             task["last_event_id"] = event_id
             self._save_unlocked(task)
-            self._write_index_unlocked()
+            # `index.yaml` has no reader in this repo — `list()` globs the
+            # snapshots directly — but it is re-serialized in full on every
+            # transition, which is O(N) in the task count. Only rewrite it when a
+            # column it carries actually changes; progress, stage and heartbeat
+            # updates change none of them.
+            if status is not None or phase is not None:
+                self._write_index_unlocked(task)
         self._notify_change(task)
         return normalize_task_record(task)
 
@@ -389,6 +423,7 @@ class TaskStore:
                     self.transition(
                         str(task["task_id"]),
                         status="failed",
+                        expected_status="running",
                         updates={
                             "error": {
                                 "code": "WORKSPACE_CONTEXT_MISMATCH",
@@ -404,6 +439,7 @@ class TaskStore:
                 self.transition(
                     str(task["task_id"]),
                     status="interrupted",
+                    expected_status="running",
                     updates={
                         "error": {
                             "code": "PROCESS_INTERRUPTED",
@@ -455,30 +491,26 @@ class TaskStore:
             yaml.safe_dump(task, allow_unicode=True, sort_keys=False),
         )
 
-    def _write_index_unlocked(self) -> None:
-        records = []
-        if self.root.is_dir():
-            for path in self.root.glob("task_tsk_*.yaml"):
-                try:
-                    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-                except (OSError, yaml.YAMLError):
-                    continue
-                if not isinstance(data, dict):
-                    continue
-                records.append(
-                    {
-                        key: data.get(key)
-                        for key in (
-                            "task_id",
-                            "type",
-                            "status",
-                            "phase",
-                            "chapter_id",
-                            "created_at",
-                            "updated_at",
-                        )
-                    }
-                )
+    def _write_index_unlocked(self, task: dict[str, Any] | None = None) -> None:
+        # Rewrite only the touched row. Rebuilding from every snapshot made each
+        # transition cost O(N) I/O — measured ~98 ms at 200 tasks, and
+        # `TaskContext.phase()/stage()/report_progress()` each fire one — so a
+        # long-lived Studio degraded quadratically.
+        row = {
+            key: task.get(key)
+            for key in ("task_id", "type", "status", "phase", "chapter_id", "created_at", "updated_at")
+        } if task is not None else None
+        records: list[dict[str, Any]] = []
+        if self.index_path.is_file():
+            try:
+                existing = yaml.safe_load(self.index_path.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                existing = {}
+            if isinstance(existing, dict) and isinstance(existing.get("tasks"), list):
+                records = [item for item in existing["tasks"] if isinstance(item, dict)]
+        if row is not None:
+            records = [item for item in records if str(item.get("task_id") or "") != str(row.get("task_id") or "")]
+            records.append(row)
         payload = {
             "version": 1,
             "novel_id": self.novel_id,

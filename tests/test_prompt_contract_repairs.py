@@ -1,4 +1,5 @@
 import asyncio
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -341,3 +342,44 @@ def test_radar_limits_each_platform_to_top_n():
     selected = RadarAgent._limit_recommendations(recommendations, top_n=2)
 
     assert [item.confidence for item in selected] == [0.9, 0.8]
+
+
+def test_style_manifest_is_written_atomically(tmp_path: Path, monkeypatch):
+    """A crash mid-write must not leave a truncated manifest.toml.
+
+    The file used to be written with a bare `write_text`, which truncates in
+    place. The truncated result was then swallowed by
+    `render_style_manifest_summary`, which returned "" — so the writer and
+    reviewer ran with no style guidance at all and no diagnostic.
+    """
+    from tools.style_synthesizer import build_style_manifest
+
+    init_project(tmp_path, "demo")
+
+    # Fail the write the way a full disk would: partway through, after the target
+    # has been opened. A bare in-place write leaves the truncated bytes behind;
+    # an atomic write leaves the previous manifest intact.
+    manifest_path = tmp_path / "data" / "novels" / "demo" / "data" / "style" / "manifest.toml"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text("style_id = previous\n", encoding="utf-8")
+    previous = manifest_path.read_text(encoding="utf-8")
+
+    import tools.file_ops as file_ops
+
+    real_replace = file_ops.replace_file
+
+    def failing_replace(source, target):
+        # Simulate the process dying between writing the temp file and renaming.
+        raise OSError("simulated crash before the rename")
+
+    monkeypatch.setattr(file_ops, "replace_file", failing_replace)
+
+    try:
+        build_style_manifest(tmp_path, "demo", "style_demo")
+    except OSError:
+        pass
+
+    # The previous manifest survives intact; nothing was truncated in place.
+    assert manifest_path.read_text(encoding="utf-8") == previous
+    # No stray temporary files left behind either.
+    assert sorted(p.name for p in manifest_path.parent.iterdir() if p.name.startswith('.')) == []

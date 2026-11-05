@@ -6,6 +6,19 @@ from typing import Any, Callable, Iterable
 from tools.llm.cancellation import model_cancellation
 
 
+def _settled(future: Any) -> dict[str, Any]:
+    """Turn a finished job into a result dict, capturing a raised error.
+
+    `future.result()` re-raises the worker's exception, which used to escape the
+    dispatch loop and abandon every job still queued behind it: one failing
+    provider silently dropped the remaining candidates and never told the caller.
+    """
+    try:
+        return future.result()
+    except Exception as exc:  # noqa: BLE001 - reported as data, never re-raised
+        return {"status": "failed", "error": {"code": "JOB_RAISED", "message": str(exc)}}
+
+
 def run_bounded(
     jobs: Iterable[tuple[Any, ...]],
     execute: Callable[..., dict[str, Any]],
@@ -43,4 +56,4 @@ def run_bounded(
                 break
             ready, active = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
             for index, future in enumerate(ready):
-                completed(future.result(), len(active) + len(ready) - index - 1)
+                completed(_settled(future), len(active) + len(ready) - index - 1)

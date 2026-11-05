@@ -9,6 +9,7 @@
 
 import asyncio
 import copy
+import hashlib
 import json
 import logging
 import re
@@ -16,6 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..llm.errors import LLMWrappedError
 from ..llm.response import ProviderResponseError, load_tool_arguments
 from ..outline_contract import OUTLINE_MARKDOWN_CONTRACT
 from ..shared_documents import CHARACTER_MARKDOWN_CONTRACT
@@ -212,6 +214,7 @@ class ReActAgent:
         max_turns: int = 20,
         max_tool_failures: int = 2,
         max_model_repairs: int = 1,
+        max_transport_failures: int = 3,
         activity_callback: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.client = client
@@ -221,6 +224,10 @@ class ReActAgent:
         self.max_turns = max_turns
         self.max_tool_failures = max(1, int(max_tool_failures))
         self.max_model_repairs = max(0, int(max_model_repairs))
+        # A provider hiccup says nothing about the request, so the turn may ask
+        # again. Without a bound, a provider that is down for a minute would
+        # burn every turn of the run on retries.
+        self.max_transport_failures = max(0, int(max_transport_failures))
         self.activity_callback = activity_callback
 
     async def run(
@@ -259,7 +266,19 @@ class ReActAgent:
             tuple[dict[str, Any], set[str], dict[str, Any]],
         ] = {}
         successful_tool_results: list[tuple[str, str]] = []
+        gated_tool_results: list[tuple[str, str]] = []
+        # Set when a mid-loop branch wants to stop the turn; the remaining
+        # declared tool calls are executed first so nothing is dropped silently.
+        pending_terminal: tuple[str, list[dict[str, Any]]] | None = None
+        pending_failure: str | None = None
+        # Consecutive repairs within a turn; the run-level budget below is what
+        # bounds total spend.
         model_repairs = 0
+        total_model_repairs = 0
+        # Consecutive transport failures (rate limit, network, timeout). They
+        # are counted apart from model repairs: a provider hiccup is not the
+        # model's fault and must not spend the repair budget.
+        transport_failures = 0
         model_output_tokens: int | None = None
         active_tools, requested_tool = self._tools_for_instruction(instruction)
         self._emit_activity(
@@ -281,6 +300,7 @@ class ReActAgent:
                     messages,
                     active_tools,
                     max_tokens=model_output_tokens,
+                    max_retries=0,
                 )
                 decoded_tool_calls = [
                     (tool_call, load_tool_arguments(tool_call, index=index))
@@ -290,8 +310,10 @@ class ReActAgent:
                 if (
                     exc.code in self._repairable_model_error_codes()
                     and model_repairs < self.max_model_repairs
+                    and total_model_repairs < self.max_model_repairs * self.max_turns
                 ):
                     model_repairs += 1
+                    total_model_repairs += 1
                     previous_output_tokens = model_output_tokens
                     if exc.code == "MODEL_OUTPUT_TRUNCATED":
                         previous_output_tokens, retry_output_tokens = (
@@ -337,7 +359,41 @@ class ReActAgent:
                     error_code=failure.code,
                 )
                 raise failure from exc
+            except LLMWrappedError as exc:
+                # A transport failure says nothing about the request: the same
+                # call may well succeed a moment later. The loop used to die
+                # here, so one rate limit ended the whole turn - while a
+                # malformed answer, which says nothing about the provider,
+                # got a repair. The two classes deserve the opposite care.
+                from ..llm.retry import classify_failure, wait_before_retry_async
+
+                failure = classify_failure(exc, attempt=turn + 1)
+                if (
+                    not failure.retryable
+                    or transport_failures >= self.max_transport_failures
+                ):
+                    self._emit_activity(
+                        "run_failed",
+                        turn=turn + 1,
+                        reason=str(exc),
+                        error_code=failure.code,
+                        transport_attempts=transport_failures,
+                    )
+                    raise
+                transport_failures += 1
+                delay = await wait_before_retry_async(transport_failures)
+                self._emit_activity(
+                    "model_retry",
+                    turn=turn + 1,
+                    reason=str(exc),
+                    error_code=failure.code,
+                    transport_attempt=transport_failures,
+                    transport_limit=self.max_transport_failures,
+                    message=f"服务商暂时不可用，{delay:.1f} 秒后重试",
+                )
+                continue
             model_repairs = 0
+            transport_failures = 0
             self._emit_activity(
                 "model_completed",
                 turn=turn + 1,
@@ -365,9 +421,12 @@ class ReActAgent:
                     )
                     break
 
-            for tool_call, tc_args in decoded_tool_calls:
+            for call_index, (tool_call, tc_args) in enumerate(decoded_tool_calls):
                 tc_id = tool_call.get("id", "")
                 tc_name = tool_call.get("name", "")
+                remaining_tool_calls = [
+                    item[0] for item in decoded_tool_calls[call_index + 1:]
+                ]
                 failure_key = self._tool_failure_key(tc_name, tc_args)
                 inherited_fields: list[str] = []
                 corrected_fields: list[str] = []
@@ -476,6 +535,7 @@ class ReActAgent:
                                 failed_tool=tc_name,
                                 failure_reason=failure_reason,
                                 failure_count=failed_tool_counts[failure_key],
+                                gated_results=gated_tool_results,
                             )
                             if partial_response:
                                 self._emit_activity(
@@ -503,16 +563,25 @@ class ReActAgent:
                                 reason=failure_reason,
                                 failure_count=failed_tool_counts[failure_key],
                             )
-                            return (
+                            pending_failure = (
                                 f"工具 {tc_name} 连续失败 "
                                 f"{failed_tool_counts[failure_key]} 次，"
                                 "我已停止本轮以避免继续重复消耗。"
                                 f"最后原因：{failure_reason}"
                             )
+                            break
                     else:
                         failed_tool_counts.pop(failure_key, None)
                         failed_tool_arguments.pop(failure_key, None)
-                        successful_tool_results.append((tc_name, result))
+                        # A soft confirmation gate is not a failure (so the turn
+                        # is not aborted) but it is not a success either: nothing
+                        # was written. Keeping it out of `successful_tool_results`
+                        # stops `_partial_success_response` from telling the author
+                        # a gated mutation "已成功并保留".
+                        if self._is_confirmation_gate(result):
+                            gated_tool_results.append((tc_name, result))
+                        else:
+                            successful_tool_results.append((tc_name, result))
                     messages.append(
                         Message(
                             role="tool",
@@ -523,18 +592,13 @@ class ReActAgent:
                     if not failure_reason:
                         terminal_response = self._terminal_tool_response(result)
                         if terminal_response:
-                            on_message and on_message(terminal_response)
-                            self._emit_activity(
-                                "response_ready",
-                                turn=turn + 1,
-                                content_chars=len(terminal_response),
-                                source_tool=tc_name,
-                            )
-                            self._emit_activity(
-                                "run_completed",
-                                content_chars=len(terminal_response),
-                            )
-                            return terminal_response
+                            # The assistant declared more tool calls in this turn.
+                            # Returning here used to abandon them silently, so the
+                            # author saw a clean completion for a turn in which a
+                            # requested mutation was skipped. Drain the rest first
+                            # and name what was not executed.
+                            pending_terminal = (terminal_response, remaining_tool_calls)
+                            break
                 except Exception as e:
                     failed_tool_arguments.pop(failure_key, None)
                     failure_reason = str(e)
@@ -569,6 +633,7 @@ class ReActAgent:
                             failed_tool=tc_name,
                             failure_reason=failure_reason,
                             failure_count=failed_tool_counts[failure_key],
+                            gated_results=gated_tool_results,
                         )
                         if partial_response:
                             self._emit_activity(
@@ -576,7 +641,8 @@ class ReActAgent:
                                 partial=True,
                                 secondary_failure=tc_name,
                             )
-                            return partial_response
+                            pending_failure = partial_response
+                            break
                         logger.warning(
                             "react.tool_failure_limit %s %s",
                             tc_name,
@@ -609,6 +675,21 @@ class ReActAgent:
                             tool_call_id=tc_id,
                         )
                     )
+            # The tool-call loop has now drained. Emit whatever a mid-loop branch
+            # deferred, naming the declared calls that were not executed.
+            if pending_terminal is not None:
+                terminal_response, skipped = pending_terminal
+                on_message and on_message(terminal_response)
+                self._emit_activity(
+                    "response_ready",
+                    turn=turn + 1,
+                    content_chars=len(terminal_response),
+                )
+                self._emit_activity("run_completed", content_chars=len(terminal_response))
+                return self._with_skipped_calls(terminal_response, skipped)
+            if pending_failure is not None:
+                self._emit_activity("run_failed", reason="tool_failure_limit")
+                return self._with_skipped_calls(pending_failure, remaining_tool_calls)
         else:
             logger.warning(f"Reached max turns ({self.max_turns})")
             self._emit_activity(
@@ -714,6 +795,34 @@ class ReActAgent:
             logger.debug("react.activity_callback_failed", exc_info=True)
 
     @staticmethod
+    def _with_skipped_calls(message: str, skipped: list[dict[str, Any]]) -> str:
+        """Name declared tool calls that were not executed.
+
+        The assistant message declares every call of the turn, so stopping the
+        loop early used to drop the rest without a word — the author saw a clean
+        completion for a turn in which a requested mutation never ran.
+        """
+        names = [
+            str(item.get("name") or "")
+            for item in (skipped or [])
+            if isinstance(item, dict) and str(item.get("name") or "")
+        ]
+        if not names:
+            return message
+        return f"{message}\n\n未执行：{'、'.join(dict.fromkeys(names))}（本轮已停止，未产生任何变更）。"
+
+    @staticmethod
+    def _is_confirmation_gate(result: str) -> bool:
+        """Whether a tool result is a soft confirmation gate rather than an outcome."""
+        from .confirmation import is_confirmation_policy_block
+
+        try:
+            payload = json.loads(result)
+        except (TypeError, json.JSONDecodeError):
+            return False
+        return is_confirmation_policy_block(payload)
+
+    @staticmethod
     def _tool_failure_reason(result: str) -> str:
         try:
             payload = json.loads(result)
@@ -729,6 +838,19 @@ class ReActAgent:
         is_failure = payload.get("ok") is False or bool(payload.get("error"))
         if not is_failure:
             return ""
+        # A named diagnosis first: it says what kind of failure this is and
+        # what would move it, which a bare error string does not. The agent in
+        # front of the loop needs to act on it, not just read it.
+        diagnosis = payload.get("diagnosis")
+        if isinstance(diagnosis, dict):
+            hint = str(diagnosis.get("hint") or "").strip()
+            message = str(diagnosis.get("message") or "").strip()
+            category = str(diagnosis.get("category") or "").strip()
+            if hint or message:
+                detail = message or hint
+                if category and category != "unknown":
+                    return f"[{category}] {detail} {hint}".strip()
+                return f"{detail} {hint}".strip()
         reason = (
             payload.get("message")
             or payload.get("reason")
@@ -780,6 +902,7 @@ class ReActAgent:
         tools: Sequence[ToolDefinition] | None = None,
         *,
         max_tokens: int | None = None,
+        max_retries: int | None = None,
     ) -> Any:
         """调用 LLM（带工具）"""
 
@@ -795,9 +918,17 @@ class ReActAgent:
             for t in (self.tools if tools is None else tools)
         ]
 
-        if max_tokens is None:
-            return self.client.chat_with_tools(messages, llm_tools)
-        return self.client.chat_with_tools(messages, llm_tools, max_tokens=max_tokens)
+        kwargs: dict[str, Any] = {}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        if max_retries is not None:
+            from ..llm.client import accepts_parameter
+
+            if accepts_parameter(self.client, "chat_with_tools", "max_retries"):
+                # The loop below runs the classified retry policy, so LiteLLM's
+                # own retry has to be off: two retry layers stack into a burst.
+                kwargs["max_retries"] = max_retries
+        return self.client.chat_with_tools(messages, llm_tools, **kwargs)
 
     def _next_truncation_output_budget(
         self,
@@ -993,6 +1124,20 @@ class ReActAgent:
             path = str(args.get("path") or args.get("source_path") or "").strip()
             if path:
                 return f"{name}:{path}"
+        if name == "stage_outline_edits":
+            # The system prompt instructs batching a large outline rewrite, so
+            # each batch is an independent edit set: one batch's failure must not
+            # consume another's retry budget, or the turn aborts with
+            # "连续失败 2 次" for two unrelated batches.
+            label = str(args.get("batch_label") or "").strip()
+            edits = args.get("edits")
+            if label:
+                return f"{name}:{label}"
+            if isinstance(edits, list) and edits:
+                digest = hashlib.sha256(
+                    json.dumps(edits, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest()[:16]
+                return f"{name}:{digest}"
         return name
 
     @staticmethod
@@ -1017,24 +1162,60 @@ class ReActAgent:
         }
         return json.dumps(payload, ensure_ascii=False)
 
+    # A restriction the model could not honor. Narrowing to the empty set denies
+    # the model every tool while the system prompt still advertises them all, so
+    # the turn "succeeds" with a text-only answer and the request silently does
+    # not happen.
+    _RESTRICTION_PATTERNS = (
+        r"(?:只|仅)(?:需|要|能|允许|许)?[^。；，\n]{0,8}?(?:调用|使用)",
+        r"\b(?:only\s+call|call\s+only|only\s+use)\b",
+    )
+    _NEGATION_BEFORE = "不没别勿莫未"
+
     def _tools_for_instruction(
         self, instruction: str
     ) -> tuple[list[ToolDefinition], str]:
-        patterns = (
-            r"(?:只|仅)(?:需|要|能)?(?:调用|使用)\s*(?:工具\s*)?[`\"']?"
-            r"([A-Za-z][A-Za-z0-9_]*)",
-            r"\b(?:only\s+call|call\s+only|only\s+use)\s+[`\"']?"
-            r"([A-Za-z][A-Za-z0-9_]*)",
-        )
-        requested = ""
-        for pattern in patterns:
-            match = re.search(pattern, str(instruction or ""), re.IGNORECASE)
-            if match:
-                requested = match.group(1)
-                break
+        """Narrow the offered tools when the author asked for one specific tool.
+
+        Fails open rather than closed: a restriction that cannot be honored
+        precisely still gets the full surface, because narrowing to the empty set
+        denies the model every tool while the system prompt keeps advertising
+        them all — the turn then "succeeds" with a text-only answer and the
+        request silently does not happen.
+        """
+        text = str(instruction or "")
+        known = {tool.name.lower(): tool.name for tool in self.tools}
+        requested = self._requested_tool_name(text, known)
         if not requested:
             return list(self.tools), ""
-        return [tool for tool in self.tools if tool.name == requested], requested
+        narrowed = [tool for tool in self.tools if tool.name.lower() == requested.lower()]
+        if not narrowed:
+            # The named tool is not in this persona's surface: a cross-persona
+            # name, a casing difference, or a name that no longer exists.
+            return list(self.tools), requested
+        return narrowed, requested
+
+    @staticmethod
+    def _requested_tool_name(text: str, known: dict[str, str]) -> str:
+        """Return the tool an instruction restricts the agent to, or "".
+
+        The restriction and the tool name are detected independently: tying the
+        name to the exact phrasing ("只能用 X" has no 调用/使用 in it) made the
+        matcher miss real restrictions, and a restriction that cannot be honored
+        precisely must still fail open rather than deny every tool.
+        """
+        # A restriction the author stated explicitly.
+        restricted = re.search(r"只|仅|\bonly\b", text, re.IGNORECASE)
+        if restricted is None:
+            return ""
+        # "不要只调用 X" excludes X rather than naming it.
+        window = text[max(0, restricted.start() - 3):restricted.start()]
+        if any(char in ReActAgent._NEGATION_BEFORE for char in window):
+            return ""
+        for match in re.finditer(r"[A-Za-z][A-Za-z0-9_]*", text):
+            if match.group(0).lower() in known:
+                return known[match.group(0).lower()]
+        return ""
 
     @staticmethod
     def _partial_success_response(
@@ -1043,16 +1224,37 @@ class ReActAgent:
         failed_tool: str,
         failure_reason: str,
         failure_count: int,
+        gated_results: list[tuple[str, str]] | None = None,
     ) -> str:
         if not successful_results:
             return ""
         retained_results = [
             (name, result)
             for name, result in successful_results
-            if not ReActAgent._is_read_only_tool(name)
+            # A read-only call is not a mutation worth reporting as retained, and
+            # a confirmation gate wrote nothing at all. Filtering both here (not
+            # only at the call site) keeps the message honest regardless of who
+            # builds the list.
+            if not ReActAgent._is_read_only_tool(name) and not ReActAgent._is_confirmation_gate(result)
         ]
+        # Name the changes that were requested but not applied. This is appended
+        # even when nothing was retained: the author must be told which of their
+        # requests are still waiting, not left believing everything happened.
+        gated = list(gated_results or [])
+        gated_notice = ""
+        if gated:
+            gated_names = "、".join(dict.fromkeys(name for name, _ in gated))
+            gated_notice = (
+                f"\n\n尚未应用（等待你明确确认）：{gated_names}。"
+                "确认后我会重试这些变更。"
+            )
         if not retained_results:
-            return ""
+            if not gated_notice:
+                return ""
+            return (
+                f"本轮没有已保留的变更。之后的 {failed_tool} 连续失败 "
+                f"{failure_count} 次，我已停止后续调用。最后原因：{failure_reason}"
+            ) + gated_notice
         names = list(dict.fromkeys(name for name, _ in retained_results))
         details = [
             ReActAgent._summarize_retained_result(name, result)
@@ -1063,7 +1265,7 @@ class ReActAgent:
             f"{failure_count} 次，我已停止后续调用。最后原因：{failure_reason}"
             "\n\n已保留的结果：\n"
             + "\n".join(details)
-        )
+        ) + gated_notice
 
     @staticmethod
     def _is_read_only_tool(name: str) -> bool:

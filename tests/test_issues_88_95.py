@@ -145,6 +145,12 @@ def test_settle_retries_full_prose_and_degrades_persistently(tmp_path, monkeypat
             time.sleep(0.01)
         assert task["status"] == "completed", task.get("error")
         assert task["result"]["degraded"]
+        # The task has to say *which* chapter was lost and *why*. A silent
+        # "completed" is what made this look like a mysterious failure.
+        degraded_chapters = task["result"]["degraded_chapters"]
+        assert [item["chapter_id"] for item in degraded_chapters] == ["ch_001"]
+        assert degraded_chapters[0]["reason"] == "MODEL_OUTPUT_UNPARSEABLE"
+        assert degraded_chapters[0]["attempts"] == 3
         assert ChapterMemoryStore(tmp_path, "demo").load("ch_001")["observations"] == _DEGRADED_MARK
         assert task["finished_at"] and task["duration_ms"] > 0
         assert path.read_text().endswith("旧信从雨中送来。\n")
@@ -377,3 +383,109 @@ def test_shared_length_bounds_avoid_rewriting_4200_unit_chapter(tmp_path):
     assert maximum == 7500 and target == 5000
     issues = ReviewerAgent.__new__(ReviewerAgent)._rule_based_check(prose, 5000)
     assert not any(issue.dimension == 7 for issue in issues)
+
+
+def test_a_stray_memory_file_does_not_break_the_whole_novel(tmp_path):
+    """One non-conforming memory file must not take out every context build.
+
+    `list_before`/`usage_totals` glob `ch_*.yaml` and feed `path.stem` straight
+    into `load()`, which raises for anything that is not `ch_<digits>`. A single
+    `ch_old.yaml` (hand-renamed, or `cp`-renamed) then broke `render_context` —
+    called on every `build_generation_context` — and `usage_totals`, with no
+    recovery path.
+    """
+    init_project(tmp_path, "demo")
+    store = ChapterMemoryStore(tmp_path, "demo")
+    store.save(
+        chapter_id="ch_001", title="第一章", summary="正常记忆", word_count=100, observations="观察"
+    )
+    # A stray, non-conforming memory file.
+    (tmp_path / "data/novels/demo/data/memory/chapters/ch_old.yaml").write_text(
+        "title: 旧文件\n", encoding="utf-8"
+    )
+
+    assert isinstance(store.usage_totals(), dict)
+    assert isinstance(store.render_context("ch_003"), str)
+    # The stray file is skipped, not fatal; the valid record still loads.
+    assert store.load("ch_001") is not None
+
+
+def test_a_corrupt_chapter_memory_is_reported_not_silently_dropped(tmp_path):
+    """A truncated record must not look like "no memory yet".
+
+    `load()` used to swallow a YAML error into `None`, which every caller
+    treats as "this chapter has no summary" — so a truncated memory file made
+    the chapter's summary vanish from every later prompt with no signal at all.
+    """
+    init_project(tmp_path, "demo")
+    store = ChapterMemoryStore(tmp_path, "demo")
+    store.save(
+        chapter_id="ch_001", title="第一章", summary="正常记忆", word_count=100, observations="观察"
+    )
+    # Truncate the record mid-document.
+    record = tmp_path / "data/novels/demo/data/memory/chapters/ch_001.yaml"
+    original = record.read_text(encoding="utf-8")
+    record.write_text(original[: len(original) // 2], encoding="utf-8")
+
+    loaded = store.load("ch_001")
+    assert isinstance(loaded, dict), "an unreadable record must be distinguishable from absent"
+    assert loaded["freshness_status"] == "corrupt"
+
+
+def test_settle_run_holds_the_project_write_lock_for_the_whole_run(tmp_path, monkeypatch):
+    """The truth-file read-modify-write must be serialized across runs.
+
+    `load_truth_files` -> `create_snapshot` -> `apply_runtime_delta_with_fallback`
+    is a shared read-modify-write; without the lock two overlapping runs both
+    reported success while only one chapter's delta survived - and the other's
+    memory record was already written, so the default `only_missing` skipped it
+    forever.
+    """
+    import tools.project_lock as project_lock
+    from tools.settle_backfill import run
+
+    init_project(tmp_path, "demo")
+    (tmp_path / "data/novels/demo/data/manuscript").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data/novels/demo/src/outline.md").write_text(
+        "# 小说\n\n#### 第一章 旧信\n\n雨。\n", encoding="utf-8"
+    )
+    (tmp_path / "data/novels/demo/data/manuscript/ch_001.md").write_text(
+        "# 第一章 旧信\n\n旧信从雨中送来。\n", encoding="utf-8"
+    )
+
+    held = {"depth": 0, "peak": 0, "saw_chapter": False}
+    real_lock = project_lock.ProjectWriteLock
+
+    class SpyLock:
+        def __init__(self, *args, **kwargs):
+            held["depth"] += 1
+            held["peak"] = max(held["peak"], held["depth"])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            held["depth"] -= 1
+            return False
+
+    monkeypatch.setattr(project_lock, "ProjectWriteLock", SpyLock)
+
+    def report(done, total, label):
+        # The opening "0 chapters" report fires before the lock by design; the
+        # per-chapter ones must be inside it.
+        if done:
+            held["saw_progress"] = held["depth"] > 0
+
+    result = run(
+        tmp_path,
+        "demo",
+        only_missing=True,
+        report=report,
+    )
+
+    assert result.get("checked", 0) >= 1, result
+    assert held["peak"] == 1, "the whole run must execute under one write lock"
+    assert held["saw_progress"], "a chapter was settled outside the write lock"
+    assert held["depth"] == 0, "the lock was not released"
+    # The real lock is still available to other callers.
+    assert real_lock is not None

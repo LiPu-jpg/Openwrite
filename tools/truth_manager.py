@@ -189,8 +189,34 @@ class TruthFilesManager:
                     handle.flush()
                     os.fsync(handle.fileno())
                     temporary[attr_name] = Path(handle.name)
-            for attr_name in ["current_state", "ledger", "relationships"]:
-                temporary[attr_name].replace(self._get_file_path(attr_name))
+            # Snapshot before replacing so a failure part-way through can restore
+            # every already-committed file. Without it, current_state could land
+            # while ledger/relationships kept the old content — mutually
+            # inconsistent truth that the next chapter reads as a mixture.
+            committed: Dict[str, bytes | None] = {}
+            try:
+                for attr_name in ["current_state", "ledger", "relationships"]:
+                    target = self._get_file_path(attr_name)
+                    committed[attr_name] = target.read_bytes() if target.is_file() else None
+                    temporary[attr_name].replace(target)
+            except Exception:
+                for attr_name, original in committed.items():
+                    target = self._get_file_path(attr_name)
+                    try:
+                        if original is None:
+                            target.unlink(missing_ok=True)
+                            continue
+                        descriptor, name = tempfile.mkstemp(
+                            prefix=f".{target.name}.", suffix=".restore", dir=str(target.parent)
+                        )
+                        with os.fdopen(descriptor, "wb") as handle:
+                            handle.write(original)
+                            handle.flush()
+                            os.fsync(handle.fileno())
+                        os.replace(name, target)
+                    except OSError:
+                        logger.warning("Failed to restore %s after a partial write", attr_name)
+                raise
             # Keep a manually edited legacy document visible to the canonical state
             # on projects that have already migrated. Structured projections remain
             # additive and are never silently discarded here.

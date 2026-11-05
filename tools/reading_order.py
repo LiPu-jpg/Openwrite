@@ -809,18 +809,27 @@ class ReadingOrderService:
             temporary.append(outline_temp)
             registry_temp = self._temporary(self.identity_path, registry_after)
             temporary.append(registry_temp)
+            # Commit the metadata first, the file last. Copying the file first
+            # left a crash window with the chapter in both arcs while the
+            # outline still named the old one: the surface reported
+            # DUPLICATE_CHAPTER_ID + ORPHAN_CHAPTER_FILE with
+            # mutation_allowed=False, and the registry still mapped the old
+            # path, so the moved file got a freshly derived document_id and its
+            # annotations detached. With this order a crash leaves a single
+            # orphan file that the next move can clean up, never a duplicate.
             target_temp: Path | None = None
             if target != source:
                 target_temp = self._temporary(target, source_content)
                 temporary.append(target_temp)
-                target_temp.replace(target)
-                target_was_created = True
-                self._fault(fault_injector, "document_copied")
             outline_temp.replace(self.outline_path)
             self._fault(fault_injector, "outline_replaced")
             registry_temp.replace(self.identity_path)
             self._fault(fault_injector, "registry_replaced")
             if target != source:
+                assert target_temp is not None
+                target_temp.replace(target)
+                target_was_created = True
+                self._fault(fault_injector, "document_copied")
                 source.unlink()
                 source_was_removed = True
                 self._fault(fault_injector, "source_removed")

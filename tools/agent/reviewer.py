@@ -40,6 +40,63 @@ from .base import BaseAgent
 logger = logging.getLogger(__name__)
 
 
+# A rubric entry is a regex when it contains regex metacharacters; otherwise it is
+# a literal substring. Two entries ("仿佛.*一样", "如同.*一般") were written as
+# regexes but tested with `pattern in content`, so they could never fire.
+_REGEX_META = re.compile(r"[.*+?^${}()|\[\]\\]")
+# The review contract reserves `critical` for "明确事实矛盾、连续性破坏或使章节不可用的问题"
+# (see the reviewer prompt), and `critical` is a HARD severity: it blocks the whole
+# chapter (review_rubric.HARD_SEVERITIES). Mapping craft `high` onto `critical`
+# therefore let a single cliche ("值得注意的是") block a chapter, which is not what
+# the rubric means by high. `warning` is the strongest non-blocking level, so craft
+# high maps there and the ordering information is carried by `low` -> info.
+_SEVERITY_TO_ISSUE = {"high": "warning", "medium": "warning", "low": "info"}
+
+
+def _matches_pattern(pattern: str, content: str) -> bool:
+    """Whether a rubric pattern occurs in the text, as regex or literal."""
+    if not pattern:
+        return False
+    if _REGEX_META.search(pattern):
+        try:
+            return re.search(pattern, content) is not None
+        except re.error:
+            # An unusable regex is not a reason to skip the whole rubric.
+            logger.warning("Skipping unusable craft pattern: %s", pattern)
+            return False
+    return pattern in content
+
+
+def _pattern_budget(data: dict) -> int | None:
+    """The per-1000-character AI-trace budget from the rubric's detection_config.
+
+    Returns None when the rubric does not declare one, so the density check is
+    skipped rather than guessed.
+    """
+    config = data.get("detection_config")
+    if not isinstance(config, dict):
+        return None
+    per_1000 = config.get("max_patterns_per_1000_words")
+    if not isinstance(per_1000, dict):
+        return None
+    strictness = str(config.get("default_strictness") or "normal").strip().lower()
+    value = per_1000.get(strictness, per_1000.get("normal"))
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+def _pattern_severity(item: dict) -> str:
+    """Map the rubric's declared severity onto a review-issue severity.
+
+    The key used to be dead data: the consumer hardcoded "warning", so a
+    high-severity banned phrase and a low-severity cliche produced identical
+    issues and the author could not triage by severity.
+    """
+    declared = str(item.get("severity", "medium")).lower()
+    return _SEVERITY_TO_ISSUE.get(declared, "warning")
+
+
 @dataclass
 class ReviewIssue:
     """审核问题"""
@@ -801,6 +858,88 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
         yaml_issues = self._check_yaml_patterns(content)
         issues.extend(yaml_issues)
 
+        # ── craft/humanization.yaml 的句长配比与开头规则 ─
+        # 这两节此前只有 banned_phrases 被读取，sentence_variation 的
+        # target_ratio 与 opening_rules 声明了却没有任何消费方。
+        issues.extend(self._check_sentence_variation(content))
+
+        return issues
+
+    def _check_sentence_variation(self, content: str) -> list[ReviewIssue]:
+        """Check sentence-length mix and repeated sentence openings.
+
+        `craft/humanization.yaml` declares a target ratio (short 30-40%, medium
+        40-50%, long 15-20%) and opening rules ("avoid 3+ consecutive sentences
+        starting with 他/她/它"). Only `banned_phrases` from that file was ever
+        read; the rest was declared but never enforced.
+        """
+        issues: list[ReviewIssue] = []
+        sentences = [s.strip() for s in re.split(r"[。！？!?…]+\s*", content) if s.strip()]
+        if len(sentences) < 10:
+            # Too little text for a ratio to mean anything.
+            return issues
+
+        lengths = sorted(len(s) for s in sentences)
+        short = sum(1 for n in lengths if n <= 15)
+        long = sum(1 for n in lengths if n >= 45)
+        short_ratio = short / len(sentences)
+        long_ratio = long / len(sentences)
+
+        # The declared band is 30-40% short. Below 25% is a real signal; the upper
+        # bound is intentionally not enforced (punchy prose is not a defect).
+        if short_ratio < 0.25:
+            issues.append(
+                ReviewIssue(
+                    severity="info",
+                    category="句长单一",
+                    description=(
+                        f"短句占比 {short_ratio:.0%}，低于 humanization 目标区间 30-40%"
+                        f"（共 {len(sentences)} 句）"
+                    ),
+                    suggestion="建议掺入短句打断长句，制造节奏起伏",
+                    dimension=None,
+                )
+            )
+        if long_ratio > 0.35:
+            issues.append(
+                ReviewIssue(
+                    severity="info",
+                    category="句长单一",
+                    description=f"长句占比 {long_ratio:.0%}，超过 15-20% 的目标区间",
+                    suggestion="建议拆分最长的一句或两句，避免读感疲劳",
+                    dimension=None,
+                )
+            )
+
+        # Repeated openings: 3+ consecutive sentences starting the same way. The
+        # rubric names pronoun/connective openings (他/她/它, 然后/于是/接着), so
+        # compare the leading pronoun or connective rather than two arbitrary
+        # characters — "他走" and "他停" are the same opening, but "他走" and
+        # "他们" would falsely compare equal on a two-character key.
+        openings: list[str] = []
+        for sentence in sentences:
+            m = re.match(
+                r"(他|她|它|他们|她们|它们|你|你们|我|我们|然后|于是|接着|随后|紧接着|但是|不过|然而|因为|所以|如果|虽然|尽管)",
+                sentence,
+            )
+            openings.append(m.group(1) if m else '')
+        run = 1
+        for index in range(1, len(openings)):
+            if openings[index] != '' and openings[index] == openings[index - 1]:
+                run += 1
+                if run >= 3:
+                    issues.append(
+                        ReviewIssue(
+                            severity="warning",
+                            category="开头重复",
+                            description=f"连续 {run} 句以「{openings[index]}」开头",
+                            suggestion="建议变换主语或句式开头",
+                            dimension=None,
+                        )
+                    )
+                    run = 1
+            else:
+                run = 1
         return issues
 
     def _check_yaml_patterns(self, content: str) -> list[ReviewIssue]:
@@ -817,11 +956,10 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
                 banned = data.get("banned_patterns", [])
                 for item in banned:
                     pattern = item.get("pattern", "")
-                    if pattern in content:
-                        severity = "warning"
+                    if _matches_pattern(pattern, content):
                         issues.append(
                             ReviewIssue(
-                                severity=severity,
+                                severity=_pattern_severity(item),
                                 category=item.get("category", "AI套路"),
                                 description=f"发现禁用表达：{pattern}",
                                 suggestion=(
@@ -835,13 +973,51 @@ blocked 必须至少包含一条能在正文中逐字定位的 critical 证据�
                 cliched = data.get("cliched_patterns", [])
                 for item in cliched:
                     pattern = item.get("pattern", "")
-                    if pattern in content:
+                    if _matches_pattern(pattern, content):
                         issues.append(
                             ReviewIssue(
-                                severity="warning",
+                                severity=_pattern_severity(item),
                                 category=item.get("category", "AI套路"),
                                 description=f"发现AI套话：{pattern}",
                                 suggestion=f"建议：{item.get('replacements', ['直接删除'])[0]}",
+                                dimension=None,
+                            )
+                        )
+
+                # 信息倾倒与 AI 结构模式。 这两组此前完全没有任何读取方：
+                # 设定堆砌、信息倾倒和"首先/其次/最后"是写手最需要的门禁，
+                # 却在 rubric 里声明了却不生效。
+                for group in ("info_dump_patterns", "structure_patterns"):
+                    for item in data.get(group, []):
+                        pattern = item.get("pattern", "")
+                        if _matches_pattern(pattern, content):
+                            issues.append(
+                                ReviewIssue(
+                                    severity=_pattern_severity(item),
+                                    category=item.get("category", "AI套路"),
+                                    description=f"发现{item.get('category', group)}：{pattern}",
+                                    suggestion=item.get("suggestion", "建议调整表达方式"),
+                                    dimension=None,
+                                )
+                            )
+
+                # 每千字阈值。 声明了却从未被消费：没有它，一个 200 字的片段里出现
+                # 一次「总而言之」就会触发 AI 结构告警，而 rubric 的本意是只在
+                # 密度超过阈值时才报。短章按阈值折算，不按绝对次数。
+                threshold = _pattern_budget(data)
+                if threshold is not None:
+                    found = len(issues)
+                    budget = max(1, round(threshold * max(len(content), 1) / 1000))
+                    if found > budget:
+                        issues.append(
+                            ReviewIssue(
+                                severity="warning",
+                                category="AI痕迹密度",
+                                description=(
+                                    f"AI 痕迹密度偏高：{found} 处，超过每千字 {threshold} 处的阈值"
+                                    f"（本章约 {len(content)} 字，允许 {budget} 处）"
+                                ),
+                                suggestion="建议逐处替换或删改，降低可识别的 AI 表达密度",
                                 dimension=None,
                             )
                         )

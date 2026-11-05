@@ -278,6 +278,10 @@ class ArcAuditService:
             },
         }
 
+    # Baselines are whole-book snapshots, so they are the largest thing this store
+    # writes. Keep only the ones a live entry still needs.
+    MAX_BASELINES = 12
+
     def _baseline(self, group_id: str) -> str:
         baseline_id = "baseline_" + uuid4().hex[:12]
         folder = self.store / "baselines" / baseline_id
@@ -292,7 +296,84 @@ class ArcAuditService:
                 atomic_write(folder / relative, data)
                 manifest[relative] = revision(data)
         atomic_write(folder / "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        self._prune_baselines()
         return baseline_id
+
+    def _prune_baselines(self) -> None:
+        """Drop baselines no live entry can still need.
+
+        Each one is a full copy of the outline plus every chapter in the group,
+        so an unpruned store grows without bound — a 200-chapter group reached
+        606 files / 1.59 MB after only three drift entries, and a real book is
+        orders of magnitude larger.
+        """
+        ledger = (
+            json.loads(self.ledger_path.read_text(encoding="utf-8"))
+            if self.ledger_path.is_file()
+            else {}
+        )
+        live = {
+            str(entry.get("baseline_id") or "")
+            for entry in (ledger.get("entries") or [])
+            if isinstance(entry, dict)
+            and str(entry.get("status") or "") in {"open", "recovery_planned", "frozen"}
+        }
+        folder = self.store / "baselines"
+        if not folder.is_dir():
+            return
+        present = sorted(
+            (path for path in folder.iterdir() if path.is_dir()),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+        # The baseline just written is not in the ledger yet, so always keep it.
+        newest = present[0].name if present else ""
+        keep = {name for name in live if name == newest}
+        # Live entries keep their baseline, newest first, up to the cap. An open
+        # entry whose baseline is evicted is marked so a later `recover` refuses
+        # it with a clear reason instead of failing on a missing directory.
+        evicted: set[str] = set()
+        for path in present:
+            if len(keep) >= self.MAX_BASELINES:
+                break
+            keep.add(path.name)
+        for path in present:
+            if path.name in keep:
+                continue
+            if path.name in live:
+                evicted.add(path.name)
+            for child in sorted(path.rglob("*"), reverse=True):
+                try:
+                    if child.is_file() or child.is_symlink():
+                        child.unlink()
+                    else:
+                        child.rmdir()
+                except OSError:
+                    continue
+            try:
+                path.rmdir()
+            except OSError:
+                continue
+        if evicted:
+            self._mark_baselines_evicted(evicted)
+
+    def _mark_baselines_evicted(self, evicted: set[str]) -> None:
+        """Flag entries whose baseline was pruned so `recover` can refuse them."""
+        if not self.ledger_path.is_file():
+            return
+        try:
+            ledger = json.loads(self.ledger_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        changed = False
+        for entry in ledger.get("entries") or []:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("baseline_id") or "") in evicted and not entry.get("baseline_evicted"):
+                entry["baseline_evicted"] = True
+                changed = True
+        if changed:
+            atomic_write(self.ledger_path, json.dumps(ledger, ensure_ascii=False, indent=2))
 
     def change(self, payload: dict[str, Any]) -> dict[str, Any]:
         with ProjectWriteLock(self.project_root, self.novel_id, operation="arc_reconcile"):
@@ -384,6 +465,13 @@ class ArcAuditService:
                     for entry in selected
                 ):
                     raise ValueError("Selected drift was already resolved")
+                # A baseline pruned to keep the store bounded cannot be recovered
+                # from; say so rather than failing later on a missing directory.
+                if any(entry.get("baseline_evicted") for entry in selected):
+                    raise ValueError(
+                        "所选漂移的基线快照已被清理（存储上限），无法 recover；"
+                        "可改为 absorb 或 freeze"
+                    )
                 baseline = self._baseline(group_id)
                 if decision == "absorb":
                     updates = payload.get("outline_updates")

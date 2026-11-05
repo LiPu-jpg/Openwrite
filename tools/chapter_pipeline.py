@@ -20,6 +20,15 @@ from tools.llm.cancellation import ModelCancelledError
 from tools.style_synthesizer import render_style_manifest_summary
 
 
+def _host_route(model: str) -> tuple[str, str]:
+    """Split a `provider/model` host route into its provider and model segments."""
+    raw = str(model or "").strip()
+    if "/" not in raw:
+        return "", raw.lower()
+    provider, _, rest = raw.rpartition("/")
+    return provider.lower(), rest.lower()
+
+
 def configure_writer_llm(config: Any) -> dict[str, Any]:
     """Apply operation-specific provider options and return a safe request summary."""
     provider = str(getattr(config, "provider", "") or "").lower()
@@ -29,8 +38,20 @@ def configure_writer_llm(config: Any) -> dict[str, Any]:
     if requested_mode not in {"auto", "enabled", "disabled"}:
         requested_mode = "auto"
 
-    is_deepseek_chat = provider in {"openai", "custom"} and "api.deepseek.com" in base_url
-    is_flash = model.lower() == "deepseek-v4-flash"
+    # A host-relay profile reaches the host's own model service over the loopback
+    # relay: its endpoint is 127.0.0.1 and its model is a `provider/model` route.
+    # Matching the endpoint on `api.deepseek.com` alone skipped every relay
+    # profile — and with it the flash-reasoning policy those routes depend on.
+    # A flash model that keeps reasoning burns the whole output budget on
+    # reasoning and returns an empty "length" stop, which reads as a parse
+    # failure downstream (see tools/settle_backfill.py).
+    is_host_relay = str(getattr(config, "auth_source", "") or "").lower() == "host_relay"
+    route_provider, route_model = _host_route(model)
+    is_deepseek_chat = provider in {"openai", "custom"} and (
+        "api.deepseek.com" in base_url
+        or (is_host_relay and "deepseek" in route_provider)
+    )
+    is_flash = route_model == "deepseek-v4-flash" or route_model.endswith("-flash")
     extra = dict(getattr(config, "extra", {}) or {})
     extra_body = dict(extra.get("extra_body") or {})
     existing_thinking = extra_body.get("thinking")
@@ -204,19 +225,30 @@ def _load_chapter(project_root: Path, novel_id: str, chapter_id: str) -> str | N
 
 
 def _atomic_write(path: Path, content: bytes) -> None:
+    """Write bytes atomically, cleaning up the temporary file on any failure.
+
+    Kept separate from `file_ops.atomic_write` because chapter content is bytes
+    (an exact manuscript round-trip), but it now has the same finally-block
+    guarantee: a failed replace cannot leak a hidden temp file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="wb",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as handle:
-        handle.write(content)
-        handle.flush()
-        os.fsync(handle.fileno())
-        temporary = Path(handle.name)
-    temporary.replace(path)
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = handle.name
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(temporary).replace(path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def _save_chapter(
@@ -1419,11 +1451,18 @@ def execute_write_chapter(project_root: Path, args: dict[str, Any]) -> dict[str,
                 pass
         if active_stage:
             scheduler.fail_stage(workflow, active_stage, str(exc))
+        # The failure is named, not just stringified: whoever retries this
+        # chapter - the loop, the agent, the author - has to be able to tell a
+        # provider hiccup from an unusable answer.
+        from tools.failure_diagnosis import diagnose
+
+        diagnosis = diagnose(code, str(exc))
         return {
             "ok": False,
             "chapter_id": chapter_id,
             "error": str(exc),
             "code": code,
+            "diagnosis": diagnosis.as_dict(),
             "run_id": run_manifest.run_id if run_manifest else "",
             **_preserve_failed_draft(
                 project_root,

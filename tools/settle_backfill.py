@@ -29,17 +29,40 @@ from tools.llm import long_generation_stream
 from tools.novel_workspace import count_writing_units
 
 import asyncio
+import logging
 import re
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 _CHAPTER_RE = re.compile(r"^ch_(\d+)\.md$")
 
 # Marker stored as the memory ``observations`` value for chapters whose model
 # pass failed (degraded record) so a later run can retry exactly those.
 _DEGRADED_MARK = "（结算降级：模型未产出结构化结果）"
+
+#: One compact extraction needs little room; a truncated answer means the model
+#: spent the budget on reasoning, so the retry raises it.
+SETTLE_MAX_TOKENS = 3200
+#: Attempts per chapter. Each one changes a lever (budget, self-repair,
+#: backoff); repeating the same request is what used to lose the chapter.
+SETTLE_ATTEMPTS = 3
+
+
+class _SettleStructureError(ValueError):
+    """The model answered, but the answer did not parse.
+
+    The raw text travels with the error so the next attempt can ask the model
+    to repair its own answer instead of guessing again.
+    """
+
+    def __init__(self, message: str, raw: str):
+        super().__init__(message)
+        self.raw = raw
 
 
 def _novel_root(project_root: Path, novel_id: str) -> Path:
@@ -88,6 +111,12 @@ def _memory_record(project_root: Path, novel_id: str, chapter_id: str) -> bool:
         )
     except Exception:
         return False
+
+
+def _chapter_sort_key(chapter_id: str) -> tuple[int, str]:
+    """Order chapters by number so a mixed candidate list stays in book order."""
+    digits = "".join(char for char in str(chapter_id) if char.isdigit())
+    return (int(digits) if digits else 10**9, str(chapter_id))
 
 
 def _degraded_ids(project_root: Path, novel_id: str) -> list[str]:
@@ -153,6 +182,8 @@ def _compact_settle(
     truth_context: str,
     *,
     strict: bool = False,
+    max_tokens: int = SETTLE_MAX_TOKENS,
+    repair: str = "",
 ) -> dict[str, Any]:
     """One compact LLM call: observations + legacy state deltas + summary."""
     from tools.llm import Message
@@ -178,17 +209,31 @@ def _compact_settle(
     )
     if strict:
         user += "\n上一次结构无效。只输出 YAML mapping，必须包含 chapter_summary；不要解释或围栏。"
+    if repair:
+        # Self-repair: hand the invalid answer back so the model can fix its own
+        # shape. Repeating the same request cannot fix a structure problem.
+        user += (
+            "\n\n你上一次的回答无法解析，原文如下（只保留其中可用的信息，"
+            "重新输出为合法的 YAML mapping，不要输出任何其它文字）：\n"
+            f"---\n{repair[:2000]}\n---"
+        )
     response = client.chat(
         messages=[Message("system", system), Message("user", user)],
         temperature=0.0 if strict else 0.2,
-        max_tokens=3200,
+        max_tokens=max_tokens,
         stream=long_generation_stream(),
         operation="settle_backfill",
+        # The retry policy below is the only retry layer: two layers stack into
+        # a burst, and the burst is what a rate limiter punishes.
+        max_retries=0,
     )
     from tools.llm.response import classify_response
 
     classify_response(response.content, finish_reason=getattr(response, "finish_reason", ""))
-    return _parse_settle_yaml(response.content)
+    try:
+        return _parse_settle_yaml(response.content)
+    except (ValueError, yaml.YAMLError) as exc:
+        raise _SettleStructureError(str(exc), str(response.content or "")) from exc
 
 
 def analyze_existing_chapter(
@@ -200,6 +245,7 @@ def analyze_existing_chapter(
     content: str,
     truth_context: str = "",
     profile: Optional[dict[str, Any]] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> dict[str, Any]:
     """Pure model-facing fact extraction used by acceptance and backfill.
 
@@ -221,6 +267,7 @@ def analyze_existing_chapter(
                 title,
                 content,
                 truth_context or "（无既有运行态）",
+                cancelled=cancelled,
             )
         )
 
@@ -231,6 +278,8 @@ def analyze_existing_chapter(
         result = call()
     return {
         "degraded": bool(result.get("degraded")),
+        "degraded_reason": str(result.get("degraded_reason") or ""),
+        "failures": list(result.get("failures") or []),
         "chapter_summary": str(result.get("chapter_summary") or ""),
         "observations": str(result.get("observations") or ""),
         "legacy_updates": {
@@ -254,23 +303,79 @@ async def _settle_one(
     title: str,
     content: str,
     truth_context: str,
+    *,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> dict[str, Any]:
-    """Retry structured-output errors twice, then retain an explicit degraded recap."""
-    from tools.llm.response import ProviderResponseError
+    """Retry structured-output failures with a lever that changes the outcome.
 
-    for attempt in range(3):
+    A blind retry repeats the same request: a truncated answer stays truncated
+    and an invalid structure stays invalid, so three fast attempts all fail
+    and the chapter is degraded. Each attempt here changes exactly one lever:
+
+    * a truncated answer is asked again with a bigger output budget,
+    * an unparseable answer is handed back to the model for repair,
+    * a provider failure waits out a backoff.
+
+    Every failure keeps its reason, so a degraded chapter can say why.
+    """
+    from tools.llm.cancellation import ModelCancelledError, model_cancellation
+    from tools.llm.retry import AttemptFailure, classify_failure, wait_before_retry
+
+    failures: list[AttemptFailure] = []
+    budget = SETTLE_MAX_TOKENS
+    repair = ""
+    for attempt in range(1, SETTLE_ATTEMPTS + 1):
+        if cancelled and cancelled():
+            raise ModelCancelledError("MODEL_CANCELLED: 结算已取消")
         try:
-            return _compact_settle(
-                client, chapter_id, title, content, truth_context, strict=attempt > 0
+            with model_cancellation(cancelled) if callable(cancelled) else nullcontext():
+                result = _compact_settle(
+                    client,
+                    chapter_id,
+                    title,
+                    content,
+                    truth_context,
+                    strict=attempt > 1,
+                    max_tokens=budget,
+                    repair=repair,
+                )
+        except _SettleStructureError as exc:
+            failure = AttemptFailure(
+                "MODEL_OUTPUT_UNPARSEABLE", str(exc), attempt, True, exc.raw[:200]
             )
-        except (ValueError, yaml.YAMLError, ProviderResponseError):
-            if attempt == 2:
-                return {
-                    "chapter_summary": _degraded_summary(content),
-                    "observations": _DEGRADED_MARK,
-                    "degraded": True,
-                }
-    raise AssertionError("unreachable")
+            failures.append(failure)
+            repair = exc.raw
+            if attempt >= SETTLE_ATTEMPTS:
+                break
+            # The repair prompt is the lever; waiting only delays the fix.
+            continue
+        except ModelCancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - classified below
+            failure = classify_failure(exc, attempt=attempt)
+            failures.append(failure)
+            if not failure.retryable or attempt >= SETTLE_ATTEMPTS:
+                break
+            if failure.code == "MODEL_OUTPUT_TRUNCATED":
+                budget = min(SETTLE_MAX_TOKENS * 3, int(budget * 1.5))
+            if failure.needs_wait:
+                # Only a provider-side failure needs the provider to breathe.
+                wait_before_retry(attempt)
+            continue
+        # Every caller reads the same three fields, so a success carries them
+        # too: an absent key is what made a healthy chapter look like it had
+        # no verdict at all.
+        result["degraded"] = False
+        result["degraded_reason"] = ""
+        result["failures"] = [item.as_dict() for item in failures]
+        return result
+    return {
+        "chapter_summary": _degraded_summary(content),
+        "observations": _DEGRADED_MARK,
+        "degraded": True,
+        "failures": [item.as_dict() for item in failures],
+        "degraded_reason": failures[-1].code if failures else "MODEL_OUTPUT_INVALID",
+    }
 
 
 def run(
@@ -294,6 +399,7 @@ def run(
     from tools.chapter_pipeline import apply_runtime_delta_with_fallback
     from tools.character_state_index import CharacterStateIndex
     from tools.llm import LLMClient, LLMConfig
+    from tools.llm.cancellation import ModelCancelledError
     from tools.model_profiles import activate_model_profile
     from tools.truth_manager import TruthFilesManager
 
@@ -312,11 +418,19 @@ def run(
         ]
         if include_degraded:
             extra_ids = set(_degraded_ids(project_root, novel_id))
-            candidates = [
-                (cid, path)
-                for cid, path in chapters
-                if cid in extra_ids and (wanted_ids is None or cid in wanted_ids)
-            ] + candidates
+            # Merge into one dict and re-sort by chapter number. Prepending the
+            # degraded chapters used to process them before earlier ones, so a
+            # later chapter's model call saw a truth baseline that already
+            # contained an earlier chapter's delta - "only what this chapter
+            # adds" was extracted against the wrong baseline, and the snapshot
+            # numbering stopped tracking chapter order.
+            merged = dict(candidates)
+            for cid, path in chapters:
+                if cid in extra_ids and (wanted_ids is None or cid in wanted_ids):
+                    merged.setdefault(cid, path)
+            candidates = sorted(
+                merged.items(), key=lambda item: _chapter_sort_key(item[0])
+            )
 
     applied: list[dict[str, Any]] = []
     degraded: list[dict[str, Any]] = []
@@ -334,116 +448,143 @@ def run(
     if report:
         report(0, total, "chapters")
 
-    for index, (chapter_id, path) in enumerate(candidates, start=1):
-        if cancelled and cancelled():
-            break
-        title, content = _load_chapter(path)
-        try:
-            truth = truth_manager.load_truth_files()
-            truth_context = "\n".join(
-                _clean_text(part, 600)
-                for part in (
-                    getattr(truth, "current_state", "") or "",
-                    getattr(truth, "ledger", "") or "",
-                    getattr(truth, "relationships", "") or "",
-                )
-                if part.strip()
-            ) or "（无既有运行态）"
+    # Serialize the whole run. `load_truth_files` -> `create_snapshot` ->
+    # `apply_runtime_delta_with_fallback` is a read-modify-write on the shared
+    # truth files; without the lock two overlapping runs both reported success
+    # while only one chapter's delta survived - and the other's memory record
+    # was already written, so the default `only_missing` skipped it forever.
+    from tools.project_lock import ProjectWriteLock
 
-            def _call() -> dict[str, Any]:
-                config = LLMConfig.from_env()
-                # Reuse the write pipeline's thinking-mode policy (flash models
-                # must run with reasoning disabled, else they burn the whole
-                # output budget on reasoning and return empty "length" stops).
-                try:
-                    from tools.chapter_pipeline import configure_writer_llm
+    with ProjectWriteLock(project_root, novel_id, operation="settle_backfill"):
+        for index, (chapter_id, path) in enumerate(candidates, start=1):
+            if cancelled and cancelled():
+                break
+            title, content = _load_chapter(path)
+            try:
+                truth = truth_manager.load_truth_files()
+                truth_context = "\n".join(
+                    _clean_text(part, 600)
+                    for part in (
+                        getattr(truth, "current_state", "") or "",
+                        getattr(truth, "ledger", "") or "",
+                        getattr(truth, "relationships", "") or "",
+                    )
+                    if part.strip()
+                ) or "（无既有运行态）"
 
-                    configure_writer_llm(config)
-                except Exception:
-                    pass
-                client = LLMClient(config)
-                return asyncio.run(
-                    _settle_one(client, chapter_id, title, content, truth_context)
-                )
+                def _call() -> dict[str, Any]:
+                    config = LLMConfig.from_env()
+                    # Reuse the write pipeline's thinking-mode policy (flash models
+                    # must run with reasoning disabled, else they burn the whole
+                    # output budget on reasoning and return empty "length" stops).
+                    try:
+                        from tools.chapter_pipeline import configure_writer_llm
 
-            if profile is not None:
-                with activate_model_profile(profile):
+                        configure_writer_llm(config)
+                    except Exception:
+                        pass
+                    client = LLMClient(config)
+                    return asyncio.run(
+                        _settle_one(
+                            client, chapter_id, title, content, truth_context, cancelled=cancelled
+                        )
+                    )
+
+                if profile is not None:
+                    with activate_model_profile(profile):
+                        settled = _call()
+                else:
                     settled = _call()
-            else:
-                settled = _call()
 
-            observations = str(settled.get("observations") or "").strip()
-            summary = str(settled.get("chapter_summary") or "").strip()
-            updates = {
-                key: settled[key]
-                for key in ("current_state", "ledger", "relationships")
-                if str(settled.get(key) or "").strip()
-            }
-            snapshot = truth_manager.create_snapshot(max(index - 1, 0))
-            try:
-                effective_delta, fallback = apply_runtime_delta_with_fallback(
-                    truth_manager,
-                    {},
-                    updates,
-                    chapter_id=chapter_id,
-                    known_entities=[],
-                )
-                memory.save(
-                    chapter_id=chapter_id,
-                    title=title,
-                    summary=summary,
-                    word_count=count_writing_units(content),
-                    observations=observations,
-                    token_usage={},
-                )
-                (degraded if settled.get("degraded") else applied).append(
-                    {
-                        "chapter_id": chapter_id,
-                        "word_count": count_writing_units(content),
-                        "notes": bool(effective_delta or updates),
-                        "fallback": bool(fallback),
-                    }
-                )
-                _say(f"applied {chapter_id} (notes={bool(effective_delta or updates)})")
-            except Exception as exc:
+                observations = str(settled.get("observations") or "").strip()
+                summary = str(settled.get("chapter_summary") or "").strip()
+                updates = {
+                    key: settled[key]
+                    for key in ("current_state", "ledger", "relationships")
+                    if str(settled.get(key) or "").strip()
+                }
+                snapshot = truth_manager.create_snapshot(max(index - 1, 0))
                 try:
-                    truth_manager.restore_snapshot(snapshot)
-                except Exception:
-                    pass
-                # Degraded path: memory still persisted so the chapter is not
-                # left without a recap; truth delta is skipped.
-                memory.save(
-                    chapter_id=chapter_id,
-                    title=title,
-                    summary=summary or _degraded_summary(content),
-                    word_count=count_writing_units(content),
-                    observations=observations or _DEGRADED_MARK,
-                    token_usage={},
-                )
-                degraded.append({"chapter_id": chapter_id, "error": f"{type(exc).__name__}: {exc}"})
-                _say(f"degraded {chapter_id}: {type(exc).__name__}: {exc}")
-        except Exception as exc:
-            # Even when the model pass fails, persist a degraded memory record
-            # so the chapter is never left without a recap for later context /
-            # review.  Truth deltas are skipped for such chapters.
-            try:
-                memory.save(
-                    chapter_id=chapter_id,
-                    title=title,
-                    summary=_degraded_summary(content),
-                    word_count=count_writing_units(content),
-                    observations=_DEGRADED_MARK,
-                    token_usage={},
-                )
-                degraded.append({"chapter_id": chapter_id, "error": f"{type(exc).__name__}: {exc}"})
-                _say(f"degraded {chapter_id}: {type(exc).__name__}: {exc}")
-            except Exception as save_exc:
-                failed.append(
-                    {"chapter_id": chapter_id, "error": f"{type(save_exc).__name__}: {save_exc}"}
-                )
-                _say(f"failed {chapter_id}: {type(save_exc).__name__}: {save_exc}")
-        if report:
-            report(index, total, "chapters")
+                    effective_delta, fallback = apply_runtime_delta_with_fallback(
+                        truth_manager,
+                        {},
+                        updates,
+                        chapter_id=chapter_id,
+                        known_entities=[],
+                    )
+                    memory.save(
+                        chapter_id=chapter_id,
+                        title=title,
+                        summary=summary,
+                        word_count=count_writing_units(content),
+                        observations=observations,
+                        token_usage={},
+                    )
+                    (degraded if settled.get("degraded") else applied).append(
+                        {
+                            "chapter_id": chapter_id,
+                            "word_count": count_writing_units(content),
+                            "notes": bool(effective_delta or updates),
+                            "fallback": bool(fallback),
+                            "reason": str(settled.get("degraded_reason") or ""),
+                            "failures": list(settled.get("failures") or []),
+                        }
+                    )
+                    if settled.get("degraded"):
+                        # A degraded chapter is a lost chapter: the recap is a
+                        # placeholder, not a fact record. Say so loudly — the
+                        # run still reports "completed" otherwise.
+                        logger.warning(
+                            "结算降级 %s: %s (%d 次尝试)",
+                            chapter_id,
+                            settled.get("degraded_reason") or "MODEL_OUTPUT_INVALID",
+                            len(settled.get("failures") or []),
+                        )
+                    _say(f"applied {chapter_id} (notes={bool(effective_delta or updates)})")
+                except Exception as exc:
+                    try:
+                        truth_manager.restore_snapshot(snapshot)
+                    except Exception:
+                        pass
+                    # Degraded path: memory still persisted so the chapter is not
+                    # left without a recap; truth delta is skipped.
+                    memory.save(
+                        chapter_id=chapter_id,
+                        title=title,
+                        summary=summary or _degraded_summary(content),
+                        word_count=count_writing_units(content),
+                        observations=observations or _DEGRADED_MARK,
+                        token_usage={},
+                    )
+                    degraded.append({"chapter_id": chapter_id, "error": f"{type(exc).__name__}: {exc}"})
+                    _say(f"degraded {chapter_id}: {type(exc).__name__}: {exc}")
+            except ModelCancelledError:
+                # A cancel request is not a degradation. Turning it into a
+                # placeholder recap would keep the run going and report a
+                # "lost" chapter that nobody asked to lose.
+                raise
+            except Exception as exc:
+                # Even when the model pass fails, persist a degraded memory record
+                # so the chapter is never left without a recap for later context /
+                # review.  Truth deltas are skipped for such chapters.
+                try:
+                    memory.save(
+                        chapter_id=chapter_id,
+                        title=title,
+                        summary=_degraded_summary(content),
+                        word_count=count_writing_units(content),
+                        observations=_DEGRADED_MARK,
+                        token_usage={},
+                    )
+                    degraded.append({"chapter_id": chapter_id, "error": f"{type(exc).__name__}: {exc}"})
+                    _say(f"degraded {chapter_id}: {type(exc).__name__}: {exc}")
+                except Exception as save_exc:
+                    failed.append(
+                        {"chapter_id": chapter_id, "error": f"{type(save_exc).__name__}: {save_exc}"}
+                    )
+                    _say(f"failed {chapter_id}: {type(save_exc).__name__}: {save_exc}")
+            if report:
+                report(index, total, "chapters")
 
     try:
         CharacterStateIndex(project_root, novel_id).refresh()

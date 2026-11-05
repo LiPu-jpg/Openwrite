@@ -1,6 +1,8 @@
 """sync 命令辅助逻辑测试。"""
 
 import os
+
+import yaml
 from pathlib import Path
 import sys
 
@@ -90,3 +92,30 @@ def test_sync_status_marks_stale_character_cards_pending(tmp_path: Path):
 
     assert status["needs_sync"] is True
     assert status["stale_cards"] == ["chen_ming"]
+
+
+def test_outline_sync_is_atomic_and_leaves_no_temporary_files(tmp_path: Path):
+    """A crash mid-write must not leave a half-written hierarchy.yaml.
+
+    The freshness check compares mtimes, so a file truncated by a bare
+    open(...,"w") then reads as current and every consumer (workspace snapshot,
+    context build, reading order) works from a partial outline.
+    """
+    from tools.outline_sync import sync_outline_to_hierarchy
+
+    src = tmp_path / "src"
+    data = tmp_path / "data"
+    src.mkdir(parents=True)
+    (src / "outline.md").write_text(
+        "# 小说\n\n## 第一幕\n\n#### 第一章 起点\n\n甲\n", encoding="utf-8"
+    )
+
+    sync_outline_to_hierarchy(src, data)
+
+    hierarchy = data / "hierarchy.yaml"
+    assert hierarchy.is_file()
+    # The written cache parses completely, so nothing was left half-serialized.
+    parsed = yaml.safe_load(hierarchy.read_text(encoding="utf-8"))
+    assert isinstance(parsed, dict) and parsed
+    # No stray temp files beside it.
+    assert sorted(p.name for p in data.iterdir() if p.name.startswith('.')) == []

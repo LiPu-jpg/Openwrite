@@ -92,3 +92,34 @@ def test_benchmark_persists_partial_result_and_billing_while_cancel_drains(tmp_p
     assert saved['summary']['total_tokens'] == 20
     assert saved['summary']['total_cost_usd'] == 0.004
     assert saved['in_flight'] == 0
+
+
+def test_a_raising_job_does_not_abandon_the_rest_of_the_run():
+    """One failing provider must not silently drop the queued candidates.
+
+    `future.result()` re-raises the worker's exception, which escaped the dispatch
+    loop and abandoned every job behind it: the caller only ever sees results
+    through the `completed` callback, so a crash there lost the remaining
+    candidates without any diagnostic.
+    """
+    seen: list[dict] = []
+    drained: list[int] = []
+
+    def execute(index: int) -> dict:
+        if index == 2:
+            raise RuntimeError("provider exploded")
+        return {"index": index, "status": "completed"}
+
+    run_bounded(
+        [(index,) for index in (1, 2, 3, 4)],
+        execute,
+        concurrency=2,
+        cancelled=lambda: False,
+        completed=lambda value, in_flight: seen.append(value),
+        draining=drained.append,
+    )
+
+    assert [item.get("index") for item in seen if "index" in item] == [1, 3, 4]
+    failure = next(item for item in seen if item.get("status") == "failed")
+    assert failure["error"]["code"] == "JOB_RAISED"
+    assert "provider exploded" in failure["error"]["message"]

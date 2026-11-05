@@ -1106,3 +1106,31 @@ def test_load_or_create_repairs_corrupt_session_file(tmp_path: Path):
     assert state.active_agent == "dante"
     assert state.recent_turns == []
     assert yaml.safe_load(store.path.read_text(encoding="utf-8"))["session_id"] == "demo"
+
+
+def test_transcript_rotates_once_it_exceeds_the_byte_budget(tmp_path: Path):
+    """The JSONL transcript must not grow without bound.
+
+    The rolling YAML is carefully bounded (`_compress_for_size`,
+    `_hard_truncate_state`), but the append-only transcript had no cap at all:
+    500 turns of 4 KB each produced an 18 KB YAML beside a 2 MB JSONL.
+    """
+    store = SessionStateStore(tmp_path, "demo")
+
+    # Stay under the budget first: nothing should rotate.
+    for _ in range(50):
+        store.append_turn("user", "x" * 100)
+    assert not store.transcript_path.with_name(store.transcript_path.name + ".1").exists()
+
+    # Push past the 8 MiB budget. Each turn is ~4 KB, so 2200 of them is ~9 MB.
+    for _ in range(2200):
+        store.append_turn("user", "y" * 4000)
+
+    rotated = store.transcript_path.with_name(store.transcript_path.name + ".1")
+    assert rotated.is_file(), "the oversized transcript must have rotated"
+    assert store.transcript_path.stat().st_size < rotated.stat().st_size
+    # A marker records the rotation so a reader can tell the live file starts fresh.
+    lines = store.transcript_path.read_text(encoding="utf-8").splitlines()
+    assert lines, "the live transcript must not be empty after rotation"
+    marker = yaml.safe_load(lines[0])
+    assert marker.get("rotation") is True

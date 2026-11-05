@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.foreshadowing_manager import ForeshadowingDAGManager
+from models.foreshadowing import ForeshadowingGraph
+from tools.foreshadowing_manager import ForeshadowingDAGManager, ForeshadowingDagError
 from tools.init_project import init_project
 from tools.rolling_planning import (
     PLANNING_WINDOW_MAX,
@@ -191,3 +192,62 @@ def test_rolling_plan_50_chapter_window_keeps_plans_off_accepted_facts(
     )
     assert clamped["window_size"] == 50
     assert len(clamped["planned_window"]) == 50
+
+
+def test_a_truncated_foreshadowing_dag_is_refused_not_silently_emptied(tmp_path):
+    """An unreadable DAG must not degrade to an empty graph.
+
+    The read path swallowed any parse failure into `ForeshadowingGraph()`, so a
+    half-written dag.yaml (the save path used a bare `open(..., "w")`) erased
+    every foreshadowing record with no error reported anywhere.
+    """
+    init_project(tmp_path, "demo")
+    manager = ForeshadowingDAGManager(tmp_path, "demo")
+    dag_file = manager.dag_file
+    dag_file.parent.mkdir(parents=True, exist_ok=True)
+    # A YAML document cut mid-value is what a crash during a bare
+    # open(..., "w") leaves behind; the old code parsed-or-emptied it.
+    dag_file.write_text(
+        "nodes:\n  - id: fs_1\n    title: \"钟声会改写记忆\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ForeshadowingDagError):
+        manager._load_dag()
+    # The damaged file is preserved so the author can repair it by hand.
+    assert dag_file.is_file()
+
+
+def test_saving_the_dag_is_atomic_and_leaves_no_temporary_files(tmp_path, monkeypatch):
+    """A crash mid-dump must not leave a half-written dag.yaml.
+
+    A bare `open(..., "w")` truncates in place, so a failure part-way through
+    destroys the previous graph; the atomic write leaves it intact.
+    """
+    init_project(tmp_path, "demo")
+    manager = ForeshadowingDAGManager(tmp_path, "demo")
+    dag_file = manager.dag_file
+    dag_file.parent.mkdir(parents=True, exist_ok=True)
+    # A valid, loadable graph: the point is that a later failed save must not
+    # damage it, not that an empty document round-trips.
+    manager._save_dag(ForeshadowingGraph())
+    previous = dag_file.read_text(encoding="utf-8")
+    assert previous.strip() != ""
+
+    manager._save_dag(manager._load_dag())
+    assert dag_file.is_file()
+    import yaml
+    assert isinstance(yaml.safe_load(dag_file.read_text(encoding="utf-8")), dict)
+    assert sorted(p.name for p in dag_file.parent.iterdir() if p.name.startswith('.')) == []
+
+    # Fail the rename the way a full disk would.
+    import tools.file_ops as file_ops
+
+    def failing_replace(source, target):
+        raise OSError("simulated crash before the rename")
+
+    monkeypatch.setattr(file_ops, "replace_file", failing_replace)
+    with pytest.raises(OSError):
+        manager._save_dag(manager._load_dag())
+
+    assert dag_file.read_text(encoding="utf-8") == previous, "the previous DAG was truncated"
+    assert sorted(p.name for p in dag_file.parent.iterdir() if p.name.startswith('.')) == []

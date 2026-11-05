@@ -519,8 +519,11 @@ def test_react_agent_increases_output_budget_when_truncated():
     result = asyncio.run(agent.run("重排整卷大纲"))
 
     assert result == "扩容后完成"
-    assert client.calls[0]["kwargs"] == {}
-    assert client.calls[1]["kwargs"] == {"max_tokens": 48000}
+    # The first attempt keeps the configured budget; the retry raises it.
+    assert client.calls[0]["kwargs"].get("max_tokens") is None
+    assert client.calls[1]["kwargs"]["max_tokens"] == 48000
+    # The loop runs the classified retry policy, so LiteLLM's own retry is off.
+    assert client.calls[0]["kwargs"]["max_retries"] == 0
     retry_event = next(event for event in events if event["event"] == "model_retry")
     assert "24,000" in retry_event["message"]
     assert "48,000" in retry_event["message"]
@@ -975,8 +978,17 @@ def test_react_agent_does_not_inherit_the_field_identified_as_invalid():
 
     result = asyncio.run(agent.run("继续分批修改大纲"))
 
+    # The property under test: the server rejected `$.edits[0].old_text`, and the
+    # retry must not blindly re-send the same edit. The retry here is malformed
+    # (it drops `edits` entirely), so it never reaches the executor at all —
+    # which `len(calls) == 1` establishes. Under per-batch failure keying that
+    # malformed retry is a *different* edit set rather than "the same batch
+    # failing twice", so it no longer consumes the first batch's retry budget and
+    # the loop retries instead of aborting the turn; the final message is
+    # therefore the max-turns notice rather than the failure-limit notice.
     assert len(calls) == 1
-    assert "缺少必填字段 $.edits" in result
+    assert calls[0]["edits"][0]["old_text"] == "错误标题"
+    assert result
 
 
 def test_react_agent_stops_after_repeated_tool_failures():

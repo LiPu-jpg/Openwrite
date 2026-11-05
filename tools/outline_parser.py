@@ -16,6 +16,19 @@ from models.outline import (
 )
 
 
+def _extend_unique(target: list[str], items: list[str]) -> None:
+    """Append the items that are not already listed, keeping the first order.
+
+    A chapter may carry the same field on two lines — `出场角色` from the
+    current contract and `涉及人物` from an older outline — and the writer
+    never produces that, but an existing project still can. Merging the two
+    lines as a union keeps every name and reports each one once.
+    """
+    for item in items:
+        if item not in target:
+            target.append(item)
+
+
 class OutlineMdParser:
     """Markdown 大纲解析器
 
@@ -321,10 +334,10 @@ class OutlineMdParser:
         elif key_lower in ("涉及人物", "出场人物", "出场角色", "characters", "人物", "角色"):
             # 解析中英文逗号/顿号分隔的人物列表
             characters = [c.strip() for c in re.split(r"[，,、]", value) if c.strip()]
-            node.involved_characters.extend(characters)
+            _extend_unique(node.involved_characters, characters)
         elif key_lower in ("涉及设定", "涉及概念", "设定", "概念", "settings", "concepts"):
             settings = [s.strip() for s in re.split(r"[，,、]", value) if s.strip()]
-            node.involved_settings.extend(settings)
+            _extend_unique(node.involved_settings, settings)
 
         # 章纲字段
         elif key_lower in ("promise", "章节承诺"):
@@ -337,7 +350,7 @@ class OutlineMdParser:
             node.function = [v.strip() for v in re.split(r"[，,、]", value) if v.strip()]
         elif key_lower in ("本章目标", "写作目标", "goals", "目标"):
             goals = [g.strip() for g in re.split(r"[，,、]", value) if g.strip()]
-            node.goals.extend(goals)
+            _extend_unique(node.goals, goals)
         elif key_lower in ("预估字数", "estimated_words", "字数"):
             try:
                 node.estimated_words = int(value.replace(",", ""))
@@ -351,10 +364,10 @@ class OutlineMdParser:
             node.emotional_arc = value
         elif key_lower in ("节拍", "beats"):
             beats = [b.strip() for b in re.split(r"[，,、]", value) if b.strip()]
-            node.beats.extend(beats)
+            _extend_unique(node.beats, beats)
         elif key_lower in ("悬念", "hooks"):
             hooks = [h.strip() for h in re.split(r"[，,、]", value) if h.strip()]
-            node.hooks.extend(hooks)
+            _extend_unique(node.hooks, hooks)
         elif node.node_type == OutlineNodeType.CHAPTER and key in self.extra_keys:
             node.extra_metadata[key] = value
         else:

@@ -292,3 +292,31 @@ def test_asset_package_rejects_archive_path_traversal(tmp_path: Path):
 
     with pytest.raises(AssetPackageError, match="不安全路径"):
         AssetPackageService(tmp_path, "demo").preview_import(package_path)
+
+
+def test_importing_a_skipped_dependency_is_reported_as_dangling(tmp_path: Path):
+    """Skipping a packaged dependency must fail the import, not leave a dangle.
+
+    `missing_dependencies` only looked at what the package does not contain, so
+    skipping `char_linzhou` while importing `org_clockkeepers` passed the gate
+    and left the imported organization pointing at an asset that does not exist.
+    """
+    source_root = tmp_path / "source_project"
+    target_root = tmp_path / "target_project"
+    _source_assets(source_root)
+    package_path = tmp_path / "clock_assets.owasset.zip"
+    AssetPackageService(source_root, "source").export(package_path)
+
+    init_project(target_root, "target")
+    package = AssetPackageService(target_root, "target")
+    preview = package.preview_import(package_path)
+
+    with pytest.raises(AssetPackageError) as excinfo:
+        package.import_package(
+            package_path,
+            expected_sha256=preview["package_sha256"],
+            resolutions={"char_linzhou": {"action": "skip"}},
+        )
+
+    assert excinfo.value.code == "ASSET_DEPENDENCY_MISSING"
+    assert "char_linzhou" in (excinfo.value.details or {}).get("missing_dependencies", [])

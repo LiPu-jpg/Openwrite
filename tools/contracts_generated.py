@@ -5,7 +5,7 @@
 #   delivery-manifest-v2.schema.json sha256:cb149eae6952 $id: https://openwrite.dev/schemas/delivery-manifest-v2.schema.json
 #   delivery-stage-v2.schema.json sha256:04d2637e1e4d $id: https://openwrite.dev/schemas/delivery-stage-v2.schema.json
 #   model-benchmark-v1.schema.json sha256:6774fc0eff8d $id: https://openwrite.dev/schemas/model-benchmark-v1.schema.json
-#   model-profile-surface-v1.schema.json sha256:048082f2169b $id: https://openwrite.dev/schemas/model-profile-surface-v1.schema.json
+#   model-profile-surface-v1.schema.json sha256:b78c70b4cd5e $id: https://openwrite.dev/schemas/model-profile-surface-v1.schema.json
 #   task-surface-v1.schema.json sha256:b25a2195014a $id: https://openwrite.dev/schemas/task-surface-v1.schema.json
 #   research-surface-v1.schema.json sha256:c66c3f1494a1 $id: https://openwrite.dev/schemas/research-surface-v1.schema.json
 #   model-connection-test-v1.schema.json sha256:60824b0b20f4 $id: https://openwrite.dev/schemas/model-connection-test-v1.schema.json
@@ -660,7 +660,8 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
           "auth_source": {
             "enum": [
               "api_key",
-              "opencode_console"
+              "opencode_console",
+              "host_relay"
             ]
           },
           "capabilities": {

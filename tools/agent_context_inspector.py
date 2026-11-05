@@ -8,6 +8,8 @@ import json
 import os
 from dataclasses import asdict
 from datetime import datetime, timezone
+import contextlib
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -32,6 +34,9 @@ class _CaptureClient:
         return LLMResponse(content="[]", provider="context-inspector")
 
 
+logger = logging.getLogger("tools.agent_context_inspector")
+
+
 class AgentContextInspector:
     AGENTS = {"canonical", "writer", "reviewer", "dante", "goethe"}
 
@@ -41,6 +46,62 @@ class AgentContextInspector:
         self.project_root = Path(project_root).resolve()
         self.service = NovelApplicationService(self.project_root)
         self.novel_id = self.service.novel_id
+
+    @contextlib.contextmanager
+    def _read_only_snapshot(self):
+        """Restore the derived files an inspection would otherwise leave behind.
+
+        `assemble_packet` -> `ensure_runtime_fresh` -> `run_sync` writes character
+        cards, and the context build refreshes the character-state index. Both are
+        caches, so reverting them is safe; what is not safe is leaving them behind,
+        because source_sync then treats them as current and hides real staleness.
+        """
+        from tools.source_sync import collect_sync_status
+
+        derived: list[Path] = []
+        # Directories the sync chain may create files in, re-globbed on the way
+        # out: a card created during the inspection is not in the snapshot list.
+        derived_dirs: list[Path] = []
+        try:
+            status = collect_sync_status(self.project_root, self.novel_id)
+            # Anything the sync chain owns is a derived cache we may revert.
+            for key in ("outline_path", "hierarchy_path"):
+                value = status.get(key)
+                if isinstance(value, str) and value:
+                    derived.append(Path(value))
+            cards_dir = self.project_root / "data" / "novels" / self.novel_id / "data" / "characters" / "cards"
+            if cards_dir.is_dir():
+                derived.extend(sorted(cards_dir.glob("*.yaml")))
+                derived_dirs.append(cards_dir)
+            index = self.project_root / "data" / "novels" / self.novel_id / ".openwrite" / "character-state-index.json"
+            derived.append(index)
+            # Record what existed before, so files the sync chain creates can be
+            # removed again rather than only reverted.
+            existing = {path for path in derived if path.is_file()}
+            saved = [(path, path.read_bytes()) for path in existing]
+        except Exception:
+            # If the snapshot itself fails, proceed without one rather than
+            # refusing to inspect at all.
+            existing = set()
+            saved = []
+        try:
+            yield
+        finally:
+            for path, content in saved:
+                try:
+                    path.write_bytes(content)
+                except OSError:
+                    logger.warning("Could not restore derived file %s after inspection", path)
+            created = [path for path in derived if path not in existing]
+            for directory in derived_dirs:
+                created.extend(path for path in sorted(directory.glob("*.yaml")) if path not in existing)
+            for path in created:
+                if not path.is_file():
+                    continue
+                try:
+                    path.unlink()
+                except OSError:
+                    logger.warning("Could not remove derived file %s created by an inspection", path)
 
     def inspect(
         self,
@@ -56,7 +117,15 @@ class AgentContextInspector:
         if clean_agent not in self.AGENTS:
             raise AgentContextInspectionError(f"不支持的 Agent: {clean_agent}")
         chapter = self.service.resolve_chapter_id(chapter_id)
-        packet = self.service.assemble_packet(chapter)
+        # K6: the module advertises itself as read-only and the tool is presented
+        # to the model as 只读检查, but assembling a packet runs the auto-sync
+        # chain and writes derived caches into the novel's data dir. Worse, the
+        # character-state-index cache it writes makes source_sync's freshness
+        # check believe the caches are current, masking real staleness for the
+        # writers that follow. Snapshot the derived files, then restore them so
+        # an inspection leaves the project exactly as it found it.
+        with self._read_only_snapshot():
+            packet = self.service.assemble_packet(chapter)
         if clean_agent == "writer":
             result = self._inspect_writer(chapter, packet, guidance, target_words)
         elif clean_agent == "reviewer":

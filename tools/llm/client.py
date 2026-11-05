@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import logging
 import math
@@ -16,12 +17,31 @@ from uuid import uuid4
 
 from tools.operation_trace import active_operation_trace
 
+from .concurrency import model_slot
 from .context import ContextBudgetPolicy
 
 logger = logging.getLogger(__name__)
 
 ProviderName = Literal["openai", "anthropic", "custom"]
 APIFormat = Literal["chat", "responses"]
+
+
+def accepts_parameter(client: Any, method: str, parameter: str) -> bool:
+    """Whether `client.method` takes `parameter` as a keyword.
+
+    A custom client may not know a keyword at all - passing it anyway turns a
+    working setup into a TypeError, so callers ask first.
+    """
+    try:
+        signature = inspect.signature(getattr(client, method))
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if parameter in signature.parameters:
+        return True
+    return any(
+        item.kind is inspect.Parameter.VAR_KEYWORD
+        for item in signature.parameters.values()
+    )
 
 
 def _provider_name(value: Any) -> ProviderName:
@@ -225,6 +245,18 @@ class LLMConfig:
         self.provider = _provider_name(self.provider)
         self.api_format = _api_format(self.api_format)
         self.base_url = self._normalize_base_url(self.base_url)
+        if self.auth_source == "host_relay":
+            # The host relay speaks the OpenAI chat protocol over the
+            # loopback interface. Its address is supplied by the profile, so
+            # an empty one means the relay was never resolved and the request
+            # would silently fall back to the public OpenAI endpoint.
+            if self.provider not in {"openai", "custom"} or self.api_format != "chat":
+                raise ValueError(
+                    "Host relay profiles are restricted to OpenAI-compatible chat endpoints"
+                )
+            if not self.base_url.startswith("http://") and not self.base_url.startswith("https://"):
+                raise ValueError("Host relay profiles require the host relay base URL")
+            return
         if self.auth_source != "api_key" or self.workspace_id:
             from .opencode_console import is_go_url
 
@@ -264,6 +296,51 @@ class LLMConfig:
                 ),
                 max_retries=int(os.getenv("LLM_MAX_RETRIES", "1")),
                 extra={"thinking_modes": dict(profile.get("thinking_modes") or {})},
+            )
+        # A legacy environment configuration is an explicit choice by the
+        # author, so it outranks the host relay.
+        if any(
+            os.getenv(name, "").strip()
+            for name in ("LLM_MODEL", "LLM_API_KEY", "LLM_BASE_URL", "LLM_PROVIDER")
+        ):
+            return cls(
+                provider=_provider_name(os.getenv("LLM_PROVIDER", "openai")),
+                api_key=os.getenv("LLM_API_KEY", ""),
+                base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
+                model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
+                max_tokens=int(os.getenv("LLM_MAX_TOKENS", "24000")),
+                context_tokens=int(os.getenv("OPENWRITE_CONTEXT_TOKENS", "64000")),
+                stream=os.getenv("LLM_STREAM", "true").lower() == "true",
+                api_format=_api_format(os.getenv("LLM_API_FORMAT", "chat")),
+                timeout_seconds=float(
+                    os.getenv("OW_LLM_TIMEOUT") or os.getenv("LLM_TIMEOUT_SECONDS", "300")
+                ),
+                max_retries=int(os.getenv("LLM_MAX_RETRIES", "1")),
+            )
+        # Nothing is configured anywhere: fall back to the model dsh itself
+        # would use. A fresh install can then write without a second key
+        # setup, and `host/current` resolves to the host's live selection on
+        # every call, so switching the host's model switches ours too.
+        from tools.host_llm import host_llm
+
+        relay = host_llm()
+        if relay is not None:
+            return cls(
+                provider="custom",
+                api_key=relay["token"],
+                base_url=relay["url"],
+                model="host/current",
+                temperature=0.7,
+                max_tokens=int(os.getenv("LLM_MAX_TOKENS", "24000")),
+                context_tokens=int(os.getenv("OPENWRITE_CONTEXT_TOKENS", "64000")),
+                stream=os.getenv("LLM_STREAM", "true").lower() == "true",
+                api_format="chat",
+                auth_source="host_relay",
+                timeout_seconds=float(
+                    os.getenv("OW_LLM_TIMEOUT") or os.getenv("LLM_TIMEOUT_SECONDS", "300")
+                ),
+                max_retries=int(os.getenv("LLM_MAX_RETRIES", "1")),
             )
         return cls(
             provider=_provider_name(os.getenv("LLM_PROVIDER", "openai")),
@@ -353,8 +430,14 @@ class LLMClient:
         stream: bool = False,
         on_progress: OnStreamProgress = None,
         operation: str = "",
+        max_retries: int | None = None,
     ) -> LLMResponse:
-        """Send one provider-neutral chat request."""
+        """Send one provider-neutral chat request.
+
+        `max_retries` overrides LiteLLM's own retry count. A caller that runs
+        its own classified retry policy passes 0: two retry layers stack into a
+        burst, and the burst is what a rate limiter punishes.
+        """
         temp = temperature if temperature is not None else self.config.temperature
         maxt = max_tokens if max_tokens is not None else self.config.max_tokens
         collector = active_operation_trace()
@@ -362,7 +445,7 @@ class LLMClient:
             if self.config.api_format == "responses":
                 response = self._chat_responses(messages, temp, maxt, stream, on_progress, operation)
             else:
-                response = self._chat_completion(messages, temp, maxt, stream, on_progress, operation)
+                response = self._chat_completion(messages, temp, maxt, stream, on_progress, operation, max_retries)
         except Exception as exc:
             if collector is not None:
                 collector.record_model_exchange(
@@ -388,18 +471,32 @@ class LLMClient:
         tools: list[dict[str, Any]],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        max_retries: int | None = None,
     ) -> ToolCallResponse:
-        """Send a normalized function-calling request through LiteLLM."""
+        """Send a normalized function-calling request through LiteLLM.
+
+        `max_retries` overrides LiteLLM's own retry count. The agent loop runs
+        its own classified retry policy, so it passes 0: two retry layers stack
+        into a burst, and the burst is what a rate limiter punishes.
+        """
         temp = temperature if temperature is not None else self.config.temperature
         maxt = max_tokens if max_tokens is not None else self.config.max_tokens
         collector = active_operation_trace()
         try:
-            response = self._chat_completion_with_tools(messages, tools, temp, maxt)
+            response = self._chat_completion_with_tools(
+                messages, tools, temp, maxt, max_retries
+            )
         except Exception as exc:
             error_msg = str(exc).lower()
             if "invalid tool type" in error_msg or "tool_calls" in error_msg:
                 logger.warning("Tool calling failed, falling back to regular chat: %s", exc)
-                response = self.chat(messages, temperature=temp, max_tokens=maxt, stream=False)
+                response = self.chat(
+                    messages,
+                    temperature=temp,
+                    max_tokens=maxt,
+                    stream=False,
+                    max_retries=max_retries,
+                )
                 result = ToolCallResponse(
                     content=response.content,
                     usage=response.usage,
@@ -441,6 +538,7 @@ class LLMClient:
         stream: bool,
         on_progress: OnStreamProgress,
         operation: str = "",
+        max_retries: int | None = None,
     ) -> LLMResponse:
         prepared = self._prepare_messages(messages, max_tokens=max_tokens)
         params = self._completion_params(
@@ -449,21 +547,25 @@ class LLMClient:
             max_tokens=max_tokens,
             stream=stream,
             operation=operation,
+            max_retries=max_retries,
         )
-        response = self._call(self._completion, params)
-        if stream:
-            return self._stream_response(response, on_progress)
+        # The slot covers the whole call *and* the stream: releasing it when the
+        # response object is handed back would let every fan-out open at once.
+        with model_slot():
+            response = self._call(self._completion, params)
+            if stream:
+                return self._stream_response(response, on_progress)
 
-        choice = self._first_choice(response)
-        message = _value(choice, "message", {})
-        return LLMResponse(
-            content=_content_text(_value(message, "content", "")),
-            usage=_plain_usage(_value(response, "usage"), response=response),
-            model=str(_value(response, "model", self.config.model) or self.config.model),
-            provider=self.config.provider,
-            finish_reason=str(_value(choice, "finish_reason", "") or ""),
-            reasoning=str(_value(message, "reasoning_content", "") or ""),
-        )
+            choice = self._first_choice(response)
+            message = _value(choice, "message", {})
+            return LLMResponse(
+                content=_content_text(_value(message, "content", "")),
+                usage=_plain_usage(_value(response, "usage"), response=response),
+                model=str(_value(response, "model", self.config.model) or self.config.model),
+                provider=self.config.provider,
+                finish_reason=str(_value(choice, "finish_reason", "") or ""),
+                reasoning=str(_value(message, "reasoning_content", "") or ""),
+            )
 
     def _chat_completion_with_tools(
         self,
@@ -471,6 +573,7 @@ class LLMClient:
         tools: list[dict[str, Any]],
         temperature: float,
         max_tokens: int,
+        max_retries: int | None = None,
     ) -> ToolCallResponse:
         prepared = self._prepare_messages(
             messages,
@@ -483,12 +586,14 @@ class LLMClient:
             max_tokens=max_tokens,
             stream=False,
             tools=tools,
+            max_retries=max_retries,
         )
-        response = self._call(self._completion, params)
-        choice = self._first_choice(response)
-        message = _value(choice, "message", {})
-        content = _content_text(_value(message, "content", ""))
-        tool_calls = self._normalize_tool_calls(_value(message, "tool_calls", []) or [])
+        with model_slot():
+            response = self._call(self._completion, params)
+            choice = self._first_choice(response)
+            message = _value(choice, "message", {})
+            content = _content_text(_value(message, "content", ""))
+            tool_calls = self._normalize_tool_calls(_value(message, "tool_calls", []) or [])
 
         from .response import classify_response, validate_tool_arguments
 
@@ -555,7 +660,7 @@ class LLMClient:
             None, read=seconds, connect=min(30.0, seconds), write=seconds, pool=seconds
         )
 
-    def _base_params(self) -> dict[str, Any]:
+    def _base_params(self, max_retries: int | None = None) -> dict[str, Any]:
         provider = "openai" if self.config.provider == "custom" else self.config.provider
         params = {
             "model": self.config.model,
@@ -563,7 +668,7 @@ class LLMClient:
             "api_key": self.config.api_key,
             "base_url": self.config.base_url or None,
             "timeout": self.config.timeout_seconds,
-            "max_retries": self.config.max_retries,
+            "max_retries": self.config.max_retries if max_retries is None else max_retries,
             "drop_params": True,
         }
         url = urlsplit(self.config.base_url)
@@ -593,8 +698,9 @@ class LLMClient:
         stream: bool,
         tools: list[dict[str, Any]] | None = None,
         operation: str = "",
+        max_retries: int | None = None,
     ) -> dict[str, Any]:
-        params = self._base_params()
+        params = self._base_params(max_retries)
         params.update(
             {
                 "messages": messages,

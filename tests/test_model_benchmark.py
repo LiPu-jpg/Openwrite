@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import json
 from pathlib import Path
@@ -864,3 +865,73 @@ def test_benchmark_store_keeps_legacy_unknowns_explicit(tmp_path: Path):
     assert row["comparison"]["token_estimator"] is None
     assert row["comparison"]["basis_complete"] is False
     assert row["comparison"]["packet_revision"] == "legacy-packet"
+
+
+def test_creative_generation_prefers_frozen_writer_payload(tmp_path: Path, monkeypatch):
+    captured: dict = {}
+
+    async def fake_creative_write(self, context, chapter_number, temperature, target_words):
+        captured.update(context)
+        return {
+            "title": "第一章 测试",
+            "content": "# 第一章 测试\n\n正文。",
+            "word_count": 2,
+            "usage": {},
+            "finish_reason": "stop",
+            "model": "stub",
+            "provider": "custom",
+        }
+
+    from tools.agent.writer import WriterAgent
+
+    monkeypatch.setattr(WriterAgent, "_creative_write", fake_creative_write)
+    monkeypatch.setattr(
+        "tools.model_benchmark.activate_model_profile",
+        lambda _profile: contextlib.nullcontext(),
+    )
+    service = ModelBenchmarkService(
+        tmp_path, "book", ModelProfileStore(tmp_path / "profiles"), readiness_gate=False
+    )
+
+    service._generate_creative(
+        profile("writer", "writer-model"),
+        {"_benchmark_writer_payload": {"outline": "正确大纲", "target_words": 1000}},
+        2,
+        1000,
+    )
+
+    assert captured["outline"] == "正确大纲"
+
+
+def test_creative_review_prefers_frozen_review_payload(tmp_path: Path, monkeypatch):
+    captured: dict = {}
+
+    class Result:
+        issues: list = []
+        score = 80
+        passed = True
+        token_usage: dict = {}
+        review_v2: dict = {}
+
+    async def fake_review(self, content, context, *args, **kwargs):
+        captured.update(context)
+        return Result()
+
+    from tools.agent.reviewer import ReviewerAgent
+
+    monkeypatch.setattr(ReviewerAgent, "review", fake_review)
+    monkeypatch.setattr(
+        "tools.model_benchmark.activate_model_profile",
+        lambda _profile: contextlib.nullcontext(),
+    )
+    service = ModelBenchmarkService(
+        tmp_path, "book", ModelProfileStore(tmp_path / "profiles"), readiness_gate=False
+    )
+
+    service._review_direct(
+        profile("critic", "review-model"),
+        "正文。",
+        {"_benchmark_review_payload": {"outline": "复核大纲"}},
+    )
+
+    assert captured["outline"] == "复核大纲"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import tempfile
@@ -19,6 +20,11 @@ from models.manuscript_editing import (
 from tools.novel_workspace import count_writing_units
 from tools.project_lock import ProjectBusyError, ProjectWriteLock
 from tools.review_store import ReviewStore
+
+
+# How many automatic version snapshots to keep per chapter. Entries the author
+# explicitly labelled are kept regardless (see _prune_versions).
+VERSION_HISTORY_KEEP = 20
 
 
 class ManuscriptEditingError(RuntimeError):
@@ -81,7 +87,49 @@ class ManuscriptVersionStore:
             chapter_root / f"{version_id}.json",
             version.model_dump_json(indent=2) + "\n",
         )
+        self._prune_versions(clean_chapter)
         return version
+
+    def _prune_versions(self, chapter_id: str) -> None:
+        """Bound the per-chapter version history.
+
+        Every write and every restore created a pair of files and nothing ever
+        removed them: a 100-chapter book with 20 edits per chapter reached 2000
+        full-text copies, and `list()` parses every one of them on each request.
+        Autosave coalescing throttles the rate but not the total.
+
+        Kept: the newest VERSION_HISTORY_KEEP entries, plus any entry the author
+        explicitly labelled - those are deliberate markers, not incidental
+        snapshots. The live chapter text is not in this directory, so pruning
+        cannot affect what the author is reading.
+        """
+        root = self.root / chapter_id
+        if not root.is_dir():
+            return
+        try:
+            entries = sorted(
+                (path for path in root.glob("ver_*.json") if path.is_file()),
+                key=lambda path: path.stat().st_mtime_ns,
+                reverse=True,
+            )
+        except OSError:
+            return
+        keep = set(entries[:VERSION_HISTORY_KEEP])
+        for path in entries[VERSION_HISTORY_KEEP:]:
+            try:
+                payload = json.loads(path.read_bytes().decode("utf-8"))
+            except (OSError, ValueError):
+                payload = {}
+            if isinstance(payload, dict) and str(payload.get("label") or "").strip():
+                keep.add(path)
+        for stale in entries:
+            if stale in keep:
+                continue
+            try:
+                stale.unlink()
+                stale.with_suffix(".md").unlink(missing_ok=True)
+            except OSError:
+                continue
 
     def list(self, chapter_id: str) -> list[ManuscriptVersionV1]:
         root = self.root / self._chapter_id(chapter_id)
@@ -283,21 +331,11 @@ class ManuscriptVersionStore:
 
     @staticmethod
     def _atomic_text(path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-            temporary = Path(handle.name)
-        temporary.replace(path)
+        # atomic_write cleans up its temporary file in a finally block, so a
+        # failed replace cannot leak one.
+        from tools.file_ops import atomic_write
+
+        atomic_write(path, content)
 
 
 class ManuscriptAnnotationStore:

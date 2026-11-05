@@ -192,7 +192,12 @@ def test_continuous_write_continues_after_single_chapter_failure(tmp_path: Path)
         completed = _wait(app, task["task_id"], {"completed"}, timeout=10)
         result = completed["result"]
         assert [item["chapter_id"] for item in result["completed_chapters"]] == ["ch_001", "ch_002"]
-        assert [item["chapter_id"] for item in result["failed_chapters"]] == ["ch_001"]
+        # The chapter was written on the retry, so it is not a failed chapter
+        # any more. The failure stays in the log, under `recovered_chapters`:
+        # the task has nothing missing, and calling it a partial failure would
+        # tell the author to go looking for a chapter that is there.
+        assert result["failed_chapters"] == []
+        assert [item["chapter_id"] for item in result["recovered_chapters"]] == ["ch_001"]
         assert result["stop_reason"] == "max_chapters_reached"
     finally:
         if app._task_runner is not None:

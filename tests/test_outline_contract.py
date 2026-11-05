@@ -8,7 +8,11 @@ from tools.agent.orchestrator import OpenWriteOrchestrator
 from tools.agent.react import OPENWRITE_SYSTEM_PROMPT
 from tools.architect import ArchitectAgent
 from tools.goethe import DEFAULT_GOETHE_SYSTEM_PROMPT
-from tools.outline_contract import INLINE_ANNOTATION_CONTRACT, OUTLINE_MARKDOWN_CONTRACT
+from tools.outline_contract import (
+    INLINE_ANNOTATION_CONTRACT,
+    OUTLINE_MARKDOWN_CONTRACT,
+    validate_outline_markdown,
+)
 from tools.outline_parser import OutlineMdParser
 
 REQUIRED_MARKDOWN_FIELDS = (
@@ -122,6 +126,63 @@ def test_markdown_contract_fields_round_trip_through_parser() -> None:
     assert chapter.beats == ["场景切入", "冲突升级", "关键选择"]
     assert chapter.hooks == ["来客身份", "怀表来源"]
     assert chapter.summary == "林岑在雨夜发现钟楼停摆。"
+
+
+COMPLETE_OUTLINE = """# 测试作品
+
+## 第1篇：开端
+
+林岑从异常来客追查到钟楼危机。
+
+### 第1节：入局
+
+林岑在雨夜接待异常来客。
+
+#### 第1章：来客
+> 戏剧位置: 起
+> 内容焦点: 林岑发现异常来客
+> 本章目标: 建立冲突，明确选择
+> 预估字数: 3200
+> 字数预算: 3200
+> 出场角色: 林岑、周岚
+> 涉及设定: 镜雨区，停摆怀表
+> 情感弧线: 戒备 -> 动摇 -> 决意
+> 节拍: 场景切入、冲突升级
+> 悬念: 来客身份、怀表来源
+
+林岑在雨夜发现钟楼停摆。
+"""
+
+
+def test_a_compliant_outline_has_no_duplicate_field_error() -> None:
+    assert validate_outline_markdown(COMPLETE_OUTLINE, "demo") == []
+
+
+def test_a_chapter_carrying_one_field_on_two_lines_is_reported() -> None:
+    # The writer no longer appends a second line for a field the file already
+    # carries, but a draft - or a file written before the fix - still can, and
+    # the completeness check used to pass it in silence.
+    polluted = COMPLETE_OUTLINE.replace(
+        "> 出场角色: 林岑、周岚",
+        "> 出场角色: 林岑、周岚\n> 涉及人物: 林岑",
+    )
+
+    errors = validate_outline_markdown(polluted, "demo")
+
+    assert any("ch_001" in error and "出场角色" in error for error in errors), errors
+
+
+def test_a_legacy_label_alone_is_not_a_duplicate() -> None:
+    # One line under the old spelling is a legacy file, not a polluted one.
+    legacy = COMPLETE_OUTLINE.replace("> 出场角色: 林岑、周岚", "> 涉及人物: 林岑、周岚")
+
+    assert validate_outline_markdown(legacy, "demo") == []
+
+
+def test_two_different_word_fields_are_not_a_duplicate() -> None:
+    assert validate_outline_markdown(COMPLETE_OUTLINE, "demo") == []
+    assert "> 预估字数: 3200" in COMPLETE_OUTLINE
+    assert "> 字数预算: 3200" in COMPLETE_OUTLINE
 
 
 def test_architect_requests_and_preserves_complete_chapter_fields() -> None:

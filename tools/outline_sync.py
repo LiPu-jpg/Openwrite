@@ -1,3 +1,5 @@
+import os
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -18,5 +20,21 @@ def sync_outline_to_hierarchy(src_dir: Path, data_dir: Path) -> None:
     )
     data = serialize_outline_hierarchy(hierarchy)
 
-    with open(hierarchy_path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    # Atomic write: a bare open(...,"w") truncates in place, so a crash mid-write
+    # leaves a half-written hierarchy.yaml. The freshness check only compares
+    # mtimes, so that truncated file then reads as current and every consumer
+    # (workspace snapshot, context build, reading order) works from a partial
+    # outline. Write to a sibling temp file and rename over the target.
+    hierarchy_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".hierarchy.", suffix=".tmp", dir=str(hierarchy_path.parent)
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            yaml.dump(data, handle, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, hierarchy_path)
+    finally:
+        temporary.unlink(missing_ok=True)

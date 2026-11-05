@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger("tools.chapter_memory")
 
 
 class ChapterMemoryStore:
@@ -55,16 +58,48 @@ class ChapterMemoryStore:
         self._atomic_write(path, content)
         return path
 
-    def load(self, chapter_id: str) -> dict[str, Any] | None:
+    def _inspect_acceptance(self) -> dict[str, dict[str, Any]]:
+        """Acceptance heads keyed by chapter id.
+
+        `inspect()` reads and hashes every chapter file, so calling it once per
+        record made a book of n chapters cost O(n^2) file reads - measured 0.6 s
+        at 120 chapters and roughly 250 000 reads at 500, paid on every generation
+        and every desk load. Bulk callers pass the result down so it is computed
+        once per call; a single `load()` still computes it fresh, because a rewrite
+        invalidates the acceptance state within a store's lifetime.
+        """
+        from tools.manuscript_acceptance import ManuscriptAcceptanceService
+
+        try:
+            inspection = ManuscriptAcceptanceService(self.project_root, self.novel_id).inspect()
+        except Exception as exc:
+            logger.warning("Acceptance inspection unavailable: %s", exc)
+            return {}
+        return {
+            str(item.get("chapter_id") or ""): item
+            for item in inspection.get("chapters", [])
+            if isinstance(item, dict)
+        }
+
+    def load(
+        self,
+        chapter_id: str,
+        acceptance_heads: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
         path = self.path_for(chapter_id)
         if not path.is_file():
             return None
         try:
             data = yaml.safe_load(path.read_bytes().decode("utf-8")) or {}
-        except (OSError, yaml.YAMLError):
-            return None
+        except (OSError, yaml.YAMLError) as exc:
+            # A truncated record used to be swallowed into `None`, which is
+            # indistinguishable from "no memory yet" — the chapter's summary then
+            # vanished from every later prompt with no signal at all.
+            logger.warning("Chapter memory %s is unreadable: %s", path.name, exc)
+            return {"freshness_status": "corrupt", "chapter_id": chapter_id}
         if not isinstance(data, dict):
-            return None
+            logger.warning("Chapter memory %s is not a mapping", path.name)
+            return {"freshness_status": "corrupt", "chapter_id": chapter_id}
         source_revision = str(data.get("source_revision") or "")
         current_revision = self._manuscript_revision(chapter_id)
         if source_revision and current_revision and source_revision == current_revision:
@@ -77,19 +112,12 @@ class ChapterMemoryStore:
         # chapter acceptance is replaying downstream facts. The acceptance
         # head is the causal gate for summaries used in later prompts.
         try:
-            from tools.manuscript_acceptance import ManuscriptAcceptanceService
-
-            acceptance = ManuscriptAcceptanceService(
-                self.project_root, self.novel_id
-            ).inspect()
-            head = next(
-                (
-                    item
-                    for item in acceptance.get("chapters", [])
-                    if item.get("chapter_id") == chapter_id
-                ),
-                None,
-            )
+            head = None
+            if (acceptance_heads is not None):
+                head = acceptance_heads.get(chapter_id)
+            else:
+                inspection = self._inspect_acceptance()
+                head = inspection.get(chapter_id)
             if isinstance(head, dict) and (
                 head.get("status") != "current"
                 or head.get("facts_revision") != current_revision
@@ -109,11 +137,19 @@ class ChapterMemoryStore:
         records: list[dict[str, Any]] = []
         if not self.memory_dir.exists():
             return records
+        # One acceptance inspect for the whole sweep: `load()` would otherwise run
+        # one per chapter, which is O(n^2) in the chapter count.
+        heads = self._inspect_acceptance()
         for path in self.memory_dir.glob("ch_*.yaml"):
+            # A stray name (`ch_old.yaml`, a hand-renamed file) must be skipped,
+            # not fatal: `load()` raises for anything that is not `ch_<digits>`,
+            # and one such file used to break every context build for the novel.
+            if not re.fullmatch(r"ch_\d+", path.stem):
+                continue
             number = self._chapter_number(path.stem)
             if target and number >= target:
                 continue
-            record = self.load(path.stem)
+            record = self.load(path.stem, heads)
             if record and record.get("freshness_status") == "current":
                 records.append(record)
         return sorted(
@@ -150,8 +186,11 @@ class ChapterMemoryStore:
         }
         if not self.memory_dir.exists():
             return totals
+        heads = self._inspect_acceptance()
         for path in self.memory_dir.glob("ch_*.yaml"):
-            record = self.load(path.stem) or {}
+            if not re.fullmatch(r"ch_\d+", path.stem):
+                continue
+            record = self.load(path.stem, heads) or {}
             usage = record.get("token_usage", {})
             if not isinstance(usage, dict):
                 continue
@@ -195,15 +234,8 @@ class ChapterMemoryStore:
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            handle.write(content)
-            temp_path = Path(handle.name)
-        temp_path.replace(path)
+        # Delegate to the shared writer: it cleans up its temporary file in a
+        # finally block, so a failed replace cannot leak one.
+        from tools.file_ops import atomic_write
+
+        atomic_write(path, content)

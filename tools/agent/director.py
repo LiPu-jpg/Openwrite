@@ -166,14 +166,26 @@ class MultiAgentDirector:
                 writable[attr] = value
 
         from ..chapter_pipeline import apply_runtime_delta_with_fallback
+        from ..project_lock import ProjectWriteLock
 
-        apply_runtime_delta_with_fallback(
-            self.truth_manager,
-            state_delta,
-            writable,
-            chapter_id=chapter_id,
-            known_entities=known_entities,
-        )
+        # The settlement is a read-modify-write over the shared truth files.
+        # `settle_backfill` already holds this lock around the same call, but this
+        # path (a chapter commit reaching the same helper) did not: two concurrent
+        # chapter commits both read, both apply, and only the second delta
+        # survives. The lock is not re-entrant, so it must be taken here and NOT
+        # inside `apply_runtime_delta_with_fallback`.
+        with ProjectWriteLock(
+            Path(self.ctx.project_root),
+            self.novel_id,
+            operation=f"state_settlement:{chapter_id}",
+        ):
+            apply_runtime_delta_with_fallback(
+                self.truth_manager,
+                state_delta,
+                writable,
+                chapter_id=chapter_id,
+                known_entities=known_entities,
+            )
         return writable
 
     def _apply_state_updates(

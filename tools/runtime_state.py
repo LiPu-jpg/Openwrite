@@ -62,7 +62,16 @@ def legacy_updates_to_delta(
         collection = aliases.get(str(raw_key))
         text = str(raw_value or "").strip()
         if collection and text:
-            operations.append(RuntimeDeltaOperation(op="append", collection=collection, value=text))
+            # One stable note per (collection, chapter): a re-settle replaces the
+            # previous summary instead of appending a second copy of it.
+            operations.append(
+                RuntimeDeltaOperation(
+                    op="append",
+                    collection=collection,
+                    target=f"legacy_{collection}_{chapter_id}",
+                    value=text,
+                )
+            )
     return RuntimeStateDelta(
         chapter_id=chapter_id,
         source_revision=source_revision,
@@ -217,13 +226,29 @@ class RuntimeStateManager:
             text = str(operation.value or "").strip()
             if not text:
                 raise RuntimeStateError("状态增量正文不能为空")
-            notes.append(
-                RuntimeNote(
-                    id=operation.target.strip() or f"note_{uuid4().hex[:12]}",
-                    text=text,
-                    source_chapter=chapter_id,
+            target = operation.target.strip()
+            if not target:
+                notes.append(
+                    RuntimeNote(
+                        id=f"note_{uuid4().hex[:12]}",
+                        text=text,
+                        source_chapter=chapter_id,
+                    )
                 )
-            )
+                return
+            # A chapter has one current summary per collection. Supersede older
+            # active notes for the same chapter (including notes written before
+            # stable ids existed) so repeated settlement cannot accumulate them.
+            for note in notes:
+                if note.source_chapter == chapter_id and note.id != target and note.status == "active":
+                    note.status = "resolved"
+            existing = next((note for note in notes if note.id == target), None)
+            if existing is not None:
+                existing.text = text
+                existing.source_chapter = chapter_id
+                existing.status = "active"
+                return
+            notes.append(RuntimeNote(id=target, text=text, source_chapter=chapter_id))
             return
         index = next((i for i, note in enumerate(notes) if note.id == operation.target), -1)
         if index < 0:
@@ -285,9 +310,24 @@ class RuntimeStateManager:
             ),
         )
 
+    @staticmethod
+    def _latest_active_notes(notes: Iterable[RuntimeNote]) -> list[RuntimeNote]:
+        """Keep one active note per chapter; older duplicates stay as audit rows."""
+        latest: dict[str, RuntimeNote] = {}
+        passthrough: list[RuntimeNote] = []
+        for note in notes:
+            if note.status != "active":
+                continue
+            chapter = note.source_chapter.strip()
+            if not chapter:
+                passthrough.append(note)
+            else:
+                latest[chapter] = note
+        return passthrough + list(latest.values())
+
     def _render_current_state(self, state: RuntimeState) -> str:
         parts = [state.legacy_documents.get("current_state", "").strip()]
-        active_notes = [note for note in state.current_state_notes if note.status == "active"]
+        active_notes = self._latest_active_notes(state.current_state_notes)
         if active_notes:
             parts.append("## 后续章节状态增量\n\n" + self._render_notes(active_notes))
         if state.characters:
@@ -315,7 +355,7 @@ class RuntimeStateManager:
 
     def _render_ledger(self, state: RuntimeState) -> str:
         parts = [state.legacy_documents.get("ledger", "").strip()]
-        active_notes = [note for note in state.ledger_notes if note.status == "active"]
+        active_notes = self._latest_active_notes(state.ledger_notes)
         if active_notes:
             parts.append("## 后续章节账本增量\n\n" + self._render_notes(active_notes))
         if state.resources:
@@ -329,7 +369,7 @@ class RuntimeStateManager:
 
     def _render_relationships(self, state: RuntimeState) -> str:
         parts = [state.legacy_documents.get("relationships", "").strip()]
-        active_notes = [note for note in state.relationship_notes if note.status == "active"]
+        active_notes = self._latest_active_notes(state.relationship_notes)
         if active_notes:
             parts.append("## 后续章节关系增量\n\n" + self._render_notes(active_notes))
         if state.relationships:

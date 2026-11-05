@@ -945,3 +945,101 @@ def test_goethe_cli_refuses_without_project(tmp_path: Path, monkeypatch: pytest.
     assert (tmp_path / "novel_config.yaml").exists() is False
     exit_code = run_goethe()
     assert exit_code == 1
+
+
+def test_dante_context_messages_reflect_the_current_book_state(tmp_path: Path):
+    """The context prompt must not describe a state the book has left.
+
+    `startup()` loads the book state once; every tool action can advance it after
+    that, and a stale snapshot made the prompt report a stage and chapter the book
+    had already left.
+    """
+    from tools.agent.book_state import BookState, BookStateStore
+    from tools.agent.dante import DanteChatAgent
+
+    _write_session_state(tmp_path, "demo")
+    state_store = BookStateStore(tmp_path, "demo")
+    seeded = state_store.load_or_create()
+    seeded.stage = BookStage.ROLLING_OUTLINE
+    seeded.current_chapter = "ch_006"
+    state_store.save(seeded)
+
+    agent = DanteChatAgent(
+        project_root=tmp_path,
+        novel_id="demo",
+        prompt_session_factory=lambda **kwargs: FakePromptSession(["exit"]),
+        react_agent=FakeReActAgent(),
+    )
+    agent.startup()
+    assert agent.book_state.current_chapter == "ch_006"
+
+    # A tool action advances the book on disk after startup.
+    advanced = state_store.load_or_create()
+    advanced.stage = BookStage.REVIEW_AND_REVISE
+    advanced.current_chapter = "ch_007"
+    state_store.save(advanced)
+
+    messages = agent._build_context_messages()
+    book_state = next(
+        message for message in messages if message.content.startswith("书状态: ")
+    )
+    assert "stage=review_and_revise" in book_state.content
+    assert "chapter=ch_007" in book_state.content
+    assert "chapter=ch_006" not in book_state.content
+
+
+def test_goethe_handoff_shortcut_fails_closed_when_the_book_state_is_unreadable(tmp_path: Path):
+    """An unreadable book state must not unlock the handoff shortcut.
+
+    The shortcut bypasses the outline-scope confirmation gate, so returning True
+    on a read failure let an author skip a confirmation that was still pending -
+    the opposite of the fail-closed rule used everywhere else.
+    """
+    from tools.agent.book_state import BookStateStore
+    from tools.goethe import GoetheChatAgent
+    from tools.init_project import init_project
+
+    init_project(tmp_path, "demo")
+    agent = GoetheChatAgent(
+        project_root=tmp_path,
+        novel_id="demo",
+        react_agent=object(),
+    )
+
+    # A pending confirmation blocks the shortcut.
+    store = BookStateStore(tmp_path, "demo")
+    state = store.load_or_create()
+    state.pending_confirmation = "outline_scope"
+    store.save(state)
+    assert agent._should_use_handoff_shortcut("开始写正文") is False
+
+    # Confirming it unblocks the shortcut.
+    state = store.load_or_create()
+    state.pending_confirmation = ""
+    store.save(state)
+    assert agent._should_use_handoff_shortcut("开始写正文") is True
+
+    # An unreadable state file must not unlock it either.
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text("pending_confirmation: [broken\n", encoding="utf-8")
+    assert agent._should_use_handoff_shortcut("开始写正文") is False, (
+        "an unreadable book state must fail closed, not unlock the shortcut"
+    )
+
+
+def test_an_empty_book_state_file_also_fails_the_gate_closed(tmp_path: Path):
+    """A truncated-to-nothing state file is not "no pending confirmation"."""
+    from tools.agent.book_state import BookStateError, BookStateStore
+    from tools.goethe import GoetheChatAgent
+    from tools.init_project import init_project
+
+    init_project(tmp_path, "demo")
+    store = BookStateStore(tmp_path, "demo")
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.path.write_text("", encoding="utf-8")
+
+    with pytest.raises(BookStateError):
+        store.load_strict()
+
+    agent = GoetheChatAgent(project_root=tmp_path, novel_id="demo", react_agent=object())
+    assert agent._should_use_handoff_shortcut("开始写正文") is False

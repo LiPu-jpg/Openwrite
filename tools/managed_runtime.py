@@ -13,6 +13,7 @@ from tools.studio import create_server
 from tools.studio_http import health_payload
 from tools.studio_preferences import StudioModelSettingsStore
 from tools.model_profiles import ModelProfileStore
+from tools.host_llm import configure_host_llm
 
 # A stuck request thread (e.g. a wedged embedding probe) must not keep this
 # process alive after serve_forever returns; the bridge can only restart a
@@ -63,6 +64,12 @@ def main() -> int:
     request = json.loads(sys.stdin.readline())
     state = Path(request["state_dir"]).resolve()
     state.mkdir(parents=True, exist_ok=True)
+    # The host's own model directory, reached through its loopback relay. The
+    # coordinates are held in memory only: the relay port is ephemeral and the
+    # token is a machine secret.
+    host_llm = request.get("host_llm")
+    if isinstance(host_llm, dict):
+        configure_host_llm(str(host_llm.get("url") or ""), str(host_llm.get("token") or ""))
     server = create_managed_server(state, request["token"])
 
     def parent_channel() -> None:

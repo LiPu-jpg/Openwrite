@@ -398,12 +398,14 @@ class ChapterWorkBriefService:
 
     def _tasks(self, chapter_id: str) -> list[dict[str, Any]]:
         related: list[dict[str, Any]] = []
-        for task in TaskStore(self.project_root, self.novel_id).list(limit=500):
-            task_chapter = str(task.get("chapter_id") or "")
-            if not task_chapter and isinstance(task.get("input"), Mapping):
-                task_chapter = str(task["input"].get("chapter_id") or "")
-            if task_chapter != chapter_id:
-                continue
+        # Filter inside the store: `list` sorts by created_at descending and caps
+        # at `limit` before the caller sees anything, so taking the newest 500
+        # and filtering here silently dropped this chapter's tasks on any book
+        # with more than 500 tasks - a running review task vanished from the work
+        # surface.
+        for task in TaskStore(self.project_root, self.novel_id).list(
+            limit=500, chapter_id=chapter_id
+        ):
             related.append(
                 {
                     "task_id": str(task.get("task_id") or ""),

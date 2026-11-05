@@ -1100,11 +1100,17 @@ class GoetheChatAgent:
         if self._looks_like_explicit_outline_confirmation(text):
             return False
         try:
-            from .agent.book_state import BookStateStore
+            from .agent.book_state import BookStateError, BookStateStore
 
-            state = BookStateStore(self.project_root, self.novel_id).load_or_create()
+            # Strict read: `load_or_create` quarantines a damaged file and returns
+            # a fresh state, which reads as "nothing pending" and would unlock
+            # the shortcut past a confirmation the author never gave.
+            state = BookStateStore(self.project_root, self.novel_id).load_strict()
         except Exception:
-            return True
+            # Fail closed: an unreadable book state means we cannot know whether
+            # an outline scope is still awaiting the author's confirmation, and
+            # the shortcut bypasses exactly that gate.
+            return False
         return not bool(str(state.pending_confirmation or "").strip())
 
     def _append_user_turn(self, content: str) -> None:

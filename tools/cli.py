@@ -2428,20 +2428,27 @@ def _chapter_file_path(project_root: Path, novel_id: str, chapter_id: str) -> Pa
 
 
 def _atomic_write_bytes(path: Path, content: bytes) -> None:
+    """Write bytes atomically, cleaning up the temporary file on any failure."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     import tempfile
 
-    with tempfile.NamedTemporaryFile(
-        mode="wb",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as handle:
-        handle.write(content)
-        handle.flush()
-        os.fsync(handle.fileno())
-        temp_path = type(path)(handle.name)
-    temp_path.replace(path)
+    temp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = handle.name
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        type(path)(temp_path).replace(path)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def _get_next_chapter(project_root: Path, novel_id: str) -> str:

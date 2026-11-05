@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
 import os
 import re
-import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from tools.file_ops import atomic_write
+
+logger = logging.getLogger("tools.character_state_index")
 
 SCHEMA_VERSION = 1
 DEFAULT_FIELD = "综合状态"
@@ -556,14 +560,24 @@ class CharacterStateIndex:
                 self.project_root, self.novel_id
             )
             for path in manuscript_paths:
-                fact = acceptance._read_json(acceptance.fact_path(path.stem))  # noqa: SLF001
-                if not isinstance(fact, dict):
+                try:
+                    fact = acceptance._read_json(acceptance.fact_path(path.stem))  # noqa: SLF001
+                    if not isinstance(fact, dict):
+                        continue
+                    content = path.read_bytes().decode("utf-8")
+                    if fact.get("source_revision") == acceptance.fingerprint(content):
+                        accepted.append(path)
+                except (OSError, UnicodeDecodeError, ValueError) as exc:
+                    logger.warning("Skipping unreadable manuscript %s: %s", path, exc)
                     continue
-                content = path.read_bytes().decode("utf-8")
-                if fact.get("source_revision") == acceptance.fingerprint(content):
-                    accepted.append(path)
-        except Exception:
-            accepted = []
+        except Exception as exc:
+            # A single unreadable file or acceptance-store error must not discard
+            # every manuscript contribution. Falling back to nothing would leave
+            # the index answering from `src/` only, so scan the whole manuscript
+            # instead: over-reporting a stale annotation is recoverable, silently
+            # losing all of them is not.
+            logger.warning("Skipping the acceptance filter while scanning accepted facts: %s", exc)
+            accepted = manuscript_paths
         candidates = [*(self.novel_root / "src").rglob("*.md"), *accepted]
         return sorted({path.resolve() for path in candidates if path.is_file()})
 
@@ -589,20 +603,12 @@ class CharacterStateIndex:
 
     def _save_cache(self, payload: dict[str, Any]) -> None:
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.index_path.parent,
-            prefix=f".{self.index_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-            temporary = Path(handle.name)
-        temporary.replace(self.index_path)
+        # atomic_write cleans up its temporary file in a finally block, so a
+        # failed replace cannot leave a stray .tmp behind.
+        atomic_write(
+            self.index_path,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
 
     def _document_signature(self, path: Path) -> dict[str, Any]:
         stat = path.stat()

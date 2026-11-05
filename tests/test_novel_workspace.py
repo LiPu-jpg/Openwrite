@@ -69,6 +69,45 @@ def test_chapter_packet_includes_author_intent_and_focus(tmp_path: Path):
     assert rendered.index("## 创作罗盘") < rendered.index("## 故事背景")
 
 
+def test_split_manuscript_does_not_treat_prose_as_heading():
+    text = (
+        "# 第一章 雨夜\n他推开门。\n\n"
+        "# 第二章 回声\n第二章正文。\n第二章里，他其实没有听见。"
+    )
+
+    chunks = split_manuscript(text, fallback_title="旧稿")
+
+    assert [title for title, _ in chunks] == ["第一章 雨夜", "第二章 回声"]
+    content = chunks[1][1]
+    assert content.startswith("第二章正文。")
+    assert "第二章里，他其实没有听见。" in content
+
+
+def test_split_manuscript_accepts_plain_and_markdown_headings():
+    text = (
+        "第一章归国的伤兵\n第一段。\n\n"
+        "#### 第二章：回声\n第二段。\n\n"
+        "Chapter 3 The End\n正文。"
+    )
+
+    chunks = split_manuscript(text, fallback_title="旧稿")
+
+    assert [title for title, _ in chunks] == [
+        "第一章归国的伤兵",
+        "第二章：回声",
+        "Chapter 3 The End",
+    ]
+
+
+def test_split_manuscript_rejects_long_marker_line_as_prose():
+    long_prose = "第一章 " + "很长的正文" * 10
+
+    chunks = split_manuscript(f"{long_prose}\n正文。", fallback_title="旧稿")
+
+    assert [title for title, _ in chunks] == ["旧稿"]
+    assert long_prose in chunks[0][1]
+
+
 def test_split_import_and_export_existing_manuscript(tmp_path: Path):
     init_project(tmp_path, "demo", "雾城来信")
     source = tmp_path / "old.txt"

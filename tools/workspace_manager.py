@@ -8,6 +8,7 @@ legacy single-project behavior driven by the launch application.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
@@ -19,6 +20,8 @@ from urllib.parse import unquote
 
 from tools.project_registry import is_framework_root
 from tools.studio_contracts import StudioError
+
+logger = logging.getLogger("tools.workspace")
 
 WORKSPACE_ROOT_HEADER = "X-OpenWrite-Workspace-Root"
 WORKSPACE_ID_HEADER = "X-OpenWrite-Workspace-Id"
@@ -172,6 +175,18 @@ class WorkspaceManager:
             # legacy request change the dsh context when both use launch_root.
             cached = self._context_apps.get(root)
             if cached is not None:
+                # The app snapshot's `initialized` is computed once at
+                # construction. A pre-init GET is allowed by design (the browser
+                # polls while `openwrite init` runs), so the project can appear
+                # on disk afterwards; re-activate rather than answering 428
+                # forever, which also made /api/project/init reply 409.
+                if not cached.initialized and (root / "novel_config.yaml").is_file():
+                    try:
+                        cached._activate_project(root)
+                    except Exception:
+                        logger.warning(
+                            "Failed to activate a project that appeared at %s", root, exc_info=True
+                        )
                 return cached
             self._reject_nested(root)
             app = self._build_app(root)

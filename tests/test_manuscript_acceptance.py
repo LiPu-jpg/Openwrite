@@ -232,6 +232,44 @@ def test_external_edit_is_detected_and_must_enter_the_same_acceptance_protocol(
     assert service.operation(operation["operation_id"])["source"] == "external_editor"
 
 
+def test_an_empty_chapter_id_accepts_the_whole_project(tmp_path: Path):
+    init_project(tmp_path, "demo")
+    first = _chapter(tmp_path, "ch_001", "林岑仍活着。")
+    second = _chapter(tmp_path, "ch_002", "林岑继续寻找旧信。")
+    service = _baseline(tmp_path)
+
+    first.write_text("# ch_001\n\n林岑在钟楼死去。\n", encoding="utf-8")
+    second.write_text("# ch_002\n\n林岑在码头死去。\n", encoding="utf-8")
+
+    operation = service.accept_external("", confirm=True)
+
+    assert operation["affected_chapters"] == ["ch_001", "ch_002"]
+    assert operation["chapter_id"] == "ch_001"
+    assert service.operation(operation["operation_id"])["source"] == "external_editor"
+
+
+def test_an_empty_chapter_id_without_confirmation_is_still_refused(tmp_path: Path):
+    init_project(tmp_path, "demo")
+    _chapter(tmp_path, "ch_001", "林岑仍活着。")
+    service = ManuscriptAcceptanceService(tmp_path, "demo")
+
+    with pytest.raises(ManuscriptAcceptanceError) as raised:
+        service.accept_external("", confirm=False)
+
+    assert raised.value.code == "CONFIRMATION_REQUIRED"
+
+
+def test_an_unknown_chapter_id_is_still_refused(tmp_path: Path):
+    init_project(tmp_path, "demo")
+    _chapter(tmp_path, "ch_001", "林岑仍活着。")
+    service = ManuscriptAcceptanceService(tmp_path, "demo")
+
+    with pytest.raises(ManuscriptAcceptanceError) as raised:
+        service.accept_external("ch_", confirm=True)
+
+    assert raised.value.code == "INVALID_CHAPTER_ID"
+
+
 def test_rapid_saves_keep_last_completed_revision_until_latest_facts_are_accepted(
     tmp_path: Path,
 ):

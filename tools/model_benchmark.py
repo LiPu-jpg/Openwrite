@@ -422,6 +422,14 @@ class ModelBenchmarkService:
         if not isinstance(packet, dict):
             raise ValueError("benchmark requires the full novel_context_preview packet")
         packet = {**packet, **target}
+        # Creative mode drives WriterAgent/ReviewerAgent directly. Attach the
+        # frozen production payloads so those agents see the chapter outline and
+        # review context, not the raw packet whose `outline` field is the whole
+        # context markdown.
+        if isinstance(context_preview.get("agent_payload"), dict):
+            packet["_benchmark_writer_payload"] = context_preview["agent_payload"]
+        if isinstance(context_preview.get("review_payload"), dict):
+            packet["_benchmark_review_payload"] = context_preview["review_payload"]
         # Readiness gate: refuse to run on un-authored projects or on chapters
         # that have no outline node.  Otherwise the model free-writes against a
         # thin context and blind review cannot catch the drift (garbage-in).
@@ -1205,8 +1213,13 @@ class ModelBenchmarkService:
             agent = WriterAgent(
                 AgentContext(LLMClient(config), config.model, str(self.project_root), self.novel_id)
             )
+            writer_context = packet.get("_benchmark_writer_payload")
+            if not isinstance(writer_context, dict):
+                writer_context = packet
             return asyncio.run(
-                agent._creative_write(packet, chapter_number, config.temperature, target_words)
+                agent._creative_write(
+                    writer_context, chapter_number, config.temperature, target_words
+                )
             )
 
     def _review_direct(
@@ -1224,7 +1237,10 @@ class ModelBenchmarkService:
             agent = ReviewerAgent(
                 AgentContext(LLMClient(config), config.model, str(self.project_root), self.novel_id)
             )
-            result = asyncio.run(agent.review(content, packet))
+            review_context = packet.get("_benchmark_review_payload")
+            if not isinstance(review_context, dict):
+                review_context = packet
+            result = asyncio.run(agent.review(content, review_context))
         issues = [agent._issue_payload(item) for item in result.issues]
         return {
             "score": result.score,

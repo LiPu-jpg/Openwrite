@@ -205,7 +205,10 @@ class RollingPlanningService:
         candidate = self.load(candidate_id)
         if candidate is None:
             raise RollingPlanningError("滚动规划候选不存在", code="CANDIDATE_NOT_FOUND")
-        if revision and revision != self.revision(candidate):
+        # Strict, like `stage_proposal`: an empty revision must not disable the
+        # guard. `if revision and ...` short-circuited on "" and the caller then
+        # mutated with no check at all.
+        if revision != self.revision(candidate):
             raise RollingPlanningError("滚动规划候选已变化", code="STALE_CANDIDATE")
         path = self.path_for(candidate_id)
         if path.exists():
@@ -223,7 +226,9 @@ class RollingPlanningService:
         candidate = self.load(candidate_id)
         if candidate is None:
             raise RollingPlanningError("滚动规划候选不存在", code="CANDIDATE_NOT_FOUND")
-        if revision and revision != self.revision(candidate):
+        # Strict, like `stage_proposal`. `apply_proposal` writes into the
+        # canonical outline, so an empty revision must never disable the gate.
+        if revision != self.revision(candidate):
             raise RollingPlanningError("滚动规划候选已变化", code="STALE_CANDIDATE")
         proposal = self._proposal_text(candidate)
         if not proposal:
@@ -357,6 +362,33 @@ class RollingPlanningService:
             "请输出完整 Markdown 大纲草案。该草案只进入待确认区，不直接覆盖 canonical 大纲。"
         )
 
+    # Retain only the most recent roll_* entries. Every `create` writes a new
+    # directory and nothing ever deleted one, so a long-lived project
+    # accumulated them without bound.
+    MAX_RETAINED = 50
+
+    def _prune(self) -> None:
+        if not self.root.is_dir():
+            return
+        entries = sorted(
+            (path for path in self.root.glob('roll_*') if path.is_dir()),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+        for stale in entries[self.MAX_RETAINED:]:
+            for child in sorted(stale.rglob('*'), reverse=True):
+                try:
+                    if child.is_file() or child.is_symlink():
+                        child.unlink()
+                    else:
+                        child.rmdir()
+                except OSError:
+                    continue
+            try:
+                stale.rmdir()
+            except OSError:
+                continue
+
     def save(self, candidate: RollingPlanCandidateV1) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         target = self.path_for(candidate.candidate_id)
@@ -373,6 +405,7 @@ class RollingPlanningService:
             os.fsync(handle.fileno())
             temporary = Path(handle.name)
         temporary.replace(target)
+        self._prune()
         return target
 
     def revision(self, candidate: RollingPlanCandidateV1) -> str:
@@ -468,6 +501,9 @@ def rolling_plan_action(
             )
         )
     if action == "delete":
+        # The store now rejects an empty revision rather than treating it as "no
+        # check", so a caller that omits it gets an explicit stale/conflict error
+        # instead of an unchecked delete.
         service.delete(candidate_id, revision=str(payload.get("revision") or ""))
         return {"ok": True, "deleted": candidate_id}
     if action == "apply":

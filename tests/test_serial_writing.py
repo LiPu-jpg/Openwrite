@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from tools.agent.base import AgentContext
 from tools.agent.writer import WriterAgent
 from tools.arc_audit import ArcAuditService
+from tools.file_ops import atomic_write
 from tools.init_project import init_project
 from tools.llm.client import _plain_usage
 from tools.manuscript_acceptance import ManuscriptAcceptanceError, ManuscriptAcceptanceService
@@ -269,9 +271,18 @@ def test_stream_total_timeout_preserves_received_draft(tmp_path, monkeypatch):
     from tools.llm.errors import LLMTimeoutError
 
     monkeypatch.setenv("OW_LLM_TOTAL_TIMEOUT", "1")
-    times = iter([0, 0.2, 2])
-    monkeypatch.setattr("tools.llm.client.time.monotonic", lambda: next(times))
     client = LLMClient(LLMConfig(model="fake"))
+    # `tools.llm.client.time` IS the `time` module, so this fakes the clock for
+    # the whole process. Build the client first: its `import litellm` reads the
+    # clock while importing, and those reads would otherwise eat the values
+    # this test means for the stream loop. The clock also keeps its last value
+    # once it runs out, so an unrelated reader cannot turn the timeout into a
+    # StopIteration.
+    clock = [0, 0.2, 2]
+    monkeypatch.setattr(
+        "tools.llm.client.time.monotonic",
+        lambda: clock.pop(0) if len(clock) > 1 else clock[0],
+    )
     stream = iter([{"choices": [{"delta": {"content": "已有草稿"}}]}, {"choices": []}])
     with pytest.raises(LLMTimeoutError) as timeout:
         client._stream_response(stream, None)
@@ -340,3 +351,40 @@ def test_stream_timeout_configuration_cannot_disable_deadline(monkeypatch, value
     monkeypatch.setenv("OW_LLM_TOTAL_TIMEOUT", value)
     with pytest.raises(ValueError, match="finite positive"):
         LLMClient(LLMConfig(model="fake"))._stream_response(iter([]), None)
+
+
+def test_baselines_are_pruned_and_evicted_entries_are_flagged(tmp_path):
+    """An unbounded baseline store is a silent disk leak.
+
+    Each baseline copies the outline plus every chapter in the group, so an
+    unpruned store reached 606 files / 1.59 MB after three drift entries. When a
+    baseline is dropped, the ledger entries that still point at it must be marked,
+    or a later `recover` happily restores a file that no longer exists.
+    """
+    root = project(tmp_path)
+    service = ArcAuditService(tmp_path, "demo")
+    baseline_dir = root / "data" / "arc_audit" / "baselines"
+
+    ids = [service._baseline("sec_001") for _ in range(ArcAuditService.MAX_BASELINES + 4)]
+
+    remaining = sorted(p.name for p in baseline_dir.iterdir() if p.is_dir())
+    assert len(remaining) <= ArcAuditService.MAX_BASELINES
+    # The most recent baselines survive.
+    assert ids[-1] in remaining
+    assert ids[0] not in remaining, "the oldest baseline must have been pruned"
+
+    # A ledger entry pointing at a pruned baseline must be flagged, so `recover`
+    # refuses instead of restoring from a file that is gone.
+    atomic_write(
+        service.ledger_path,
+        json.dumps(
+            {"entries": [{"id": "e1", "status": "open", "baseline_id": ids[0]}]},
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+    service._mark_baselines_evicted(set(ids[:-ArcAuditService.MAX_BASELINES]))
+    ledger = json.loads(service.ledger_path.read_text(encoding="utf-8"))
+    entry = ledger["entries"][0]
+    assert entry["baseline_evicted"] is True, "a pruned baseline must be flagged"
+    assert entry["baseline_id"] not in remaining

@@ -90,6 +90,9 @@ POST_ROUTES = {
     "/api/model/routes": StudioPostRoute(
         "save_model_routes", requires_project=False, envelope=True
     ),
+    "/api/model/host-profiles": StudioPostRoute(
+        "save_host_model_profile", requires_project=False, envelope=True
+    ),
     "/api/research/settings": StudioPostRoute("save_research_settings", envelope=True),
     "/api/project/init": StudioPostRoute("initialize_project", requires_project=False),
     "/api/project/open": StudioPostRoute("open_project", requires_project=False),
@@ -259,6 +262,7 @@ GET_ROUTES = frozenset(
         "/api/manuscript/drafts",
         "/api/manuscript/versions",
         "/api/model/embedding",
+        "/api/model/host-models",
         "/api/model/profiles",
         "/api/outline",
         "/api/project-archives",
@@ -382,6 +386,7 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                     "/api/project/list",
                     "/api/model/profiles",
                     "/api/model/embedding",
+                    "/api/model/host-models",
                     "/api/agents",
                     "/api/agent/activity",
                 }
@@ -456,6 +461,9 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/model/embedding":
                 self._json(studio_success_payload(self.app.model_embedding(), self.request_id))
+                return
+            if parsed.path == "/api/model/host-models":
+                self._json(studio_success_payload(self.app.host_model_catalog(), self.request_id))
                 return
             if parsed.path == "/api/continuity":
                 self.app.require_project()
@@ -1064,6 +1072,13 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise StudioError("请求 JSON 无效", code="INVALID_JSON") from exc
+        except RecursionError as exc:
+            # A deeply-nested document makes the JSON parser recurse until the
+            # stack overflows. RecursionError is recoverable, but it escapes
+            # _body_json's own handlers and surfaces as a 500 with a traceback,
+            # so a ~400 KB request could turn every attempt into an internal
+            # error. Reject it as malformed input instead.
+            raise StudioError("请求 JSON 嵌套过深", code="INVALID_JSON_DEPTH") from exc
         if not isinstance(payload, dict):
             raise StudioError("请求必须是 JSON 对象", code="INVALID_JSON_OBJECT")
         return payload
