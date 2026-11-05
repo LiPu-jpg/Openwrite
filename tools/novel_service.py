@@ -548,6 +548,14 @@ class NovelApplicationService:
         from tools.context_protection import ContextBudgetError
 
         target = self.resolve_chapter_id(chapter_id)
+        # Writing context is only meaningful for a chapter that exists in the
+        # outline. Previously any ch_<digits> produced a generic 3000-word
+        # context, which let an agent write a chapter that never existed.
+        if target not in self._outline_chapter_ids():
+            raise NovelServiceError(
+                f"章节 {target} 不在大纲中，请先补齐章纲",
+                code="CHAPTER_NOT_FOUND",
+            )
         try:
             packet = self.assemble_packet(target)
             generation = ContextBuilder(self.project_root, self.novel_id).build_generation_context(
@@ -1282,6 +1290,19 @@ class NovelApplicationService:
         except Exception as exc:
             raise NovelServiceError(f"风格合成失败: {exc}") from exc
         return {**result, "ok": True, "source_id": source_id}
+
+    def _outline_chapter_ids(self) -> set[str]:
+        from tools.outline_tree import build_outline_structure
+
+        structure = build_outline_structure(self.novel_root)
+        ids: set[str] = set()
+        pending = list(structure.get("roots") or [])
+        while pending:
+            node = pending.pop()
+            if node.get("kind") == "chapter":
+                ids.add(str(node.get("id") or ""))
+            pending.extend(node.get("children") or [])
+        return ids
 
     def resolve_chapter_id(self, chapter_id: str, *, latest: bool = False) -> str:
         value = str(chapter_id or "").strip()

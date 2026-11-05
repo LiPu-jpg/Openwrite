@@ -42,6 +42,42 @@ CHAPTER_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
+_REFERENCE_MARKER_RE = re.compile(
+    r"^(?:第[零〇一二三四五六七八九十百千万两\d]+[卷部篇章节回集]|"
+    r"(?:chapter|part|book)\s+[0-9ivxlcdm]+)",
+    re.IGNORECASE,
+)
+_REFERENCE_SEPARATORS = " \t:：·.．-—–、"
+_REFERENCE_SENTENCE_PUNCTUATION = "。；，,;"
+
+
+def _is_reference_heading(line: str) -> bool:
+    """Reject prose lines such as “第二章正文。” that start with a marker.
+
+    Markdown headings are trusted; plain lines must be short, free of sentence
+    punctuation, and either separated from the marker or carry a short title.
+    """
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("#"):
+        return CHAPTER_HEADING_RE.fullmatch(stripped) is not None
+    if len(stripped) > 60:
+        return False
+    marker = _REFERENCE_MARKER_RE.match(stripped)
+    if marker is None:
+        return False
+    rest = stripped[marker.end():].strip()
+    if not rest:
+        return True
+    if rest[0] in _REFERENCE_SEPARATORS:
+        title = rest.lstrip(_REFERENCE_SEPARATORS).strip()
+        return not any(char in title for char in _REFERENCE_SENTENCE_PUNCTUATION)
+    return (
+        len(stripped) <= 25
+        and not any(char in rest for char in _REFERENCE_SENTENCE_PUNCTUATION)
+    )
+
 
 def default_reference_library_root() -> Path:
     configured = os.environ.get("OPENWRITE_REFERENCE_LIBRARY_ROOT", "").strip()
@@ -706,7 +742,7 @@ class ReferenceLibraryService:
         sentences = [
             item.strip()
             for item in re.split(r"[。！？!?\n]+", text)
-            if item.strip() and not CHAPTER_HEADING_RE.fullmatch(item.strip())
+            if item.strip() and not _is_reference_heading(item)
         ]
         paragraphs = [item.strip() for item in re.split(r"\n\s*\n|\n", text) if item.strip()]
         sentence_lengths = [self._writing_units(item) for item in sentences]
@@ -751,7 +787,11 @@ class ReferenceLibraryService:
     def _project_structure(
         self, source_id: str, text: str, source_sha256: str
     ) -> ReferenceStructureV1:
-        matches = list(CHAPTER_HEADING_RE.finditer(text))
+        matches = [
+            match
+            for match in CHAPTER_HEADING_RE.finditer(text)
+            if _is_reference_heading(match.group(0))
+        ]
         units: list[ReferenceStructureUnitV1] = []
         if matches:
             if matches[0].start() > 0:

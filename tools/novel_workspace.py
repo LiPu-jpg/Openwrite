@@ -274,6 +274,8 @@ def _chapter_heading_text(line: str) -> str | None:
     markdown = MARKDOWN_HEADING_RE.match(stripped)
     if markdown is not None:
         body = markdown.group(2).strip()
+        # ATX headings may carry a closing sequence ("# 第一章 雨夜 ###").
+        body = re.sub(r"\s+#+\s*$", "", body).strip()
         return body if CHAPTER_MARKER_RE.match(body) else None
     if len(stripped) > 40:
         return None
@@ -293,6 +295,9 @@ def _chapter_heading_text(line: str) -> str | None:
 
 
 def split_manuscript(text: str, *, fallback_title: str) -> list[tuple[str, str]]:
+    # Windows editors frequently save UTF-8 with a BOM; the BOM would otherwise
+    # hide the first heading and silently fold it into the next chapter.
+    text = text.lstrip("\ufeff")
     lines = text.splitlines()
     headings: list[tuple[int, str]] = []
     for index, line in enumerate(lines):

@@ -221,3 +221,20 @@ def test_demo_short_template_creates_writable_assets(tmp_path: Path):
     outline = (tmp_path / "data" / "novels" / "demo_novel" / "src" / "outline.md").read_text(encoding="utf-8")
     assert "第一章" in outline
     assert "待填写" not in outline
+
+
+def test_split_manuscript_ignores_utf8_bom():
+    text = "\ufeff# 第一章 雨夜\n\n他推开门。\n\n# 第二章 回声\n\n门后没有人。"
+
+    chunks = split_manuscript(text, fallback_title="旧稿")
+
+    assert [title for title, _ in chunks] == ["第一章 雨夜", "第二章 回声"]
+    assert chunks[0][1] == "他推开门。"
+
+
+def test_split_manuscript_strips_atx_closing_hashes():
+    text = "# 第一章 雨夜 ###\n\n他推开门。"
+
+    chunks = split_manuscript(text, fallback_title="旧稿")
+
+    assert [title for title, _ in chunks] == ["第一章 雨夜"]

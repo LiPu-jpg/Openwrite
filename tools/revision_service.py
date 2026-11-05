@@ -329,7 +329,10 @@ class RevisionService:
         return self.present(proposal)
 
     def get(self, proposal_id: str) -> dict[str, Any]:
-        proposal = self.store.load(proposal_id)
+        try:
+            proposal = self.store.load(proposal_id)
+        except RevisionStoreError as exc:
+            raise self._store_error(exc) from exc
         if proposal is None:
             raise RevisionError("修订提案不存在", code="REVISION_NOT_FOUND")
         return self.present(proposal)
@@ -390,7 +393,10 @@ class RevisionService:
         replacement_text: str | None = None,
         selected_hunk_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        proposal = self.store.load(proposal_id)
+        try:
+            proposal = self.store.load(proposal_id)
+        except RevisionStoreError as exc:
+            raise self._store_error(exc) from exc
         if proposal is None:
             raise RevisionError("修订提案不存在", code="REVISION_NOT_FOUND")
         if proposal.get("status") != "proposed":
@@ -407,7 +413,10 @@ class RevisionService:
                 self.novel_id,
                 operation=f"revision:{proposal_id}",
             ):
-                locked_proposal = self.store.load(proposal_id)
+                try:
+                    locked_proposal = self.store.load(proposal_id)
+                except RevisionStoreError as exc:
+                    raise self._store_error(exc) from exc
                 if locked_proposal is None:
                     raise RevisionError("修订提案不存在", code="REVISION_NOT_FOUND")
                 if locked_proposal.get("status") != "proposed":

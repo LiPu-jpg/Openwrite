@@ -245,10 +245,19 @@ class RollingPlanningService:
 
         added: list[dict[str, Any]] = []
         skipped: list[str] = []
+        recognized = 0
         current: dict[str, Any] | None = None
         for raw in proposal.splitlines():
-            match = re.match(r"^#{1,6}\s*第\s*(\d+)\s*章[：:]\s*(.*)$", raw.strip())
+            # Accept “第N章：标题”, “第N章 标题” and a bare “第N章”; models and
+            # authors do not always keep the colon that the canonical outline
+            # uses. Silently ignoring every heading made `apply` look like a
+            # no-op with a misleading “already exists” message.
+            match = re.match(
+                r"^#{1,6}\s*第\s*([零〇一二三四五六七八九十百千万两\d]+)\s*章\s*(?:[：:]\s*(.*)|[ \t]+(.+)|)$",
+                raw.strip(),
+            )
             if match is not None:
+                recognized += 1
                 if (
                     current is not None
                     and current["number"] is not None
@@ -257,16 +266,23 @@ class RollingPlanningService:
                     added.append(current)
                 elif current is not None:
                     skipped.append(f"ch_{int(current['number']):03d}（已存在/冲突）")
-                chapter_number = int(match.group(1))
-                chapter_id = f"ch_{chapter_number:03d}"
+                from tools.utils import parse_chapter_id
+
+                chapter_id = parse_chapter_id(f"第{match.group(1)}章")
+                if chapter_id is None:
+                    current = None
+                    skipped.append(f"第{match.group(1)}章（无法解析章节号）")
+                    continue
+                chapter_number = int(chapter_id.split("_")[1])
                 if chapter_id in existing:
                     current = None
                     skipped.append(f"{chapter_id}（已存在/冲突）")
                     continue
+                title = (match.group(2) or match.group(3) or "").strip()
                 current = {
                     "id": chapter_id,
                     "number": chapter_number,
-                    "title": f"第{match.group(1)}章：{match.group(2).strip()}",
+                    "title": f"第{match.group(1)}章：{title}" if title else f"第{match.group(1)}章",
                     "summary": "",
                 }
                 continue
@@ -282,10 +298,19 @@ class RollingPlanningService:
                 skipped.append(current["id"])
 
         if not added:
+            if recognized == 0:
+                return {
+                    "applied": False,
+                    "added": [],
+                    "skipped": skipped,
+                    "reason": "NO_RECOGNIZED_CHAPTERS",
+                    "message": "草案中没有可识别的章节标题；请使用“第N章：标题”或“第N章 标题”格式",
+                }
             return {
                 "applied": False,
                 "added": [],
                 "skipped": skipped,
+                "reason": "NO_NEW_CHAPTERS",
                 "message": "没有可追加的不冲突章节（草案章节均已存在或小于等于当前进度）",
             }
 

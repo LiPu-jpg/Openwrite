@@ -1047,6 +1047,7 @@ class StudioApplication:
             "RUN_NOT_RESUMABLE": HTTPStatus.CONFLICT,
             "RUN_TARGET_MISMATCH": HTTPStatus.CONFLICT,
             "CHAPTER_ALREADY_EXISTS": HTTPStatus.CONFLICT,
+            "CHAPTER_NOT_FOUND": HTTPStatus.NOT_FOUND,
         }.get(exc.code, HTTPStatus.BAD_GATEWAY)
         return StudioError(str(exc), status, code=exc.code, details=getattr(exc, "details", {}))
 

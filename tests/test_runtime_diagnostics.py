@@ -251,3 +251,48 @@ def test_saving_the_dag_is_atomic_and_leaves_no_temporary_files(tmp_path, monkey
 
     assert dag_file.read_text(encoding="utf-8") == previous, "the previous DAG was truncated"
     assert sorted(p.name for p in dag_file.parent.iterdir() if p.name.startswith('.')) == []
+
+
+def test_rolling_apply_accepts_headings_without_colon(tmp_path: Path) -> None:
+    init_project(tmp_path, "demo")
+    novel_root = tmp_path / "data" / "novels" / "demo"
+    outline_path = novel_root / "src" / "outline.md"
+    outline_path.write_text(_outline(), encoding="utf-8")
+    service = RollingPlanningService(tmp_path, "demo")
+    candidate = service.create(window_size=2)
+    proposal = "#### 第三章\n\n进入下一窗口。\n"
+    staged = service.stage_proposal(
+        candidate.candidate_id,
+        proposal,
+        candidate_revision=service.revision(candidate),
+    )
+
+    result = service.apply_proposal(
+        staged.candidate_id, revision=service.revision(staged)
+    )
+
+    assert result["applied"] is True
+    assert [item["id"] for item in result["added"]] == ["ch_003"]
+    assert "#### 第三章" in outline_path.read_text(encoding="utf-8")
+    assert "进入下一窗口。" in outline_path.read_text(encoding="utf-8")
+
+
+def test_rolling_apply_reports_unrecognized_proposal(tmp_path: Path) -> None:
+    init_project(tmp_path, "demo")
+    novel_root = tmp_path / "data" / "novels" / "demo"
+    (novel_root / "src" / "outline.md").write_text(_outline(), encoding="utf-8")
+    service = RollingPlanningService(tmp_path, "demo")
+    candidate = service.create(window_size=2)
+    staged = service.stage_proposal(
+        candidate.candidate_id,
+        "这一段没有章节标题。\n",
+        candidate_revision=service.revision(candidate),
+    )
+
+    result = service.apply_proposal(
+        staged.candidate_id, revision=service.revision(staged)
+    )
+
+    assert result["applied"] is False
+    assert result["reason"] == "NO_RECOGNIZED_CHAPTERS"
+    assert "没有可识别的章节标题" in result["message"]

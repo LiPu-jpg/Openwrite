@@ -109,9 +109,15 @@ def studio_error_payload(error: StudioError, request_id: str) -> dict[str, Any]:
     # was replaced by a generic English sentence, so every client that displays
     # `message` lost the cause. Keep the friendly mapping only for short
     # English/internal messages; otherwise surface the original text.
-    message = original if any(
-        "\u3400" <= char <= "\u9fff" for char in original
-    ) else messages.get(error.code, original)
+    message = (
+        original
+        if any("\u3400" <= char <= "\u9fff" for char in original)
+        else (
+            messages[error.code]
+            if error.code in messages and len(original.strip()) <= 16
+            else original
+        )
+    )
     return {
         "error": original,
         "message": message,

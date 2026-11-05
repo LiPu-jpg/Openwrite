@@ -2752,3 +2752,26 @@ def test_studio_revision_api_returns_document_conflict_details(tmp_path: Path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_studio_context_preview_rejects_chapter_outside_outline(tmp_path: Path):
+    init_project(tmp_path, "demo")
+    app = StudioApplication(tmp_path)
+
+    with pytest.raises(StudioError) as error:
+        app.context_preview("ch_999")
+
+    assert error.value.code == "CHAPTER_NOT_FOUND"
+    assert error.value.status == HTTPStatus.NOT_FOUND
+
+
+def test_studio_error_contract_keeps_specific_english_message():
+    error = ContractStudioError(
+        "domains must be a non-empty array of known review domain ids",
+        HTTPStatus.BAD_REQUEST,
+        code="INVALID_INPUT",
+    )
+
+    payload = studio_error_payload(error, "req_test")
+
+    assert payload["message"] == "domains must be a non-empty array of known review domain ids"

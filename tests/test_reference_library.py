@@ -609,3 +609,31 @@ def test_studio_reference_surface_uses_injected_private_library(tmp_path: Path):
     finally:
         if app._task_runner is not None:
             app._task_runner.shutdown(wait=True)
+
+
+def test_reference_structure_ignores_prose_lines_starting_with_marker(tmp_path: Path):
+    project = tmp_path / "project"
+    library = tmp_path / "private-library"
+    init_project(project, "demo", "参考库测试")
+    service = ReferenceLibraryService(
+        library, project_root=project, novel_id="demo"
+    )
+    text = (
+        "# 第一章 雨夜\n\n他推开门。\n\n"
+        "# 第二章 回声\n\n第二章正文。\n第二章里，他其实没有听见。"
+    )
+
+    prepared = service.prepare(
+        "reference_b",
+        text,
+        title="乙参考",
+        relative_name="beta.txt",
+        input_budget_tokens=500,
+    )
+
+    chapter_titles = [
+        unit["title"]
+        for unit in prepared["structure"]["units"]
+        if unit["kind"] == "chapter"
+    ]
+    assert chapter_titles == ["第一章 雨夜", "第二章 回声"]

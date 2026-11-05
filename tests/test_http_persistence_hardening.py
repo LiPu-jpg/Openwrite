@@ -300,7 +300,6 @@ def test_non_ascii_authorization_header_is_rejected_as_unauthorized(tmp_path):
         thread.join(timeout=2)
 
 
-@pytest.mark.xfail(strict=True, reason="open defect")
 def test_malformed_proposal_id_maps_to_a_client_error(server, project):
     """A route-reachable but too-short ``proposal_id`` must not be a 500.
 
