@@ -60,8 +60,11 @@ assert.ok(bundle.includes('/studio-panel/vendor/vditor') && bundle.includes('lut
 // The turn-tail change summary is a single flex row. Without wrapping it, the
 // row squeezes its Chinese labels down to one character per line, because CJK
 // text has no break opportunities to shrink against.
-assert.match(bundle, /\w+_turnSummary\{[^}]*flex-wrap:wrap/, 'turn summary row must wrap')
-assert.match(bundle, /\w+_turnSummaryLabel,\.\w+_turnMutationLabel\{[^}]*white-space:nowrap/, 'turn summary labels must not break per character')
+// The CSS Modules hash is derived from the file path, so it differs per
+// checkout directory and may carry a `-`; the pattern must not assume word
+// characters only, or the assertion passes on one machine and fails on another.
+assert.match(bundle, /[\w-]+_turnSummary\{[^}]*flex-wrap:wrap/, 'turn summary row must wrap')
+assert.match(bundle, /[\w-]+_turnSummaryLabel,\.[\w-]+_turnMutationLabel\{[^}]*white-space:nowrap/, 'turn summary labels must not break per character')
 assert.ok(bundle.includes('turnMutationLabel'), 'the path-less mutation label must carry the nowrap class')
 const clientFiles = (await readdir(`${root}src/client`, { recursive: true }))
   .filter(file => /\.(?:ts|tsx)$/.test(file))

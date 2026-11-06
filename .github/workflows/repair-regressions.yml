@@ -42,6 +42,9 @@ jobs:
       # claim of an "immutable Git source" is not only as trustworthy as the PR.
       - name: Read the wheel's immutable Core source
         id: source
+        # This step and the ones below carry bash syntax; the Windows leg would
+        # otherwise run them under PowerShell and fail to parse them.
+        shell: bash
         run: |
           node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('plugin/release/runtime-manifest.json')); if(!/^[0-9a-f]{40}$/.test(m.sources.core.commit)) throw Error('Invalid Core commit'); fs.appendFileSync(process.env.GITHUB_OUTPUT,'commit='+m.sources.core.commit+'\n')"
           # Compare against the same file on the base branch when it is available.
@@ -66,6 +69,7 @@ jobs:
         run: python plugin/scripts/gen-context-slots.py --plugin plugin --core core --check
       # uv/pip hit PyPI directly; a transient mirror failure should not cost a leg.
       - name: Install uv
+        shell: bash
         run: |
           for attempt in 1 2 3; do
             if python -m pip install uv==0.11.19; then exit 0; fi
@@ -78,6 +82,7 @@ jobs:
       # report a flaky test as a pass and silently overwrite the junit report.
       - name: Run all Core regressions without live-model tests
         working-directory: core
+        shell: bash
         run: |
           transient='ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure in name resolution|Failed to establish a new connection|ReadTimeoutError|ConnectionError|Network is unreachable'
           for attempt in 1 2 3; do
@@ -94,6 +99,7 @@ jobs:
           exit 1
       - name: Verify follow-up routes through real HTTP
         working-directory: core
+        shell: bash
         run: |
           transient='ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure in name resolution|Failed to establish a new connection|ReadTimeoutError|ConnectionError|Network is unreachable'
           for attempt in 1 2 3; do
