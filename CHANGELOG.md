@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.34：Core 指针前移，让发布校验跑到修好的 Core 回归
+
+功能与 0.2.33 一致；本次只把捆绑 Core 的来源提交从 `b9fcacfa` 前移到 `82bae73`。
+
+- Core 5.8.30 的那条「研究质量在启动子进程前被拒绝」用例原先依赖运行机器的 `pnpm` 是否在 PATH 上：
+  Linux 与 Windows 的 CI runner 没有 `pnpm`，于是服务先报 `RESEARCH_RUNTIME_UNAVAILABLE`，
+  用例永远走不到它要验的质量校验。Core 现在按同文件既有写法桩掉工具链查找——
+  若真走到启动子进程那一步，用例仍会失败（`test-pnpm` 不可执行）。
+- Core 5.8.30 的运行时内容未变，捆绑 wheel 与来源提交的逐字节校验不受影响；
+  `docs/CONTEXT_SLOTS.md` 按新提交重新生成。
+
 ## 0.2.33 / Core 5.8.30：深度研究搜索默认走 DSH web_search / web_fetch
 
 - **默认搜索提供方 `dsh`**：托管运行时由宿主把 `ctx.web` 的搜索/抓取能力经环回中继交给 Core；没有 Key、

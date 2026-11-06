@@ -1,6 +1,6 @@
 # 写手上下文槽位参考
 
-本表对应候选 Core 5.8.30，来源提交 `b9fcacfa743ee9865e504fa6ce02c2386a5d7b68`。由捆绑 wheel 的 SECTION_SOURCES、保护规则和 shares 生成，共 20 个来源条目，包含兼容别名；不是每次写作都会装满这些槽位。
+本表对应候选 Core 5.8.30，来源提交 `82bae73fd2e1cab88dc05f36cc3945c2d6ee6756`。由捆绑 wheel 的 SECTION_SOURCES、保护规则和 shares 生成，共 20 个来源条目，包含兼容别名；不是每次写作都会装满这些槽位。
 
 ## 看本章实际用了什么
 
