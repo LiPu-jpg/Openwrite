@@ -580,11 +580,16 @@ def test_dsh_default_wins_over_a_legacy_machine_provider_but_not_a_workspace_cho
         reset_host_web()
 
 
-def test_research_rejects_an_unsupported_quality_before_starting_the_child(tmp_path: Path):
+def test_research_rejects_an_unsupported_quality_before_starting_the_child(tmp_path: Path, monkeypatch):
     framework = tmp_path / "framework"
     (framework / "node_modules").mkdir(parents=True)
     (framework / "package.json").write_text("{}", encoding="utf-8")
     service = ResearchService(tmp_path / "novel", framework_root=framework)
+    # The runtime gate runs first and reads the machine's toolchain, so a
+    # runner without pnpm on PATH would answer RESEARCH_RUNTIME_UNAVAILABLE
+    # and never reach the quality check. Stub the lookup: reaching the child
+    # launch would still fail loudly, because "test-pnpm" is not executable.
+    monkeypatch.setattr("tools.research_service.shutil.which", lambda name: "test-pnpm")
     with pytest.raises(ResearchServiceError) as error:
         service.run(
             {"prompt": "测试", "search": "none", "quality": "fast"},
