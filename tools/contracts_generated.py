@@ -7,7 +7,7 @@
 #   model-benchmark-v1.schema.json sha256:6774fc0eff8d $id: https://openwrite.dev/schemas/model-benchmark-v1.schema.json
 #   model-profile-surface-v1.schema.json sha256:b78c70b4cd5e $id: https://openwrite.dev/schemas/model-profile-surface-v1.schema.json
 #   task-surface-v1.schema.json sha256:b25a2195014a $id: https://openwrite.dev/schemas/task-surface-v1.schema.json
-#   research-surface-v1.schema.json sha256:c66c3f1494a1 $id: https://openwrite.dev/schemas/research-surface-v1.schema.json
+#   research-surface-v1.schema.json sha256:b3e2315ce38d $id: https://openwrite.dev/schemas/research-surface-v1.schema.json
 #   model-connection-test-v1.schema.json sha256:60824b0b20f4 $id: https://openwrite.dev/schemas/model-connection-test-v1.schema.json
 
 """Schema-derived contract types and validators (see tools/schema_codegen.py).
@@ -1215,6 +1215,7 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
         "properties": {
           "search_provider": {
             "enum": [
+              "dsh",
               "bocha",
               "bing",
               "jina",
@@ -1238,6 +1239,7 @@ SCHEMAS: dict[str, Any] = json.loads(r"""
                 },
                 "id": {
                   "enum": [
+                    "dsh",
                     "bocha",
                     "bing",
                     "jina",
@@ -2038,7 +2040,7 @@ class TaskSurfaceV1(_TaskSurfaceV1Required, total=False):
 class _ResearchSurfaceV1SettingsSearchProviderRequired(TypedDict):
     """Required keys of ResearchSurfaceV1SettingsSearchProvider."""
 
-    id: Literal["bocha", "bing", "jina", "none"]
+    id: Literal["dsh", "bocha", "bing", "jina", "none"]
     label: str
     requires_api_key: bool
     configured: bool
@@ -2052,7 +2054,7 @@ class ResearchSurfaceV1SettingsSearchProvider(_ResearchSurfaceV1SettingsSearchPr
 class _ResearchSurfaceV1SettingsRequired(TypedDict):
     """Required keys of ResearchSurfaceV1Settings."""
 
-    search_provider: Literal["bocha", "bing", "jina", "none"]
+    search_provider: Literal["dsh", "bocha", "bing", "jina", "none"]
     search_providers: list[ResearchSurfaceV1SettingsSearchProvider]
 
 

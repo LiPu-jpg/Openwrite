@@ -8,6 +8,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from tools.host_web import host_web_available, host_web_environment
+
 MODEL_SETTING_KEYS = {
     "provider",
     "model",
@@ -27,7 +29,7 @@ MODEL_ENV_KEYS = {
     "max_tokens": "LLM_MAX_TOKENS",
 }
 
-RESEARCH_SEARCH_PROVIDERS = ("bocha", "bing", "jina", "none")
+RESEARCH_SEARCH_PROVIDERS = ("dsh", "bocha", "bing", "jina", "none")
 RESEARCH_SEARCH_CREDENTIAL_ENV = {
     "bocha": "BOCHA_API_KEY",
     "jina": "JINA_API_KEY",
@@ -166,9 +168,10 @@ class StudioResearchSettingsStore:
 
     def surface(self) -> dict[str, Any]:
         settings = self.load_settings()
-        provider = str(settings.get("search_provider") or "bocha")
+        provider = str(settings.get("search_provider") or self._default_provider())
         providers = []
         for provider_id, label in (
+            ("dsh", "DSH web_search / web_fetch"),
             ("bocha", "博查"),
             ("bing", "Bing"),
             ("jina", "Jina"),
@@ -176,12 +179,16 @@ class StudioResearchSettingsStore:
         ):
             requires_api_key = provider_id in RESEARCH_SEARCH_CREDENTIAL_ENV
             credential_configured = bool(self.credential(provider_id))
+            if provider_id == "dsh":
+                configured = host_web_available()
+            else:
+                configured = not requires_api_key or credential_configured
             providers.append(
                 {
                     "id": provider_id,
                     "label": label,
                     "requires_api_key": requires_api_key,
-                    "configured": not requires_api_key or credential_configured,
+                    "configured": configured,
                     "credential_configured": credential_configured,
                 }
             )
@@ -195,15 +202,22 @@ class StudioResearchSettingsStore:
             payload = self._read_json(self.settings_path)
         provider = str(payload.get("search_provider") or "").strip().lower()
         remember = payload.get("remember_api_key")
+        default = self._default_provider()
         return {
             "search_provider": (
-                provider if provider in RESEARCH_SEARCH_PROVIDERS else "bocha"
+                provider if provider in RESEARCH_SEARCH_PROVIDERS else default
             ),
             "remember_api_key": True if remember is None else bool(remember),
         }
 
+    @staticmethod
+    def _default_provider() -> str:
+        # DSH's web tools are the zero-key default when the managed host relay
+        # is present; an external Studio keeps the previous Bocha default.
+        return "dsh" if host_web_available() else "bocha"
+
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        provider = str(payload.get("search_provider") or "bocha").strip().lower()
+        provider = str(payload.get("search_provider") or self._default_provider()).strip().lower()
         if provider not in RESEARCH_SEARCH_PROVIDERS:
             raise ValueError("深度研究搜索提供方无效")
         api_key = str(payload.get("search_api_key") or "").strip()
@@ -242,6 +256,8 @@ class StudioResearchSettingsStore:
         normalized = str(provider or "").strip().lower()
         if normalized not in RESEARCH_SEARCH_PROVIDERS:
             raise ValueError("深度研究搜索提供方无效")
+        if normalized == "dsh":
+            return host_web_environment()
         env_name = RESEARCH_SEARCH_CREDENTIAL_ENV.get(normalized, "")
         credential = self.credential(normalized)
         if env_name and not credential:

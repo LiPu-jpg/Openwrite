@@ -90,6 +90,37 @@ def test_research_settings_keep_search_credentials_private(tmp_path: Path):
         assert (store.credentials_path.stat().st_mode & 0o777) == 0o600
 
 
+def test_dsh_search_defaults_when_the_host_relay_is_configured(tmp_path: Path):
+    from tools.host_web import configure_host_web, reset_host_web
+
+    reset_host_web()
+    store = StudioResearchSettingsStore(tmp_path / "preferences")
+    try:
+        assert store.surface()["search_provider"] == "bocha"
+        assert next(
+            item for item in store.surface()["search_providers"] if item["id"] == "dsh"
+        )["configured"] is False
+
+        configure_host_web("http://127.0.0.1:45678", "relay-token")
+        surface = store.surface()
+        assert surface["search_provider"] == "dsh"
+        dsh = next(item for item in surface["search_providers"] if item["id"] == "dsh")
+        assert dsh["configured"] is True
+        assert dsh["requires_api_key"] is False
+        assert store.environment("dsh") == {
+            "OPENWRITE_WEB_RELAY_URL": "http://127.0.0.1:45678",
+            "OPENWRITE_WEB_RELAY_TOKEN": "relay-token",
+        }
+
+        service = ResearchService(tmp_path / "novel", settings_store=store)
+        env = service._research_environment({"search": "dsh"})
+        assert env["BOCHA_ENDPOINT"] == "http://127.0.0.1:45678/bocha"
+        assert env["BOCHA_API_KEY"] == "relay-token"
+        assert env["FETCH_PROVIDER"] == "dsh"
+    finally:
+        reset_host_web()
+
+
 def test_research_environment_uses_routed_model_and_saved_search_key(tmp_path: Path):
     store = StudioResearchSettingsStore(tmp_path / "preferences")
     store.save(

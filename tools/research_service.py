@@ -291,8 +291,11 @@ class ResearchService:
             or self.settings_store.load_settings().get("search_provider")
             or "bocha"
         ).strip().lower()
-        if search not in {"bocha", "bing", "jina", "none"}:
+        if search not in {"dsh", "bocha", "bing", "jina", "none"}:
             raise ResearchServiceError("深度研究搜索提供方无效", code="INVALID_INPUT")
+        # The vendored framework already speaks the Bocha protocol; the DSH
+        # provider is that protocol pointed at the host relay.
+        search_flag = "bocha" if search == "dsh" else search
         command = self._command_prefix(pnpm) + [
             "research",
             "--prompt",
@@ -307,7 +310,7 @@ class ResearchService:
             "--quality",
             str(payload.get("quality") or "balanced"),
             "--search",
-            search,
+            search_flag,
         ]
         llm = str(payload.get("llm") or "").strip().lower()
         if llm:
@@ -528,6 +531,12 @@ class ResearchService:
             raise ResearchServiceError(
                 str(exc), code="RESEARCH_SEARCH_CREDENTIAL_MISSING"
             ) from exc
+        if search == "dsh":
+            relay_url = str(env.get("OPENWRITE_WEB_RELAY_URL") or "").rstrip("/")
+            relay_token = str(env.get("OPENWRITE_WEB_RELAY_TOKEN") or "").strip()
+            env["BOCHA_ENDPOINT"] = f"{relay_url}/bocha"
+            env["BOCHA_API_KEY"] = relay_token
+            env["FETCH_PROVIDER"] = "dsh"
         if search != "jina":
             jina_key = self.settings_store.credential("jina")
             if jina_key:

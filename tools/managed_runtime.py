@@ -14,6 +14,7 @@ from tools.studio_http import health_payload
 from tools.studio_preferences import StudioModelSettingsStore
 from tools.model_profiles import ModelProfileStore
 from tools.host_llm import configure_host_llm
+from tools.host_web import configure_host_web
 
 # A stuck request thread (e.g. a wedged embedding probe) must not keep this
 # process alive after serve_forever returns; the bridge can only restart a
@@ -70,6 +71,10 @@ def main() -> int:
     host_llm = request.get("host_llm")
     if isinstance(host_llm, dict):
         configure_host_llm(str(host_llm.get("url") or ""), str(host_llm.get("token") or ""))
+    # The host's search/fetch relay: same private channel, different capability.
+    host_web = request.get("host_web")
+    if isinstance(host_web, dict):
+        configure_host_web(str(host_web.get("url") or ""), str(host_web.get("token") or ""))
     server = create_managed_server(state, request["token"])
 
     def parent_channel() -> None:

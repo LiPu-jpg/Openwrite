@@ -23,7 +23,7 @@
       "additionalProperties": true,
       "disallowed": ["api_key", "credential", "secret"],
       "properties": {
-        "search_provider": {"enum": ["bocha", "bing", "jina", "none"]},
+        "search_provider": {"enum": ["dsh", "bocha", "bing", "jina", "none"]},
         "search_providers": {
           "type": "array",
           "items": {
@@ -34,7 +34,7 @@
             "additionalProperties": true,
             "disallowed": ["api_key", "credential", "secret"],
             "properties": {
-              "id": {"enum": ["bocha", "bing", "jina", "none"]},
+              "id": {"enum": ["dsh", "bocha", "bing", "jina", "none"]},
               "label": {"type": "string", "minLength": 1},
               "requires_api_key": {"type": "boolean"},
               "configured": {"type": "boolean"},

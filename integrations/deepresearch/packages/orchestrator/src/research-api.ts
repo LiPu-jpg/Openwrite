@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createLlmChatFromEnv } from "@deepresearch/embedding-providers";
-import { BingSearchProvider, BochaSearchProvider, FallbackSearchProvider, FetchPageProvider, JinaSearchProvider } from "@deepresearch/tool-providers";
+import { BingSearchProvider, BochaSearchProvider, FallbackSearchProvider, FetchPageProvider, JinaSearchProvider, stripHtml } from "@deepresearch/tool-providers";
 import type { EpisodeResult, EpisodeStack, EvidenceQualityMode, FetchProvider, HumanReviewResponse, LlmChat, MemoryEvent, RuntimeProfile, SearchProvider, TaskSubmission } from "@deepresearch/contracts";
 import { createInMemoryOrchestrator } from "./orchestrator.js";
 import { resolveEvidenceQualityPolicy } from "./evidence-quality.js";
@@ -12,6 +12,49 @@ import { abortError, throwIfAborted } from "@deepresearch/net-utils";
 
 export type ResearchLlmProviderName = "bigmodel" | "deepseek" | "openai" | "custom";
 export type ResearchSearchProviderName = "bing" | "bocha" | "jina" | "none";
+
+/**
+ * Fetch through the dsh host's loopback web relay.
+ *
+ * The host owns the web providers (including the model-facing web_fetch tool);
+ * the research child only has an HTTP face onto them. Keeping this provider
+ * here, beside the other fetch construction, means the framework never needs a
+ * provider registry change to gain a host-backed fetch.
+ */
+class RelayFetchProvider implements FetchProvider {
+  readonly name = "dsh-web-fetch";
+  constructor(
+    private readonly url: string,
+    private readonly token: string,
+    private readonly timeoutMs: number,
+    private readonly maxChars: number,
+  ) {}
+
+  async fetchPage(url: string, opts: { timeoutMs?: number; maxChars?: number; signal?: AbortSignal } = {}) {
+    const response = await fetch(`${this.url.replace(/\/+$/, "")}/fetch`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.token}` },
+      body: JSON.stringify({ url }),
+      signal: opts.signal ?? AbortSignal.timeout(opts.timeoutMs ?? this.timeoutMs),
+    });
+    if (!response.ok) throw new Error(`dsh web fetch HTTP ${response.status}`);
+    const payload = await response.json() as {
+      url?: string; statusCode?: number; body?: { kind?: string; content?: string }; truncated?: boolean
+    };
+    if (typeof payload.statusCode === "number" && payload.statusCode >= 400) {
+      throw new Error(`dsh web fetch HTTP ${payload.statusCode} for ${url}`);
+    }
+    const raw = typeof payload.body?.content === "string" ? payload.body.content : "";
+    const content = payload.body?.kind === "html" ? stripHtml(raw) : raw;
+    const maxChars = opts.maxChars ?? this.maxChars;
+    return {
+      url: payload.url?.trim() || url,
+      title: "",
+      content: content.slice(0, maxChars),
+      description: "",
+    };
+  }
+}
 
 const DEBUG_TEST_MAX_ASPECTS = 2;
 const DEBUG_TEST_MAX_BRANCHES_PER_ASPECT = 2;
@@ -304,6 +347,17 @@ export function acceptBingResearchResults(input: {
 
 export function createResearchFetchFromEnv(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): FetchProvider {
   const merged = mergeResearchEnv(env, cwd);
+  if ((merged.FETCH_PROVIDER ?? "").trim().toLowerCase() === "dsh") {
+    const url = merged.OPENWRITE_WEB_RELAY_URL?.trim();
+    const token = merged.OPENWRITE_WEB_RELAY_TOKEN?.trim();
+    if (!url || !token) throw new Error("OPENWRITE_WEB_RELAY_URL/TOKEN are required when FETCH_PROVIDER=dsh");
+    return new RelayFetchProvider(
+      url,
+      token,
+      Number(merged.FETCH_TIMEOUT_MS ?? 30000),
+      Number(merged.FETCH_MAX_CHARS ?? 180000),
+    );
+  }
   const legacyJina = merged.FETCH_USE_JINA_READER === "1" || merged.FETCH_PROVIDER === "jina";
   const mode = fetchMode(merged.FETCH_MODE) ?? (legacyJina ? "jina" : "direct");
   const readerInPlay = mode !== "direct";
