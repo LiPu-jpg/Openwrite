@@ -2775,3 +2775,95 @@ def test_studio_error_contract_keeps_specific_english_message():
     payload = studio_error_payload(error, "req_test")
 
     assert payload["message"] == "domains must be a non-empty array of known review domain ids"
+
+
+def test_structured_writing_targets_preserves_unrelated_config_and_noop(tmp_path: Path):
+    init_project(tmp_path, "demo", "测试书")
+    config_path = tmp_path / "novel_config.yaml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("author: ''", "author: '测试作者'"),
+        encoding="utf-8",
+    )
+    before = config_path.read_text(encoding="utf-8")
+    app = StudioApplication(tmp_path)
+    current = yaml.safe_load(before)["writing_targets"]
+
+    noop = app.structured_change_plan(
+        {
+            "action": "preview",
+            "change_kind": "writing_targets",
+            "change": {"chapter_words": current["chapter_words"]},
+        }
+    )
+    assert noop["status"] == "no_change"
+    assert noop.get("preview_token") is None
+
+    changed = app.structured_change_plan(
+        {
+            "action": "preview",
+            "change_kind": "writing_targets",
+            "change": {"chapter_words": 2600},
+        }
+    )
+    assert changed["status"] == "proposed"
+    assert "author" not in changed["diff"]
+    assert "chapter_words: 2600" in changed["diff"]
+    applied = app.structured_change_plan(
+        {
+            "action": "apply",
+            "preview_token": changed["preview_token"],
+            "confirm": True,
+        }
+    )
+    updated = config_path.read_text(encoding="utf-8")
+    assert "author: '测试作者'" in updated
+    assert yaml.safe_load(updated)["writing_targets"]["chapter_words"] == 2600
+
+    app.structured_change_plan(
+        {
+            "action": "undo",
+            "preview_token": applied["undo_preview_token"],
+            "confirm": True,
+        }
+    )
+    assert config_path.read_text(encoding="utf-8") == before
+
+
+def test_structured_outline_set_meta_previews_applies_and_undoes(tmp_path: Path):
+    init_project(tmp_path, "demo", "测试书")
+    app = StudioApplication(tmp_path)
+    revision = app.outline_structure()["revision"]
+
+    preview = app.structured_change_plan(
+        {
+            "action": "preview",
+            "change_kind": "outline",
+            "change": {
+                "operation": "set_meta",
+                "chapter_id": "ch_001",
+                "metadata": {"content_focus": "结构化测试焦点"},
+                "revision": revision,
+            },
+        }
+    )
+    assert preview["status"] == "proposed"
+    assert "结构化测试焦点" in preview["diff"]
+
+    applied = app.structured_change_plan(
+        {
+            "action": "apply",
+            "preview_token": preview["preview_token"],
+            "confirm": True,
+        }
+    )
+    outline_path = tmp_path / "data" / "novels" / "demo" / "src" / "outline.md"
+    assert "结构化测试焦点" in outline_path.read_text(encoding="utf-8")
+
+    app.structured_change_plan(
+        {
+            "action": "undo",
+            "preview_token": applied["undo_preview_token"],
+            "confirm": True,
+        }
+    )
+    assert "结构化测试焦点" not in outline_path.read_text(encoding="utf-8")

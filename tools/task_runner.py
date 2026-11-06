@@ -151,6 +151,7 @@ class PersistentTaskRunner:
         )
         self._futures: dict[str, Future[Any]] = {}
         self._lock = Lock()
+        self._confirm_lock = Lock()
         self.recovered = self.store.recover_interrupted()
 
     def register(self, task_type: str, handler: TaskHandler) -> None:
@@ -244,26 +245,48 @@ class PersistentTaskRunner:
         return task
 
     def confirm(self, task_id: str) -> dict[str, Any]:
-        previous = self.store.load(task_id)
-        if previous is None:
-            raise TaskStoreError("Task not found")
-        if previous.get("status") != "awaiting_confirmation":
-            raise TaskStoreError("Task is not awaiting confirmation")
-        payload = self.store.materialize_input(previous)
-        result = self.store.materialize_result(previous)
-        payload["_already_completed"] = list(result.get("completed_chapters") or [])
-        if result.get("usage"):
-            payload["_already_used"] = dict(result["usage"])
-        return self.submit(
-            str(previous["type"]),
-            payload,
-            chapter_id=str(previous.get("chapter_id") or ""),
-            input_summary=str(previous.get("input_summary") or ""),
-            retryable=bool(previous.get("retryable")),
-            retry_of=task_id,
-            attempt=int(previous.get("attempt") or 1) + 1,
-            origin=_record_origin(previous),
-        )
+        # Confirm used to submit a fresh continuation every time it was called.
+        # A caller that keeps polling the original (still awaiting) task and
+        # confirms again therefore produced an unbounded chain of tasks. Keep
+        # the first continuation and make repeated confirms idempotent.
+        with self._confirm_lock:
+            previous = self.store.load(task_id)
+            if previous is None:
+                raise TaskStoreError("Task not found")
+            continued_by = str(previous.get("continued_by") or "")
+            if continued_by:
+                continued = self.store.load(continued_by)
+                if continued is not None:
+                    return continued
+            if previous.get("status") != "awaiting_confirmation":
+                raise TaskStoreError("Task is not awaiting confirmation")
+            payload = self.store.materialize_input(previous)
+            result = self.store.materialize_result(previous)
+            payload["_already_completed"] = list(result.get("completed_chapters") or [])
+            if result.get("usage"):
+                payload["_already_used"] = dict(result["usage"])
+            resumed = self.submit(
+                str(previous["type"]),
+                payload,
+                chapter_id=str(previous.get("chapter_id") or ""),
+                input_summary=str(previous.get("input_summary") or ""),
+                retryable=bool(previous.get("retryable")),
+                retry_of=task_id,
+                attempt=int(previous.get("attempt") or 1) + 1,
+                origin=_record_origin(previous),
+            )
+            try:
+                self.store.transition(
+                    task_id,
+                    updates={"continued_by": str(resumed.get("task_id") or "")},
+                    event="task_confirmed",
+                    expected_status="awaiting_confirmation",
+                )
+            except TaskStoreError:
+                # Another writer changed the snapshot; the continuation still
+                # exists and the next confirm will read its pointer if recorded.
+                pass
+            return resumed
 
     def shutdown(self, *, wait: bool = False) -> None:
         self._executor.shutdown(wait=wait, cancel_futures=False)

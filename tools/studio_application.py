@@ -1487,10 +1487,13 @@ class StudioApplication:
                 self.novel_root,
                 operation=str(effective.get("operation") or ""),
                 revision=str(effective.get("revision") or ""),
-                node_id=str(effective.get("node_id") or ""),
+                node_id=str(effective.get("node_id") or effective.get("chapter_id") or ""),
                 title=str(effective.get("title") or ""),
                 summary=str(effective.get("summary") or ""),
                 kind=str(effective.get("kind") or ""),
+                cascade=effective.get("cascade") is not False,
+                metadata=effective.get("metadata"),
+                updates=effective.get("updates"),
             )
         except OutlineEditError as exc:
             code = (
@@ -1689,6 +1692,50 @@ class StudioApplication:
             "flatten": False,
         }
 
+    @staticmethod
+    def _replace_writing_targets_block(source: str, targets: dict[str, Any]) -> str:
+        """Replace only the writing_targets block, preserving every other byte.
+
+        Dumping the whole config changed unrelated quoting (e.g. the author
+        line) and made a no-op target preview look like a real change.
+        """
+        lines = source.splitlines(keepends=True)
+        start = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if re.match(r"^writing_targets\s*:", line)
+            ),
+            None,
+        )
+        newline = "\r\n" if "\r\n" in source else "\n"
+        rendered = yaml.safe_dump(
+            targets, allow_unicode=True, sort_keys=False, default_flow_style=False
+        )
+        block = "writing_targets:" + newline + "".join(
+            ("  " + line if line.strip() else line) + newline
+            for line in rendered.splitlines()
+        )
+        if start is None:
+            if source and not source.endswith("\n"):
+                source += "\n"
+            return source + block
+        end = start + 1
+        while end < len(lines):
+            line = lines[end]
+            if line.strip() == "":
+                # A blank line belongs to the block only when indented content
+                # follows it; otherwise it separates the next top-level key.
+                following = lines[end + 1] if end + 1 < len(lines) else ""
+                if following and not following.startswith((" ", "\t")) and following.strip():
+                    break
+                end += 1
+                continue
+            if not line.startswith((" ", "\t")):
+                break
+            end += 1
+        return "".join(lines[:start]) + block + "".join(lines[end:])
+
     def _prepare_writing_targets_change(
         self,
         change: dict[str, Any],
@@ -1700,8 +1747,17 @@ class StudioApplication:
             targets = normalize_writing_targets(change, base=current, strict=True)
         except ValueError as exc:
             raise StructuredChangePlanError(str(exc), code="INVALID_STRUCTURED_CHANGE") from exc
-        config["writing_targets"] = targets
-        result = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
+        result = self._replace_writing_targets_block(source, targets)
+        try:
+            reparsed = yaml.safe_load(result)
+        except yaml.YAMLError as exc:
+            raise StructuredChangePlanError(
+                f"写作目标序列化失败: {exc}", code="INVALID_STRUCTURED_CHANGE"
+            ) from exc
+        if not isinstance(reparsed, dict) or reparsed.get("writing_targets") != targets:
+            raise StructuredChangePlanError(
+                "写作目标序列化结果无法回读为目标值", code="INVALID_STRUCTURED_CHANGE"
+            )
         return {
             "change_kind": "writing_targets",
             "change": dict(change),

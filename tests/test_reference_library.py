@@ -637,3 +637,36 @@ def test_reference_structure_ignores_prose_lines_starting_with_marker(tmp_path: 
         if unit["kind"] == "chapter"
     ]
     assert chapter_titles == ["第一章 雨夜", "第二章 回声"]
+
+
+def test_adoption_adapted_claim_override_is_accepted(tmp_path: Path):
+    project = tmp_path / "project"
+    library = tmp_path / "private-library"
+    init_project(project, "demo", "采纳覆盖测试")
+    service = ReferenceLibraryService(
+        library, project_root=project, novel_id="demo"
+    )
+    service.prepare(
+        "reference_claim",
+        _text("丙"),
+        title="丙参考",
+        relative_name="claim.txt",
+        input_budget_tokens=500,
+    )
+    service.confirm_structure("reference_claim")
+    service.analyze("reference_claim", analyzer=_analyzer)
+    profile = service.synthesize(["reference_claim"])
+    item = (profile.common_methods or profile.differences)[0]
+
+    preview = service.preview_adoption(
+        profile.profile_id,
+        [
+            {
+                "item_id": item.item_id,
+                "target": "style",
+                "adapted_claim": "改写后的可复用方法",
+            }
+        ],
+    )
+
+    assert preview.adoption.selections[0].claim == "改写后的可复用方法"

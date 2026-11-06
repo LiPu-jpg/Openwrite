@@ -273,6 +273,8 @@ def test_controlled_continuous_write_waits_for_confirmation_and_resumes(tmp_path
         ]
 
         resumed = app.confirm_task(task["task_id"], {})
+        repeated = app.confirm_task(task["task_id"], {})
+        assert repeated["task_id"] == resumed["task_id"]
         completed = _wait(app, resumed["task_id"], {"completed"})
         assert [item["chapter_id"] for item in completed["result"]["completed_chapters"]] == [
             "ch_001",

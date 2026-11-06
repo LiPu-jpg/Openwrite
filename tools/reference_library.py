@@ -412,13 +412,15 @@ class ReferenceLibraryService:
             if item is None:
                 raise SourceAnalysisError(f"画像候选不存在: {item_id}", code="INVALID_INPUT")
             payload = {
-                **raw,
+                key: value for key, value in raw.items() if key != "adapted_claim"
+            }
+            payload.update({
                 "item_id": item_id,
                 "claim": str(raw.get("adapted_claim") or item.claim).strip(),
                 "source_ids": item.source_ids,
                 "evidence": [e.model_dump(mode="json") for e in item.evidence],
                 "source_bound": item.source_bound,
-            }
+            })
             try:
                 selection = ReferenceAdoptionSelectionV1.model_validate(payload)
             except ValidationError as exc:
