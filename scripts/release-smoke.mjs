@@ -124,7 +124,12 @@ try {
   report.pluginVersion = installedVersion
   const presetId = `openwrite-${installedVersion.replace(/[^a-z0-9-]/g, '-')}`
   const presetYml = await readFile(join(env.DSH_HOME, '.agent-presets', presetId, 'agent.cordis.yml'), 'utf8')
-  assert.match(presetYml, /^preset: openwrite\s*$/m, 'the installed preset must declare the openwrite persona')
+  // The composition file must stay a top-level list of plugin rows: the host
+  // parses it with exactly that shape and reports any other document as broken,
+  // so a `preset:` key here would not declare the persona — it would make the
+  // whole preset unloadable. The persona ships as the plugin row that names it.
+  assert.match(presetYml, /^- id: persona$/m, 'the installed preset must declare a persona row')
+  assert.match(presetYml, /你是 OpenWrite 创作 Agent/, 'the installed preset must declare the openwrite persona')
   assert.equal((await fetch(base + '/studio-panel/runtime')).status, 401, 'runtime control requires host browser authentication')
   let html = ''
   for (let count = 0; count < 60; count++) {
