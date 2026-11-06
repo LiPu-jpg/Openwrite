@@ -591,3 +591,31 @@ def test_research_rejects_an_unsupported_quality_before_starting_the_child(tmp_p
             _FakeContext(),
         )
     assert error.value.code == "INVALID_INPUT"
+
+
+def test_research_preferences_are_global_and_need_no_project(tmp_path: Path):
+    server = create_server(tmp_path, port=0)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        opener = build_opener(ProxyHandler({}))
+        base = f"http://127.0.0.1:{server.server_port}"
+        with opener.open(f"{base}/api/research/preferences") as response:
+            payload = json.loads(response.read())
+        assert payload["ok"] is True
+        assert payload["data"]["schema_version"] == "openwrite.research-preferences.v1"
+        assert "search_providers" in payload["data"]["settings"]
+
+        request = __import__("urllib.request", fromlist=["Request"]).Request(
+            f"{base}/api/research/preferences",
+            data=json.dumps({"search_provider": "bocha"}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-OpenWrite-Studio": "1"},
+            method="POST",
+        )
+        with opener.open(request) as response:
+            saved = json.loads(response.read())
+        assert saved["data"]["settings"]["search_provider"] == "bocha"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

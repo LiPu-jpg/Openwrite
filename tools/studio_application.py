@@ -5993,6 +5993,25 @@ class StudioApplication:
         except ResearchServiceError as exc:
             raise StudioError(str(exc), code=exc.code, recoverable=True) from exc
 
+    def research_preferences(self) -> dict[str, Any]:
+        """Machine-global research search defaults, usable without a project."""
+        from tools.host_web import host_web_available
+
+        return {
+            "schema_version": "openwrite.research-preferences.v1",
+            "settings": self._research_settings_store.surface(),
+            "host_web_available": host_web_available(),
+        }
+
+    def save_research_preferences(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            self._research_settings_store.save(payload)
+        except ValueError as exc:
+            raise StudioError(str(exc), code="INVALID_RESEARCH_SETTINGS") from exc
+        except OSError as exc:
+            raise StudioError("研究搜索设置保存失败，请检查配置目录权限") from exc
+        return self.research_preferences()
+
     def save_research_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             self._research().save_settings(payload)

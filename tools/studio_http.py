@@ -94,6 +94,7 @@ POST_ROUTES = {
         "save_host_model_profile", requires_project=False, envelope=True
     ),
     "/api/research/settings": StudioPostRoute("save_research_settings", envelope=True),
+    "/api/research/preferences": StudioPostRoute("save_research_preferences", requires_project=False, envelope=True),
     "/api/project/init": StudioPostRoute("initialize_project", requires_project=False),
     "/api/project/open": StudioPostRoute("open_project", requires_project=False),
     "/api/project/delete": StudioPostRoute("delete_project", requires_project=False),
@@ -271,6 +272,7 @@ GET_ROUTES = frozenset(
         "/api/reading-order",
         "/api/reading-packet",
         "/api/research",
+        "/api/research/preferences",
         "/api/review/framework",
         "/api/revisions",
         "/api/scenes",
@@ -500,6 +502,9 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 self.app.require_project()
                 result = self.app.benchmark_run(benchmark_match.group("run_id"))
                 self._json(studio_success_payload(result, self.request_id))
+                return
+            if parsed.path == "/api/research/preferences":
+                self._json(studio_success_payload(self.app.research_preferences(), self.request_id))
                 return
             if parsed.path == "/api/research":
                 self.app.require_project()
