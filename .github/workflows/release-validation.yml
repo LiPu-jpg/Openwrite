@@ -160,7 +160,10 @@ jobs:
       - run: node scripts/release-check.mjs
       - run: node scripts/packaged-regressions.mjs
       - run: node packages/studio-panel/scripts/packaged-globals-browser.mjs
-      - run: node scripts/release-smoke.mjs --browser
+      # Accept the package the build job produced. This job never builds the
+      # working tree, so packing it here would ship a tarball without the
+      # compiled plugin and validate code that is not what gets published.
+      - run: node scripts/release-smoke.mjs dsh-openwrite-*.tgz --browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -227,7 +230,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-package
-      - run: node scripts/release-smoke.mjs --host-cli=.tmp-dsh-alpha/node_modules/@deepseek-ai/dsh/lib/bin.js --browser
+      - run: node scripts/release-smoke.mjs dsh-openwrite-*.tgz --host-cli=.tmp-dsh-alpha/node_modules/@deepseek-ai/dsh/lib/bin.js --browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:

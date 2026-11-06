@@ -187,34 +187,34 @@ try {
   assert.deepEqual(errors, [], 'client initialization and render errors')
   assert.deepEqual(httpFailures, [], 'no request failed during the browser acceptance')
   assert.deepEqual(errors, [], 'client initialization and render errors')
-  // The new-session selector must list the preset itself once. Aliases exist only
-  // for identities stored sessions still reference, and this acceptance home has
-  // none, so every extra entry is selector noise (issue #149).
-  const presetChip = page.getByRole('button', { name: /mode|模式|preset|预设/i }).first()
-  await presetChip.waitFor()
-  assert.ok(await presetChip.isVisible().catch(() => false), 'the preset chip is a visible control')
-  await presetChip.scrollIntoViewIfNeeded().catch(() => {})
-  await presetChip.dispatchEvent('click')
-  // The popover lists the roster; give it a moment to populate.
-  await page.waitForTimeout(500)
-  // The picker is a dialog; reading ambient body text before it renders would let
-  // a stray line satisfy the assertion, which is the false pass this check
-  // exists to prevent. A known host entry proves the picker really opened.
-  // The picker may render inline rather than as a dialog on some host builds, so
-  // accept either, but always prove it opened by a known host entry.
-  const picker = page.getByRole('dialog').last()
-  const dialogOpened = await picker.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)
-  const pickerText = await (dialogOpened ? picker : page.locator('body')).evaluate(node => node.innerText)
-  const presetEntries = pickerText.split('\n').filter(line => line.trim() === 'OpenWrite 创作')
-  assert.equal(presetEntries.length, 1, `the preset selector lists OpenWrite once: ${presetEntries.length}`)
-  // The host's own entries prove the picker really opened (issue #149 regression).
-  assert.doesNotMatch(pickerText, /历史会话|旧版/, 'no unreferenced release alias reaches the selector')
-  if (dialogOpened) {
-    // Close the picker only: a page-level Escape would also dismiss the launcher
-    // dialog the next step drives.
-    await page.keyboard.press('Escape')
-    await picker.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
-  }
+  // The preset roster must list the OpenWrite preset exactly once. Release
+  // identities (openwrite-0.2.x) are aliases for sessions that still exist;
+  // this acceptance home has none, so any extra entry is selector noise
+  // (issue #149).
+  //
+  // The workbench view replaces the host's new-session hero, so the seat that
+  // opens the roster never renders here: the active preset shows as the
+  // session header's read-only label, and the roster itself is reachable
+  // through the host's settings dialog.
+  const bodyText = await page.locator('body').innerText()
+  const named = bodyText.split('\n').filter(line => line.trim() === 'OpenWrite 创作')
+  assert.equal(named.length, 1, `the active preset is named once: ${named.length}`)
+  assert.doesNotMatch(bodyText, /历史会话|旧版/, 'no unreferenced release alias reaches the page')
+  // The host settings dialog owns the roster. Its trigger lives in the
+  // `settings.trigger` slot, whose label differs per locale.
+  const settingsTrigger = page.locator('[data-slot="settings.trigger"] button, [data-slot="settings.trigger"]').first()
+  await settingsTrigger.click({ timeout: 10_000 })
+  const roster = page.getByRole('dialog').last()
+  await roster.waitFor({ state: 'visible', timeout: 10_000 })
+  const rosterText = await roster.innerText()
+  const rosterLines = rosterText.split('\n').map(line => line.trim()).filter(Boolean)
+  const rosterIndex = rosterLines.findIndex(line => /^(Agent presets|智能体预设)$/.test(line))
+  assert.ok(rosterIndex >= 0, `the host settings dialog exposes the agent preset roster: ${rosterLines.slice(0, 8).join(' | ')}`)
+  const rosterEntries = rosterLines.filter(line => line === 'OpenWrite')
+  assert.equal(rosterEntries.length, 1, `the preset roster lists OpenWrite once: ${rosterEntries.length}`)
+  assert.doesNotMatch(rosterText, /历史会话|旧版/, 'no unreferenced release alias reaches the roster')
+  await page.keyboard.press('Escape')
+  await roster.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
   assert.deepEqual(JSON.parse(await readFile(join(profile, 'package.json'))).dsh.profile.bundles, manifest.dsh.profile.bundles)
   const result = { status: 'passed', host: hostVersion,
     artifactSha256: artifact ? createHash('sha256').update(await readFile(resolve(artifact))).digest('hex') : null,

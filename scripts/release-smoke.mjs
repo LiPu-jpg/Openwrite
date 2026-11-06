@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, mkdir, writeFile, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir, release as osRelease } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,10 +27,16 @@ const named = process.argv.find(arg => arg.endsWith('.tgz'))
 // Never fall back to whatever tarball is lying in the repo root: that file is
 // easy to leave stale, and this gate would then validate code that is not what
 // gets published (the stale root tarball still carried the openwrite-dog row and
-// vendor/dsh-dog). Pack the working tree instead.
-const artifact = named
-  ? resolve(named)
-  : resolve(await pack(root, version, await mkdtemp(join(tmpdir(), 'openwrite-pack-'))))
+// vendor/dsh-dog). Pack the working tree instead — unless the caller names an
+// artifact, which is how the CI jobs hand over the package the build job
+// produced. A named artifact that is not on disk is a caller error, not a
+// reason to silently validate a different one.
+const namedPath = named ? resolve(named) : null
+if (namedPath && !existsSync(namedPath)) {
+  throw new Error(`the named artifact does not exist: ${namedPath}`)
+}
+const artifact = namedPath
+  ?? resolve(await pack(root, version, await mkdtemp(join(tmpdir(), 'openwrite-pack-'))))
 const sourceSpec = process.argv.find(arg => arg.startsWith('github:'))
 const installSpec = sourceSpec ?? artifact
 const temporary = process.argv.includes('--reuse')
