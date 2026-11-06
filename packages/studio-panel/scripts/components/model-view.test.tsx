@@ -318,9 +318,10 @@ describe('ModelView independent Embedding contracts', () => {
     const api = makeEmbeddingApi()
     const { container } = await openEmbedding(api)
     fireEvent.change(passwordInputs(container)[0]!, { target: { value: FAKE_CREDENTIAL } })
+    const readsBeforeRefresh = api.fetchStudioApi.mock.calls.length
     fireEvent.click(screen.getByTitle('refresh'))
     expect(screen.getByText('models.unsavedChanges')).toBeTruthy()
-    expect(api.fetchStudioApi).toHaveBeenCalledTimes(1)
+    expect(api.fetchStudioApi).toHaveBeenCalledTimes(readsBeforeRefresh)
     fireEvent.click(screen.getByRole('button', { name: 'models.unsavedKeep' }))
     fireEvent.click(screen.getByRole('button', { name: 'models.new' }))
     expect(screen.getByText('models.unsavedChanges')).toBeTruthy()
@@ -1014,6 +1015,106 @@ describe('ModelView containing workspace navigation', () => {
     expect((screen.getByLabelText('models.label') as HTMLInputElement).value).toBe('Edited after registration')
     view.unmount()
     expect(onNavigationGuardChange).toHaveBeenLastCalledWith(null)
+  })
+})
+
+/**
+ * The model library is global, so its unsaved-draft slot is global too: the
+ * panel can be unmounted and mounted again (the host's settings dialog closes
+ * and reopens) without the author losing a half-written profile.
+ */
+describe('ModelView draft memory in the global slot', () => {
+  const credential = () => document.querySelector<HTMLInputElement>('input[type="password"]')!
+
+  it('restores the editor, the credential and the dirty route baseline after unmount', async () => {
+    const api = makeApi({ fetch: async () => TWO_PROFILES_PAYLOAD })
+    const view = renderView(api)
+    await screen.findByRole('button', { name: /Writer A/ })
+    fireEvent.click(screen.getByRole('button', { name: /Writer B/ }))
+    fireEvent.change(screen.getByLabelText('models.label'), { target: { value: 'Chat draft' } })
+    fireEvent.change(credential(), { target: { value: 'test-chat-key-memory-only' } })
+    fireEvent.change(screen.getByLabelText('models.route.review'), { target: { value: 'writer-a' } })
+    view.unmount()
+
+    renderView(api)
+    await screen.findByLabelText('models.label')
+    expect((screen.getByLabelText('models.label') as HTMLInputElement).value).toBe('Chat draft')
+    expect(credential().value).toBe('test-chat-key-memory-only')
+    expect((screen.getByLabelText('models.route.review') as HTMLSelectElement).value).toBe('writer-a')
+    expect((screen.getByLabelText('models.id') as HTMLInputElement).value).toBe('writer-b')
+  })
+
+  it('does not revive explicitly discarded editor drafts or credentials', async () => {
+    const api = makeApi({ fetch: async () => TWO_PROFILES_PAYLOAD })
+    const view = renderView(api)
+    await screen.findByRole('button', { name: /Writer A/ })
+    fireEvent.change(screen.getByLabelText('models.label'), { target: { value: 'Discard this draft' } })
+    fireEvent.change(credential(), { target: { value: 'test-discarded-key' } })
+    // Switching profile with unsaved edits asks first; discarding is explicit.
+    fireEvent.click(screen.getByRole('button', { name: /Writer B/ }))
+    expect(screen.getByText('models.unsavedChanges')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'models.unsavedDiscard' }))
+    view.unmount()
+
+    renderView(api)
+    await screen.findByLabelText('models.label')
+    // The discarded draft is gone; the profile the author switched to is not.
+    expect((screen.getByLabelText('models.label') as HTMLInputElement).value).toBe('Writer B')
+    expect(credential().value).toBe('')
+    expect((screen.getByLabelText('models.route.review') as HTMLSelectElement).value).toBe('writer-b')
+  })
+
+  it('clears a saved profile draft while retaining independent unsaved routes', async () => {
+    const api = makeApi({ fetch: async () => TWO_PROFILES_PAYLOAD })
+    const view = renderView(api)
+    await screen.findByRole('button', { name: /Writer A/ })
+    fireEvent.change(screen.getByLabelText('models.label'), { target: { value: 'Saved draft' } })
+    fireEvent.change(credential(), { target: { value: 'test-saved-key' } })
+    fireEvent.change(screen.getByLabelText('models.route.review'), { target: { value: 'writer-a' } })
+    fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
+    await screen.findByText('models.saved')
+    view.unmount()
+
+    renderView(api)
+    await screen.findByLabelText('models.label')
+    // The saved profile's own credential is gone; the route edit was never saved.
+    expect(credential().value).toBe('')
+    expect((screen.getByLabelText('models.route.review') as HTMLSelectElement).value).toBe('writer-a')
+  })
+
+  it('removes submitted credentials if the save finishes after its view unmounts', async () => {
+    const api = makeApi()
+    let release!: (value: unknown) => void
+    api.postStudioApi.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    const view = renderView(api)
+    await screen.findByRole('button', { name: /Writer A/ })
+    fireEvent.change(credential(), { target: { value: 'test-key-in-flight' } })
+    fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
+    view.unmount()
+    await act(async () => { release(envelope({})) })
+
+    renderView(api)
+    await screen.findByLabelText('models.label')
+    expect(credential().value).toBe('')
+  })
+
+  it('waits for an earlier save when the panel returns before that request completes', async () => {
+    const api = makeApi()
+    let release!: (value: unknown) => void
+    api.postStudioApi.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    const view = renderView(api)
+    await screen.findByRole('button', { name: /Writer A/ })
+    fireEvent.change(credential(), { target: { value: 'test-key-returned-while-saving' } })
+    fireEvent.click(screen.getByRole('button', { name: 'models.save' }))
+    view.unmount()
+
+    renderView(api)
+    expect(screen.getByText('loading')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'models.save' })).toBeNull()
+    await act(async () => { release(envelope({})) })
+    await screen.findByLabelText('models.label')
+    expect(credential().value).toBe('')
+    expect(api.postStudioApi).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -11,9 +11,11 @@
 .dialog button:disabled { opacity:.5; cursor:wait; }
 .dialog .primary { color:white; background:#416743; border-color:#416743; }
 .dialog progress { display:block; width:100%; margin:12px 0; accent-color:#608654; }
-.dialog details { margin-top:18px; font-size:13px; }
-.dialog summary { cursor:pointer; }
+.dialog details { margin-top:18px; font-size:13px; }.dialog summary { cursor:pointer; }
 .dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.dialog .pointer { margin:18px 0 0; padding-top:16px; border-top:1px solid var(--dsw-alias-border-l2); font-size:13px; }
 
 .path { display:flex; flex-direction:column; gap:6px; font-size:13px; margin:12px 0; }
 .path input { min-width:0; padding:10px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; color:inherit; background:var(--dsw-alias-bg-base); font:inherit; }
+.dialog ul { margin:8px 0 0; padding-left:18px; font-size:13px; }
+.dialog li { color:var(--dsw-alias-label-secondary); line-height:1.7; }

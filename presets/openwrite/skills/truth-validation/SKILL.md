@@ -35,7 +35,7 @@ Language: follow the author's current conversation language for responses and he
 
 | 工具 | 说明 |
 |------|------|
-| `validate_truth` | 验证真相文件与章节的一致性 |
+| `novel_continuity` | 连续性报告：未回收伏笔、人物状态漂移、时间线一致性 |
 
 ## 使用示例
 
@@ -44,10 +44,8 @@ Language: follow the author's current conversation language for responses and he
 ```
 用户: 检查一下最新章节有没有问题
 
-AI: 让我验证一下...
-[COMMAND] validate_truth {
-  "chapter_id": "latest"
-}
+AI: 让我读一下连续性报告……
+调用 `novel_continuity`（无参数，项目级）。
 
 结果:
 - ✅ 状态矛盾: 无
@@ -65,10 +63,9 @@ AI: 让我验证一下...
 ```
 用户: 第3章有没有逻辑问题？
 
-AI:
-[COMMAND] validate_truth {
-  "chapter_id": "ch_003"
-}
+AI: 逐章查需要章节级信号，调用 `novel_chapter_work(chapter_id="ch_003")`
+与 `novel_manuscript_metrics(chapter_id="ch_003")`，再对照 `novel_continuity`
+的项目级报告。`novel_continuity` 本身无参数，不能按章节过滤。
 
 结果:
 - ❌ 状态矛盾: 1个
@@ -86,8 +83,8 @@ AI:
 
 **修复**: 
 - 检查是否是穿越/传送情节
-- 如果是，更新真相文件中的位置
-- 如果不是，修复章节内容
+- 如果是，按 `novel_change_plan(action="structured", change_kind="asset")` 两阶段确认后更新设定
+- 如果不是，修订章节内容
 
 ### 2. 时间悖论
 
@@ -103,7 +100,7 @@ AI:
 
 **修复**:
 - 添加修炼/突破的场景
-- 或者回退真相文件中的状态
+- 或者按 `novel_change_plan(action="structured", change_kind="asset")` 回退设定中的状态
 
 ## 验证时机
 

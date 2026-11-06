@@ -60,77 +60,47 @@ assert.equal(registered.length, 0, 'host contributes no novel tools')
 await root.plugin(presetTools)
 const expected = [
   // reads, then writes — the registration order in src/tools.ts
-  'novel_embedding_profiles', 'novel_embedding_profile_save', 'novel_embedding_profile_select', 'novel_embedding_profile_delete',
-  'novel_status', 'novel_review_framework', 'novel_manuscript_acceptance', 'novel_trace_list', 'novel_context_preview', 'novel_outline_read',
-  'novel_reading_order', 'novel_reading_packet', 'novel_chapter_work',
-  'novel_scene_structure', 'novel_chapter_scenes', 'novel_scene_migration_preview', 'novel_assets_list',
-  'novel_search', 'novel_doc_read',
-  'novel_outline_edit', 'novel_reading_order_move', 'novel_scene_migration_apply',
-  'novel_scene_migration_rollback', 'novel_scene_update', 'novel_scene_move',
-  'novel_write_chapter', 'novel_review_chapter', 'novel_asset_update',
-  'novel_foreshadowing', 'novel_doc_write', 'novel_document_change_plan', 'novel_structured_change_plan', 'novel_focus',
-  'novel_export_preflight', 'novel_export',
-  // assets: create / read / packages
-  'novel_asset_read', 'novel_asset_create', 'novel_assets_package_export',
-  'novel_assets_package_preview', 'novel_assets_package_import',
-  // revisions
-  'novel_revisions_list', 'novel_revision_get', 'novel_revision_create_selection',
-  'novel_revision_create_from_review', 'novel_revision_apply', 'novel_revision_reject',
-  'novel_revision_regenerate',
-  // background tasks
-  'novel_tasks_list', 'novel_task_get', 'novel_task_create', 'novel_task_cancel',
-  'novel_task_retry', 'novel_task_confirm', 'novel_multi_write',
-  // project lifecycle
-  'novel_project_init', 'novel_project_open', 'novel_project_delete',
-  // chapters, documents, import, sync
-  'novel_chapter_delete', 'novel_chapter_delete_batch', 'novel_doc_create', 'novel_import_preview', 'novel_import',
-  'novel_manuscript_import_action', 'novel_project_archive_action', 'novel_project_archive_download',
-  'novel_sync', 'novel_settle_backfill', 'novel_writing_targets',
-  // continuity & diagnostics
-  'novel_continuity', 'novel_diagnostics',
-  // planning: chapter runs, rolling plans, forecasts, manuscript editing
-  'novel_chapter_run_action', 'novel_rolling_plan_action', 'novel_narrative_forecast_action',
-  'novel_manuscript_edit_action', 'novel_manuscript_acceptance_reconcile',
-  'novel_writing_assets', 'novel_manuscript_metrics', 'novel_outline_audit', 'novel_drift_entry', 'novel_arc_reconcile',
-  // style sources, reference library, runtime skills, rules
-  'novel_source_action', 'novel_reference_library_action', 'novel_runtime_skill_action',
-  'novel_rule_action',
-  // deep research
-  'novel_research_status', 'novel_research_report', 'novel_research_settings_save',
-  // model configuration
-  'novel_model_profiles', 'novel_model_benchmark', 'novel_model_configure', 'novel_model_test',
-  'novel_model_embedding_test', 'novel_model_profile_save', 'novel_model_profile_delete',
-  'novel_model_routes_save',
+  'novel_embedding_profiles', 'novel_status', 'novel_review_framework', 'novel_manuscript_acceptance',
+  'novel_trace_list', 'novel_context_preview', 'novel_outline_read', 'novel_reading_order',
+  'novel_reading_packet', 'novel_chapter_work', 'novel_scene', 'novel_chapter_scenes',
+  'novel_scene_migration', 'novel_assets', 'novel_search', 'novel_doc',
+  'novel_outline_edit', 'novel_write_chapter', 'novel_review_chapter', 'novel_foreshadowing',
+  'novel_change_plan', 'novel_focus', 'novel_export', 'novel_assets_package',
+  'novel_revision', 'novel_task', 'novel_multi_write', 'novel_project',
+  'novel_chapter_delete', 'novel_chapter_delete_batch', 'novel_import', 'novel_manuscript_import_action',
+  'novel_sync', 'novel_settle_backfill', 'novel_writing_targets', 'novel_continuity',
+  'novel_diagnostics', 'novel_chapter_run_action', 'novel_rolling_plan_action', 'novel_narrative_forecast_action',
+  'novel_manuscript_edit_action', 'novel_manuscript_acceptance_reconcile', 'novel_writing_assets', 'novel_manuscript_metrics',
+  'novel_outline_audit', 'novel_drift_entry', 'novel_arc_reconcile', 'novel_source_action',
+  'novel_reference_library_action', 'novel_runtime_skill_action', 'novel_rule_action', 'novel_research_status',
+  'novel_research_report', 'novel_research_settings_save', 'novel_model_profiles', 'novel_model_benchmark',
 ]
 assert.deepEqual(registered.map((t) => t.name), expected, 'registered novel_* tools')
 for (const tool of registered) {
   assert.ok(tool.description && tool.parameters && tool.output?.schema, `${tool.name} is fully defined`)
 }
 assert.match(
-  registered.find(tool => tool.name === 'novel_task_create')?.description ?? '',
+  registered.find(tool => tool.name === 'novel_task')?.description ?? '',
   /manuscript_reconcile/,
   'task creation documents durable manuscript reconciliation',
 )
 
-const documentPlanTool = registered.find(tool => tool.name === 'novel_document_change_plan')
-assert.ok(documentPlanTool, 'document change plan tool is registered')
+const changePlanTool = registered.find(tool => tool.name === 'novel_change_plan')
+assert.ok(changePlanTool, 'change plan tool is registered')
 await assert.rejects(
-  () => documentPlanTool.execute({ action: 'preview', path: 'src/story/background.md', edits: [] }, { signal: new AbortController().signal }),
+  () => changePlanTool.execute({ action: 'document', step: 'preview', path: 'src/story/background.md', edits: [] }, { signal: new AbortController().signal }),
   /between 1 and 50 edits/,
 )
 await assert.rejects(
-  () => documentPlanTool.execute({ action: 'apply' }, { signal: new AbortController().signal }),
+  () => changePlanTool.execute({ action: 'document', step: 'apply' }, { signal: new AbortController().signal }),
   /requires preview_token/,
 )
-
-const structuredPlanTool = registered.find(tool => tool.name === 'novel_structured_change_plan')
-assert.ok(structuredPlanTool, 'structured change plan tool is registered')
 await assert.rejects(
-  () => structuredPlanTool.execute({ action: 'preview', change: {} }, { signal: new AbortController().signal }),
+  () => changePlanTool.execute({ action: 'structured', step: 'preview', change: {} }, { signal: new AbortController().signal }),
   /requires change_kind/,
 )
 await assert.rejects(
-  () => structuredPlanTool.execute({ action: 'apply' }, { signal: new AbortController().signal }),
+  () => changePlanTool.execute({ action: 'structured', step: 'apply' }, { signal: new AbortController().signal }),
   /requires preview_token/,
 )
 
@@ -199,8 +169,8 @@ try {
 }
 
 const learnReadTool = registered.find(tool => tool.name === 'novel_source_action')
-const learnWriteTool = registered.find(tool => tool.name === 'novel_structured_change_plan')
-const learnAssetsTool = registered.find(tool => tool.name === 'novel_assets_list')
+const learnWriteTool = registered.find(tool => tool.name === 'novel_change_plan')
+const learnAssetsTool = registered.find(tool => tool.name === 'novel_assets')
 assert.ok(learnReadTool && learnWriteTool && learnAssetsTool, 'learn path tools are registered')
 const learnRequests = []
 const learnFetch = globalThis.fetch
@@ -217,11 +187,11 @@ try {
     error => error?.code === 'WORKSPACE_CONTEXT_MISSING' && error?.status === 400,
   )
   await assert.rejects(
-    () => learnWriteTool.execute({ action: 'preview', change_kind: 'focus', change: { goal: 'keep the hook' } }, execNoAgent),
+    () => learnWriteTool.execute({ action: 'structured', step: 'preview', change_kind: 'focus', change: { goal: 'keep the hook' } }, execNoAgent),
     error => error?.code === 'WORKSPACE_CONTEXT_MISSING' && error?.status === 400,
   )
   await assert.rejects(
-    () => learnAssetsTool.execute({}, execNoAgent),
+    () => learnAssetsTool.execute({ action: 'list' }, execNoAgent),
     error => error?.code === 'WORKSPACE_CONTEXT_MISSING' && error?.status === 400,
   )
   assert.equal(learnRequests.length, 0, 'learn path must not reach Studio without Workspace context')
@@ -253,7 +223,7 @@ assert.equal(new URL(benchmarkRequests[3].url).pathname, '/api/benchmarks/option
 assert.equal(benchmarkRequests[3].init.method, 'GET')
 assert.equal(benchmarkRequests[3].init.body, undefined, 'DAG options must be read-only and need no writer/reviewer selections')
 
-const exportPreflightTool = registered.find(tool => tool.name === 'novel_export_preflight')
+const exportPreflightTool = registered.find(tool => tool.name === 'novel_export')
 assert.ok(exportPreflightTool, 'export preflight tool is registered')
 const exportPreflightRequests = []
 const exportPreflightFetch = globalThis.fetch
@@ -271,9 +241,9 @@ globalThis.fetch = async (input, init = {}) => {
   }), { status: 200, headers: { 'content-type': 'application/json' } })
 }
 try {
-  assert.deepEqual(await exportPreflightTool.execute({ format: 'epub', purpose: 'backup' }, {
+  assert.deepEqual(await exportPreflightTool.execute({ action: 'preflight', format: 'epub', purpose: 'backup' }, {
     ...exec,
-    name: 'novel_export_preflight',
+    name: 'novel_export',
   }), {
     schema_version: 'openwrite.export-preflight.v1',
     format: 'epub',
@@ -301,18 +271,18 @@ assert.equal(exportPreflightRequests[0].init.method, 'GET')
     })
   }
   try {
-    await registered.find(tool => tool.name === 'novel_reading_order').execute({}, { ...exec, name: 'novel_reading_order' })
+    await registered.find(tool => tool.name === 'novel_reading_order').execute({ action: 'get' }, { ...exec, name: 'novel_reading_order' })
     await registered.find(tool => tool.name === 'novel_reading_packet').execute({
       document_id: 'doc_0123456789abcdef01234567', before: 2, after: 3,
     }, { ...exec, name: 'novel_reading_packet' })
     await registered.find(tool => tool.name === 'novel_chapter_work').execute({
       chapter_id: 'ch_003', document_id: 'doc_0123456789abcdef01234567', recent_limit: 7,
     }, { ...exec, name: 'novel_chapter_work' })
-    await registered.find(tool => tool.name === 'novel_scene_structure').execute({}, { ...exec, name: 'novel_scene_structure' })
+    await registered.find(tool => tool.name === 'novel_scene').execute({ action: 'structure' }, { ...exec, name: 'novel_scene' })
     await registered.find(tool => tool.name === 'novel_chapter_scenes').execute({
       chapter_id: 'ch_003',
     }, { ...exec, name: 'novel_chapter_scenes' })
-    await registered.find(tool => tool.name === 'novel_scene_migration_preview').execute({}, { ...exec, name: 'novel_scene_migration_preview' })
+    await registered.find(tool => tool.name === 'novel_scene_migration').execute({ action: 'preview' }, { ...exec, name: 'novel_scene_migration' })
   } finally {
     globalThis.fetch = workbenchFetch
   }
@@ -387,7 +357,10 @@ const configRoute = routes.find(route => route.path === '/studio-panel/config.js
 const configResponse = capture()
 await configRoute.handler({ method: 'GET' }, configResponse)
 assert.equal(configResponse.status, 200)
-assert.deepEqual(JSON.parse(configResponse.body), { studioUrl: resolved.baseUrl })
+// `managed` states whether a static studioUrl is meaningful: in managed mode the
+// real backend is the one connect() resolves, and this smoke runs external.
+const config = JSON.parse(configResponse.body)
+assert.deepEqual(config, { studioUrl: resolved.baseUrl, managed: false })
 
 const invalidationRoute = routes.find(route => route.path === '/studio-panel/invalidation.json')
 const eventsRoute = routes.find(route => route.path === '/studio-panel/events')
@@ -583,6 +556,16 @@ try {
   }, modelProxyResponse)
   assert.equal(modelProxyResponse.status, 200)
   assert.equal(new URL(proxyRequests[2].url).pathname, '/api/model/routes')
+  // The host settings dialog has no workspace bound: a global path must
+  // answer without one instead of refusing for a missing workspace id.
+  const globalModelResponse = capture()
+  await proxyRoute.handler({
+    method: 'POST',
+    url: '/studio-panel/api/model/routes',
+    headers: {},
+    async *[Symbol.asyncIterator]() { yield Buffer.from('{"routes":{}}') },
+  }, globalModelResponse)
+  assert.equal(globalModelResponse.status, 200)
   // The enveloped M1c model POST response passes through the proxy verbatim.
   const modelRoutesBody = JSON.parse(modelProxyResponse.body)
   assert.equal(modelRoutesBody.ok, true)
@@ -1049,7 +1032,7 @@ assert.ok(acceptanceReconcileTool, 'manuscript acceptance reconcile tool is regi
 }
 
 const manuscriptImportTool = registered.find(tool => tool.name === 'novel_manuscript_import_action')
-const projectArchiveTool = registered.find(tool => tool.name === 'novel_project_archive_action')
+const projectArchiveTool = registered.find(tool => tool.name === 'novel_project')
 assert.ok(manuscriptImportTool, 'resumable manuscript import tool is registered')
 assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
 {
@@ -1072,13 +1055,13 @@ assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
     await manuscriptImportTool.execute({ action: 'confirm', import_id: importId, expected_preview_revision: 'sha256:preview', confirm: true }, importExec)
     await manuscriptImportTool.execute({ action: 'run', import_id: importId }, importExec)
     await manuscriptImportTool.execute({ action: 'discard', import_id: importId, confirm: true }, importExec)
-    const archiveExec = { ...exec, name: 'novel_project_archive_action' }
-    await projectArchiveTool.execute({ action: 'preflight' }, archiveExec)
-    await projectArchiveTool.execute({ action: 'list' }, archiveExec)
-    await projectArchiveTool.execute({ action: 'get', archive_id: archiveId }, archiveExec)
-    await projectArchiveTool.execute({ action: 'create', expected_preflight_revision: 'sha256:preflight' }, archiveExec)
-    await projectArchiveTool.execute({ action: 'restore_preview', archive_id: archiveId, target_root: '/tmp/restored', reference_policy: 'rewrite_novel_id', target_novel_id: 'restored' }, archiveExec)
-    await projectArchiveTool.execute({ action: 'restore', archive_id: archiveId, target_root: '/tmp/restored', reference_policy: 'rewrite_novel_id', target_novel_id: 'restored', archive_sha256: 'sha256:archive', confirm: true }, archiveExec)
+    const archiveExec = { ...exec, name: 'novel_project' }
+    await projectArchiveTool.execute({ action: 'archive', archive_op: 'preflight' }, archiveExec)
+    await projectArchiveTool.execute({ action: 'archive', archive_op: 'list' }, archiveExec)
+    await projectArchiveTool.execute({ action: 'archive', archive_op: 'get', archive_id: archiveId }, archiveExec)
+    await projectArchiveTool.execute({ action: 'archive', archive_op: 'create', expected_preflight_revision: 'sha256:preflight' }, archiveExec)
+    await projectArchiveTool.execute({ action: 'archive', archive_op: 'restore_preview', archive_id: archiveId, target_root: '/tmp/restored', reference_policy: 'rewrite_novel_id', target_novel_id: 'restored' }, archiveExec)
+    await projectArchiveTool.execute({ action: 'archive', archive_op: 'restore', archive_id: archiveId, target_root: '/tmp/restored', reference_policy: 'rewrite_novel_id', target_novel_id: 'restored', archive_sha256: 'sha256:archive', confirm: true }, archiveExec)
   } finally {
     globalThis.fetch = transferFetch
   }
@@ -1207,7 +1190,7 @@ assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
     assert.equal(requests[0].body.type, 'chapter_write')
     assert.equal(requests[0].body.input.run_id_v2, 'runv2_saved')
     assert.equal('target_words' in requests[0].body.input, false, 'omitted target must reach the outline resolver')
-    await documentPlanTool.execute({ action: 'preview', path: 'src/outline.md', edits: [
+    await changePlanTool.execute({ action: 'document', step: 'preview', path: 'src/outline.md', edits: [
       { old_text: 'first', new_text: 'one' }, { old_text: 'second', new_text: 'two' },
     ] }, run)
     assert.equal(requests[1].body.edits.length, 2)
@@ -1218,11 +1201,11 @@ assert.ok(projectArchiveTool, 'project archive lifecycle tool is registered')
       [{ start_text: '> 唯一原文', end_text: '## 下一节', end_inclusive: false, new_text: '替换\r\n' }],
     ]) {
       for (const encoded of [edits, JSON.stringify(edits)]) {
-        await documentPlanTool.execute({ action: 'preview', path: 'src/world/rules.md', edits: encoded }, run)
+        await changePlanTool.execute({ action: 'document', step: 'preview', path: 'src/world/rules.md', edits: encoded }, run)
         assert.deepEqual(requests.at(-1).body.edits, edits)
       }
     }
-    await assert.rejects(() => documentPlanTool.execute({ action: 'apply', preview_token: 'token', confirm: false }, run), /confirm: true/)
+    await assert.rejects(() => changePlanTool.execute({ action: 'document', step: 'apply', preview_token: 'token', confirm: false }, run), /confirm: true/)
     globalThis.fetch = async () => new Response(JSON.stringify({
       error: { code: 'STALE_ACCEPTED_REVISION', message: 'Reconcile the pending operation', details: { operation_id: 'accept_1' } },
       request_id: 'req_example',
@@ -1263,7 +1246,7 @@ globalThis.fetch = async (input, init = {}) => {
 try {
   await registered.find(tool => tool.name === 'novel_context_preview').execute({ chapter: 'ch_001', include_agent_payload: true }, exec)
   assert.equal(issue109Requests.find(request => request.url.pathname === '/api/context').url.searchParams.get('include_agent_payload'), 'true')
-  await registered.find(tool => tool.name === 'novel_asset_update').execute({ kind: 'character', id: 'hero', revision: 'fresh', data: { related: [] }, related_mode: 'replace' }, exec)
+  await registered.find(tool => tool.name === 'novel_assets').execute({ action: 'update', kind: 'character', id: 'hero', revision: 'fresh', data: { related: [] }, related_mode: 'replace' }, exec)
   assert.equal(issue109Requests.find(request => request.url.pathname === '/api/assets/update').body.related_mode, 'replace')
 } finally {
   globalThis.fetch = issue109Fetch

@@ -5,10 +5,10 @@ on:
     paths-ignore:
       - 'README.md'
       - 'docs/**/*.md'
+  # No paths-ignore here: this workflow is the only consumer of
+  # `npm run docs:check`, which is what catches a doc that names a tool that no
+  # longer exists. Ignoring docs-only PRs made that gate unreachable.
   pull_request:
-    paths-ignore:
-      - 'README.md'
-      - 'docs/**/*.md'
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,9 +29,9 @@ jobs:
             package-lock.json
             packages/openwrite-bridge/package-lock.json
             packages/studio-panel/package-lock.json
+      - uses: ./.github/actions/ci-setup
       - run: npm install --global pnpm@9.15.9
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix packages/openwrite-bridge --no-audit --no-fund
       - run: npm ci --prefix packages/studio-panel --no-audit --no-fund
-      - run: npm ci --prefix vendor/dsh-dog --ignore-scripts --no-audit --no-fund
       - run: npm run check:plugin

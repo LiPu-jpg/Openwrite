@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type { JsonValue } from './client.js'
 import { validateReviewV2Decision } from './contracts-generated.js'
-import { assertContained, assertWorkspaceRootMatch } from './dog-delivery.js'
+import { assertContained, assertWorkspaceRootMatch, atomicWrite } from './dog-delivery.js'
 
 type RecordValue = Record<string, unknown>
 
@@ -151,6 +151,11 @@ export function instantiateDogReviewFramework(
       title: titleTemplate.replaceAll('{chapter_id}', chapterId),
       constraint: template['constraint'],
       target: `${prefix}/${artifact}`,
+      // Inert, server-declared metadata: the framework names a `script` such as
+      // "review-record"/"review-dimension" as a verification *stage kind*. The
+      // `scripts/dog/*.js` files that once implemented those names were removed
+      // with the vendored DoG engine; nothing in this plugin resolves or executes
+      // the value, so it is forwarded verbatim for contract compatibility.
       verifier: template['verifier'],
     }
     if (template['completion'] !== undefined) node['completion'] = template['completion']
@@ -380,6 +385,11 @@ export async function materializeDogReview(response: unknown, chapterId: string,
   if (expectedRoot !== undefined) assertWorkspaceRootMatch(root, expectedRoot)
   try { if (!(await stat(root)).isDirectory()) throw new Error('not a directory') } catch { throw new Error(`invalid project root: ${root}`) }
 
+  // Contain the derived path before touching the filesystem: `novelId` comes
+  // straight from the Studio payload. dog-delivery.ts asserts first and reads
+  // second; doing it the other way round walks outside the project root first.
+  const reviewDir = join(root, 'data', 'novels', novelId, 'data', 'dog', 'reviews', chapterId)
+  assertContained(reviewDir, root)
   const { manifest, dimensionRecords } = buildDogReviewBundle(review, chapterId, threshold)
   // The artifact records retain the exact blueprint identity so a historical
   // review can always be explained against the topology that produced it.
@@ -402,7 +412,9 @@ export async function materializeDogReview(response: unknown, chapterId: string,
   const directory = join(root, relativeDir)
   assertContained(directory, root)
   await mkdir(directory, { recursive: true })
-  const write = async (name: string, value: unknown) => writeFile(join(directory, name), `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  // Atomic per-file writes: a crash mid-run must not leave a truncated JSON that
+  // a later read classifies as "DoG artifact corrupt JSON" (dog-delivery.ts:38).
+  const write = (name: string, value: unknown) => atomicWrite(join(directory, name), value)
   await write('review.json', manifest)
   await write('context.json', {
     schemaVersion: 'dsh-novel.review.context.v2', recordType: 'review-context', chapterId,

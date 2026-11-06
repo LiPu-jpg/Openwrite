@@ -116,11 +116,13 @@ describe('Operations export preflight', () => {
     fireEvent.click(screen.getByRole('button', { name: 'tools.export.download' }))
 
     await waitFor(() => expect(downloadFetch).toHaveBeenCalled())
-    const url = new URL(String(downloadFetch.mock.calls[0]?.[0]), 'http://local.test')
-    expect(url.pathname).toBe('/studio-panel/api/export')
-    expect(url.searchParams.get('format')).toBe('epub')
-    expect(url.searchParams.get('purpose')).toBe('backup')
-    expect(url.searchParams.get('preflight_revision')).toBe('pf-current-9')
+    // The workbench also polls companion status; the export call is the one that matters.
+    const download = downloadFetch.mock.calls.map(args => new URL(String(args[0]), 'http://local.test'))
+      .find(url => url.pathname === '/studio-panel/api/export')
+    expect(download?.pathname).toBe('/studio-panel/api/export')
+    expect(download?.searchParams.get('format')).toBe('epub')
+    expect(download?.searchParams.get('purpose')).toBe('backup')
+    expect(download?.searchParams.get('preflight_revision')).toBe('pf-current-9')
   })
 
   it('refreshes the preflight after a download revision conflict', async () => {

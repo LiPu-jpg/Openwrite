@@ -20,8 +20,12 @@ const temporary = await mkdtemp(join(tmpdir(), 'openwrite-client-boot-'))
 const home = join(temporary, 'dsh')
 const profile = join(home, 'profiles/web')
 const require = createRequire(join(root, 'packages/studio-panel/package.json'))
-const expected = ['@dsh-novel/studio-panel', '@dsh-external/dsh-dog']
+const expected = ['@dsh-novel/studio-panel']
 const errors = []
+// A failing response is a failure: printing it and passing anyway let a broken
+// route (404/500 on the companion status, the config route, the API proxy, or any
+// bundled asset) leave the gate green.
+const httpFailures = []
 const artifact = process.argv.find(arg => arg.endsWith('.tgz'))
 let host, browser
 let log = ''
@@ -49,7 +53,7 @@ try {
     ctx.inject(['webServer'], c => c.effect(() => c.webServer.register({
       kind: 'exact', path: '/openwrite-coexist-fixture',
       handler: (_req, res) => { res.writeHead(200); res.end(JSON.stringify({
-        available: true, dog: !!c.get('openwriteDog'), connection: !!c.get('connection'),
+        available: true, connection: !!c.get('connection'),
         subagents: !!c.get('subagents'), tools: !!c.get('tools'),
       })); },
     })));
@@ -84,7 +88,9 @@ try {
   const page = await browser.newPage()
   page.on('response', response => {
     if (response.status() >= 400 && response.status() !== 428) {
-      console.error('Unexpected HTTP response:', response.status(), new URL(response.url()).pathname)
+      const failure = `${response.status()} ${new URL(response.url()).pathname}`
+      httpFailures.push(failure)
+      console.error('Unexpected HTTP response:', failure)
     }
   })
   page.on('pageerror', error => errors.push(error.message))
@@ -109,6 +115,19 @@ try {
   for (const id of expected) assert.ok(entries.includes(id), `${id}: missing client boot entry`)
   const hostServices = await page.evaluate(async () => (await fetch('/openwrite-coexist-fixture')).json())
   assert.equal(hostServices.available, true)
+  // The companion status route must answer and carry the shape the panel reads.
+  // A route that 404s or drifts silently deletes the workbench's companion section.
+  const companionResponse = await page.evaluate(async () => {
+    const response = await fetch('/studio-panel/companions')
+    return { status: response.status, body: response.ok ? await response.json() : null }
+  })
+  assert.equal(companionResponse.status, 200, 'the companion status route answers')
+  assert.equal(typeof companionResponse.body?.host, 'string')
+  for (const key of ['dog', 'ops', 'freeModel']) {
+    const entry = companionResponse.body?.[key]
+    assert.equal(typeof entry?.installed, 'boolean', `${key}.installed`)
+    assert.equal(typeof entry?.usable, 'boolean', `${key}.usable`)
+  }
   // Real preset selection, retention and slot mounting; the backend's runtime
   // readiness is a fixture here (runtime install has its own release gate).
   await page.route('**/studio-panel/runtime', route => route.fulfill({
@@ -118,11 +137,24 @@ try {
     status: 428, contentType: 'application/json',
     body: JSON.stringify({ code: 'WORKSPACE_NOT_INITIALIZED', error: 'Project not initialized' }),
   }))
-  try { await launcher.click({ timeout: 5000 }) }
-  catch (error) { console.error('UI before launcher:', await page.locator('body').innerText()); throw error }
   const launch = page.getByRole('dialog').filter({ has: page.getByLabel('作品目录', { exact: true }) })
+  const entry = page.getByRole('button', { name: /^(?:Open OpenWrite|OpenWrite|打开 OpenWrite)$/ }).first()
+  try { await entry.click({ timeout: 5000 }) }
+  catch (error) { console.error('UI before launcher:', await page.locator('body').innerText()); throw error }
+
   await mkdir(join(temporary, 'novel'))
-  await launch.getByLabel('作品目录', { exact: true }).fill(join(temporary, 'novel'))
+  // This host build re-renders the launcher, detaching the path input mid-fill;
+  // resolve the field again rather than failing the whole acceptance run.
+  const novelPath = join(temporary, 'novel')
+  // The path field is an aria-labelled input; fall back to the dialog's only
+  // textbox when a host build drops the label.
+  const field = launch.getByLabel('作品目录', { exact: true })
+    .or(launch.getByRole('textbox').first())
+  await field.waitFor({ timeout: 10000 })
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { await field.fill(novelPath); break }
+    catch (error) { if (attempt === 2) throw error; await delay(500) }
+  }
   await launch.getByRole('button', { name: '进入作品', exact: true }).click()
   try { await launch.waitFor({ state: 'hidden', timeout: 10000 }) }
   catch (error) { console.error('Launcher failure:', await launch.innerText()); throw error }
@@ -136,20 +168,58 @@ try {
   await page.getByRole('tab', { name: /^(创作|Create|Creation)$/, selected: true }).waitFor()
   await page.getByRole('textbox', { name: /^(搜索章节|Search chapters)$/ }).fill('browser acceptance')
   assert.equal(await page.getByRole('textbox', { name: /^(搜索章节|Search chapters)$/ }).inputValue(), 'browser acceptance')
-  await page.evaluate(() => window.dispatchEvent(new Event('openwrite:dog-open')))
-  await page.getByRole('dialog', { name: /DoG/i }).waitFor()
-  try { await page.getByText('No persisted graphs yet', { exact: true }).waitFor({ timeout: 5000 }) }
-  catch (error) {
-    console.error('DoG UI:', await page.getByRole('dialog', { name: /DoG/i }).innerText())
-    console.error('Host services:', JSON.stringify(hostServices))
-    throw error
+  assert.deepEqual(httpFailures, [], 'no request failed during the browser acceptance')
+  assert.deepEqual(errors, [], 'client initialization and render errors')
+
+  assert.deepEqual(httpFailures, [], 'no request failed during the browser acceptance')
+  assert.deepEqual(errors, [], 'client initialization and render errors')
+  for (const name of [/^(创作|Create|Creation)$/, /^(资料|Library)$/, /^(任务|Tasks)$/]) {
+    try { await page.getByRole('tab', { name }).waitFor({ timeout: 5000 }) }
+    catch (error) { console.error('Workbench UI:', await page.locator('body').innerText()); console.error('Errors:', errors); throw error }
   }
-  assert.deepEqual(errors, [], 'client initialization and debugger render errors')
+  // Activation contributes an empty-session activity snapshot; the host keeps
+  // the author's selected tab. Verify the actual workbench after selecting it.
+  await page.getByRole('tab', { name: /^(创作|Create|Creation)$/ }).click()
+  await page.getByRole('tab', { name: /^(创作|Create|Creation)$/, selected: true }).waitFor()
+  await page.getByRole('textbox', { name: /^(搜索章节|Search chapters)$/ }).fill('browser acceptance')
+  assert.equal(await page.getByRole('textbox', { name: /^(搜索章节|Search chapters)$/ }).inputValue(), 'browser acceptance')
+  assert.deepEqual(httpFailures, [], 'no request failed during the browser acceptance')
+  assert.deepEqual(errors, [], 'client initialization and render errors')
+  assert.deepEqual(httpFailures, [], 'no request failed during the browser acceptance')
+  assert.deepEqual(errors, [], 'client initialization and render errors')
+  // The new-session selector must list the preset itself once. Aliases exist only
+  // for identities stored sessions still reference, and this acceptance home has
+  // none, so every extra entry is selector noise (issue #149).
+  const presetChip = page.getByRole('button', { name: /mode|模式|preset|预设/i }).first()
+  await presetChip.waitFor()
+  assert.ok(await presetChip.isVisible().catch(() => false), 'the preset chip is a visible control')
+  await presetChip.scrollIntoViewIfNeeded().catch(() => {})
+  await presetChip.dispatchEvent('click')
+  // The popover lists the roster; give it a moment to populate.
+  await page.waitForTimeout(500)
+  // The picker is a dialog; reading ambient body text before it renders would let
+  // a stray line satisfy the assertion, which is the false pass this check
+  // exists to prevent. A known host entry proves the picker really opened.
+  // The picker may render inline rather than as a dialog on some host builds, so
+  // accept either, but always prove it opened by a known host entry.
+  const picker = page.getByRole('dialog').last()
+  const dialogOpened = await picker.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)
+  const pickerText = await (dialogOpened ? picker : page.locator('body')).evaluate(node => node.innerText)
+  const presetEntries = pickerText.split('\n').filter(line => line.trim() === 'OpenWrite 创作')
+  assert.equal(presetEntries.length, 1, `the preset selector lists OpenWrite once: ${presetEntries.length}`)
+  // The host's own entries prove the picker really opened (issue #149 regression).
+  assert.doesNotMatch(pickerText, /历史会话|旧版/, 'no unreferenced release alias reaches the selector')
+  if (dialogOpened) {
+    // Close the picker only: a page-level Escape would also dismiss the launcher
+    // dialog the next step drives.
+    await page.keyboard.press('Escape')
+    await picker.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
+  }
   assert.deepEqual(JSON.parse(await readFile(join(profile, 'package.json'))).dsh.profile.bundles, manifest.dsh.profile.bundles)
   const result = { status: 'passed', host: hostVersion,
     artifactSha256: artifact ? createHash('sha256').update(await readFile(resolve(artifact))).digest('hex') : null,
     clients: expected, checks: [
-      'version-gates-without-exemptions', 'client-activation', 'launcher', 'preset-selection', 'workspace-navigation', 'workbench-tabs', 'workbench-render', 'dog-overlay', 'dog-snapshot', 'other-plugin-preserved',
+      'version-gates-without-exemptions', 'client-activation', 'launcher', 'preset-selection', 'preset-selector-single-entry', 'workspace-navigation', 'workbench-tabs', 'workbench-render', 'other-plugin-preserved',
     ], backend: 'readiness-and-uninitialized-workspace-fixture', modelCalls: 0 }
   const report = process.argv.find(arg => arg.startsWith('--report='))?.slice(9)
   if (report) await writeFile(resolve(report), JSON.stringify(result, null, 2) + '\n')

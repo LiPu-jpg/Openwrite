@@ -13,14 +13,14 @@ Language: follow the author's current conversation language for responses and he
 
 1. `novel_status` 确认当前作品。
 2. 风格与提取源：`novel_source_action`（`status_v2` / `profile_v2`）。
-3. 已登记钩子：`novel_assets_list`，必要时 `novel_asset_read`。
+3. 已登记钩子：`novel_assets(action="list"`，必要时 `novel_assets(action="read", kind="character"|"world"|"progression", id=…)`。
 
 没有 Workspace（session cwd 缺失）时这些工具返回 `WORKSPACE_CONTEXT_MISSING`，不要改写全局或别的项目。
 
 ## 写入（预览/确认）
 
-- 作者偏好、必须保留/避免：`novel_structured_change_plan(change_kind="focus")`。
-- 成功钩子与可复用写法：`novel_source_action` extract/review，晋升用 `promote_v2` 且作者确认后 `confirm: true`；登记为资产时用 `novel_structured_change_plan(change_kind="asset")`。
+- 作者偏好、必须保留/避免：`novel_change_plan(action="structured"(change_kind="focus")`。
+- 成功钩子与可复用写法：`novel_source_action` extract/review，晋升用 `promote_v2` 且作者确认后 `confirm: true`；登记为资产时用 `novel_change_plan(action="structured"(change_kind="asset")`。
 - 普通讨论不得写入。
 
 细则见 style-system。不要另建记忆文件。

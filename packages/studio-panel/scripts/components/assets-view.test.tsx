@@ -1,5 +1,7 @@
 import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AssetsView } from '../../src/client/AssetsView.tsx'
 
@@ -57,5 +59,60 @@ describe('AssetsView per-asset revision locks', () => {
     await waitFor(() => expect(api.postStudioApi).toHaveBeenLastCalledWith('/assets/update', {
       kind: 'character', id: 'a', revision: 'revision-a-saved', data: { summary: 'Full summary' }, body_markdown: '',
     }))
+  })
+})
+
+function emptyApi() {
+  const fetchStudioApi = vi.fn(async (path: string) => {
+    if (path === '/assets') return { data: { assets: [] } }
+    if (path === '/workspace') return { data: {} }
+    return { data: {} }
+  })
+  const postStudioApi = vi.fn(async () => ({ data: {} }))
+  return { fetchStudioApi, postStudioApi, t: (key: string) => key }
+}
+
+describe('AssetsView empty main pane', () => {
+  // Vitest stubs CSS modules to empty objects, so the dedicated empty-state
+  // styling cannot be asserted from the DOM. Pin it in the source instead:
+  // reusing the generic `.notice` is what made the pane look blank.
+  it('does not style the empty pane with the generic notice', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/client/AssetsView.tsx'), 'utf-8')
+    const branch = source.slice(source.indexOf("if (selected === null) {"), source.indexOf("if (selected.startsWith('doc:'))"))
+    expect(branch).toContain('css.mainEmpty')
+    expect(branch).not.toContain('css.notice')
+  })
+
+  it('explains the empty pane instead of one grey line', async () => {
+    // The old state was a single `.notice` line at the top of a ~700px pane,
+    // which reads as a rendering failure rather than an empty section.
+    const api = emptyApi()
+    render(<AssetsView {...(api as never)} />)
+
+    expect(await screen.findByText('assets.emptyTitle')).toBeTruthy()
+    expect(screen.getByText('assets.emptyHint')).toBeTruthy()
+    expect(screen.queryByText('assets.selectHint')).toBeNull()
+  })
+
+  it('offers the create action for cardable segments', async () => {
+    const api = emptyApi()
+    render(<AssetsView {...(api as never)} />)
+
+    const create = await screen.findByRole('button', { name: 'assets.create.open' })
+    expect((create as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(create)
+    // NewAssetForm is mocked to null, so only assert nothing was posted.
+    await act(async () => { await Promise.resolve() })
+    expect(api.postStudioApi).not.toHaveBeenCalled()
+  })
+
+  it('points at the agent tools for read-only segments', async () => {
+    const api = emptyApi()
+    render(<AssetsView {...(api as never)} />)
+    await screen.findByText('assets.emptyTitle')
+
+    fireEvent.click(screen.getByRole('button', { name: /references/i }))
+    expect(await screen.findByText('assets.emptyAgent')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'assets.create.open' })).toBeNull()
   })
 })

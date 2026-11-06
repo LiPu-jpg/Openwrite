@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { BookMarked, Boxes, FlaskConical, Network, Search } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -27,6 +27,9 @@ export function LibraryView(props: LibraryViewProps) {
     setAssetDraft({ contextEpoch: workbench.contextEpoch, ...state })
   }, [workbench.contextEpoch])
   const currentDraft = assetDraft.contextEpoch === workbench.contextEpoch && mode === 'assets' ? assetDraft : null
+  // A context switch unmounts the discard dialog (its epoch guard below); clear
+  // the pending intent too, or it outlives the dialog and the click is lost.
+  useEffect(() => { setPendingMode(null) }, [workbench.contextEpoch])
   useBindStudioContext({ sessionId: props.sessionId, useWorkspaces: props.useWorkspaces })
   const items = [
     { id: 'assets' as const, icon: Boxes, label: props.t('view.assets') },
@@ -36,7 +39,17 @@ export function LibraryView(props: LibraryViewProps) {
     { id: 'search' as const, icon: Search, label: props.t('view.search') },
   ]
   return (
-    <div className={css.workspaceRoot}>
+    // The host opts into its floating composer when the mounted view carries
+    // `data-conversation-composer-overlay` (its trajectory view does the same).
+    // Without it the host reserves the composer's band out of the content area,
+    // and the workbench stops short of the viewport bottom with a bare strip
+    // of page background under the composer — a flat white slab, not a
+    // composer floating over the workbench.
+    //
+    // `data-openwrite-workspace` is our own marker: while it is mounted the
+    // host's composer seat is hidden (see workspace-chrome.ts), because a
+    // centered composer card would cover the workbench's own content.
+    <div className={css.workspaceRoot} data-openwrite-workspace="" data-conversation-composer-overlay="">
       <nav className={css.workspaceNav} aria-label={props.t('view.library')}>
         {items.map(item => <button key={item.id} type="button" data-active={mode === item.id} aria-current={mode === item.id ? 'page' : undefined}
           disabled={currentDraft?.busy === true && mode !== item.id} onClick={() => {

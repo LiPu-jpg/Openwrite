@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BookOpen, ExternalLink, MoreHorizontal, RefreshCw } from 'lucide-react'
+import { BookOpen, MoreHorizontal, RefreshCw } from 'lucide-react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StudioApiInjected } from './api.ts'
 import { useWorkbench, workbenchStore } from './WorkbenchStore.ts'
@@ -60,11 +60,6 @@ export function HeaderUtilities({ postStudioApi, t }: UtilityProps) {
     } finally { setBusy(false) }
   }
 
-  const openStudio = async () => {
-    window.dispatchEvent(new CustomEvent('openwrite:launch'))
-    setOpen(false)
-  }
-
   return <div className={css.headerUtilities} ref={rootRef}>
     <button type="button" className={css.headerIconButton} title={t('tools.title')} aria-label={t('tools.title')} aria-expanded={open} onClick={() => setOpen(value => !value)}>
       <MoreHorizontal size={18} />
@@ -72,7 +67,6 @@ export function HeaderUtilities({ postStudioApi, t }: UtilityProps) {
     {open && <div className={css.headerMenu}>
       {error !== '' && <span className={css.contextChipError} role="alert">{error}</span>}
       <button type="button" disabled={busy} onClick={() => void sync()}><RefreshCw size={15} />{t('tools.sync')}</button>
-      <button type="button" onClick={() => void openStudio()}><ExternalLink size={15} />环境与诊断</button>
     </div>}
   </div>
 }
@@ -102,8 +96,20 @@ export function WorkspaceContextChip(props: ContextChipProps) {
     const dismiss = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
     }
+    // Escape must dismiss the popover too, and return focus to its toggle —
+    // otherwise a keyboard user cannot close it at all. Mirrors HeaderUtilities.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        rootRef.current?.querySelector('button')?.focus()
+      }
+    }
     document.addEventListener('pointerdown', dismiss)
-    return () => document.removeEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
   }, [open])
 
   /** Unbound session: pick a directory, register it as a dsh Workspace, connect a session. */

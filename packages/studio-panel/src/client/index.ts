@@ -2,6 +2,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { isWritingSession, watchWritingScope } from './writing-scope.ts'
 import { LaunchOpenWrite } from './LaunchOpenWrite.tsx'
+import { OpenWriteSettings } from './OpenWriteSettings.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
@@ -21,17 +22,18 @@ import { en, NS, zh } from './locales.ts'
 import { NovelReviewCard } from './ReviewCard.tsx'
 import { novelMutationDefinition, TurnMutationSummaryView, TurnMutationSummaryListView } from './TurnMutationSummary.tsx'
 import { sessionOpener, type StudioPanelInjected } from './workspace-context.ts'
+import { installWorkspaceChromeStyles } from './workspace-chrome.ts'
 
 export const inject = ['slots', 'locale', 'uiConversation', 'workspaces', 'sessions', 'uiWorkspace', 'remote', 'remote.agentPresets']
 
 const FAMILY_TOOLS: Readonly<Record<ToolFamily, readonly string[]>> = {
   status: ['novel_status', 'novel_focus', 'novel_writing_targets', 'novel_continuity', 'novel_diagnostics'],
   context: ['novel_context_preview'],
-  manuscript: ['novel_doc_read', 'novel_doc_write', 'novel_document_change_plan', 'novel_structured_change_plan', 'novel_doc_create', 'novel_write_chapter', 'novel_multi_write', 'novel_chapter_delete', 'novel_chapter_delete_batch', 'novel_manuscript_edit_action', 'novel_manuscript_acceptance', 'novel_manuscript_acceptance_reconcile', 'novel_export_preflight', 'novel_export', 'novel_import', 'novel_import_preview', 'novel_manuscript_import_action', 'novel_project_archive_action', 'novel_project_archive_download'],
-  revision: ['novel_revisions_list', 'novel_revision_get', 'novel_revision_create_selection', 'novel_revision_create_from_review', 'novel_revision_apply', 'novel_revision_reject', 'novel_revision_regenerate'],
-  task: ['novel_tasks_list', 'novel_task_get', 'novel_task_create', 'novel_task_cancel', 'novel_task_retry', 'novel_task_confirm', 'novel_chapter_run_action', 'novel_model_benchmark', 'novel_settle_backfill'],
+  manuscript: ['novel_doc', 'novel_change_plan', 'novel_write_chapter', 'novel_multi_write', 'novel_chapter_delete', 'novel_chapter_delete_batch', 'novel_manuscript_edit_action', 'novel_manuscript_acceptance', 'novel_manuscript_acceptance_reconcile', 'novel_export', 'novel_import', 'novel_manuscript_import_action', 'novel_project'],
+  revision: ['novel_revision'],
+  task: ['novel_task', 'novel_chapter_run_action', 'novel_model_benchmark', 'novel_settle_backfill'],
   search: ['novel_search'],
-  asset: ['novel_assets_list', 'novel_asset_read', 'novel_asset_create', 'novel_asset_update', 'novel_assets_package_preview', 'novel_assets_package_import', 'novel_reference_library_action', 'novel_source_action'],
+  asset: ['novel_assets', 'novel_assets_package', 'novel_reference_library_action', 'novel_source_action'],
   outline: ['novel_outline_read', 'novel_outline_edit', 'novel_foreshadowing', 'novel_rolling_plan_action', 'novel_narrative_forecast_action'],
 }
 
@@ -56,6 +58,10 @@ export function apply(ctx: Context): void {
 
 function* install(ctx: Context): Generator<() => void> {
   yield ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'studio-panel: dictionaries')
+  // The workbench owns the whole content area of its views: the host's
+  // composer seat is hidden while one of them is mounted. The rule is
+  // installed once per document and scoped to our own marker attribute.
+  installWorkspaceChromeStyles()
   const t = ctx.locale.bind(NS)
   // These registries are optional chrome capabilities. Keep the workbench
   // available when a host no longer exposes the turn-summary extension point.
@@ -118,8 +124,11 @@ function* install(ctx: Context): Generator<() => void> {
     pickDirectory: pickDirectoryCompat,
     connectWorkspace: async id => {
       const sessionId = await ctx.uiWorkspace.connectWorkspace(id)
-      const result = await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
-      if (!result.ok) throw new Error(result.error.message)
+      // The stable identity is what the selector lists; the release identity is
+      // the fallback for hosts that register only that one (issue #149).
+      const bound = await ctx.remote.agentPresets.select(sessionId, 'openwrite')
+      const result = bound.ok ? bound : await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
+      if (!result.ok) throw new Error(result.error?.message ?? 'OpenWrite preset unavailable')
       return sessionId
     },
     // dsh 0.2 moved "show this session" out of the Session Controller
@@ -157,12 +166,31 @@ function* install(ctx: Context): Generator<() => void> {
       if (selected === null) return false
       const workspace = await ctx.workspaces.create({ path: selected })
       const sessionId = await ctx.sessions.create({ workspaceId: workspace.workspaceId })
-      const result = await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
-      if (!result.ok) throw new Error(result.error.message)
+      const bound = await ctx.remote.agentPresets.select(sessionId, 'openwrite')
+      const result = bound.ok ? bound : await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
+      if (!result.ok) throw new Error(result.error?.message ?? 'OpenWrite preset unavailable')
       workspaceServices.openSession(sessionId)
       return true
     } }),
   }, LaunchOpenWrite))
+
+  // OpenWrite's own page in the host's settings dialog.
+  //
+  // The build SDK is pinned to 0.1, whose SlotMap has no `settings.section`
+  // key; the host declares it as a list slot taking `id`, `order` and `label`
+  // (its own contract: packages/client/ui-settings/src/client/contract/slots.ts).
+  // Narrow the verified 0.2 overload at this boundary instead of pulling a
+  // second SDK copy into the build — the same trade the turn-tail slot makes.
+  yield injectSlot('settings.section' as unknown as Parameters<typeof ctx.slots.inject>[0], () => {
+    const register = ctx.slots.register.bind(ctx.slots) as unknown as (
+      options: { name: 'settings.section'; id: string; order: number; label: () => string; locale: typeof NS },
+      component: typeof OpenWriteSettings,
+    ) => () => void
+    return register({
+      name: 'settings.section', id: 'openwrite', order: 30,
+      label: () => t('settings.section.label'), locale: NS,
+    }, OpenWriteSettings)
+  })
 
   const writingSlots = (name: Parameters<typeof ctx.slots.inject>[0], mount: () => (() => void) | Generator<() => void>) => {
     return injectSlot(name, () => watchWritingScope(ctx.sessions.list, () => {

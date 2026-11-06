@@ -392,6 +392,8 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t, refreshEpoch = 0,
   const [draftEpoch, setDraftEpoch] = useState(0)
   /** Field key with an in-flight single-field autosave. */
   const [fieldBusy, setFieldBusy] = useState<string | null>(null)
+  /** Field writes deferred while another field save is in flight. */
+  const pendingFieldsRef = useRef<Map<string, { asset: AssetSummary; field: string; value: unknown }>>(new Map())
   const [creating, setCreating] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -588,9 +590,25 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t, refreshEpoch = 0,
    */
   const saveField = (asset: AssetSummary, field: string, value: unknown) => {
     const key = `${asset.kind}:${asset.id}`
+    const identity = draftContext ? { ...draftContext, kind: asset.kind, id: asset.id } : null
     const entry = details.get(key)
+    // A blur-save deferred while another field write is in flight is replayed
+    // here, so the second field is never silently dropped.
+    const flushPendingField = () => {
+      const next = pendingFieldsRef.current.entries().next()
+      if (next.done === true) return
+      const [field, pending] = next.value
+      pendingFieldsRef.current.delete(field)
+      void saveField(pending.asset, field, pending.value)
+    }
     if (entry?.status !== 'ready') return
-    if (fieldBusy !== null) return
+    // A second blur-save used to be dropped here with no request, no error and no
+    // notice: the author saw the input accept the text and assumed it was written.
+    // Queue it and flush when the in-flight save clears.
+    if (fieldBusy !== null) {
+      pendingFieldsRef.current.set(field, { asset, field, value })
+      return
+    }
     setFieldBusy(field)
     setSaveError(null)
     postStudioApi('/assets/update', {
@@ -602,9 +620,18 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t, refreshEpoch = 0,
       .then((data) => {
         setFieldBusy(null)
         const record = (data !== null && typeof data === 'object' ? data : {}) as { asset?: { revision?: unknown } }
+        flushPendingField()
         const nextRevision = typeof record.asset?.revision === 'string' ? record.asset.revision : null
         if (nextRevision !== null) revisionsRef.current.set(key, nextRevision)
         recoveries.current.delete(key)
+        // Re-stamp any surviving recovery draft so a remount does not restore the
+        // pre-save baseRevision and immediately report a conflict against the
+        // author's own save. `saveAsset` already does this via
+        // removeAssetDraftIfUnchanged; the single-field path did not.
+        if (identity !== null && nextRevision !== null) {
+          const stored = readAssetDraft(identity)
+          if (stored !== null) writeAssetDraft({ ...stored, baseRevision: nextRevision })
+        }
         setDetails(previous => {
           const current = previous.get(key)
           if (current?.status !== 'ready') return previous
@@ -619,6 +646,7 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t, refreshEpoch = 0,
       })
       .catch((cause: unknown) => {
         setFieldBusy(null)
+        flushPendingField()
         const conflict = cause instanceof StudioApiError && cause.status === 409
         setSaveError({ message: cause instanceof Error ? cause.message : String(cause), conflict })
         // Keep the local body and relation draft visible on version conflicts.
@@ -915,7 +943,28 @@ export function AssetsView({ fetchStudioApi, postStudioApi, t, refreshEpoch = 0,
       )
     }
     if (selected === null) {
-      return <div className={css.notice}>{t('assets.selectHint')}</div>
+      // A single grey line in a 700px-tall pane reads as "nothing rendered".
+      // Say what this section is, why it is empty, and offer the one action
+      // that changes that.
+      const canCreate = CARDABLE_SEGMENTS.includes(segment)
+      return (
+        <div className={css.mainEmpty}>
+          <h3 className={css.mainEmptyTitle}>{t('assets.emptyTitle')}</h3>
+          <p className={css.mainEmptyHint}>{t('assets.emptyHint')}</p>
+          {canCreate
+            ? <button
+                type="button"
+                className={css.primaryButton}
+                disabled={creating || busy}
+                onClick={() => {
+                  requestDiscard(() => { setCreating(true); setCreateError(null) })
+                }}
+              >
+                {t('assets.create.open')}
+              </button>
+            : <p className={css.mainEmptyHint}>{t('assets.emptyAgent')}</p>}
+        </div>
+      )
     }
     if (selected.startsWith('doc:')) {
       const path = selected.slice(4)

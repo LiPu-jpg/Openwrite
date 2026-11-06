@@ -108,6 +108,50 @@ export function parseRouteMap(value: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(routes).map(([key, route]) => [key, asText(route)]))
 }
 
+/**
+ * One model of the host's own directory.
+ *
+ * The host composes the adapters — its own providers and the ones other
+ * plugins register into the same directory — so this list is what dsh itself
+ * can call. `id` is the `provider/model` route the host's relay expects.
+ */
+export type HostModelDto = {
+  id: string
+  provider: string
+  model: string
+  label: string
+  description: string
+  context_tokens: number
+}
+
+/** The host model directory, as Core reads it through the host relay. */
+export type HostModelCatalogDto = {
+  available: boolean
+  models: HostModelDto[]
+  error: string
+}
+
+export function parseHostModelCatalog(value: unknown): HostModelCatalogDto {
+  const root = unwrapData(value)
+  const raw = Array.isArray(root['models']) ? root['models'] : []
+  const models = raw.map(entry => {
+    const item = asRecord(entry)
+    return {
+      id: asText(item['id']),
+      provider: asText(item['provider']),
+      model: asText(item['model']),
+      label: asText(item['label']),
+      description: asText(item['description']),
+      context_tokens: asInteger(item['context_tokens']),
+    }
+  }).filter(item => item.id !== '')
+  return {
+    available: root['available'] === true,
+    models,
+    error: asText(root['error']),
+  }
+}
+
 /** Success payload of POST /model/test and /model/embedding/test (enveloped). */
 export type ConnectionTestResultDto = {
   status: string

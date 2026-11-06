@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Offline profile upgrades retain the previous complete dependency tree until commit.
-import { cp, mkdir, readFile, readdir, rename, writeFile, open, access, readlink, symlink, unlink, realpath, lstat, rmdir, utimes } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rename, writeFile, open, access, readlink, symlink, unlink, realpath, lstat, rmdir, rm, utimes } from 'node:fs/promises'
 import { spawn, spawnSync } from 'node:child_process'
 import { join, resolve, relative, isAbsolute, dirname, sep } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
@@ -163,6 +163,16 @@ async function runInstall(home, profile, spec, log) {
   } finally { clearTimeout(timer); clearTimeout(drainTimer); clearTimeout(escalation); await writes }
 }
 
+/**
+ * `.plugin-manager` is host-owned state, not ours: it must never be staged, or a
+ * POSIX upgrade would commit a snapshot of it that later upgrades then restore.
+ * Compared on a normalized relative path so the check is separator-agnostic —
+ * `path.join` yields `\` on win32, which a literal '/' test can never match.
+ */
+function isHostManagedState(relativePath) {
+  return relativePath === '.plugin-manager' || relativePath.startsWith(`.plugin-manager${sep}`)
+}
+
 function profileDirectory(home, profile) {
   if (!PROFILE.test(profile)) throw new Error('Invalid profile name')
   return join(resolve(home), 'profiles', profile)
@@ -175,7 +185,8 @@ export async function recoverUpgrade(home, operationId, options = {}) {
   const operation = JSON.parse(await readFile(join(root, 'operation.json'), 'utf8'))
   const target = profileDirectory(home, operation.profile)
   await (options.assertStopped || assertHostStopped)(home, operation.profile)
-  const previous = join(root, 'previous-profile')
+
+const previous = join(root, 'previous-profile')
   const lease = await acquireRecoveryLock(home)
   try {
     if (!await exists(target) && await exists(previous)) {
@@ -225,7 +236,7 @@ export async function upgradeProfile(home, profile, spec, options = {}) {
     operation.old_manifest_sha256 = digest(oldManifest)
     await save(join(root, 'operation.json'), operation)
     await cp(target, staging, { recursive: true, dereference: false, verbatimSymlinks: true,
-      filter: source => !source.includes('/.plugin-manager/') && !source.endsWith('/.plugin-manager') })
+      filter: source => !isHostManagedState(relative(target, source)) })
     await relocateProfileLinks(staging, target, staging, yaml)
     // A downloaded tarball may live in a disposable directory. Pin its bytes
     // below DSH_HOME before the installer writes file: references into locks.
@@ -269,7 +280,16 @@ export async function upgradeProfile(home, profile, spec, options = {}) {
     await save(join(root, 'operation.json'), operation)
     error.message += `; operation=${id}; log=${logPath}`
     throw error
-  } finally { try { await log?.close() } finally { await release() } }
+  } finally {
+    try { await log?.close() } finally {
+      // The staging directory is a full profile copy including node_modules, so
+      // every failed upgrade used to leave hundreds of MB behind with nothing to
+      // reclaim it. On success it has been renamed onto the target, so removing
+      // it here is a no-op; on any failure path it is reclaimed.
+      try { await rm(staging, { recursive: true, force: true }) } catch { /* best effort */ }
+      await release()
+    }
+  }
 }
 
 /** Disable only an incomplete OpenWrite bundle so a stopped profile can boot for repair. */
@@ -300,7 +320,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const value = name => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1] }
   const home = resolve(process.env.DSH_HOME || join(homedir(), '.dsh'))
   try {
-    const profile = value('--profile') || 'web'
+    // `--profile` as the last argument yields undefined, and `|| 'web'` then
+    // silently operates on `web` and exits 0 - the same bug fixed in
+    // maintenance.mjs. A trailing flag is a usage error, not a default.
+    const profileIndex = process.argv.indexOf('--profile')
+    if (profileIndex >= 0) {
+      const named = process.argv[profileIndex + 1]
+      if (named === undefined || named === '') {
+        throw new Error('Usage: openwrite-safe-upgrade [--upgrade|--repair|--recover <id>] --profile <name> [--apply] [--package <path>]')
+      }
+    }
+    const profile = profileIndex < 0 ? 'web' : process.argv[profileIndex + 1]
     const result = value('--recover') ? await recoverUpgrade(home, value('--recover'))
       : process.argv.includes('--repair') ? await repairProfile(home, profile, process.argv.includes('--apply'))
       : await upgradeProfile(home, profile, value('--package'))

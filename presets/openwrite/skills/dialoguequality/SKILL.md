@@ -19,14 +19,15 @@ Language: follow the author's current conversation language for responses and he
 3. `data/style/composed.md` — 当前作品风格约束
 4. `src/outline.md` / canonical packet — 本章戏剧位置与章节目标
 
-如果需要完整判断某章对白是否失真，优先结合 `review_chapter` 或章节 packet，而不是只看几行台词。
+如果需要完整判断某章对白是否失真，优先结合 `novel_review_chapter` 或 `novel_chapter_work` 的章节 packet，而不是只看几行台词。
 
 ## 可用工具
 
 | 工具 | 说明 |
 |------|------|
-| `extract_dialogue_fingerprint` | 提取角色对白指纹 |
-| `review_chapter` | 对整章做审查，可发现台词失真、解释性对话、套路对白 |
+| `novel_manuscript_metrics(chapter_id=…)` | 章节可量化信号：字数、句长、对白占比等 |
+| `novel_review_chapter(chapter_id=…, domains=["prose","character"])` | 对整章做审查，可发现台词失真、解释性对话、套路对白 |
+| `novel_chapter_work(chapter_id=…)` | 章节工作 brief：戏剧位置、出场角色、章节目标 |
 
 ## 什么时候用
 
@@ -37,26 +38,24 @@ Language: follow the author's current conversation language for responses and he
 
 ## 工作方式
 
-### 1. 提取对白指纹
+### 1. 读取章节信号
 
-先定位章节和角色，再提取：
+先定位章节，再读可量化指标：
 
 ```text
 用户: 分析一下林月在第六章的对话风格
 
-AI:
-[COMMAND] extract_dialogue_fingerprint {
-  "chapter_id": "ch_006",
-  "character_names": ["林月"]
-}
+AI: 调用 novel_manuscript_metrics(chapter_id="ch_006")
 ```
 
-重点观察：
+重点观察返回里的：
 
-- `avg_sentence_length`：句长偏短还是偏长
-- `question_ratio`：疑问句比例
-- `common_bigrams`：高频词组
-- `speech_patterns`：口头禅、重复习惯、语气特征
+- 字数与对白占比：这一章是谁在说话
+- 句长相关指标：偏短还是偏长
+- 出场角色：林月是否真的有戏份
+
+没有工具会直接给出"对白指纹"；上面的指标加上正文摘录就是判断依据。
+需要整章判断时再调用 `novel_review_chapter(chapter_id="ch_006", domains=["prose","character"])`。
 
 ### 2. 结合角色档案复核
 
@@ -163,6 +162,6 @@ AI:
 
 ## 注意
 
-- `extract_dialogue_fingerprint` 适合看“说话指纹”
-- `review_chapter` 适合看“对白放在整章里是否成立”
+- `novel_manuscript_metrics` 提供可量化信号，判断"说话指纹"要靠它加上正文摘录
+- `novel_review_chapter` 适合看“对白放在整章里是否成立”
 - 真要改对白，必须结合人物文档和章节戏剧位置一起判断

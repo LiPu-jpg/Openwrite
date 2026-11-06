@@ -38,7 +38,7 @@ function makeApi() {
     fetchStudioApi: vi.fn(async (path: string) => {
       if (path === '/research') return envelope({
         available: true, setup_hint: '', reports,
-        settings: { search_provider: 'bing', search_providers: [] },
+        settings: { search_provider: 'bing', search_providers: [{ id: 'dsh', label: 'DSH web_search / web_fetch', requires_api_key: false, configured: true, credential_configured: false }, { id: 'bocha', label: '博查', requires_api_key: true, configured: false, credential_configured: false }] },
         model_route: { profile_id: 'research-a', label: 'Research A', provider: 'openai', model: 'writer-model', configured: true, compatible: true },
       })
       if (path === '/research/reports/report_one') return detail(
@@ -84,6 +84,21 @@ describe('ResearchView M2d workbench', () => {
     fireEvent.change(screen.getByLabelText('research.filter.sources'), { target: { value: 'unavailable' } })
     expect(screen.queryByRole('button', { name: /港口贸易核查/ })).toBeNull()
     expect(screen.getByRole('button', { name: /失败的制度核查/ })).toBeTruthy()
+  })
+
+  it('saves the research search provider from the settings panel', async () => {
+    const api = makeApi()
+    renderView(api)
+    await screen.findByRole('button', { name: /港口贸易核查/ })
+
+    fireEvent.click(screen.getByRole('button', { name: 'research.settings' }))
+    fireEvent.change(screen.getByLabelText('research.settings.provider'), { target: { value: 'dsh' } })
+    fireEvent.click(screen.getByRole('button', { name: 'research.settings.save' }))
+
+    await waitFor(() => expect(api.postStudioApi).toHaveBeenCalledWith('/research/settings', {
+      search_provider: 'dsh', search_api_key: '', remember_api_key: true,
+    }))
+    await waitFor(() => expect(screen.getByText('research.settings.saved')).toBeTruthy())
   })
 
   it('opens a task result target and shows provenance, source checks, and tri-state usage', async () => {

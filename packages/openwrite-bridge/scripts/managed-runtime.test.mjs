@@ -689,3 +689,114 @@ test('cancel and dispose during recovery wait do not reject unhandled or start a
   assert.equal(seen.length, 0, `dispose leaked unhandledRejection: ${seen.map(String).join('; ')}`)
 })
 
+
+test('a request that exceeds the deadline is reported as REQUEST_TIMEOUT, not NETWORK_ERROR', async () => {
+  // The distinction matters: a caller that retries NETWORK_ERROR will hammer a
+  // hung backend forever, while REQUEST_TIMEOUT is the signal to give up or
+  // widen the budget. Both used to be reported as the same code.
+  let seen = 0
+  const server = createServer((request, response) => {
+    seen += 1
+    // Never answer: the client's deadline must fire first.
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    const client = new StudioClient({ baseUrl: `http://127.0.0.1:${port}`, timeoutMs: 150 })
+    await assert.rejects(client.getJson('/api/health'), error => {
+      assert.equal(error.code, 'REQUEST_TIMEOUT', 'a deadline overrun must be distinguishable')
+      return true
+    })
+    assert.equal(seen, 1)
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+  }
+})
+
+test('a connection refused is reported as NETWORK_ERROR, not REQUEST_TIMEOUT', async () => {
+  // The other half of the same distinction: nothing is listening, so this must
+  // not be mistaken for a deadline overrun.
+  const client = new StudioClient({ baseUrl: 'http://127.0.0.1:1', timeoutMs: 5000 })
+  await assert.rejects(client.getJson('/api/health'), error => {
+    assert.equal(error.code, 'NETWORK_ERROR', 'a refused connection must not look like a timeout')
+    return true
+  })
+})
+
+test('the startup handshake hands the host relay to the backend', async t => {
+  const { root, artifacts } = await prepared(t)
+  let handshake = null
+  const spawnFn = () => {
+    const child = new EventEmitter()
+    child.stdin = new PassThrough()
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.exitCode = null
+    child.signalCode = null
+    child.kill = () => { child.exitCode = 1; child.emit('exit', 1, null) }
+    child.stdin.once('data', chunk => {
+      handshake = JSON.parse(String(chunk))
+      child.stdout.write(JSON.stringify({ port: 18099 }) + '\n')
+    })
+    return child
+  }
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).includes('/api/health')) {
+      return new Response(JSON.stringify({ core_version: 'test-core', contract_version: 1 }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response('{}', { status: 404 })
+  })
+  const runtime = new ManagedRuntime(root, artifacts, {
+    spawn: spawnFn,
+    delay: async () => undefined,
+    restartLimit: 1,
+    backoffMs: [1],
+    hostLlm: async () => ({ url: 'http://127.0.0.1:45999/v1', token: 'relay-token' }),
+    hostWeb: async () => ({ url: 'http://127.0.0.1:45998', token: 'web-token' }),
+  })
+  await runtime.ensure()
+  // The relay travels over the private stdio handshake, never the environment.
+  assert.equal(handshake.host_llm.url, 'http://127.0.0.1:45999/v1')
+  assert.equal(handshake.host_llm.token, 'relay-token')
+  assert.equal(handshake.host_web.url, 'http://127.0.0.1:45998')
+  assert.equal(handshake.host_web.token, 'web-token')
+  await runtime.dispose()
+})
+
+test('a relay that cannot be resolved leaves the backend usable', async t => {
+  const { root, artifacts } = await prepared(t)
+  let handshake = null
+  const spawnFn = () => {
+    const child = new EventEmitter()
+    child.stdin = new PassThrough()
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.exitCode = null
+    child.signalCode = null
+    child.kill = () => { child.exitCode = 1; child.emit('exit', 1, null) }
+    child.stdin.once('data', chunk => {
+      handshake = JSON.parse(String(chunk))
+      child.stdout.write(JSON.stringify({ port: 18098 }) + '\n')
+    })
+    return child
+  }
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).includes('/api/health')) {
+      return new Response(JSON.stringify({ core_version: 'test-core', contract_version: 1 }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response('{}', { status: 404 })
+  })
+  const runtime = new ManagedRuntime(root, artifacts, {
+    spawn: spawnFn,
+    delay: async () => undefined,
+    restartLimit: 1,
+    backoffMs: [1],
+    hostLlm: async () => { throw new Error('the host has no model relay') },
+  })
+  const connection = await runtime.ensure()
+  // No relay is not a startup failure: the backend still runs, it just offers
+  // no host models.
+  assert.equal(handshake.host_llm, undefined)
+  assert.ok(connection.baseUrl)
+  await runtime.dispose()
+})

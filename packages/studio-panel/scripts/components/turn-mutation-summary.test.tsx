@@ -43,8 +43,8 @@ describe('TurnMutationSummary', () => {
     state = update(state, {
       type: 'tool/call',
       data: {
-        turn: 7, callId: 'call_write', name: 'novel_doc_write',
-        arguments: JSON.stringify({ path: 'requested.md' }),
+        turn: 7, callId: 'call_write', name: 'novel_doc',
+        arguments: JSON.stringify({ action: 'write', path: 'requested.md' }),
       },
     })
     state = update(state, {
@@ -70,7 +70,7 @@ describe('TurnMutationSummary', () => {
 
   it('keeps failed and partial calls instead of reporting every call as a write', () => {
     let state = startState()
-    for (const [callId, name] of [['call_failed', 'novel_revision_apply'], ['call_partial', 'novel_multi_write']] as const) {
+    for (const [callId, name] of [['call_failed', 'novel_revision'], ['call_partial', 'novel_multi_write']] as const) {
       state = update(state, {
         type: 'tool/call',
         data: { turn: 7, callId, name, arguments: '{}' },
@@ -100,7 +100,7 @@ describe('TurnMutationSummary', () => {
     const openFile = vi.fn()
     const matched: NovelMutationSummary = {
       items: [{
-        callId: 'call_one', tool: 'novel_doc_write', label: '更新文档',
+        callId: 'call_one', tool: 'novel_doc', label: '文档操作',
         path: 'data/manuscript/ch_001.md', status: 'refresh_failed',
         errorCode: '', historyVersionId: 'ver_before_write', revision: 'sha256:new',
         sourceRevision: '', resultRevision: '', changes: [],
@@ -123,8 +123,8 @@ describe('TurnMutationSummary', () => {
     state = update(state, {
       type: 'tool/call',
       data: {
-        turn: 7, callId: 'call_asset', name: 'novel_asset_update',
-        arguments: JSON.stringify({ kind: 'character', id: 'lin_cen' }),
+        turn: 7, callId: 'call_asset', name: 'novel_assets',
+        arguments: JSON.stringify({ action: 'update', kind: 'character', id: 'lin_cen' }),
       },
     })
     state = update(state, {
@@ -191,8 +191,8 @@ describe('TurnMutationSummary', () => {
     state = update(state, {
       type: 'tool/call',
       data: {
-        turn: 7, callId: 'call_plan', name: 'novel_document_change_plan',
-        arguments: JSON.stringify({ action: 'preview', path: 'src/story/background.md' }),
+        turn: 7, callId: 'call_plan', name: 'novel_change_plan',
+        arguments: JSON.stringify({ action: 'document', step: 'preview', path: 'src/story/background.md' }),
       },
     })
     state = update(state, {
@@ -245,12 +245,12 @@ describe('TurnMutationSummary', () => {
     expect(screen.getByRole('button', { name: 'turn.retry' })).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'turn.accept' }))
     await waitFor(() => expect(postStudioApi).toHaveBeenCalledWith(
-      '/document/change-plan', { action: 'apply', preview_token: 'a'.repeat(24) },
+      '/document/change-plan', { action: 'apply', preview_token: 'a'.repeat(24), confirm: true },
     ))
     expect(await screen.findByText('turn.applied')).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'turn.undo' }))
     await waitFor(() => expect(postStudioApi).toHaveBeenLastCalledWith(
-      '/document/change-plan', { action: 'undo', preview_token: 'b'.repeat(24) },
+      '/document/change-plan', { action: 'undo', preview_token: 'b'.repeat(24), confirm: true },
     ))
     expect(await screen.findByText('turn.undone')).not.toBeNull()
   })
@@ -260,8 +260,8 @@ describe('TurnMutationSummary', () => {
     state = update(state, {
       type: 'tool/call',
       data: {
-        turn: 8, callId: 'call_structured', name: 'novel_structured_change_plan',
-        arguments: JSON.stringify({ action: 'preview', change_kind: 'focus', change: { goal: '守桥' } }),
+        turn: 8, callId: 'call_structured', name: 'novel_change_plan',
+        arguments: JSON.stringify({ action: 'structured', step: 'preview', change_kind: 'focus', change: { goal: '守桥' } }),
       },
     })
     state = update(state, {

@@ -9,9 +9,9 @@ Language: follow the author's current conversation language for responses and he
 
 接到已有 `novel_*`。人物、地点、世界观以 OpenWrite 资产为准。
 
-1. `novel_assets_list` 列出人物/世界资产（含名称与别名）。
-2. 指定实体用 `novel_asset_read`。
+1. `novel_assets(action="list"` 列出人物/世界资产（含名称与别名）。
+2. 指定实体用 `novel_assets(action="read", kind="character"|"world"|"progression", id=…)`。
 3. 按名称或别名找不到时 `novel_search`（scope 可 `assets`）。
 4. 关系与状态漂移用 `novel_continuity`。
 
-向作者报告规范名、别名、摘要。改设定走 `novel_structured_change_plan(change_kind="asset")`；普通讨论不得写入。
+向作者报告规范名、别名、摘要。改设定走 `novel_change_plan(action="structured"(change_kind="asset")`；普通讨论不得写入。

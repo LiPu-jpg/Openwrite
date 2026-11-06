@@ -23,20 +23,20 @@ dsh Workspace 是唯一的工作区身份：agent 工具调用按会话的不可
 
 1. 在 **OpenWrite 创作** 会话里先收敛灵感、人物、世界观与大纲（所有写入经 OpenWrite
    修订门控，重要改动先出 diff 再确认），再在同一会话中写正文。
-   正文和正典使用 `novel_document_change_plan`；大纲、资产、创作重点、伏笔和写作目标
-   使用 `novel_structured_change_plan`。两者都由服务端保存不可变预览、在确认时重验源
+   正文和正典使用 `novel_change_plan(action="document")`；大纲、资产、创作重点、伏笔和写作目标
+   使用 `novel_change_plan(action="structured")`。两者都由服务端保存不可变预览、在确认时重验源
    revision，并返回只对已确认结果有效的安全撤销 token。
    正文区按 canonical reading order 切章和连续审读，计划未写章节保留在大纲中但不会被
    当作可读正文；搜索结果只有在 document ID 与完整 revision 都仍匹配时才开放改单行。
 2. 写正文时执行 `novel_context_preview` 预检上下文包 →
    `novel_write_chapter` 写章 → `novel_review_chapter` 六域累加评审。
    每次评审同时生成 `data/novels/{id}/data/dog/reviews/{chapter}/dog-graph.json`；
-   通过 `novel_task_create(type=chapter_review)` 启动的后台评审，也会在
-   `novel_task_get` 读到完成态时生成同样的图；
+   通过 `novel_task(action="create", type=chapter_review)` 启动的后台评审，也会在
+   `novel_task(action="get")` 读到完成态时生成同样的图；
    图的顶层是上下文完整性、六个质量域、硬门禁和确定性聚合，六域下可展开原 37 项，
    查询 criterion、证据、问题、覆盖率和继承状态。DoG 只查询已生成的 artifact，
    不重新调用模型评审。
-   写章、评审和 `novel_revision_*` 操作还会维护
+   写章、评审和 `novel_revision` 操作还会维护
    `data/novels/{id}/data/dog/deliveries/{chapter}/dog-graph.json`：它把正文、
    `writing → review → revision → application → rereview → closure` 六阶段串成章节交付总图；
    正文 SHA 改变后旧评审立即 stale，修订应用后必须复评通过才算交付。

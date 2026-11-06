@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { asRecord, asText, unwrapData } from './dto.ts'
+import { StudioApiError } from './api.ts'
 import type { ModelNavigationGuard } from './ModelView.tsx'
 import type { OperationsViewProps } from './OperationsView.tsx'
 import css from './SerialWritingView.module.css'
@@ -10,7 +11,7 @@ function strings(value: unknown): string[] { return Array.isArray(value) ? value
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 
 /** Deterministic chapter diagnostics and author-owned serial-writing assets. */
-export function SerialWritingView({ fetchStudioApi, postStudioApi, t, onNavigationGuardChange }: Pick<OperationsViewProps, 'fetchStudioApi' | 'postStudioApi' | 't'> & { onNavigationGuardChange?: (guard: ModelNavigationGuard | null) => void }) {
+export function SerialWritingView({ fetchStudioApi, postStudioApi, t, onNavigationGuardChange, refreshEpoch = 0 }: Pick<OperationsViewProps, 'fetchStudioApi' | 'postStudioApi' | 't'> & { onNavigationGuardChange?: (guard: ModelNavigationGuard | null) => void; refreshEpoch?: number }) {
   const [assets, setAssets] = useState<Row>({ terms: [], character_groups: {} })
   const [assetsRevision, setAssetsRevision] = useState('')
   const [anchors, setAnchors] = useState<Row[]>([])
@@ -50,7 +51,7 @@ export function SerialWritingView({ fetchStudioApi, postStudioApi, t, onNavigati
       setAnchors(rows(result['anchors'])); setIdentity(unwrapData(status))
     }).catch(error => { if (active.current) { setNotice(message(error)); setBad(true) } })
     return () => { active.current = false }
-  }, [fetchStudioApi])
+  }, [fetchStudioApi, refreshEpoch])
 
   useEffect(() => {
     const request = ++auditRequest.current
@@ -58,7 +59,7 @@ export function SerialWritingView({ fetchStudioApi, postStudioApi, t, onNavigati
       if (!active.current || request !== auditRequest.current) return
       setAudit(unwrapData(value)); setSelected([]); setEdits({})
     }).catch(error => { if (active.current && request === auditRequest.current) { setNotice(message(error)); setBad(true) } })
-  }, [fetchStudioApi, group])
+  }, [fetchStudioApi, group, refreshEpoch])
 
   useEffect(() => {
     const request = ++metricRequest.current
@@ -67,7 +68,7 @@ export function SerialWritingView({ fetchStudioApi, postStudioApi, t, onNavigati
     void fetchStudioApi(`/manuscript/${encodeURIComponent(chapter)}/metrics`).then(value => {
       if (active.current && request === metricRequest.current) setMetrics(unwrapData(value))
     }).catch(error => { if (active.current && request === metricRequest.current) { setNotice(message(error)); setBad(true) } })
-  }, [fetchStudioApi, chapter])
+  }, [fetchStudioApi, chapter, refreshEpoch])
 
   useEffect(() => {
     onNavigationGuardChange?.((navigate) => { if ((!dirty && !Object.keys(edits).length) || window.confirm(t('serial.discard'))) navigate() })
@@ -85,7 +86,22 @@ export function SerialWritingView({ fetchStudioApi, postStudioApi, t, onNavigati
     if (busy) return
     setBusy(true); setNotice(''); setBad(false)
     try { await action(); if (active.current) setNotice(t('serial.saved')) }
-    catch (error) { if (active.current) { setNotice(message(error)); setBad(true) } }
+    catch (error) {
+      if (!active.current) { setBusy(false); return }
+      // Every write in this view is revision-gated. Without a 409 branch the raw
+      // server message was shown and the stale expected_revision was kept, so
+      // retrying always conflicted again with no way forward. Re-pull the audit so
+      // the next attempt carries the current revision.
+      if (error instanceof StudioApiError && error.status === 409) {
+        setNotice(t('serial.conflictReload'))
+        setBad(true)
+        void fetchStudioApi(`/outline/audit?group_id=${encodeURIComponent(group)}`)
+          .then(value => { if (active.current) setAudit(unwrapData(value)) })
+          .catch(() => { /* the notice above already tells the author what to do */ })
+        return
+      }
+      setNotice(message(error)); setBad(true)
+    }
     finally { if (active.current) setBusy(false) }
   }
   const updateAssets = (next: Row) => { setAssets(next); setDirty(true) }

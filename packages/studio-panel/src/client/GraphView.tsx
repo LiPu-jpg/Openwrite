@@ -444,7 +444,7 @@ function RelationshipFlow({ nodes: relationNodes, edges: relationEdges, t }: Rel
   return <div className={css.relationshipWorkspace} data-detail={selected !== undefined || selectedEdge !== undefined}>
     <div ref={containerRef} className={css.relationshipCanvas}>
       <div className={css.relationshipCanvasHeader}>
-        <span><b>{relationNodes.length}</b> 节点 · <b>{relationEdges.length}</b> 连接</span>
+        <span>{t('graph.nodes')}: <b>{relationNodes.length}</b> · {t('graph.connections')}: <b>{relationEdges.length}</b></span>
         <button type="button" className={css.button} onClick={() => {
           setSelectedId(''); setSelectedEdgeId('')
           try { window.localStorage.removeItem(storageKey(RELATION_POSITIONS_KEY, workspaceId)) } catch { /* unavailable storage */ }
@@ -525,17 +525,22 @@ export function GraphView({ fetchStudioApi, postStudioApi, t }: GraphViewProps) 
     } catch { /* unavailable storage */ }
   }, [connectedOnly, relationQuery, workspaceId])
 
+  // One sequence for every load, effect-driven or manual: two rapid refreshes
+  // must not let the slower response repaint stale continuity data, and a
+  // refresh abandoned by a workspace switch must not setState on the new tree.
+  const loadSequence = useRef(0)
   const load = useCallback(() => {
+    const sequence = ++loadSequence.current
     setState('loading')
     let cancelled = false
     fetchStudioApi('/continuity')
       .then((data) => {
-        if (cancelled) return
+        if (cancelled || sequence !== loadSequence.current) return
         setPayload(parseContinuity(data))
         setState('ready')
       })
       .catch((cause: unknown) => {
-        if (cancelled) return
+        if (cancelled || sequence !== loadSequence.current) return
         setError(cause instanceof Error ? cause.message : String(cause))
         setState('error')
       })

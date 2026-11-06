@@ -1,6 +1,6 @@
 ---
 name: review-chapter
-description: 审这一章。Use when the author asks 审这一章, 审查, 检查逻辑, or types /review-chapter. Run six-domain novel_review_chapter; do not rerun review from DoG.
+description: 审这一章。Use when the author asks 审这一章, 审查, 检查逻辑, or types /review-chapter. Run six-domain novel_review_chapter; do not rerun review from the query skills.
 ---
 
 Language: follow the author's current conversation language for responses and help; preserve the manuscript language. Translate these instructions when presenting them.
@@ -16,4 +16,4 @@ Language: follow the author's current conversation language for responses and he
 4. `novel_review_chapter` 跑六域评审。
 5. 向作者报告质量分、覆盖率、门禁、交付状态，以及带正文证据的问题。
 
-作者要改稿时转到 /revise-span。查询已物化评审图用 dog-review-query，不要让 DoG 再调模型。细则见 novel-reviewer。
+作者要改稿时转到 /revise-span。查询已物化评审图用 review-artifact-query，它只读产物、不会再调模型。细则见 novel-reviewer。

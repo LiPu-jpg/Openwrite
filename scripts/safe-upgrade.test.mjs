@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { copyFile, mkdtemp, mkdir, readFile, writeFile, readdir, rename, rm, symlink, utimes, access, lstat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -72,6 +74,11 @@ test('failed installation leaves the active profile byte-identical and writes a 
     assert.equal(await readFile(join(profile, 'package.json'), 'utf8'), original)
     const [id] = await readdir(join(home, 'openwrite', 'upgrades'))
     assert.match(await readFile(join(home, 'openwrite', 'upgrades', id, 'pnpm.log'), 'utf8'), /native module failure/)
+    // The staging directory is a full profile copy including node_modules. A
+    // failed upgrade used to leave it behind forever, so every retry cost
+    // hundreds of MB more with nothing to reclaim it.
+    const staged = (await readdir(join(home, 'profiles'))).filter(name => name.startsWith('openwrite-stage-'))
+    assert.deepEqual(staged, [], `a failed upgrade left staging directories behind: ${staged}`)
   } finally { await rm(home, { recursive: true, force: true }) }
 })
 
@@ -128,6 +135,24 @@ test('an unpacked upgrade script resolves dependencies from the selected install
       { ...options, run: installFake })
     assert.equal(result.status, 'completed')
     assert.equal(JSON.parse(await readFile(join(profile, 'package.json'))).dependencies.other, '1')
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('host-managed .plugin-manager state is never staged into an upgrade', async () => {
+  const { home, profile, options } = await fixture()
+  try {
+    await mkdir(join(profile, '.plugin-manager', 'cache'), { recursive: true })
+    await writeFile(join(profile, '.plugin-manager', 'cache', 'state.json'), 'host-owned state')
+    await writeFile(join(profile, 'author-note.txt'), 'author-owned note')
+    const staged = []
+    const result = await upgradeProfile(home, 'desktop', 'dsh-openwrite@0.2.25', { ...options, run: async (h, p, spec, log) => {
+      staged.push(...await readdir(join(h, 'profiles', p), { recursive: true }))
+      await installFake(h, p, 'dsh-openwrite@0.2.25', log)
+    } })
+    assert.equal(result.status, 'completed')
+    assert.ok(staged.includes('author-note.txt'), 'author-owned files still follow the profile')
+    assert.ok(!staged.some(entry => entry.split(sep).includes('.plugin-manager')),
+      `host-managed state leaked into staging: ${staged.filter(e => e.includes('plugin-manager')).join(', ')}`)
   } finally { await rm(home, { recursive: true, force: true }) }
 })
 
@@ -257,4 +282,38 @@ test('a partial cached archive is rebuilt atomically from the verified source', 
     assert.equal(result.status, 'completed')
     assert.equal(JSON.parse(await readFile(join(profile, 'package.json'))).dependencies.other, '1')
   } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+// The guard lives in the CLI entrypoint, which the exported-function tests never
+// execute. `--profile` as the last argument used to fall through to `|| 'web'`
+// and operate on the wrong profile while exiting 0.
+async function runCli(args) {
+  const home = await mkdtemp(join(tmpdir(), 'openwrite-upgrade-cli-'))
+  try {
+    const result = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [join(process.cwd(), 'scripts', 'safe-upgrade.mjs'), ...args], {
+        env: { ...process.env, DSH_HOME: home },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      let stderr = ''
+      child.stderr.on('data', (chunk) => { stderr += chunk })
+      child.on('error', (error) => { resolve({ code: -1, stderr: String(error) }) })
+      child.on('close', (code) => resolve({ code, stderr }))
+    })
+    return result
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+}
+
+test('safe-upgrade CLI rejects a trailing --profile with no value', async () => {
+  const { code, stderr } = await runCli(['--profile'])
+  assert.equal(code, 1, `a trailing --profile must fail, got ${code}: ${stderr}`)
+  assert.match(stderr, /Usage: openwrite-safe-upgrade/)
+})
+
+test('safe-upgrade CLI rejects an empty --profile value', async () => {
+  const { code, stderr } = await runCli(['--profile', ''])
+  assert.equal(code, 1, `an empty --profile value must fail, got ${code}: ${stderr}`)
+  assert.match(stderr, /Usage: openwrite-safe-upgrade/)
 })

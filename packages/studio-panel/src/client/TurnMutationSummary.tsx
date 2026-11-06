@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FilePenLine } from 'lucide-react'
 import type { ConversationLocationData, ConversationMatch, ConversationNodeContext, ConversationNodeDefinition } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { StudioApiError } from './api.ts'
 import type { StudioApiInjected } from './api.ts'
 import { workbenchStore } from './WorkbenchStore.ts'
 import css from './Workbench.module.css'
@@ -9,6 +10,8 @@ import css from './Workbench.module.css'
 export interface NovelMutationItem {
   callId: string
   tool: string
+  /** For a merged tool: which operation the call asked for. */
+  planKind?: string
   label: string
   path: string
   status: 'succeeded' | 'partial' | 'failed' | 'refresh_failed' | 'proposed' | 'rejected'
@@ -66,25 +69,15 @@ declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
 
 const MUTATION_LABELS: Readonly<Record<string, string>> = {
   novel_write_chapter: '写入章节',
-  novel_doc_write: '更新文档',
-  novel_document_change_plan: '文档变更计划',
-  novel_structured_change_plan: '结构化变更计划',
-  novel_doc_create: '创建文档',
+  novel_doc: '文档操作',
+  novel_change_plan: '变更计划',
   novel_chapter_delete: '删除章节',
   novel_chapter_delete_batch: '批量删除章节',
   novel_outline_edit: '更新大纲',
-  novel_asset_create: '创建资料',
-  novel_asset_update: '更新资料',
-  novel_assets_package_import: '导入资料',
-  novel_revision_create_selection: '生成修订',
-  novel_revision_create_from_review: '生成修订',
-  novel_revision_apply: '应用修订',
-  novel_revision_reject: '拒绝修订',
-  novel_revision_regenerate: '重生成修订',
-  novel_task_create: '创建任务',
-  novel_task_cancel: '取消任务',
-  novel_task_retry: '重试任务',
-  novel_task_confirm: '确认任务',
+  novel_assets: '资料操作',
+  novel_assets_package: '导入资料',
+  novel_revision: '修订操作',
+  novel_task: '任务操作',
   novel_multi_write: '启动连写',
   novel_import: '导入章节',
   novel_sync: '同步作品',
@@ -93,6 +86,7 @@ const MUTATION_LABELS: Readonly<Record<string, string>> = {
   novel_writing_targets: '更新写作目标',
   novel_manuscript_edit_action: '编辑正文',
 }
+
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}
@@ -260,6 +254,7 @@ export const novelMutationDefinition: ConversationNodeDefinition<MutationState> 
           callId: event.data.callId,
           tool: event.data.name,
           label,
+          planKind: text(args['action']),
           path: targetOf(args),
           status: 'succeeded',
           errorCode: '',
@@ -342,6 +337,9 @@ export function TurnMutationSummaryView({ matched, openFile, postStudioApi, t }:
   const [actions, setActions] = useState<Record<string, PlanActionState>>({})
   const runPlanAction = async (item: NovelMutationItem, action: 'apply' | 'reject' | 'retry' | 'undo') => {
     const current = actions[item.callId]
+    // Every sibling action handler bails on its own busy flag; without it a
+    // double-click (or double-Enter) sends the same preview_token twice.
+    if (current?.busy === true) return
     const previewToken = action === 'undo'
       ? (current?.undoPreviewToken || item.undoPreviewToken)
       : (current?.previewToken || item.previewToken)
@@ -356,14 +354,20 @@ export function TurnMutationSummaryView({ matched, openFile, postStudioApi, t }:
       message: '', busy: true,
     } }))
     try {
-      const planPath = item.tool === 'novel_structured_change_plan'
+      const planPath = item.tool === 'novel_change_plan' && item.planKind === 'structured'
         ? '/structured/change-plan'
         : '/document/change-plan'
-      const raw = record(await postStudioApi(planPath, { action, preview_token: previewToken }))
+      // Core gates the *document* plan's apply/undo on an explicit confirm
+      // (agent/tool_runtime.py:648); without it the call answers
+      // CONFIRMATION_REQUIRED and the preview token is spent. The structured
+      // route has no such gate, and the agent tool forwards confirm only there
+      // too (openwrite-bridge tools.ts, `novel_change_plan`), so match it.
+      const confirmed = planPath === '/document/change-plan' && (action === 'apply' || action === 'undo')
+      const raw = record(await postStudioApi(planPath, { action, preview_token: previewToken, ...(confirmed ? { confirm: true } : {}) }))
       const payload = record(raw['data'] ?? raw)
       const summary = record(payload['mutation_summary'])
       const changes = entityChanges(payload)
-      if (item.tool === 'novel_structured_change_plan' && (action === 'apply' || action === 'undo')) {
+      if (item.tool === 'novel_change_plan' && item.planKind === 'structured' && (action === 'apply' || action === 'undo')) {
         const kind = text(payload['change_kind'])
         const resources = kind === 'outline' ? ['outline', 'graph'] as const
           : kind === 'asset' ? ['assets', 'graph'] as const
@@ -388,12 +392,16 @@ export function TurnMutationSummaryView({ matched, openFile, postStudioApi, t }:
         busy: false,
       } }))
     } catch (cause: unknown) {
+      // A stale preview token answers 409 with a raw server-side Chinese
+      // sentence. Show the localized "refresh required" notice instead, the way
+      // CreationView.launchReviewTask maps its conflict codes.
+      const stale = cause instanceof StudioApiError && (cause.status === 409 || cause.code === 'CONFIRMATION_REQUIRED')
       setActions(value => ({ ...value, [item.callId]: {
         ...(value[item.callId] ?? {
           status: item.status, previewToken: item.previewToken, undoPreviewToken: item.undoPreviewToken,
           changes: item.changes ?? [], sourceRevision: item.sourceRevision ?? '', resultRevision: item.resultRevision ?? '',
         }),
-        message: cause instanceof Error ? cause.message : String(cause), busy: false,
+        message: stale ? t('turn.stalePreview') : cause instanceof Error ? cause.message : String(cause), busy: false,
       } }))
     }
   }
@@ -404,7 +412,7 @@ export function TurnMutationSummaryView({ matched, openFile, postStudioApi, t }:
   const allRejected = statuses.every(status => status === 'rejected')
   return <div className={css.turnSummary}>
     <FilePenLine size={14} />
-    <span>{failures === matched.items.length
+    <span className={css.turnSummaryLabel}>{failures === matched.items.length
       ? t('turn.failed')
       : allProposed ? t('turn.proposed')
         : allRejected ? t('turn.rejected')
@@ -420,7 +428,7 @@ export function TurnMutationSummaryView({ matched, openFile, postStudioApi, t }:
       return <span key={item.callId} className={css.turnMutationItem} data-status={itemStatus}>
       {item.path !== ''
         ? <button type="button" onClick={() => openFile(item.path)}>{item.label} {item.path}</button>
-        : <span>{item.label}</span>}
+        : <span className={css.turnMutationLabel}>{item.label}</span>}
       {itemStatus === 'failed' && <small>{item.errorCode || t('turn.failed')}</small>}
       {itemStatus === 'partial' && <small>{t('turn.partial')}</small>}
       {itemStatus === 'refresh_failed' && <small>{t('turn.refreshFailed')}</small>}

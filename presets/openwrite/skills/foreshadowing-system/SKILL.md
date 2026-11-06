@@ -29,10 +29,10 @@ Language: follow the author's current conversation language for responses and he
 
 | 工具 | 说明 |
 |------|------|
-| `create_foreshadowing` | 创建伏笔节点 |
-| `list_foreshadowing` | 列出伏笔 |
-| `update_foreshadowing` | 更新伏笔状态 |
-| `validate_foreshadowing` | 验证伏笔DAG |
+| `novel_foreshadowing(action="create")` | 创建伏笔节点（仅作者本轮已授权该精确变更时的一次性写入） |
+| `novel_foreshadowing(action="update")` | 更新伏笔状态 |
+| `novel_change_plan(action="structured", change_kind="foreshadowing", step="preview"/"apply")` | 伏笔 DAG 的逐项预览/确认维护（**默认路径**） |
+| `novel_continuity` | 未回收伏笔、人物状态漂移、时间线一致性报告 |
 
 ## 使用示例
 
@@ -41,15 +41,11 @@ Language: follow the author's current conversation language for responses and he
 ```
 用户: 在第三章埋一个伏笔，关于主角的神秘身世
 
-AI: 好的，我来创建一个主线伏笔。
-[COMMAND] create_foreshadowing {
-  "node_id": "f001",
-  "content": "主角发现自己体内有一道封印的神秘力量",
-  "weight": 9,
-  "layer": "主线",
-  "created_at": "ch_003",
-  "target_chapter": "ch_015"
-}
+AI: 好的，伏笔 DAG 的维护走变更计划两阶段确认。
+先 `novel_change_plan(action="structured", change_kind="foreshadowing", step="preview", change={…})`，
+把 diff 展示给作者；作者确认后才 `step="apply"` 并传回 `preview_token`。
+仅当作者在本轮已明确授权这条精确变更时，才可用直接入口
+`novel_foreshadowing(action="create", node_id="f001", content="主角发现自己体内有一道封印的神秘力量", weight=9, layer="主线", target_chapter="ch_015")`。
 
 结果: ✅ 伏笔已创建
 - ID: f001
@@ -64,11 +60,8 @@ AI: 好的，我来创建一个主线伏笔。
 ```
 用户: 有哪些待回收的伏笔？
 
-AI: 让我查询一下...
-[COMMAND] list_foreshadowing {
-  "status": "待收",
-  "min_weight": 5
-}
+AI: 让我读一下连续性报告……
+调用 `novel_continuity`（无参数，项目级）。
 
 结果:
 - f001: 主角身世之谜 (权重9, 主线)
@@ -81,11 +74,9 @@ AI: 让我查询一下...
 ```
 用户: 第八章回收了 f003 的伏笔，更新状态
 
-AI: 好的
-[COMMAND] update_foreshadowing {
-  "node_id": "f003",
-  "status": "已收"
-}
+AI: 同样走两阶段确认：`novel_change_plan(action="structured", change_kind="foreshadowing", step="preview", change={…})`
+→ 展示 → `step="apply"`。作者本轮已授权时可用
+`novel_foreshadowing(action="update", node_id="f003", status="paid-off")`。
 
 结果: ✅ f003 状态已更新为「已收」
 ```
@@ -95,8 +86,8 @@ AI: 好的
 ```
 用户: 检查伏笔有没有问题
 
-AI: 让我验证一下伏笔图...
-[COMMAND] validate_foreshadowing {}
+AI: 让我读一下连续性报告……
+调用 `novel_continuity`（无参数，项目级）。
 
 结果:
 - ✅ DAG有效，无环

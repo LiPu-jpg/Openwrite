@@ -12,8 +12,24 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { acceptRuntime } from './runtime-acceptance.mjs'
 import { acceptBrowser } from './browser-acceptance.mjs'
 const root = fileURLToPath(new URL('../', import.meta.url))
+
+/** Pack the working tree into `destination` and return the artifact path. */
+async function pack(root, version, destination) {
+  const { execFileSync } = await import('node:child_process')
+  execFileSync('npm', ['pack', '--ignore-scripts', '--pack-destination', destination], {
+    cwd: root, stdio: 'inherit',
+  })
+  return join(destination, `dsh-openwrite-${version}.tgz`)
+}
 const version = JSON.parse(await readFile(join(root, 'package.json'))).version
-const artifact = resolve(process.argv.find(arg => arg.endsWith('.tgz')) ?? join(root, `dsh-openwrite-${version}.tgz`))
+const named = process.argv.find(arg => arg.endsWith('.tgz'))
+// Never fall back to whatever tarball is lying in the repo root: that file is
+// easy to leave stale, and this gate would then validate code that is not what
+// gets published (the stale root tarball still carried the openwrite-dog row and
+// vendor/dsh-dog). Pack the working tree instead.
+const artifact = named
+  ? resolve(named)
+  : resolve(await pack(root, version, await mkdtemp(join(tmpdir(), 'openwrite-pack-'))))
 const sourceSpec = process.argv.find(arg => arg.startsWith('github:'))
 const installSpec = sourceSpec ?? artifact
 const temporary = process.argv.includes('--reuse')
@@ -55,6 +71,10 @@ try {
   const profile = JSON.parse(await readFile(join(env.DSH_HOME, 'profiles/web/package.json')))
   assert.equal(profile.dsh.profile.bundles.filter(name => name === 'dsh-openwrite').length, 1)
   run(['plugin', '--profile', 'web', 'add', '-w', installSpec])
+  // Re-read after the second add: the assertion used to run before it, so the
+  // check named repeat-install proved nothing about the repeat.
+  const repeated = JSON.parse(await readFile(join(env.DSH_HOME, 'profiles/web/package.json')))
+  assert.equal(repeated.dsh.profile.bundles.filter(name => name === 'dsh-openwrite').length, 1)
   report.checks.push('install', 'repeat-install')
   const dump = run(['--profile', 'web', '--dump-config'])
   assert.match(dump, /openwrite-bridge/)
@@ -103,8 +123,8 @@ try {
   const installedVersion = JSON.parse(await readFile(join(env.DSH_HOME, 'profiles/web/node_modules/dsh-openwrite/package.json'))).version
   report.pluginVersion = installedVersion
   const presetId = `openwrite-${installedVersion.replace(/[^a-z0-9-]/g, '-')}`
-  assert.match(presetId, /^[a-z0-9][a-z0-9-]*$/)
-  await readFile(join(env.DSH_HOME, '.agent-presets', presetId, 'agent.cordis.yml'))
+  const presetYml = await readFile(join(env.DSH_HOME, '.agent-presets', presetId, 'agent.cordis.yml'), 'utf8')
+  assert.match(presetYml, /^preset: openwrite\s*$/m, 'the installed preset must declare the openwrite persona')
   assert.equal((await fetch(base + '/studio-panel/runtime')).status, 401, 'runtime control requires host browser authentication')
   let html = ''
   for (let count = 0; count < 60; count++) {
@@ -115,7 +135,6 @@ try {
   }
   if (!html) throw new Error(`Web app did not boot: ${log}`)
   assert.match(html, /@dsh-novel\/studio-panel/)
-  assert.match(html, /@dsh-external\/dsh-dog/)
   const asset = await browserFetch(base + '/studio-panel/vendor/vditor/dist/js/lute/lute.min.js')
   assert.equal(asset.status, 200)
   assert.ok((await asset.text()).length > 1000)

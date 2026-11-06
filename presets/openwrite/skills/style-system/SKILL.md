@@ -121,13 +121,20 @@ front matter 放：
 - negative_rules
 - promotion_notes
 
-## 当前命令口径
+## 当前工具口径
 
-- `openwrite style extract <source_id> --source <file>`
-- `openwrite setting extract <source_id> --source <file>`
-- `openwrite source review <source_id>`
-- `openwrite source promote <source_id> --target all`
-- `openwrite style synthesize`
+一律走 `novel_source_action`，没有 `openwrite` 命令行（本插件只发行
+`openwrite-maintenance` 与 `openwrite-safe-upgrade` 两个维护脚本）：
+
+- 提取风格信号：`novel_source_action(action="analyze_v2", source_id=…, content=<原文>, focus=["style"])`
+- 提取设定提要：`novel_source_action(action="analyze_v2", source_id=…, content=<原文>, focus=["setting"])`
+- 查看提取状态：`novel_source_action(action="status_v2", source_id=…)`
+- 复审：`novel_source_action(action="review", source_id=…)`
+- 晋升预览：`novel_source_action(action="promotion_preview_v2", profile_id=…, target=…)`
+- 执行晋升：`novel_source_action(action="promote_v2", preview_id=…, confirm=true)`
+- 综合风格：`novel_source_action(action="synthesize_v2", source_ids=[…])`
+
+带 `confirm` 的动作必须先预览再执行；模型侧动作是长时的，见任务页。
 
 其中 `source promote --target all` 会把：
 - style 信号晋升到当前 `style_id`

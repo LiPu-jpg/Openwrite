@@ -10,7 +10,7 @@
 <p align="center">在 DeepSeek Harness 中规划、写作、审稿和管理长篇小说。</p>
 
 <p align="center">
-  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.2.1--rc.3-2563eb" alt="dsh 0.2.1-rc.3"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.2.1--rc.5-2563eb" alt="dsh 0.2.1-rc.5"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node-%E2%89%A522.19-15803d" alt="Node >= 22.19"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0f766e" alt="Apache-2.0"></a>
   <a href="https://dsh-plugin.org/plugins/lipu-jpg/openwrite"><img src="https://dsh-plugin.org/badges/listed.svg" alt="Listed on dsh-plugin.org"></a>
@@ -34,6 +34,35 @@
 配置和边界见 [安装说明](docs/INSTALL.md#bring-your-own-python)。同时补齐手机后台输入保留、独立 Studio 正文草稿恢复、触屏选区与下载，并加入 Chromium / WebKit 发布回归，见 [手机验收说明](docs/MOBILE_READINESS.md)。正式可安装版本仍为下方的 0.2.28；
 同时修复审稿证据漏填误判与机器批注污染，候选捆绑 Core 5.8.22，见 [#146 修复说明](docs/ISSUE_146_REVIEW_EVIDENCE.md)。
 Android 完整工具验收与宿主升级保护发布继续在 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123) 跟踪。
+
+## 0.2.33
+
+- **深度研究搜索默认走宿主 DSH**：托管运行时把 `ctx.web` 的搜索/抓取经环回中继交给 Core，默认 provider `dsh`，
+  不需要第三方搜索 Key；外部 Studio 仍默认 `bocha`。
+- **研究页新增搜索设置**：提供方、API Key、记住 Key；`dsh` 显示无需 Key。保存与 `novel_research_settings_save`
+  同路由，设置按作品作用域落盘。
+- 新增宿主 `host-web.ts` 中继（`/search`、`/fetch`、Bocha 兼容 `/bocha`，仅 127.0.0.1 + 机器 token）和 Core
+  handshake；DeepResearch 仍可选，首次使用需在 integration 目录 `pnpm install --frozen-lockfile`。
+- 搜索默认值放到左下角 **OpenWrite → 设置 → 搜索**（机器级默认，新作品生效；单个作品可在研究页覆盖）。
+- 研究 `quality` 在启动子进程前校验为 `advisory` / `balanced` / `strict`。
+- 修复非 ASCII `Authorization` 头返回 500 的问题，认证比较改为 UTF-8 bytes。
+- 左下角设置页视觉重做：搜索 provider 卡片、胶囊 Tab、卡片化配置块与主渐变保存按钮，对齐 dsh-our-free-model。
+
+## 0.2.30
+
+- **联动插件可执行接入**：`dsh-our-free-model` 接入按钮现在写 profile 并把写作/评审路由切到该模型（其余路由保留、二次确认、部分失败如实报告）；`dsh-ops` 的挂载计划（文件工具/渐进发现/无 shell/不替换官方工具）显示在「联动插件」区；`dsh-dog` 新增非斜杠技能 `dog-delivery-verification`，把正文与评审证据写成 handoff 图交给 `dog_validate`/`dog_create`/`dog_run` 独立验收。详见 [联动插件说明](docs/COMPANION_PLUGINS.md)。
+
+本轮候选还包含两项发布阻塞修复，见 [#149/#150/#151 修复说明](docs/ISSUES_149_150_151.md)：
+
+- 兼容精确宿主 dsh `0.2.1-rc.4` 与 `0.2.1-rc.5`，修复 `plugin does not support the DSH version in use` 直接拒装（[#150](https://github.com/LiPu-jpg/Openwrite/issues/150)/[#151](https://github.com/LiPu-jpg/Openwrite/issues/151)/[#142](https://github.com/LiPu-jpg/Openwrite/issues/142)）。
+- 新建会话选择器不再为每个已发布版本注册预设别名，只保留会话真实引用过的旧版本（[#149](https://github.com/LiPu-jpg/Openwrite/issues/149)）；工作台入口改用稳定预设 id。
+
+本轮候选还加入**可选联动插件**支持，见 [联动插件说明](docs/COMPANION_PLUGINS.md)：检测到 [dsh-ops](https://github.com/T-Auto/dsh-ops)
+时，用其官方预设接口挂载有界文件工具与渐进发现；检测到 [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 时，
+在工作台「联动插件」区显示状态与接入提示。两者均为可选项，未安装时行为与之前一致；任何判定失败都回退到 OpenWrite 自己的实现。
+同时**移除了内置的 DoG 引擎**（原 `vendor/dsh-dog`）：包里不再有 `dog_*` 工具与「DoG 验收」入口，
+三个查询技能改为直接读 OpenWrite 自己的评审/交付/导入产物；需要 DoG 图形验证可自行安装
+[@dsh-external/dsh-dog](https://github.com/Fun10165/dsh-dog)。
 
 ## 0.2.28
 
@@ -195,7 +224,7 @@ dsh web
 packages/openwrite-bridge/   小说工具与后端桥接
 packages/studio-panel/       dsh 原生工作台
 presets/openwrite/          OpenWrite 创作预设与技能
-scripts/                   安装、启动、检查与 DoG 适配
+scripts/                   安装、启动与检查
 conductor/                 连续写章、评审与修订编排
 ```
 
@@ -205,7 +234,7 @@ conductor/                 连续写章、评审与修订编排
 ## 许可与来源
 
 项目采用 [Apache-2.0](LICENSE)。`oh-story-*` 技能和随包编辑器保留各自目录中的原有许可证。
-Logo 基于 OpenWrite `native-core` 分支，已调整深浅主题配色；基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，图谱集成使用 [dsh-dog](https://github.com/Fun10165/dsh-dog)。
+Logo 基于 OpenWrite `native-core` 分支，已调整深浅主题配色；基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，图谱验证可选装第三方 [dsh-dog](https://github.com/Fun10165/dsh-dog)（内置引擎已移除）。
 
 生态目录：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) · [社区插件市场](https://dshtui.com/plugins/)。OpenWrite 当前面向 DeepSeek Harness 的 `web` profile，使用 `dsh web` 打开创作工作台；尚未验证 dsh-TUI 界面兼容性。
 

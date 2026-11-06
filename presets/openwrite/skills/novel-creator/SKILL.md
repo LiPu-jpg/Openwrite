@@ -21,12 +21,12 @@ Language: follow the author's current conversation language for responses and he
 ## 工作流程
 
 1. `novel_status` 看项目阶段、资产缺口、待确认项。
-2. `novel_outline_read` 定位章纲：未指定章节时取大纲顺序中最早尚无正文的章；指定章节时校验章纲存在。已有正文则打开或审查，不得直接覆盖。
+2. `novel_outline_read` 定位章纲并读 `recommendation`：未指定章节时省略 `chapter_id`，让服务端取推荐下一章（自行推算的 id 与推荐不一致会被拒绝）；作者点名章节时才传 `chapter_id`，并先用 `recommendation` 校验一致。已有正文则打开或审查，不得直接覆盖。
 3. `novel_context_preview` 预检写章上下文包（大纲窗口、出场角色、伏笔、风格、正典）。
 4. `novel_chapter_work` 读取本章到期/超期/待埋入伏笔与字数目标。
 5. `novel_write_chapter` 写下一章或指定章（可带 `outline_revision` 与 `guidance`）。
 6. 草稿出来后暂停，请作者选择：通过进入评审、按意见重写、或到创作页手工编辑。
-7. 作者通过后调用 `novel_review_chapter`；需要改稿时用 `novel_revision_create_from_review`，确认后再 `novel_revision_apply`。
+7. 作者通过后调用 `novel_review_chapter`；需要改稿时用 `novel_revision(action="create", source="review"`，确认后再 `novel_revision(action="apply"`。
 
 ## 工具
 
@@ -38,10 +38,10 @@ Language: follow the author's current conversation language for responses and he
 | `novel_chapter_work` | 本章目标、伏笔义务、最近修改 |
 | `novel_write_chapter` | 写章（长耗时） |
 | `novel_review_chapter` | 六域累加评审 |
-| `novel_document_change_plan` | 已有正文的逐项预览/确认修改 |
-| `novel_structured_change_plan` | 大纲/资产/伏笔的逐项预览/确认 |
+| `novel_change_plan(action="document"` | 已有正文的逐项预览/确认修改 |
+| `novel_change_plan(action="structured"` | 大纲/资产/伏笔的逐项预览/确认 |
 
-`novel_doc_write` 与 `novel_outline_edit` 仅在作者本轮已明确授权精确变更时作为直接写入兼容入口。
+`novel_doc(action="write"` 与 `novel_outline_edit` 仅在作者本轮已明确授权精确变更时作为直接写入兼容入口。
 
 ## 节拍
 
@@ -68,7 +68,7 @@ Language: follow the author's current conversation language for responses and he
 | 数据 | 必须？ | 如何确认 |
 |------|--------|----------|
 | 大纲 | 必须 | `novel_outline_read` |
-| 本章出场角色 | 必须 | `novel_context_preview` / `novel_assets_list` |
+| 本章出场角色 | 必须 | `novel_context_preview` / `novel_assets(action="list"` |
 | 合成风格 | 建议 | 上下文包 |
 | 伏笔 | 可选 | `novel_chapter_work` 的分类义务 |
 
@@ -79,12 +79,12 @@ Language: follow the author's current conversation language for responses and he
 | 情况 | 处理 |
 |------|------|
 | 上下文超限 | 报告 `novel_context_preview` 的压缩/保护原因，不静默丢掉正典 |
-| 章纲缺失 | 回到规划，用 `novel_structured_change_plan(change_kind="outline")` |
-| 已有正文 | 打开或审查；改稿走 `novel_document_change_plan` |
-| 写章失败 | 用 `novel_tasks_list` / `novel_task_get` 查看后台任务，可 `novel_task_retry` |
+| 章纲缺失 | 回到规划，用 `novel_change_plan(action="structured"(change_kind="outline")` |
+| 已有正文 | 打开或审查；改稿走 `novel_change_plan(action="document"` |
+| 写章失败 | 用 `novel_task(action="list"` / `novel_task(action="get"` 查看后台任务，可 `novel_task(action="retry"` |
 
 ## 与其他技能
 
 - **novel-reviewer**：写完后评审
 - **workflow-manager**：连写、后台任务、中断恢复
-- **foreshadowing-system**：伏笔 DAG 维护仍走 `novel_structured_change_plan` / `novel_foreshadowing`
+- **foreshadowing-system**：伏笔 DAG 维护仍走 `novel_change_plan(action="structured"` / `novel_foreshadowing`

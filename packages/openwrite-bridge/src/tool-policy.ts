@@ -4,21 +4,22 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-plan-mode'
 
 export type NovelEffect = 'read' | 'write' | 'generate'
+// Only unconditionally read-only tools belong here. An action-dispatching tool
+// must NOT be listed: `reads` short-circuits before `readActions`, so a merged
+// family placed here has all of its mutating actions (delete, configure,
+// save_routes) classified as reads and run under a read-only sandbox or plan
+// mode. `novel_model_profiles` / `novel_embedding_profiles` were listed here by
+// mistake after the 95→56 merge; their read-only actions are in `readActions`.
 const reads = new Set([
-  'novel_embedding_profiles', 'novel_status', 'novel_review_framework', 'novel_trace_list',
-  'novel_context_preview', 'novel_outline_read', 'novel_reading_order', 'novel_reading_packet',
-  'novel_chapter_work', 'novel_scene_structure', 'novel_chapter_scenes', 'novel_scene_migration_preview',
-  'novel_assets_list', 'novel_search', 'novel_doc_read', 'novel_asset_read', 'novel_revisions_list',
-  'novel_revision_get', 'novel_tasks_list', 'novel_continuity', 'novel_diagnostics',
-  'novel_research_status', 'novel_research_report', 'novel_model_profiles',
-  'novel_manuscript_acceptance', 'novel_export_preflight',
-  'novel_manuscript_metrics', 'novel_outline_audit',
+  'novel_status', 'novel_review_framework', 'novel_trace_list',
+  'novel_context_preview', 'novel_outline_read', 'novel_reading_packet',
+  'novel_chapter_work', 'novel_chapter_scenes', 'novel_search', 'novel_continuity', 'novel_diagnostics',
+  'novel_research_status', 'novel_research_report',
+  'novel_manuscript_acceptance', 'novel_manuscript_metrics', 'novel_outline_audit',
 ])
 const generates = new Set([
-  'novel_write_chapter', 'novel_review_chapter', 'novel_multi_write', 'novel_task_create',
-  'novel_task_retry', 'novel_task_confirm', 'novel_revision_create_selection',
-  'novel_revision_create_from_review', 'novel_revision_regenerate', 'novel_settle_backfill',
-  'novel_model_test', 'novel_model_embedding_test',
+  'novel_write_chapter', 'novel_review_chapter', 'novel_multi_write',
+  'novel_revision_regenerate', 'novel_settle_backfill',
 ])
 const readActions: Record<string, readonly string[]> = {
   novel_writing_assets: ['get'],
@@ -31,6 +32,28 @@ const readActions: Record<string, readonly string[]> = {
   novel_reference_library_action: ['list', 'status', 'profile'],
   novel_runtime_skill_action: ['list', 'diagnose', 'resolve'],
   novel_rule_action: ['status'],
+  // Merged tools: the read-only actions of each family.
+  novel_task: ['get', 'list'],
+  novel_revision: ['list', 'get'],
+  novel_assets: ['list', 'read'],
+  novel_assets_package: ['preview'],
+  novel_doc: ['read'],
+  novel_scene: ['structure'],
+  novel_scene_migration: ['preview'],
+  novel_reading_order: ['get'],
+  novel_export: ['preflight'],
+  // `download` is NOT here: it writes a local file (mkdir + writeFile under
+  // outputDir), so classifying it as a read would let a read-only sandbox or plan
+  // mode write bytes to disk — the same class of mistake as the assets-package
+  // export. Its archive_op read variants are covered by the write classification
+  // being fail-closed rather than permissive.
+  novel_model_profiles: ['list', 'test'],
+  novel_embedding_profiles: ['list', 'test'],
+}
+/** Merged tools whose creating/generating actions replace the old per-tool names. */
+const generateActions: Record<string, readonly string[]> = {
+  novel_task: ['create', 'retry', 'confirm'],
+  novel_revision: ['create'],
 }
 
 /** Unknown and preview operations fail closed: previews can persist confirmation records. */
@@ -40,6 +63,7 @@ export function novelEffect(name: string, args: unknown): NovelEffect {
   if (name === 'novel_write_chapter' && values.dry_run === true) return 'read'
   if (readActions[name]?.includes(String(values.action))) return 'read'
   if (name === 'novel_model_benchmark' && values.action === 'run') return 'generate'
+  if (generateActions[name]?.includes(String(values.action))) return 'generate'
   return generates.has(name) ? 'generate' : 'write'
 }
 

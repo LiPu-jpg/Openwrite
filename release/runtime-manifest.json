@@ -3,7 +3,7 @@
   "dsh": "0.1.2-rc.1",
   "uv_version": "0.11.19",
   "python_version": "3.12.13",
-  "core_version": "5.8.22",
+  "core_version": "5.8.30",
   "contract_version": 1,
   "platforms": {
     "darwin-arm64": {
@@ -56,8 +56,8 @@
     }
   },
   "wheel": {
-    "file": "openwrite-5.8.22-py3-none-any.whl",
-    "sha256": "13d48e14f95d61de3e4e503121326cb3be7d00b9eff874a2b0931a41aa2f5bc0"
+    "file": "openwrite-5.8.30-py3-none-any.whl",
+    "sha256": "d9e48cbaa0263c7cc194005606a61abdd9194e56adb5e3365b52e4c2be805a37"
   },
   "requirements": {
     "file": "requirements.lock",
@@ -67,16 +67,7 @@
     "core": {
       "repository": "https://github.com/LiPu-jpg/Openwrite",
       "branch": "native-core",
-      "commit": "ba9a1fc0a585ea06966361a62fbae5e70e7e2a4c"
-    },
-    "dog": {
-      "repository": "https://github.com/Fun10165/dsh-dog",
-      "tag": "v1.2.0",
-      "commit": "3a442ef4b1a82cc4258a01baf798913c94a99445",
-      "patches": [
-        "0.2.19: src/host-shims.ts 内置 dshHomePath/defineTool，移除 @deepseek-ai/dsh-home-paths 与 @deepseek-ai/dsh-tools 的运行时导入（#74）",
-        "unreleased 0.2.28: Electron Node-mode verifier execution, structured process/output diagnostics, and per-condition DoG guards (#121)"
-      ]
+      "commit": "b9fcacfa743ee9865e504fa6ce02c2386a5d7b68"
     },
     "cryptography": {
       "package": "cryptography",

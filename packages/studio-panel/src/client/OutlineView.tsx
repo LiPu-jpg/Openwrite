@@ -22,7 +22,7 @@
  * { path, revision, roots, counts, drafted_chapters, recommendation }.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { StudioApiError, type StudioApiInjected } from './api.ts'
@@ -144,7 +144,18 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
 
   const load = useCallback(() => {
     setState('loading')
-    setDrafts({})
+    // Do not clear drafts here: a refresh click, a 409 conflict reload or a
+    // post-merge reload used to silently revert the title/summary the author was
+    // still typing. Stale overlays are dropped by the revision bump in runOp
+    // instead, which only discards entries the server no longer has.
+    setDrafts(previous => {
+      const next: Record<string, FieldDraft> = {}
+      for (const [key, value] of Object.entries(previous)) {
+        // Keep only what the author actually changed; a reload is not a reset.
+        if (value.title !== undefined || value.summary !== undefined) next[key] = value
+      }
+      return next
+    })
     let cancelled = false
     fetchStudioApi('/outline')
       .then((data) => {
@@ -185,9 +196,13 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
     return () => { on = false }
   }, [postStudioApi])
 
+  const toastTimer = useRef<number | null>(null)
   const showToast = (text: string, bad: boolean) => {
     setToast({ text, bad })
-    window.setTimeout(() => setToast(null), 6000)
+    // Clear the previous timer: without this the first toast's timeout erases the
+    // second one early, so a follow-up message can vanish within a second.
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => { toastTimer.current = null; setToast(null) }, 6000)
   }
 
   /** Patch one node's draft overlay. */
@@ -513,6 +528,17 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
   const openEditDraft = (plan: PlanInfo) => {
     setEditor({ id: plan.id, label: plan.label, text: plan.proposal ?? '', revision: plan.revision ?? '' })
   }
+  // A 409 here means the candidate moved on: the list still holds the old
+  // revision, so every later action would conflict again until a manual refresh.
+  // Re-pull first, then report.
+  const planFailure = async (cause: unknown) => {
+    if (cause instanceof StudioApiError && cause.status === 409) {
+      setToast({ text: t('outline.plan.conflict'), bad: true })
+      await reloadPlans()
+      return
+    }
+    setToast({ text: cause instanceof Error ? cause.message : String(cause), bad: true })
+  }
   const saveDraft = async () => {
     if (editor === null) return
     setDraftBusy(true)
@@ -523,31 +549,31 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
         proposal: editor.text,
         revision: editor.revision,
       })
-      setToast({ text: `草案已保存（${editor.label}）`, bad: false })
+      setToast({ text: t('outline.plan.saved').replace('{label}', editor.label), bad: false })
       setEditor(null)
       await reloadPlans()
     } catch (cause) {
-      setToast({ text: cause instanceof Error ? cause.message : String(cause), bad: true })
+      await planFailure(cause)
     } finally {
       setDraftBusy(false)
     }
   }
   const deleteDraft = async (plan: PlanInfo) => {
-    if (!window.confirm(`删除草案「${plan.label}」？（只删候选，不改大纲）`)) return
+    if (!window.confirm(t('outline.plan.confirmDelete').replace('{label}', plan.label))) return
     setDraftBusy(true)
     try {
       await postStudioApi('/rolling-plans', { action: 'delete', candidate_id: plan.id, revision: plan.revision ?? '' })
       if (activePlan === plan.id) setActivePlan('')
-      setToast({ text: `已删除草案「${plan.label}」`, bad: false })
+      setToast({ text: t('outline.plan.deleted').replace('{label}', plan.label), bad: false })
       await reloadPlans()
     } catch (cause) {
-      setToast({ text: cause instanceof Error ? cause.message : String(cause), bad: true })
+      await planFailure(cause)
     } finally {
       setDraftBusy(false)
     }
   }
   const applyDraft = async (plan: PlanInfo) => {
-    if (!window.confirm(`把草案「${plan.label}」并入正式大纲（只追加不冲突的章节）？\n\n会写入 src/outline.md。`)) return
+    if (!window.confirm(t('outline.plan.confirmApply').replace('{label}', plan.label))) return
     setDraftBusy(true)
     try {
       const data = asObj(await postStudioApi('/rolling-plans', {
@@ -555,11 +581,11 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
         candidate_id: plan.id,
         revision: plan.revision ?? '',
       }))
-      setToast({ text: asText(data.message, '已并入'), bad: false })
+      setToast({ text: asText(data.message, t('outline.plan.merged')), bad: false })
       await load()
       await reloadPlans()
     } catch (cause) {
-      setToast({ text: cause instanceof Error ? cause.message : String(cause), bad: true })
+      await planFailure(cause)
     } finally {
       setDraftBusy(false)
     }
@@ -575,16 +601,16 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
         )}
         <span className={css.toolbarMeta}>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            接预演
+            {t('outline.plan.attach')}
             <select
               value={activePlan}
               onChange={(event) => { setActivePlan(event.target.value) }}
               style={{ maxWidth: 220 }}
             >
-              <option value="">（不接 · 仅正式大纲）</option>
+              <option value="">{t('outline.plan.attachNone')}</option>
               {plans.map(plan => (
                 <option key={plan.id} value={plan.id}>
-                  {plan.kind === 'rolling' ? '草案·' : '方向·'}{plan.label}
+                  {t(plan.kind === 'rolling' ? 'outline.plan.rolling' : 'outline.plan.direction')}{plan.label}
                 </option>
               ))}
             </select>
@@ -615,23 +641,23 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
       )}
       <div className={css.toolbar} style={{ marginTop: 4 }}>
         <button type="button" className={css.button} disabled={draftBusy || payload === null} onClick={() => { void createNewDraft() }}>
-          ＋新建草案
+          {t('outline.plan.new')}
         </button>
         {activeRolling !== undefined && (
           <>
             <button type="button" className={css.button} disabled={draftBusy} onClick={() => { openEditDraft(activeRolling) }}>
-              编辑草案
+              {t('outline.plan.edit')}
             </button>
             <button type="button" className={css.button} disabled={draftBusy} onClick={() => { void applyDraft(activeRolling) }}>
-              并入正式大纲
+              {t('outline.plan.apply')}
             </button>
             <button type="button" className={css.button} disabled={draftBusy} onClick={() => { void deleteDraft(activeRolling) }}>
-              删除草案
+              {t('outline.plan.delete')}
             </button>
           </>
         )}
         {editor !== null && (
-          <span className={css.toolbarMeta}>正在编辑：{editor.label}</span>
+          <span className={css.toolbarMeta}>{t('outline.plan.editing')}{editor.label}</span>
         )}
       </div>
       {editor !== null && (
@@ -640,15 +666,15 @@ export function OutlineView({ fetchStudioApi, postStudioApi, t }: OutlineViewPro
             className={css.bodyTextarea}
             rows={12}
             value={editor.text}
-            placeholder={'粘贴/编写 Markdown 大纲草案（# 篇 / ## 节 / ### 第N章 …）'}
+            placeholder={t('outline.plan.placeholder')}
             onChange={(event) => { setEditor({ ...editor, text: event.target.value }) }}
           />
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className={css.button} disabled={draftBusy} onClick={() => { void saveDraft() }}>
-              保存草案（stage）
+              {t('outline.plan.stage')}
             </button>
             <button type="button" className={css.button} onClick={() => { setEditor(null) }}>
-              取消
+              {t('outline.plan.cancel')}
             </button>
           </div>
         </div>

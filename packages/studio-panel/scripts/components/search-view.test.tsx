@@ -203,8 +203,9 @@ describe('SearchView revision-bound preview', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'search.change.confirmApply' }))
     await act(async () => { await Promise.resolve() })
+    // Core gates apply/undo on an explicit confirm; omitting it is CONFIRMATION_REQUIRED.
     expect(postStudioApi).toHaveBeenNthCalledWith(2, '/document/change-plan', {
-      action: 'apply', preview_token: 'preview-token-one',
+      action: 'apply', preview_token: 'preview-token-one', confirm: true,
     })
     expect(screen.getByText('search.change.applied')).not.toBeNull()
     expect(harness.invalidate).toHaveBeenCalledWith('manuscript')

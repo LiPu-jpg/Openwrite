@@ -71,8 +71,9 @@ export function ContinuousReader({
     let cancelled = false
     setState('loading')
     setLoadError('')
+    // Hoisted so the catch below can keep whatever was fetched before a failure.
+    const loaded: ReaderDocument[] = []
     void (async () => {
-      const loaded: ReaderDocument[] = []
       const canonical = chapters.length > 0 && readingOrderRevision !== '' &&
         chapters.every(chapter => chapter.occurrenceId !== '' && chapter.documentId !== '')
       if (canonical) {
@@ -126,7 +127,13 @@ export function ContinuousReader({
       }
     })().catch((cause: unknown) => {
       if (cancelled) return
+      // Keep whatever was already fetched: a failure part-way through used to
+      // discard all of it, so one unreadable chapter of twenty hid all twenty.
+      // The per-chapter error is reported alongside the chapters that did load.
       setLoadError(cause instanceof Error ? cause.message : String(cause))
+      if (loaded.length > 0) {
+        setDocuments(loaded.sort((left, right) => left.occurrence - right.occurrence))
+      }
       setState('ready')
     })
     return () => { cancelled = true }

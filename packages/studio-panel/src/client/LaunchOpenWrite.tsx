@@ -9,6 +9,16 @@ export async function runtimeAction(action: string): Promise<Status> {
   return result.json() as Promise<Status>
 }
 
+/**
+ * The sidebar entry: pick a work and start writing.
+ *
+ * This dialog is the way *into* a novel, so it stays a launcher: one status
+ * line for the writing environment, the directory field, and the way in.
+ * Everything that is a setting rather than an action — the environment's
+ * diagnostics, the model profile library, the companion plugins — lives in the
+ * host's settings dialog under 「设置 → OpenWrite」, the way
+ * `dsh-our-free-model` keeps its own configuration.
+ */
 export function LaunchOpenWrite({ wide, openWorkspace }: { wide: boolean; openWorkspace: (path?: string) => Promise<boolean> }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [open, setOpen] = useState(false)
@@ -53,7 +63,6 @@ export function LaunchOpenWrite({ wide, openWorkspace }: { wide: boolean; openWo
       <header><div><small>长篇小说工作台</small><h2>开始创作</h2></div><button type="button" aria-label="关闭" onClick={() => setOpen(false)}><X size={20} /></button></header>
       <section aria-live="polite"><strong>{title}</strong><p>{status.message ?? '正在连接…'}</p>
         {preparing && <progress value={status.totalBytes ? status.downloadedBytes : undefined} max={status.totalBytes} aria-label="环境准备进度" />}
-        {preparing && <button type="button" onClick={() => void runtimeAction('cancel').catch(cause => setError(String(cause)))}>取消准备</button>}
         {['error', 'cancelled', 'stopped'].includes(status.phase) && <button type="button" onClick={() => { setError(''); void runtimeAction('retry').catch(cause => setError(String(cause))) }}>重试</button>}
       </section>
       <section><strong>选择作品目录</strong><p>可以打开已有作品，也可以选择空文件夹创建小说。每次进入都会建立独立的创作会话，已有会话保持原样。</p>
@@ -61,7 +70,10 @@ export function LaunchOpenWrite({ wide, openWorkspace }: { wide: boolean; openWo
         <button className={css.primary} type="button" disabled={status.phase !== 'ready' || busy} onClick={() => void choose()}>{busy ? '正在打开…' : path.trim() ? '进入作品' : '选择目录并进入'}</button>
       </section>
       {error && <p role="alert">{error}</p>}
-      <details><summary>诊断与帮助</summary><p>环境状态：{status.phase}</p>{status.error && <pre>{status.error}</pre>}<p>模型可在「任务 → 模型」中配置。关闭本窗口不会中断环境准备。</p></details>
+      {/* Everything that is a setting rather than an action lives in the host's
+          settings dialog. The host exposes no public way to open that dialog at
+          a given section, so this is a pointer, not a button. */}
+      <p className={css.pointer}>模型档案、环境诊断与联动插件在 dsh 的「设置 → OpenWrite」里。关闭本窗口不会中断环境准备。</p>
     </dialog>}
   </>
 }

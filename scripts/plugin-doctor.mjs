@@ -4,11 +4,13 @@ import { readFile, realpath } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isAbsolute, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { load } from 'js-yaml'
 import { inspectProfile } from './maintenance.mjs'
+import { detectCompanions } from '../companions.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const packageDirs = ['.', 'packages/openwrite-bridge', 'packages/studio-panel', 'vendor/dsh-dog']
+const packageDirs = ['.', 'packages/openwrite-bridge', 'packages/studio-panel']
 const isDsh = name => /^@deepseek-ai\/dsh(?:-|$)/.test(name)
 const lockName = path => path.match(/(?:^|\/)node_modules\/(@deepseek-ai\/[^/]+)$/)?.[1]
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'))
@@ -140,7 +142,7 @@ export async function doctor({ profiles = false } = {}) {
       }
       assertClean(errors)
     })
-    if (relative === '.' || relative === 'vendor/dsh-dog') continue
+    if (relative === '.') continue
     await report(`${manifest.name}: packed entries + patch + assets`, async () => {
       const packed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'],
         { cwd: dir, encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }))
@@ -151,6 +153,18 @@ export async function doctor({ profiles = false } = {}) {
     })
   }
   if (profiles) await checkProfiles(report)
+  await report('companion plugins', async () => {
+    const home = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
+    const companions = await detectCompanions(home)
+    const lines = []
+    if (companions.dog.installed) lines.push(`dsh-dog ${companions.dog.usable ? 'active' : `inactive (${companions.dog.reason})`}`)
+    if (companions.ops.installed) lines.push(`dsh-ops ${companions.ops.usable ? 'active' : `inactive (${companions.ops.reason})`}`)
+    if (companions.freeModel.installed) lines.push(`dsh-our-free-model ${companions.freeModel.usable ? 'active' : `inactive (${companions.freeModel.reason})`}`)
+    if (companions.host === null && (companions.dog.installed || companions.ops.installed || companions.freeModel.installed)) {
+      throw new Error(`host version unresolved; companion decisions stay fail-closed (${lines.join(', ')})`)
+    }
+    console.log(`      ${lines.join(', ') || 'none installed'}`)
+  })
   console.log(failures ? `${failures} check(s) failed.` : 'All checks passed. No model or live-service call was made.')
   return failures ? 1 : 0
 }

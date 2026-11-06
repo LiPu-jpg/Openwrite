@@ -148,11 +148,13 @@ describe('BenchmarkView M1c task wiring', () => {
       result_ref: { type: 'benchmark_run', id: 'partial' } },
       details: { partial: { ...RUN_DETAIL, run_id: 'partial', status: 'cancelling', in_flight: 1 } } })
     await renderAndRun(api)
-    const button = await screen.findByRole('button', { name: '取消中…' })
+    // The label comes from locales, not a hardcoded string in the view.
+    const button = await screen.findByRole('button', { name: 'benchmark.cancellingEllipsis' })
     expect((button as HTMLButtonElement).disabled).toBe(true)
     await waitFor(() => expect(api.fetchStudioApi).toHaveBeenCalledWith('/benchmarks/partial'))
-    expect(screen.getByText(/已发送的请求仍可能产生费用/)).toBeTruthy()
-    expect(await screen.findByText(/还有 1 个请求在途/)).toBeTruthy()
+    expect(screen.getByText('benchmark.cancelNote')).toBeTruthy()
+    // `t` is stubbed to echo the key, and interpolation is the caller's job.
+    expect(await screen.findByText(/benchmark.cancellingInflight/)).toBeTruthy()
   })
 
   it('renders real progress units and the phase while the task runs', async () => {

@@ -338,7 +338,7 @@ export function SearchView({ fetchStudioApi, postStudioApi, t }: SearchViewProps
     setChangePlanMessage('')
     try {
       const applied = parseDocumentChangePlan(await postStudioApi('/document/change-plan', {
-        action: 'apply', preview_token: plan.preview_token,
+        action: 'apply', preview_token: plan.preview_token, confirm: true,
       }))
       // The user may be reading another hit now; still refresh documents after
       // the authorized write, but never attach its result to that new hit.

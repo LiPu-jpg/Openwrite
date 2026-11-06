@@ -4,7 +4,14 @@
   position: relative;
   display: grid;
   grid-template-columns: var(--chapter-column) minmax(0, 1fr) var(--inspector-column);
-  height: calc(100dvh - 200px);
+  /* Follow the host's content area instead of a viewport offset. The host
+     hands this view whatever height is left over by the conversation chrome;
+     with the composer seat hidden (workspace-chrome.ts) that is the whole
+     area below the header, so the editor reaches the viewport bottom. The
+     old `calc(100dvh - 200px)` was a guess at the composer's band: it left
+     the editor 124px short of the bottom and the space below it read as a
+     bare white slab. */
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   background: var(--dsw-alias-bg-base);
@@ -1332,7 +1339,12 @@
 .workspaceRoot {
   display: grid;
   grid-template-columns: 136px minmax(0, 1fr);
-  height: calc(100dvh - 200px);
+  /* Follow the host's content area instead of a viewport offset: the host
+     hands this view the whole area below the conversation header once the
+     composer seat is hidden (workspace-chrome.ts). A magic 200px offset left
+     the workbench 124px short of the viewport bottom, and the strip below it
+     read as a bare white slab under the composer. */
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   background: var(--dsw-alias-bg-base);
@@ -1399,7 +1411,7 @@
 .transferPanel {
   height: 100%;
   box-sizing: border-box;
-  padding: 24px clamp(16px, 3vw, 32px) 180px;
+  padding: 24px clamp(16px, 3vw, 32px) 24px;
   overflow-y: auto;
   color: var(--dsw-alias-label-primary);
 }
@@ -1795,17 +1807,6 @@
 }
 .operationNote[data-bad='true'] { color: var(--dsw-alias-state-error-primary); }
 
-.externalLink {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 16px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  text-decoration: none;
-}
-.externalLink:hover { color: var(--dsw-alias-label-primary); }
-
 .headerStatus {
   display: flex;
   min-width: 0;
@@ -1896,11 +1897,19 @@
 
 .turnSummary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
   color: var(--dsw-alias-label-tertiary);
   font-size: 10px;
+}
+/* CJK labels have no spaces to break on, so without an explicit nowrap the
+   flex row squeezes them into one character per line. */
+.turnSummaryLabel,
+.turnMutationLabel {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .turnSummary button {
   max-width: 200px;
@@ -1998,7 +2007,9 @@
     --chapter-column: 0px;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: var(--mobile-bar-height) minmax(0, 1fr);
-    height: max(360px, calc(100dvh - 180px));
+    /* Same rule as the desktop layout: the host's content area decides. The
+       floor keeps the editor usable on very short windows. */
+    height: max(360px, 100%);
   }
   .tabletInspectorButton { display: none !important; }
   .mobileBar {
@@ -2077,7 +2088,7 @@
   .workspaceRoot {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 46px minmax(0, 1fr);
-    height: calc(100dvh - 260px);
+    height: 100%;
   }
   .workspaceNav {
     flex-direction: row;

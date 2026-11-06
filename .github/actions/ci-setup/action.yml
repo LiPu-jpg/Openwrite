@@ -1,0 +1,73 @@
+name: CI setup
+description: >-
+  Shared, stability-hardened setup for every acceptance job: the apt mirror guard
+  on Linux, a cached Playwright browser install with retries, and npm fetch
+  settings that survive a flaky registry. Idempotent, so calling it twice in one
+  job is harmless, and it never depends on node_modules already being installed.
+inputs:
+  browser:
+    description: 'Playwright browser to install (chromium or webkit); empty skips the install.'
+    required: false
+    default: ''
+  apt-guard:
+    description: 'Apply the Ubuntu apt mirror guard (default: only on Linux).'
+    required: false
+    default: auto
+runs:
+  using: composite
+  env:
+    # Workspace-relative so no context is needed: job-level and step-level env
+    # cannot both see `runner`, and a literal path works in every scope.
+    PLAYWRIGHT_BROWSERS_PATH: .tmp-ms-playwright
+  steps:
+    - name: Harden npm against registry flakiness
+      shell: bash
+      run: |
+        npm config set fetch-retries 5 --location=global
+        npm config set fetch-retry-factor 2 --location=global
+        npm config set fetch-retry-mintimeout 20000 --location=global
+        npm config set fetch-retry-maxtimeout 120000 --location=global
+        npm config set fetch-timeout 300000 --location=global
+
+    - name: Guard apt against dead Azure mirrors (Linux)
+      if: inputs.apt-guard == 'auto' && runner.os == 'Linux' || inputs.apt-guard == 'always'
+      shell: bash
+      run: |
+        # GitHub-hosted ubuntu runners intermittently lose outbound port 80 (the
+        # default Azure apt mirror goes dead while https stays healthy), leaving
+        # apt hanging single-threaded until the job timeout kills the matrix leg.
+        # Pin the mirror list to the public archive over https and bound every
+        # connection so a sick runner fails fast instead of wedging.
+        echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
+        printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
+
+    # One workspace-relative location: identical on every OS (macOS otherwise
+    # uses ~/Library/Caches, Linux ~/.cache) and free of context restrictions.
+    - name: Restore the Playwright browser cache
+      if: inputs.browser != ''
+      uses: actions/cache@v4
+      with:
+        path: .tmp-ms-playwright
+        key: ms-playwright-${{ runner.os }}-${{ inputs.browser }}-${{ hashFiles('packages/studio-panel/package-lock.json') }}
+        restore-keys: |
+          ms-playwright-${{ runner.os }}-${{ inputs.browser }}-
+
+    - name: Install the Playwright browser (retrying, then cached)
+      if: inputs.browser != ''
+      shell: bash
+      run: |
+        cli=packages/studio-panel/node_modules/playwright/cli.js
+        args=(install)
+        # --with-deps needs apt; Windows has no apt and already ships the runtime deps.
+        if [ "$RUNNER_OS" != "Windows" ]; then args+=(--with-deps); fi
+        args+=("${{ inputs.browser }}")
+        for attempt in 1 2 3; do
+          echo "playwright ${args[*]} (attempt $attempt)"
+          if node "$cli" "${args[@]}"; then
+            echo "browser ready"
+            exit 0
+          fi
+          sleep $((attempt * 30))
+        done
+        echo "::error::playwright install failed after 3 attempts"
+        exit 1

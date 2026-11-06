@@ -13,17 +13,24 @@ export const legacyBundles = legacyPackages
 const PROFILE = /^[a-zA-Z0-9_-]+$/
 const PROFILE_FILES = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'cordis.patch.yml']
 
-export function inspectProfile(manifest) {
+export function inspectProfile(manifest, options = {}) {
   const bundles = Array.isArray(manifest?.dsh?.profile?.bundles) ? manifest.dsh.profile.bundles : []
   const dependencies = manifest?.dependencies && typeof manifest.dependencies === 'object'
     ? Object.keys(manifest.dependencies) : []
   const leftoverBundles = legacyPackages.filter(name => bundles.includes(name))
   const leftoverDeps = legacyPackages.filter(name => dependencies.includes(name))
+  // A manifest that names the bundle while node_modules is gone is not a working
+  // install; the caller passes bundlePresent so `installed` can say so. Without
+  // it the diagnostic reported "installed: true" and the healthy instruction on
+  // a profile that cannot boot.
+  const bundlePresent = options.bundlePresent !== false
   return {
     leftover: [...new Set([...leftoverBundles, ...leftoverDeps])],
     leftoverBundles,
     leftoverDeps,
-    installed: bundles.filter(name => name === 'dsh-openwrite').length === 1,
+    installed: bundlePresent && bundles.filter(name => name === 'dsh-openwrite').length === 1,
+    bundlePresent,
+    malformedBundles: manifest?.dsh?.profile?.bundles !== undefined && !Array.isArray(manifest.dsh.profile.bundles),
     otherPlugins: bundles.filter(name => name !== 'dsh-openwrite' && !legacyPackages.includes(name)),
   }
 }
@@ -33,8 +40,20 @@ export async function inspectPresets(home) {
   const names = await readdir(dir).catch(error => { if (error.code === 'ENOENT') return []; throw error })
   const presets = []
   for (const name of names) {
-    const marker = await readFile(join(dir, name, '.openwrite-managed.json'), 'utf8').then(JSON.parse).catch(() => null)
-    presets.push({ name, origin: marker ? 'package-managed' : 'author-owned', preserved: true })
+    const markerPath = join(dir, name, '.openwrite-managed.json')
+    const raw = await readFile(markerPath, 'utf8').catch(() => null)
+    // A marker that exists but does not parse is not the same as no marker: a
+    // crash during the install (or a hand edit) can leave a truncated file, and
+    // treating that as "author-owned" made the preset permanently unupgradable
+    // with no diagnostic. Report it distinctly so the fix (re-run the installer)
+    // is visible.
+    let marker = null
+    let origin = 'author-owned'
+    if (raw !== null) {
+      try { marker = JSON.parse(raw) } catch { marker = null; origin = 'marker-corrupt' }
+      if (marker) origin = 'package-managed'
+    }
+    presets.push({ name, origin, preserved: true, marker })
   }
   return presets
 }
@@ -126,10 +145,16 @@ export async function migrate(home, profile, apply = false, options = {}) {
     leftover: inspection.leftover, leftoverBundles: inspection.leftoverBundles, leftoverDeps: inspection.leftoverDeps,
   })
   const runPlugin = options.runPlugin ?? defaultRunPlugin
+  // The spec each removed dependency was installed from, so a failure midway can
+  // put the packages back instead of leaving a half-migrated profile whose
+  // manifest lists dependencies node_modules no longer contains.
+  const removedSpecs = []
   try {
     if (await readFile(file, 'utf8') !== original) throw new Error('Profile changed during backup; retry with dsh stopped')
     for (const name of inspection.leftoverDeps) {
+      const spec = manifest.dependencies?.[name]
       await runPlugin(home, profile, ['plugin', '--profile', profile, 'remove', '-w', name])
+      if (typeof spec === 'string') removedSpecs.push(spec)
     }
     const afterRemove = await readFile(file, 'utf8')
     const remaining = inspectProfile(JSON.parse(afterRemove))
@@ -141,6 +166,12 @@ export async function migrate(home, profile, apply = false, options = {}) {
     return { ...base, leftover: [], leftoverBundles: [], leftoverDeps: [], changed: true, backup, otherPlugins: final.otherPlugins }
   } catch (error) {
     await restoreBackup(backup, home, profile)
+    // Restoring the manifest alone is not enough: the host remove already
+    // deleted these packages from node_modules. Put them back so the profile the
+    // user is left with is the one the manifest describes.
+    for (const spec of removedSpecs) {
+      await runPlugin(home, profile, ['plugin', '--profile', profile, 'add', '-w', spec]).catch(() => {})
+    }
     error.message = `${error.message}; restored profile from ${backup}`
     throw error
   }
@@ -148,10 +179,13 @@ export async function migrate(home, profile, apply = false, options = {}) {
 
 export async function diagnose(home, profile) {
   const { manifest } = await readManifest(home, profile)
-  const inspection = inspectProfile(manifest)
   const presets = await inspectPresets(home)
   const runtime = await readFile(join(home, 'openwrite', 'active.json'), 'utf8').then(JSON.parse).catch(() => null)
   const installedPackage = await readFile(join(home, 'profiles', profile, 'node_modules', 'dsh-openwrite', 'package.json'), 'utf8').then(JSON.parse).catch(() => null)
+  // A manifest that names the bundle while the tree is absent is not a working
+  // install. Reading the package first lets `installed` say so, instead of
+  // reporting healthy on a profile that cannot boot.
+  const inspection = inspectProfile(manifest, { bundlePresent: installedPackage !== null })
   const toolPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const requestedSpec = manifest.dependencies?.['dsh-openwrite']
   const packageSelection = {
@@ -177,19 +211,29 @@ export async function diagnose(home, profile) {
     presets,
     runtimePrepared: runtime !== null,
     packageSelection,
+    bundlePresent: inspection.bundlePresent,
+    malformedBundles: inspection.malformedBundles,
     instructions: inspection.leftover.length
       ? 'Stop dsh, run openwrite-maintenance migrate --profile web --apply, then install the Release package. Author-owned presets and historical sessions are preserved.'
-      : 'OpenWrite → 诊断与帮助：查看实时健康状态；本命令不启动模型。',
+      : !inspection.bundlePresent
+        ? 'The manifest lists dsh-openwrite but node_modules/dsh-openwrite is missing, so the plugin cannot load. Stop dsh, then reinstall with dsh plugin add dsh-openwrite@<verified version>.'
+        : inspection.malformedBundles
+          ? 'dsh.profile.bundles is not an array, so no bundle can be registered. Restore the profile manifest from a backup or reinstall the plugin.'
+          : 'OpenWrite → 诊断与帮助：查看实时健康状态；本命令不启动模型。',
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const command = process.argv[2] ?? 'doctor'
   const index = process.argv.indexOf('--profile')
-  const profile = index < 0 ? 'web' : process.argv[index + 1]
   const home = resolve(process.env.DSH_HOME || join(homedir(), '.dsh'))
   try {
     if (!['doctor', 'migrate'].includes(command)) throw new Error('Usage: openwrite-maintenance doctor|migrate --profile web [--apply]')
+    // `--profile` with no value must be a usage error. `PROFILE.test(undefined)`
+    // coerces to the string "undefined", which the pattern accepts, so the guard
+    // downstream cannot catch it and the failure surfaces as a raw TypeError.
+    if (index >= 0 && process.argv[index + 1] === undefined) throw new Error('Usage: openwrite-maintenance doctor|migrate --profile <name> [--apply]')
+    const profile = index < 0 ? 'web' : process.argv[index + 1]
     console.log(JSON.stringify(await (command === 'migrate' ? migrate(home, profile, process.argv.includes('--apply')) : diagnose(home, profile)), null, 2))
   } catch (error) { console.error(error.message); process.exitCode = 1 }
 }

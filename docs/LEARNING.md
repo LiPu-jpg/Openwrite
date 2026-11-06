@@ -62,7 +62,7 @@
 | 编辑器选区润色（扩写/缩写/去 AI 味/按审稿改这段） | done | 选区动作走 `/revisions/selection`（expand/compress/naturalize）与 `/revisions/from-review`；hunk 应用走 `/revisions/{id}/apply` + `selected_hunk_ids`，不 PUT 正文；源 revision 不一致时拒绝覆盖 |
 | 正文提及高亮与资料卡 | done | 创作页用现有 `/assets` 的人物/地点名与别名做最长匹配；点击在创作视图打开只读资料卡；切章/切 Workspace 清卡；不进资料库、不 POST 资产更新 |
 | 斜杠命令 / 7 个作者入口 | done | `presets/openwrite/skills/{progress,write-next,review-chapter,revise-span,foreshadow,canon,export-book}` 接到 `novel_*`；persona 默认工作流为看进度 → 写下一章 → 审这一章 → 改这段；其余技能 `user-invocable: false`；`npm run test:preset` 断言入口存在并拒绝旧 Python 命令名 |
-| 项目级 `/learn` 写法记忆 | done | `presets/openwrite/skills/learn`：风格/成功钩子/作者偏好走 `novel_source_action` 与 `novel_structured_change_plan`，随 Workspace 资产走；无 cwd 时现有工具返回 `WORKSPACE_CONTEXT_MISSING`；`npm run test:preset` 24 skills / 8 author entries |
+| 项目级 `/learn` 写法记忆 | done | `presets/openwrite/skills/learn`：风格/成功钩子/作者偏好走 `novel_source_action` 与 `novel_change_plan(action="structured")`，随 Workspace 资产走；无 cwd 时现有工具返回 `WORKSPACE_CONTEXT_MISSING`；`npm run test:preset` 24 skills / 8 author entries |
 | 网文可选审稿维（钩子/黄金三章/追读力） | done | `form: web_novel` 时六域上附加 `max=0` 的钩子/黄金三章/追读力；37 项与质量分不变；黄金三章仅第 1–3 章；非网文项目不附加 |
 | 每 50 章规划窗口 | done | `novel_rolling_plan_action` 默认/上限 50 章；`accepted_window` 只含已接纳正文，`planned_window` 只含未接纳大纲计划；create 不改正文/事实 |
 | 写作冲刺统计 | done | 创作动态页从工作简报字数目标 + 已知 `writing_units_delta` 推导新增/删减/净增；修订净增只来自 `revision_applied`；无 delta 的事件不猜来源；不另建冲刺账本 |

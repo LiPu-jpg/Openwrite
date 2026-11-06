@@ -1,0 +1,415 @@
+/**
+ * OpenWrite's page in the host's settings dialog.
+ *
+ * The host dialog is the one surface the author opens without a novel in
+ * front of them, so this page owns every setting that is not tied to one
+ * work: the writing environment, the model profile library (global by
+ * design), the host's current model, and the companion plugins.
+ *
+ * The groups are tabs, the way `dsh-our-free-model` groups its own page: one
+ * section, several groups, and the chosen group survives a dialog reopen.
+ *
+ * Every fact here comes from a host route that does not need a bound
+ * workspace. The model library is global too — Studio keeps it outside every
+ * project — so it is reached through the context-free global API.
+ */
+
+import { useCallback, useEffect, useState } from 'react'
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { CompanionSection, fetchCompanions, type CompanionStatus } from './companions.tsx'
+import { ModelView } from './ModelView.tsx'
+import { SearchSettings } from './SearchSettings.tsx'
+import { fetchGlobalStudioApi } from './api.ts'
+import { parseHostModelCatalog, type HostModelCatalogDto } from './dto.ts'
+import type { StudioPanelKey } from './locales.ts'
+import css from './OpenWriteSettings.module.css'
+
+/** The host's default-model selection, as the host's own route reports it. */
+export interface HostModelSelection {
+  available: boolean
+  provider: string
+  model: string
+  reasoningEffort: string
+}
+
+/** The writing environment's lifecycle, as the host's runtime route reports it. */
+export interface RuntimeStatus {
+  phase: string
+  message: string
+  error?: string
+  downloadedBytes?: number
+  totalBytes?: number
+}
+
+/** The Studio backend the bridge talks to. */
+export interface StudioBackend {
+  studioUrl: string
+  managed: boolean
+  available?: boolean
+}
+
+/** The groups of this page, in the order they are shown. */
+export type OpenWriteSettingsTab = 'environment' | 'models' | 'search' | 'host'
+
+const TABS: readonly OpenWriteSettingsTab[] = ['environment', 'models', 'search', 'host'] as const
+
+/** The tab labels, as dictionary keys. */
+const TAB_KEYS: Readonly<Record<OpenWriteSettingsTab, StudioPanelKey>> = {
+  environment: 'settings.tab.environment',
+  models: 'settings.tab.models',
+  search: 'settings.tab.search',
+  host: 'settings.tab.host',
+}
+
+/** Where the chosen tab is remembered between dialog reopens. */
+const TAB_STORAGE_KEY = 'openwrite.settings.tab'
+
+/**
+ * Read the remembered tab.
+ *
+ * localStorage can throw (a locked-down browser profile, a private window
+ * with storage disabled), and the host may run this page outside a window at
+ * all — a missing or unreadable store must never break the settings page.
+ */
+function readStoredTab(): OpenWriteSettingsTab {
+  try {
+    const stored = window.localStorage.getItem(TAB_STORAGE_KEY)
+    return TABS.find(tab => tab === stored) ?? 'environment'
+  } catch {
+    return 'environment'
+  }
+}
+
+/** Remember the chosen tab, best effort. */
+function storeTab(tab: OpenWriteSettingsTab): void {
+  try {
+    window.localStorage.setItem(TAB_STORAGE_KEY, tab)
+  } catch {
+    // A tab that cannot be remembered is still a working tab.
+  }
+}
+
+/** Read a JSON route, answering null when it is missing or unreadable. */
+async function readJson<T>(url: string, signal?: AbortSignal): Promise<T | null> {
+  let response: Response
+  try {
+    response = await fetch(url, signal === undefined ? undefined : { signal, credentials: 'same-origin' })
+  } catch (cause) {
+    if (signal?.aborted === true) return null
+    throw cause
+  }
+  if (!response.ok) return null
+  try { return await response.json() as T } catch { return null }
+}
+
+/** The host's default model selection. Null when the route is unreachable. */
+export async function fetchHostModel(signal?: AbortSignal): Promise<HostModelSelection | null> {
+  return await readJson<HostModelSelection>('/studio-panel/host-model', signal)
+}
+
+/**
+ * The host's own model directory.
+ *
+ * The host owns the adapters — its own providers and the ones other plugins
+ * register into the same registry — so this is what dsh itself can call. The
+ * list is read through the backend's machine channel; the browser never sees
+ * the relay's token.
+ */
+export async function fetchHostModelCatalog(signal?: AbortSignal): Promise<HostModelCatalogDto | null> {
+  try {
+    return parseHostModelCatalog(await fetchGlobalStudioApi('/model/host-models', signal))
+  } catch (cause) {
+    // The reason has to survive the trip: a list that is empty with no words
+    // is what made a broken host model channel look like a host that owns no
+    // models at all.
+    return {
+      available: false,
+      models: [],
+      error: cause instanceof Error ? cause.message : String(cause),
+    }
+  }
+}
+
+/** The writing environment's status. Null when the route is unreachable. */
+export async function fetchRuntimeStatus(signal?: AbortSignal): Promise<RuntimeStatus | null> {
+  return await readJson<RuntimeStatus>('/studio-panel/runtime', signal)
+}
+
+/** The Studio backend address. Null when the route is unreachable. */
+export async function fetchStudioBackend(signal?: AbortSignal): Promise<StudioBackend | null> {
+  return await readJson<StudioBackend>('/studio-panel/config.json', signal)
+}
+
+/**
+ * Ask the host to act on the writing environment.
+ *
+ * `prepare` and `retry` reach the same server-side action; the caller picks
+ * the word that matches the phase it is looking at. `cancel` stops a run that
+ * is already under way.
+ */
+export async function postRuntimeAction(action: 'prepare' | 'retry' | 'cancel'): Promise<RuntimeStatus | null> {
+  const response = await fetch('/studio-panel/runtime', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-openwrite-studio': '1' },
+    body: JSON.stringify({ action }),
+    credentials: 'same-origin',
+  })
+  if (!response.ok) return null
+  try { return await response.json() as RuntimeStatus } catch { return null }
+}
+
+/** Runtime phases mapped to the dictionary key that explains them. */
+const PHASE_KEYS: Readonly<Record<string, StudioPanelKey>> = {
+  idle: 'settings.phase.idle',
+  waiting: 'settings.phase.busy',
+  downloading: 'settings.phase.busy',
+  installing: 'settings.phase.busy',
+  starting: 'settings.phase.busy',
+  recovering: 'settings.phase.busy',
+  ready: 'settings.phase.ready',
+  error: 'settings.phase.error',
+  cancelled: 'settings.phase.cancelled',
+  stopped: 'settings.phase.stopped',
+  uninstalled: 'settings.phase.uninstalled',
+}
+
+/** Phases in which the environment is still working on something. */
+const BUSY_PHASES = new Set(['waiting', 'downloading', 'installing', 'starting', 'recovering'])
+
+/** How many times an unreadable status is re-read before the page gives up. */
+const READ_RETRIES = 4
+/** The pause between two status reads. */
+const READ_RETRY_MS = 2_000
+
+export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element {
+  const [tab, setTab] = useState<OpenWriteSettingsTab>(readStoredTab)
+  const [runtime, setRuntime] = useState<RuntimeStatus | null>(null)
+  const [backend, setBackend] = useState<StudioBackend | null>(null)
+  const [hostModel, setHostModel] = useState<HostModelSelection | null>(null)
+  const [hostCatalog, setHostCatalog] = useState<HostModelCatalogDto | null>(null)
+  const [companions, setCompanions] = useState<CompanionStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [attempt, setAttempt] = useState(0)
+
+  /**
+   * Read the four statuses this page shows.
+   *
+   * Answers `false` when at least one of them could not be read: the host may
+   * still be starting its writing environment, and a status page that gave up
+   * on the first miss would keep saying "unreadable" long after the answer
+   * became available.
+   */
+  const load = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
+    const [runtimeResult, backendResult, hostModelResult, companionResult, hostCatalogResult] = await Promise.all([
+      fetchRuntimeStatus(signal).catch(() => null),
+      fetchStudioBackend(signal).catch(() => null),
+      fetchHostModel(signal).catch(() => null),
+      fetchCompanions(signal).catch(() => null),
+      fetchHostModelCatalog(signal).catch(() => null),
+    ])
+    if (signal?.aborted === true) return true
+    setRuntime(runtimeResult)
+    setBackend(backendResult)
+    setHostModel(hostModelResult)
+    setCompanions(companionResult)
+    setHostCatalog(hostCatalogResult)
+    return runtimeResult !== null && backendResult !== null && hostModelResult !== null && companionResult !== null
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    void load(controller.signal).then(complete => {
+      if (complete || controller.signal.aborted) return
+      if (attempt >= READ_RETRIES) return
+      timer = setTimeout(() => setAttempt(value => value + 1), READ_RETRY_MS)
+    })
+    return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer) }
+  }, [load, attempt])
+
+  // The environment reports its progress through the runtime route. While it
+  // is working, poll it — otherwise the page would show a stale phase until
+  // the author reopens the dialog.
+  useEffect(() => {
+    if (runtime === null || !BUSY_PHASES.has(runtime.phase)) return
+    const controller = new AbortController()
+    const timer = window.setInterval(() => {
+      void fetchRuntimeStatus(controller.signal).then(next => {
+        if (controller.signal.aborted || next === null) return
+        setRuntime(next)
+      }).catch(() => undefined)
+    }, 1_000)
+    return () => { controller.abort(); window.clearInterval(timer) }
+  }, [runtime])
+
+  const act = async (action: 'prepare' | 'retry' | 'cancel') => {
+    setBusy(true)
+    setNotice('')
+    try {
+      const next = await postRuntimeAction(action)
+      setRuntime(next)
+      setNotice(next === null ? t('settings.section.unavailable') : '')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selectTab = (next: OpenWriteSettingsTab) => {
+    if (next === tab) return
+    setTab(next)
+    storeTab(next)
+  }
+
+  const phaseKey = runtime === null ? undefined : PHASE_KEYS[runtime.phase]
+  const phaseLabel = runtime === null ? '' : phaseKey === undefined ? runtime.phase : t(phaseKey)
+  const ready = runtime?.phase === 'ready'
+  const idle = runtime?.phase === 'idle'
+  const preparing = runtime !== null && BUSY_PHASES.has(runtime.phase)
+
+  return <section className={css.page}>
+    <header className={css.header}>
+      <h2>{t('settings.section.label')}</h2>
+      <p>{t('settings.section.intro')}</p>
+    </header>
+
+    <div className={css.tabs} role="tablist" aria-label={t('settings.section.label')}>
+      {TABS.map(id => <button
+        key={id}
+        type="button"
+        role="tab"
+        id={`openwrite-settings-tab-${id}`}
+        aria-selected={tab === id}
+        aria-controls={`openwrite-settings-panel-${id}`}
+        data-active={tab === id}
+        onClick={() => selectTab(id)}
+      >{t(TAB_KEYS[id])}</button>)}
+    </div>
+
+    <div
+      role="tabpanel"
+      id="openwrite-settings-panel-environment"
+      aria-labelledby="openwrite-settings-tab-environment"
+      hidden={tab !== 'environment'}
+      className={css.panel}
+    >
+      <div className={css.block}>
+        <h3>{t('settings.section.runtime')}</h3>
+        {runtime === null
+          ? <p>{t('settings.section.unavailable')}</p>
+          : <>
+            <p>{phaseLabel}</p>
+            <p className={css.hint}>{runtime.message}</p>
+            {runtime.error !== undefined && runtime.error !== '' && <p className={css.error}>{runtime.error}</p>}
+            {preparing && runtime.totalBytes !== undefined && runtime.totalBytes > 0 && (
+              <progress value={runtime.downloadedBytes ?? 0} max={runtime.totalBytes} aria-label={t('settings.section.runtime')} />
+            )}
+            <div className={css.actions}>
+              {!ready && <button type="button" disabled={busy} onClick={() => void act(idle ? 'prepare' : 'retry')}>
+                {busy ? t('settings.section.working') : idle ? t('settings.section.prepare') : t('settings.section.retry')}
+              </button>}
+              {preparing && <button type="button" disabled={busy} onClick={() => void act('cancel')}>
+                {t('settings.section.cancel')}
+              </button>}
+            </div>
+          </>}
+      </div>
+
+      <div className={css.block}>
+        <h3>{t('settings.section.backend')}</h3>
+        {backend === null
+          ? <p>{t('settings.section.unavailable')}</p>
+          : <>
+            <p>{backend.managed ? t('settings.section.backendManaged') : t('settings.section.backendExternal')}</p>
+            <code>{backend.studioUrl}</code>
+            {backend.available === false && <p className={css.error}>{t('settings.section.backendDown')}</p>}
+          </>}
+      </div>
+
+      <details className={css.block}>
+        <summary>{t('settings.section.diagnostics')}</summary>
+        <p>{t('settings.section.phaseLabel')}：{runtime?.phase ?? t('settings.section.unavailable')}</p>
+        {runtime?.error !== undefined && runtime.error !== '' && <pre className={css.error}>{runtime.error}</pre>}
+        <p className={css.hint}>{t('settings.section.diagnosticsHint')}</p>
+      </details>
+    </div>
+
+    <div
+      role="tabpanel"
+      id="openwrite-settings-panel-models"
+      aria-labelledby="openwrite-settings-tab-models"
+      hidden={tab !== 'models'}
+      className={css.panel}
+    >
+      <p className={css.hint}>{t('settings.tab.modelsHint')}</p>
+      <ModelView t={t} />
+    </div>
+
+    <div
+      role="tabpanel"
+      id="openwrite-settings-panel-search"
+      aria-labelledby="openwrite-settings-tab-search"
+      hidden={tab !== 'search'}
+      className={css.panel}
+    >
+      <SearchSettings t={t} />
+    </div>
+
+    <div
+      role="tabpanel"
+      id="openwrite-settings-panel-host"
+      aria-labelledby="openwrite-settings-tab-host"
+      hidden={tab !== 'host'}
+      className={css.panel}
+    >
+      <div className={css.block}>
+        <h3>{t('settings.section.hostModel')}</h3>
+        {hostModel === null
+          ? <p>{t('settings.section.unavailable')}</p>
+          : hostModel.available !== true
+            ? <p>{t('settings.section.hostModelNone')}</p>
+            : <p><code>{hostModel.model}</code>{` · ${hostModel.provider}`}{hostModel.reasoningEffort !== '' ? ` · ${hostModel.reasoningEffort}` : ''}</p>}
+        <p className={css.hint}>{t('settings.section.hostModelHint')}</p>
+      </div>
+
+      <div className={css.block}>
+        <h3>{t('settings.section.hostModels')}</h3>
+        {hostCatalog === null
+          ? <p>{t('settings.section.unavailable')}</p>
+          : !hostCatalog.available
+            ? (
+              <>
+                {/* The reason first: "the host owns no models" and "the host
+                    could not be read" are different faults, and only the second
+                    one is worth acting on. */}
+                <p>{hostCatalog.error !== '' ? hostCatalog.error : t('settings.section.hostModelsUnavailable')}</p>
+                {hostCatalog.error !== '' && (
+                  <p className={css.hint}>{t('settings.section.hostModelsUnavailable')}</p>
+                )}
+              </>
+            )
+            : hostCatalog.models.length === 0
+              ? <p>{t('settings.section.hostModelsEmpty')}</p>
+              : <ul className={css.modelHostList}>
+                {hostCatalog.models.map((model) => (
+                  <li key={model.id} className={css.modelHostItem}>
+                    <span>
+                      <strong>{model.label}</strong>
+                      <small>{model.id}</small>
+                    </span>
+                  </li>
+                ))}
+              </ul>}
+        <p className={css.hint}>{t('settings.section.hostModelsHint')}</p>
+      </div>
+
+      <div className={css.block}>
+        <CompanionSection status={companions} />
+      </div>
+    </div>
+
+    {notice !== '' && <p role="status" className={css.notice}>{notice}</p>}
+  </section>
+}

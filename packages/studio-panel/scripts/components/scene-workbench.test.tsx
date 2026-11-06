@@ -65,6 +65,28 @@ function apiFor(structure: unknown) {
   return { fetchStudioApi, postStudioApi }
 }
 
+/**
+ * The shape Core returns when no chapter carries manuscript text: an empty plan
+ * with `can_apply: false`. Applying it used to write a sidecar with zero
+ * chapters and zero scenes, which flipped the structure to `current` and
+ * removed the migration path while leaving nothing to edit.
+ */
+function emptyPreviewEnvelope() {
+  return {
+    data: {
+      schema_version: 'openwrite.scene-migration-preview.v1',
+      preview_revision: 'preview-empty-r1',
+      can_apply: false,
+      input_chapters: [],
+      plan: [],
+      issues: [
+        { code: 'MISSING_CHAPTER_FILE', blocking: false, chapter_id: 'ch_001', paths: ['data/manuscript/arc_001/ch_001.md'] },
+        { code: 'MIGRATION_PLAN_EMPTY', severity: 'error', blocking: true, details: { input_chapters: 0 } },
+      ],
+    },
+  }
+}
+
 describe('SceneWorkbench migration', () => {
   it('keeps the preview read-only and requires explicit confirmation before apply', async () => {
     const api = apiFor(sceneEnvelope({ status: 'absent' }))
@@ -92,6 +114,30 @@ describe('SceneWorkbench migration', () => {
     await waitFor(() => expect(api.postStudioApi).toHaveBeenCalledWith('/scenes/migration/rollback', {
       migration_id: 'migration-7', expected_revision: 'structure-r2',
     }))
+  })
+
+  it('refuses to apply a preview whose plan is empty and says why', async () => {
+    const structure = sceneEnvelope({ status: 'absent' })
+    const api = apiFor(structure)
+    api.fetchStudioApi = vi.fn(async (path: string) => path === '/scenes' ? structure : emptyPreviewEnvelope())
+    render(<SceneWorkbench {...api} />)
+
+    await screen.findByRole('heading', { name: '迁移预览（只读）' })
+    // The user is told what is missing instead of being left with a silent gap.
+    expect(screen.getByText(/预览中没有迁移项/)).toBeTruthy()
+    expect(screen.getByText(/规划章节还没有稿件正文/)).toBeTruthy()
+
+    // Confirming must not arm a migration that has nothing to migrate.
+    fireEvent.click(screen.getByRole('checkbox', { name: /确认应用迁移/ }))
+    const apply = screen.getByRole('button', { name: '应用迁移' })
+    expect((apply as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(apply)
+    await waitFor(() => expect(api.postStudioApi).not.toHaveBeenCalled())
+
+    // The blocking reason survives the MISSING_CHAPTER_FILE filter, so it is
+    // visible in the issue list rather than swallowed.
+    expect(screen.getByText(/MIGRATION_PLAN_EMPTY/)).toBeTruthy()
+    expect(screen.queryByText(/MISSING_CHAPTER_FILE/)).toBeNull()
   })
 
   it('allows an explicitly confirmed stale re-anchor with the exact preview revision', async () => {
@@ -256,5 +302,33 @@ describe('SceneWorkbench projections and missing chapters', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑元数据 scene-a' }))
     const target = screen.getByRole('combobox', { name: '目标章 scene-a' })
     expect(within(target).queryByRole('option', { name: /ch_missing_0/ })).toBeNull()
+  })
+
+  it('does not list a not-yet state as a structure problem', async () => {
+    // A freshly initialized project has a planning skeleton but no manuscript
+    // text, so it has no scene structure yet. Core reports that as an
+    // `info` issue; listing it under the red "结构问题" heading made a normal
+    // start look like a failed one.
+    const structure = sceneEnvelope({ status: 'absent' })
+    structure.data.issues = [
+      { code: 'SCENE_STRUCTURE_ABSENT', severity: 'info', blocking: false, message: '还没有原生场景结构：初始化只建了规划骨架，写出章节稿件后才会生成。' },
+    ] as never
+    const api = apiFor(structure)
+    render(<SceneWorkbench {...api} />)
+
+    await screen.findByRole('heading', { name: '迁移预览（只读）' })
+    expect(screen.queryByText(/结构问题/)).toBeNull()
+    expect(screen.queryByText(/SCENE_STRUCTURE_ABSENT/)).toBeNull()
+    // The status line still says what is missing and what to do about it.
+    expect(screen.getByText(/初始化只建了规划骨架/)).toBeTruthy()
+  })
+
+  it('still lists a real problem', async () => {
+    const structure = sceneEnvelope({ status: 'current' })
+    const api = apiFor(structure)
+    render(<SceneWorkbench {...api} />)
+
+    expect(await screen.findByText(/结构问题（1）/)).toBeTruthy()
+    expect(screen.getByText(/SCENE_TIME_GAP/)).toBeTruthy()
   })
 })

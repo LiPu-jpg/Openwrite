@@ -7,12 +7,12 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
-import type { ConvViewProps } from "@deepseek-ai/dsh-client-ui-conversation/client";
-import type { InjectFace, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
-import { StudioApiError, type StudioApiInjected } from "./api.ts";
+import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
+import { fetchGlobalStudioApi, isGlobalFallbackActive, postGlobalStudioApi, StudioApiError, type StudioApiInjected } from "./api.ts";
 import {
   parseConnectionTestResult,
   parseDeletePreview,
+  parseHostModelCatalog,
   parseModelProfiles,
   parseRouteImpact,
   parseRouteMap,
@@ -21,22 +21,38 @@ import {
   asText,
   parseTestRecord,
   type DeletePreviewDto,
+  type HostModelCatalogDto,
   type JsonRecord,
   type ModelProfileDto,
   type ModelTestRecordDto,
   type RouteImpactDto,
 } from "./dto.ts";
 import { useWorkbench } from "./WorkbenchStore.ts";
-import { modelMemoryContextKey, WorkspaceViewMemory } from "./model-view-memory.ts";
+import { WorkspaceViewMemory } from "./model-view-memory.ts";
 import css from "./views.module.css";
 
 export type ModelNavigationGuard = (navigate: () => void) => void;
 
-type Props = ConvViewProps &
-  InjectFace<StudioApiInjected> &
-  PropsLocale<"studio-panel"> & {
-    onNavigationGuardChange?: (guard: ModelNavigationGuard | null) => void;
-  };
+/**
+ * The model profile library is global: Studio keeps it outside every project
+ * and registers every model route with `requires_project=False`.
+ *
+ * Two hosts render this panel:
+ *
+ * - the workbench, which injects the project-scoped API;
+ * - the host's settings dialog, which is opened with no bound workspace and
+ *   therefore reaches the same library through the context-free global API.
+ *
+ * When nothing is injected the panel falls back to the global calls — the
+ * library it edits is the same file either way.
+ */
+export type ModelViewProps = {
+  fetchStudioApi?: StudioApiInjected["fetchStudioApi"];
+  postStudioApi?: StudioApiInjected["postStudioApi"];
+} & PropsLocale<"studio-panel"> & {
+  onNavigationGuardChange?: (guard: ModelNavigationGuard | null) => void;
+};
+type Props = ModelViewProps;
 type Form = {
   id: string;
   label: string;
@@ -76,7 +92,23 @@ interface ModelDraft {
   routes?: { value: Record<string, string>; baseline: Record<string, string> };
 }
 const modelDraftMemory = new WorkspaceViewMemory<ModelDraft>();
+/** The model library is global: one draft slot serves every workspace. */
+const MODEL_MEMORY_KEY = 'global-model-library';
+
+/**
+ * Forget every cached model draft and pending save.
+ *
+ * The model library is global, so its draft slot is global too — which means
+ * a draft can outlive the panel that wrote it. The test layer calls this
+ * between cases so one case's draft never reaches the next.
+ */
+export function resetModelViewMemory(): void {
+  modelDraftMemory.delete(MODEL_MEMORY_KEY);
+  pendingModelSaves.delete(MODEL_MEMORY_KEY);
+}
 type PendingSaveResult = { saved: boolean; error?: string };
+/** How long a remount waits for an in-flight save before giving up on it. */
+const PENDING_SAVE_WAIT_MS = 10_000;
 interface PendingModelSave { section: DraftSection; result: Promise<PendingSaveResult> }
 const pendingModelSaves = new WorkspaceViewMemory<PendingModelSave>();
 
@@ -148,10 +180,10 @@ const localEmbeddingPreset = {
   base_url: "",
 } as const;
 
-const newEmbeddingDraft = (): Embedding => ({
+const newEmbeddingDraft = (t: Props['t']): Embedding => ({
   ...emptyEmbedding(),
   id: `embedding-${Date.now().toString(36)}`,
-  label: "新 Embedding 档案",
+  label: t('models.embeddingNew'),
 });
 const snapshot = (value: unknown) => JSON.stringify(value);
 // Connection outcomes and active/configured markers are server metadata,
@@ -189,9 +221,17 @@ const marker = (
     ? `${t("models.test.ok")} · ${latency}`
     : `${t("models.test.failed")} ${record.error_code ?? ""} · ${latency}`;
 };
+/**
+ * The two chat agents share one model.
+ *
+ * The host composes a single `openwrite` preset, so Goethe and Dante are no
+ * longer two agents the author picks between: the route table shows one row
+ * for the conversation, and saving it writes both underlying routes. The
+ * route keys themselves stay, because old archives and the model benchmark
+ * still address them by name.
+ */
+const CHAT_ROUTE_KEYS = ["goethe", "dante"] as const;
 const routeOrder = [
-  "goethe",
-  "dante",
   "chapter_write",
   "review",
   "source_extract",
@@ -200,11 +240,25 @@ const routeOrder = [
   "research",
 ] as const;
 
-export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardChange }: Props) {
+export function ModelView({ fetchStudioApi: injectedFetch, postStudioApi: injectedPost, t, onNavigationGuardChange }: Props) {
+  // The host's settings dialog injects nothing: the model library is global,
+  // so it is reached without a Workspace context. Both wrappers stay
+  // referentially stable — `load` depends on them, and a fresh identity on
+  // every render would restart the load effect forever.
+  const injected = useRef({ fetch: injectedFetch, post: injectedPost });
+  injected.current = { fetch: injectedFetch, post: injectedPost };
+  const fetchStudioApi = useCallback((path: string) => {
+    const call = injected.current.fetch;
+    return call === undefined ? fetchGlobalStudioApi(path) : call(path);
+  }, []);
+  const postStudioApi = useCallback((path: string, body: unknown) => {
+    const call = injected.current.post;
+    return call === undefined ? postGlobalStudioApi(path, body) : call(path, body);
+  }, []);
   const workbench = useWorkbench();
-  // OperationsView keys this editor at the context barrier. Pin the identity so
-  // its cleanup always writes back to the workspace that owned these drafts.
-  const [memoryKey] = useState(() => modelMemoryContextKey(workbench.context));
+  // The model library is global, so its unsaved drafts belong to one global
+  // slot — not to whichever workspace happens to be bound.
+  const [memoryKey] = useState(() => MODEL_MEMORY_KEY);
   const [restored] = useState(() => modelDraftMemory.read(memoryKey));
   const discardedSections = useRef(new Set<DraftSection>());
   const [profiles, setProfiles] = useState<ModelProfileDto[]>([]);
@@ -223,6 +277,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState("");
   const [routeImpact, setRouteImpact] = useState<RouteImpactDto | null>(null);
+  const [hostCatalog, setHostCatalog] = useState<HostModelCatalogDto>({ available: false, models: [], error: "" });
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const unsavedPrompt = useRef<HTMLDivElement | null>(null);
   const [deletePreview, setDeletePreview] = useState<DeletePreviewDto | null>(null);
@@ -279,7 +334,15 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
       // that request instead of presenting a second active copy of its draft.
       const pending = pendingModelSaves.read(memoryKey);
       if (pending) {
-        const outcome = await pending.result;
+        // Bound the wait: a write that never settles (dead socket before the
+        // deadline, a host crash) must not leave this tab permanently on its
+        // loading branch, which has no retry affordance.
+        const outcome = await Promise.race([
+          pending.result,
+          new Promise<PendingSaveResult>(done => {
+            window.setTimeout(() => done({ saved: false }), PENDING_SAVE_WAIT_MS)
+          }),
+        ])
         if (!mounted.current) return;
         if (outcome.saved) {
           options = { ...options, [pending.section === "chat" ? "preserveChat" : pending.section === "embedding" ? "preserveEmbedding" : "preserveRoutes"]: false };
@@ -305,6 +368,23 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
       setProfiles(next);
       setEmbeddingProfiles(embeds);
       setActiveEmbeddingId(activeId);
+      // The host's own model directory. A host without a relay answers
+      // "unavailable" rather than failing the whole library read. A failure to
+      // read it at all keeps its reason: an empty list with no words is what
+      // made a broken channel look like a host that owns no models.
+      let hostValue: unknown = null;
+      let hostError = "";
+      try {
+        hostValue = await fetchStudioApi("/model/host-models");
+      } catch (cause) {
+        hostError = cause instanceof Error ? cause.message : String(cause);
+      }
+      if (!mounted.current) return;
+      setHostCatalog(hostError !== ''
+        ? { available: false, models: [], error: hostError }
+        : hostValue === null
+          ? { available: false, models: [], error: "" }
+          : parseHostModelCatalog(hostValue));
       const map = parseRouteMap(value);
       if (!options.preserveRoutes) {
         discardedSections.current.add("routes");
@@ -362,7 +442,16 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
     if (!onNavigationGuardChange) return;
     onNavigationGuardChange((navigate) => {
       const current = drafts.current;
-      if (current.busy !== "" && current.busy !== "load") return;
+      // A save in flight must not silently swallow the navigation: the nav
+      // button would look broken. Queue it behind the same confirmation the
+      // unsaved-changes path uses, so it runs once the save settles.
+      if (current.busy !== "" && current.busy !== "load") {
+        // Tell the author why nothing happened. Do NOT queue the navigation
+        // behind the unsaved-changes prompt: there are no unsaved edits here, a
+        // save is merely in flight, and that dialog would misdescribe the state.
+        setNotice({ text: t("models.savePending"), bad: false })
+        return
+      }
       if (current.formDirty || current.embeddingDirty || current.routesDirty) setPendingAction(() => () => {
         discardedSections.current = new Set(["chat", "embedding", "routes"]);
         modelDraftMemory.delete(memoryKey);
@@ -469,7 +558,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
     finally { setBusy(""); }
   };
   const deleteEmbedding = async () => {
-    if (busy || !embeddingProfiles.some((p) => p.id === embedding.id) || embeddingProfiles.length <= 1 || !window.confirm("Delete this Embedding profile?")) return;
+    if (busy || !embeddingProfiles.some((p) => p.id === embedding.id) || embeddingProfiles.length <= 1 || !window.confirm(t('models.embeddingDeleteConfirm'))) return;
     setBusy("embedding-delete");
     try {
       await postStudioApi("/model/embedding/delete", { profile_id: embedding.id });
@@ -516,7 +605,58 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
     } catch (cause) { finishSave({ saved: false, error: errorText(cause) }); if (mounted.current) setNotice({ text: errorText(cause), bad: true }); }
     finally { finishSave({ saved: false }); if (mounted.current) setBusy(""); }
   };
-  const routeLabel = (route: string) => routeOrder.includes(route as typeof routeOrder[number]) ? t(`models.route.${route}` as Parameters<Props["t"]>[0]) : route;
+  /**
+   * Adopt one model of the host's own directory.
+   *
+   * The host owns the credentials and the route, so the profile it creates
+   * carries no address and no key: the backend resolves the relay at call
+   * time, which is why the profile survives a host restart.
+   */
+  const useHostModel = async (model: string) => {
+    if (busy) return;
+    setBusy("host");
+    try {
+      const result = asRecord(await postStudioApi("/model/host-profiles", { model }));
+      const created = asRecord(result["profile"]);
+      await load({ preserveEmbedding: true, chatId: asText(created["id"]) });
+      if (!mounted.current) return;
+      setNotice({ text: t("models.hostProfileCreated"), bad: false });
+    } catch (cause) {
+      if (mounted.current) setNotice({ text: errorText(cause), bad: true });
+    } finally { if (mounted.current) setBusy(""); }
+  };
+  const routeLabel = (route: string) => {
+    if ((CHAT_ROUTE_KEYS as readonly string[]).includes(route)) return t("models.route.chat");
+    return routeOrder.includes(route as typeof routeOrder[number]) ? t(`models.route.${route}` as Parameters<Props["t"]>[0]) : route;
+  };
+  /** Route labels without duplicates: the chat agents share one label. */
+  const routeLabels = (list: string[]) => [...new Set(list.map(routeLabel))];
+  /**
+   * The rows the route table shows.
+   *
+   * The two chat routes collapse into one row: the author picks a model for
+   * the conversation, and both underlying routes follow it. The route keys
+   * stay in the saved map, so old archives and the benchmark still resolve.
+   */
+  const routeRows = (map: Record<string, string>) => {
+    const rows: Array<{ key: string; label: string; value: string; keys: string[] }> = [];
+    if (map["goethe"] !== undefined || map["dante"] !== undefined) {
+      rows.push({
+        key: "chat",
+        label: t("models.route.chat"),
+        value: map["goethe"] ?? map["dante"] ?? "",
+        keys: [...CHAT_ROUTE_KEYS],
+      });
+    }
+    for (const key of routeOrder) {
+      if (map[key] === undefined) continue;
+      rows.push({ key, label: routeLabel(key), value: map[key] ?? "", keys: [key] });
+    }
+    return rows;
+  };
+  /** The profile the editor shows, if any. */
+  const selectedProfile = profiles.find((p) => p.id === selectedId) ?? null;
+  const isHostProfile = selectedProfile?.auth_source === "host_relay";
   if (state === "loading")
     return (
       <div className={css.root}>
@@ -555,6 +695,9 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
         </span>
       </div>
       <div className={css.body}>
+        {isGlobalFallbackActive() && (
+          <div className={css.notice} role="status">{t("models.staleHostHint")}</div>
+        )}
         {pendingAction && (
           <div className={css.notice} role="alert" ref={unsavedPrompt} tabIndex={-1}>
             <span>{t("models.unsavedChanges")}</span>
@@ -592,6 +735,43 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
         </div>
         {tab === "chat" ? (
           <>
+            <section className={css.modelHost} aria-label={t("models.hostModels")}>
+              <div className={css.paneHeading}>{t("models.hostModels")}</div>
+              {!hostCatalog.available ? (
+                <>
+                  {/* The reason first: "the host owns no models" and "the host
+                      could not be read" are different faults, and only the
+                      second one is worth acting on. */}
+                  <p className={css.modelEmpty}>
+                    {hostCatalog.error !== '' ? hostCatalog.error : t("models.hostModelsUnavailable")}
+                  </p>
+                  {hostCatalog.error !== '' && (
+                    <p className={css.modelEmpty}>{t("models.hostModelsUnavailable")}</p>
+                  )}
+                </>
+              ) : hostCatalog.models.length === 0 ? (
+                <p className={css.modelEmpty}>{t("models.hostModelsEmpty")}</p>
+              ) : (
+                <ul className={css.modelHostList}>
+                  {hostCatalog.models.map((model) => (
+                    <li key={model.id} className={css.modelHostItem}>
+                      <span>
+                        <strong>{model.label}</strong>
+                        <small>{model.id}</small>
+                      </span>
+                      <button
+                        type="button"
+                        className={css.button}
+                        disabled={!!busy}
+                        onClick={() => void useHostModel(model.id)}
+                      >
+                        {t("models.hostUse")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
             <div className={css.modelLayout}>
               <section className={css.modelList} aria-label={t("models.list")}>
                 <button
@@ -626,7 +806,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                 ))}
               </section>
               <section className={css.modelEditor} aria-label={t("models.editor")}>
-                <fieldset className={css.modelGroup} disabled={!!busy}>
+                <fieldset className={css.modelGroup} disabled={!!busy || isHostProfile}>
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.basic")}
                   </legend>
@@ -666,7 +846,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     </label>
                   </div>
                 </fieldset>
-                <fieldset className={css.modelGroup} disabled={!!busy}>
+                <fieldset className={css.modelGroup} disabled={!!busy || isHostProfile}>
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.connection")}
                   </legend>
@@ -699,7 +879,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     </label>
                   </div>
                 </fieldset>
-                <fieldset className={css.modelGroup} disabled={!!busy}>
+                <fieldset className={css.modelGroup} disabled={!!busy || isHostProfile}>
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.generation")}
                   </legend>
@@ -737,7 +917,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     </label>
                   </div>
                 </fieldset>
-                <fieldset className={css.modelGroup} disabled={!!busy}>
+                <fieldset className={css.modelGroup} disabled={!!busy || isHostProfile}>
                   <legend className={css.modelGroupTitle}>
                     {t("models.group.credentials")}
                   </legend>
@@ -782,14 +962,16 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     <span>{t("models.goWorkspaceHint")}</span>
                   </label>}
                 </fieldset>
+                {isHostProfile && <p className={css.modelImpact}>{t("models.hostProfileHint")}</p>}
                 <fieldset className={css.modelGroup} disabled={!!busy}>
                   <legend className={css.modelGroupTitle}>{t("models.group.routeUsage")}</legend>
-                  <ul>{Object.entries(savedRoutes).filter(([, id]) => id === selectedId).map(([route]) => <li key={route}>{routeLabel(route)}</li>)}</ul>
+                  <ul>{routeLabels(Object.entries(savedRoutes).filter(([, id]) => id === selectedId).map(([route]) => route))}</ul>
                 </fieldset>
                 <div className={css.modelTestRow}>
                   {t("models.chatTest")} · {marker(t, profiles.find((p) => p.id === selectedId)?.last_test ?? null, busy === "chat-test")}
                 </div>
                 <div className={css.modelActions}>
+                  {!isHostProfile && (
                   <button
                     type="button"
                     className={css.button}
@@ -798,6 +980,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                   >
                     <Save size={14} /> {t("models.save")}
                   </button>
+                  )}
                   <button
                     type="button"
                     className={css.button}
@@ -812,14 +995,14 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                   </button>}
                 </div>
                 {deletePreview && <div className={css.modelDependencies}>
-                  <p>{t("models.usedByRoutes")}: {deletePreview.used_by_routes.map(routeLabel).join(", ") || t("models.noRoutes")}</p>
+                  <p>{t("models.usedByRoutes")}: {routeLabels(deletePreview.used_by_routes).join(", ") || t("models.noRoutes")}</p>
                   <label>{t("models.fallback")}
                     <select value={fallbackId} disabled={!!busy} onChange={(event) => { void previewDelete(event.target.value); }}>
                       <option value="">{t("models.chooseFallback")}</option>
                       {deletePreview.fallback_candidates.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.label}</option>)}
                     </select>
                   </label>
-                  {deletePreview.routes_that_would_fail.length > 0 && <p>{t("models.delete.wouldFail")}: {deletePreview.routes_that_would_fail.map(routeLabel).join(", ")}</p>}
+                  {deletePreview.routes_that_would_fail.length > 0 && <p>{t("models.delete.wouldFail")}: {routeLabels(deletePreview.routes_that_would_fail).join(", ")}</p>}
                   {deletePreview.blocking_reasons.length > 0 && <p>{t("models.delete.blocked")}: {deletePreview.blocking_reasons.join(", ")}</p>}
                   <p>{t("models.delete.resultingRoutes")}: {Object.entries(deletePreview.resulting_routes ?? {}).map(([route, id]) => `${routeLabel(route)} → ${id}`).join(", ")}</p>
                   <button type="button" className={css.buttonDanger} disabled={!!busy || !deletePreview.deletable} onClick={() => void deleteChat()}>{t("models.delete.confirm")}</button>
@@ -831,22 +1014,21 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
               aria-label={t("models.routes")}
             >
               <div className={css.paneHeading}>{t("models.routes")}</div>
-              {Object.keys(routes)
-                .sort(
-                  (a, b) =>
-                    routeOrder.indexOf(a as never) -
-                    routeOrder.indexOf(b as never),
-                )
-                .map((route) => (
-                  <div className={css.modelRouteRow} key={route}>
+              {routeRows(routes).map((row) => (
+                  <div className={css.modelRouteRow} key={row.key}>
                     <label>
-                      {routeLabel(route)}
+                      {row.label}
                       <select
-                        value={routes[route] ?? ""}
+                        value={row.value}
                         disabled={!!busy}
                         onChange={(e) => {
                           discardedSections.current.delete("routes");
-                          setRoutes((x) => ({ ...x, [route]: e.target.value }));
+                          const value = e.target.value;
+                          setRoutes((x) => {
+                            const next = { ...x };
+                            for (const key of row.keys) next[key] = value;
+                            return next;
+                          });
                         }}
                       >
                         {profiles.map((p) => (
@@ -858,6 +1040,9 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
                     </label>
                   </div>
                 ))}
+              {routes["goethe"] !== undefined && routes["dante"] !== undefined && routes["goethe"] !== routes["dante"] && (
+                <p className={css.modelImpact}>{t("models.routeChatSplit")}</p>
+              )}
               <button
                 type="button"
                 className={css.button}
@@ -876,7 +1061,7 @@ export function ModelView({ fetchStudioApi, postStudioApi, t, onNavigationGuardC
         ) : (
           <div className={css.modelLayout}>
             <section className={css.modelList} aria-label="Embedding profiles">
-              <button type="button" className={css.button} onClick={() => guarded(embeddingDirty, () => resetEmbedding(newEmbeddingDraft()))} disabled={!!busy}>
+              <button type="button" className={css.button} onClick={() => guarded(embeddingDirty, () => resetEmbedding(newEmbeddingDraft(t)))} disabled={!!busy}>
                 <Plus size={14} /> {t('models.new')}
               </button>
               {embeddingProfiles.length === 0 && (

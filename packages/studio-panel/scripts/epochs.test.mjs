@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readdirSync, readFileSync } from 'node:fs'
 import { nextEpochs, terminalTransitionResources, triggersRefresh } from '../src/client/workbench-epochs.ts'
 
 const ZERO = {
@@ -72,6 +73,32 @@ test('SSE and polling paths behave identically (same pure function)', () => {
   const sse = nextEpochs('assets', { ...ZERO })
   const polling = nextEpochs('assets', { ...ZERO })
   assert.deepEqual(sse, polling)
+})
+
+test('every epoch key a resource can bump is consumed by a view', () => {
+  // `dag` used to be bumped for chapter_review/chapter_write/revision_* with no
+  // consumer, so those terminal results never refreshed the serial-writing tab.
+  const keys = new Set(Object.keys(ZERO))
+  const client = readdirSync(new URL('../src/client/', import.meta.url), { withFileTypes: true })
+    .filter(entry => /\.[tj]sx?$/.test(entry.name))
+    .map(entry => readFileSync(new URL(`../src/client/${entry.name}`, import.meta.url), 'utf8'))
+    .join('\n')
+  const consumed = [...keys].filter(key => client.includes(`epochs.${key}`) || client.includes(`epochs['${key}']`))
+  assert.deepEqual(consumed.sort(), [...keys].sort(),
+    `unconsumed epoch keys: ${[...keys].filter(k => !consumed.includes(k)).join(', ')}`)
+})
+
+test('the serial-writing refresh sum strictly increases on any relevant mutation', () => {
+  const sum = e => e.assets + e.outline + e.manuscript + e.dag
+  let epochs = { ...ZERO }
+  const seen = [sum(epochs)]
+  for (const resource of ['assets', 'outline', 'manuscript', 'dag']) {
+    epochs = nextEpochs(resource, epochs)
+    seen.push(sum(epochs))
+  }
+  // A `Math.max` combinator would stay flat when a lagging resource bumps; a sum
+  // must be strictly increasing so no mutation is missed.
+  for (let i = 1; i < seen.length; i += 1) assert.ok(seen[i] > seen[i - 1], `step ${i} did not increase: ${seen.join(',')}`)
 })
 
 test('refresh trigger set matches workspace/manuscript/outline/tasks only', () => {

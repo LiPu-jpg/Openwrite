@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, normalize } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   ToolArgsError,
@@ -71,21 +71,56 @@ function parseJsonArgument(name: string, value: string): unknown {
 }
 
 /**
+ * The asset id shape the server accepts. The same text is quoted in the
+ * parameter description the model reads and in the error it gets when the id
+ * is missing or malformed, so a rejected call can be corrected in one retry
+ * instead of guessing the format again.
+ */
+const ASSET_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/
+const ASSET_ID_SHAPE = '[A-Za-z0-9][A-Za-z0-9_.-]{0,79}'
+
+/** A missing asset id must say what a valid one looks like. */
+function assetIdRequired(action: string): string {
+  return `id is required for novel_assets(action="${action}"); pass an id matching ${ASSET_ID_SHAPE}`
+}
+
+function assertAssetId(id: string): void {
+  if (!ASSET_ID_PATTERN.test(id)) {
+    throw new Error(`invalid asset id "${id}"; it must match ${ASSET_ID_SHAPE}`)
+  }
+}
+
+/** JSON-typed parameters that also legitimately accept a raw string. */
+const RAW_STRING_JSON_ARGUMENTS = new Set(['novel_source_action.focus'])
+
+/**
  * Normalize arguments for parameters declared `type: 'json'` (and
  * `type: 'array'` with json items). DSH keeps `json` an annotation-only
  * schema, so the value reaches the plugin in whatever shape the model
  * emitted; models that serialize the object/array as a JSON *string* would
  * otherwise fail the plugin-side object/array checks (GitHub issue #75).
+ * Parameters in {@link RAW_STRING_JSON_ARGUMENTS} additionally accept their
+ * documented plain-string form.
  */
-function normalizeJsonArguments(parameters: ParameterSchemaSpec, args: Record<string, unknown>): Record<string, unknown> {
+function normalizeJsonArguments(toolName: string, parameters: ParameterSchemaSpec, args: Record<string, unknown>): Record<string, unknown> {
   let normalized: Record<string, unknown> | undefined
   for (const [name, spec] of Object.entries(parameters)) {
     const value = args[name]
     if (value === undefined || spec === null || typeof spec !== 'object') continue
     const type = (spec as { type?: unknown }).type
     if (type === 'json' && typeof value === 'string') {
+      let parsed: unknown
+      try {
+        parsed = parseJsonArgument(name, value)
+      } catch (error) {
+        // Some parameters describe a plain string for one action and a JSON
+        // value for another (novel_source_action.focus). For those, a raw
+        // string is a legitimate value, not malformed JSON.
+        if (!RAW_STRING_JSON_ARGUMENTS.has(`${toolName}.${name}`)) throw error
+        parsed = value
+      }
       normalized ??= { ...args }
-      normalized[name] = parseJsonArgument(name, value)
+      normalized[name] = parsed
     } else if (type === 'array') {
       const items = (spec as { items?: unknown }).items
       const itemType = items !== null && typeof items === 'object' ? (items as { type?: unknown }).type : undefined
@@ -124,10 +159,15 @@ function defineTool<const S extends ParameterSchemaSpec, const O extends ValueSc
   const userIsConcurrencySafe = options.isConcurrencySafe
   if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0))
     throw new Error(`defineTool(${options.name}): timeoutMs must be a positive finite number`)
-  const parameters = parameterSchemaSpecToJsonSchema(options.parameters) as unknown as Record<string, unknown>
+  const compiled = parameterSchemaSpecToJsonSchema(options.parameters) as unknown as Record<string, unknown>
+  // A tool that silently accepts an undeclared argument turns a model typo into
+  // a no-op write: the argument is dropped and the call still reports success.
+  // The host's schema validator enforces this keyword, so an unknown argument
+  // is rejected before the tool body runs.
+  const parameters = { ...compiled, additionalProperties: false }
   const outputSchema = valueSchemaSpecToJsonSchema(options.output.schema)
   const normalize = (args: unknown): Record<string, unknown> =>
-    normalizeJsonArguments(options.parameters, objectValue(args))
+    normalizeJsonArguments(options.name, options.parameters, objectValue(args))
   const validate = (args: Record<string, unknown>): string[] =>
     validateJsonSchemaValue(parameters, args, '')
   const tool: ToolDefinition = {
@@ -152,7 +192,8 @@ function defineTool<const S extends ParameterSchemaSpec, const O extends ValueSc
         if (!(error instanceof StudioError) || error.code.startsWith('WORKSPACE_')) throw error
         error.message = JSON.stringify({ code: error.code, message: error.message,
           status: error.status, details: error.details, request_id: error.requestId,
-          recovery: error.code === 'NETWORK_ERROR' ? 'List recent tasks and chapter runs before resubmitting; the server may have accepted the request.' : null,
+          // A timeout is as ambiguous as a transport failure about whether the server applied the write.
+          recovery: error.code === 'NETWORK_ERROR' || error.code === 'REQUEST_TIMEOUT' ? 'List recent tasks and chapter runs before resubmitting; the server may have accepted the request.' : null,
         })
         throw error
       }
@@ -188,6 +229,43 @@ function resolveReviewPath(args: { path?: string; chapter_id?: string }): string
   if (!chapterId) throw new Error('either path or chapter_id is required')
   if (!CHAPTER_ID_PATTERN.test(chapterId)) throw new Error(`chapter_id must match ch_<digits>, got "${chapterId}"`)
   return `data/manuscript/${chapterId}.md`
+}
+
+/** Unicode code-point offset of a JavaScript UTF-16 index (Studio counts code points). */
+function codePointOffset(text: string, index: number): number {
+  return Array.from(text.slice(0, index)).length
+}
+
+/**
+ * Derive exact annotation offsets from a quote when the caller supplied none.
+ * The server matches `content[start:end]` literally, so a quote that is absent
+ * or ambiguous is reported before any request is sent.
+ */
+async function resolveAnnotationHints(
+  client: StudioClient,
+  chapterId: string,
+  quote: string,
+  signal: AbortSignal,
+): Promise<{ start: number; end: number }> {
+  const brief = objectValue(await client.getJson(`/api/chapters/${encodeURIComponent(chapterId)}/work-brief`, {}, signal))
+  const path = objectValue(brief['manuscript'])['path']
+  if (typeof path !== 'string' || path === '') {
+    throw new Error('cannot locate the chapter document to derive annotation offsets; pass start_hint and end_hint explicitly')
+  }
+  const document = objectValue(await client.getJson('/api/document', { path }, signal))
+  const content = document['content']
+  if (typeof content !== 'string') {
+    throw new Error('cannot read the chapter document to derive annotation offsets; pass start_hint and end_hint explicitly')
+  }
+  const first = content.indexOf(quote)
+  if (first < 0) {
+    throw new Error('quote was not found in the chapter; pass the exact selected text or explicit start_hint/end_hint')
+  }
+  if (content.indexOf(quote, first + 1) >= 0) {
+    throw new Error('quote occurs more than once in the chapter; pass start_hint and end_hint explicitly')
+  }
+  const start = codePointOffset(content, first)
+  return { start, end: start + Array.from(quote).length }
 }
 
 function objectValue(value: unknown): JsonObject {
@@ -267,6 +345,12 @@ function exportFilename(filename: string, fallback: string): string {
   if (name.trim() === '' || name === '.' || name === '..' || /[\\/\u0000-\u001f\u007f]/.test(name) || /^[A-Za-z]:/.test(name)) {
     throw new StudioError('Studio returned an unsafe export filename', 502, 'INVALID_EXPORT_FILENAME', { reason: 'not_basename' })
   }
+  // Beyond the traversal checks: a name longer than the filesystem limit would
+  // otherwise escape as a bare ENAMETOOLONG whose message embeds the full local
+  // path. 255 is the common ceiling; stay well under it for extension suffixes.
+  if (Buffer.byteLength(name, 'utf8') > 200) {
+    throw new StudioError('Studio returned an export filename that is too long', 502, 'INVALID_EXPORT_FILENAME', { reason: 'too_long' })
+  }
   return name
 }
 
@@ -279,61 +363,73 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
 
   // ── reads ──────────────────────────────────────────────────────────────
 
+    // ── embedding configuration ───────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
     name: 'novel_embedding_profiles',
-    description: 'List independent Embedding profiles and the active selection. Embedding is configured separately from Chat profiles.',
-    parameters: {},
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(_args, exec) {
-      return await clientFor(exec).getJson('/api/model/embedding', {}, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_embedding_profile_save',
-    description: 'Create or update an independent Embedding profile; it is never attached to a Chat profile.',
+    description:
+      'List, save, select, delete and test embedding profiles. Selection chooses the profile the ' +
+      'server uses for semantic search and recall.',
     parameters: {
-      profile: { type: 'json', required: true, description: 'Embedding profile: id, label, provider, model, base_url, dimension, max_tokens.' },
+      action: { type: 'string', required: true, enum: ['list', 'save', 'select', 'delete', 'test'], description: 'Embedding configuration operation.' },
+      profile: { type: 'json', description: 'Embedding profile: id, label, provider, model, base_url, dimension, max_tokens.' },
       api_key: { type: 'string', description: 'Embedding API key.' },
       remember_api_key: { type: 'boolean', description: 'Persist the key (default true).' },
+      profile_id: { type: 'string' },
+      id: { type: 'string', description: 'Stored profile id to probe.' },
+      candidate: { type: 'json', description: 'Embedding candidate settings object (merged into the request).' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
+    isConcurrencySafe: args => ['list', 'test'].includes(args.action),
     async execute(args, exec) {
-      if (typeof args.profile !== 'object' || args.profile === null || Array.isArray(args.profile)) throw new Error('profile must be a JSON object')
-      const body: JsonObject = { ...args.profile }
-      for (const key of ['api_key', 'remember_api_key'] as const) if (args[key] !== undefined) body[key] = args[key]
-      return await clientFor(exec).postJson('/api/model/embedding', body, exec.signal)
+      switch (args.action) {
+        case 'list': {
+              return await clientFor(exec).getJson('/api/model/embedding', {}, exec.signal)
+            
+        }
+        case 'save': {
+        if (args.profile === undefined) throw new Error('profile is required for novel_embedding_profiles(action="save")')
+              if (typeof args.profile !== 'object' || args.profile === null || Array.isArray(args.profile)) throw new Error('profile must be a JSON object')
+              const body: JsonObject = { ...args.profile }
+              for (const key of ['api_key', 'remember_api_key'] as const) if (args[key] !== undefined) body[key] = args[key]
+              return await clientFor(exec).postJson('/api/model/embedding', body, exec.signal)
+            
+        }
+        case 'select': {
+        if (args.profile_id === undefined) throw new Error('profile_id is required for novel_embedding_profiles(action="select")')
+              if (!args.profile_id.trim()) throw new Error('profile_id must be non-empty')
+              return await clientFor(exec).postJson('/api/model/embedding/select', { profile_id: args.profile_id }, exec.signal)
+            
+        }
+        case 'delete': {
+        if (args.profile_id === undefined) throw new Error('profile_id is required for novel_embedding_profiles(action="delete")')
+              if (!args.profile_id.trim()) throw new Error('profile_id must be non-empty')
+              return await clientFor(exec).postJson('/api/model/embedding/delete', { profile_id: args.profile_id }, exec.signal)
+            
+        }
+        case 'test': {
+              const client = clientFor(exec)
+              const body: JsonObject = {}
+              if (args.candidate !== undefined) {
+                if (typeof args.candidate !== 'object' || args.candidate === null || Array.isArray(args.candidate)) {
+                  throw new Error('candidate must be a JSON object')
+                }
+                Object.assign(body, args.candidate)
+              }
+              for (const key of ['id', 'api_key'] as const) {
+                const value = args[key]
+                if (value !== undefined) body[key] = value
+              }
+              return await client.postJson('/api/model/embedding/test', body, exec.signal)
+            
+        }
+        default: throw new Error(`novel_embedding_profiles: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_embedding_profile_select',
-    description: 'Select the active independent Embedding profile used by search.',
-    parameters: { profile_id: { type: 'string', required: true } },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!args.profile_id.trim()) throw new Error('profile_id must be non-empty')
-      return await clientFor(exec).postJson('/api/model/embedding/select', { profile_id: args.profile_id }, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_embedding_profile_delete',
-    description: 'Delete an independent Embedding profile; the active profile automatically moves to another one.',
-    parameters: { profile_id: { type: 'string', required: true } },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!args.profile_id.trim()) throw new Error('profile_id must be non-empty')
-      return await clientFor(exec).postJson('/api/model/embedding/delete', { profile_id: args.profile_id }, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
+        ctx.tools.register(defineTool({
     name: 'novel_status',
     description: 'Get a snapshot of the current OpenWrite novel project: title, chapters, word counts, writing targets, and focus compass.',
     parameters: {},
@@ -390,7 +486,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
 
   ctx.tools.register(defineTool({
     name: 'novel_context_preview',
-    description: 'Preview the context packet OpenWrite would assemble for writing a chapter (relevant outline, assets, foreshadowing, and prior-chapter memory). Set include_agent_payload to inspect canonical writer inputs and document inclusion without calling a model.',
+    description: 'Preview the context packet OpenWrite would assemble for writing a chapter (relevant outline, assets, foreshadowing, and prior-chapter memory). The chapter must already exist in the outline; an unknown chapter id is rejected instead of returning an empty generic context. Set include_agent_payload to inspect canonical writer inputs and document inclusion without calling a model.',
     parameters: {
       chapter: { type: 'string', description: 'Chapter id (e.g. "ch_0007"); omit or pass "next" for the next chapter to write.' },
       include_agent_payload: { type: 'boolean', description: 'Include the full writer payload, rendered initial messages and document inventory. Later segment/retry messages depend on the write request.' },
@@ -422,15 +518,47 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
+    // ── reading order ─────────────────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
     name: 'novel_reading_order',
-    description: 'Read the canonical manuscript order with stable document/occurrence ids, volume membership, previous/next links, revision, and explicit duplicate or missing-file issues.',
-    parameters: {},
+    description:
+      'Read the reading order of the current project and move one document to another volume or ' +
+      'position. The move is optimistic and requires the current revision.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['get', 'move'], description: 'Reading-order operation.' },
+      document_id: { type: 'string', description: 'Stable document_id or unambiguous occurrence_id.' },
+      target_volume_id: { type: 'string', description: 'Target volume_id from novel_reading_order.' },
+      target_index: { type: 'integer', description: 'Zero-based position inside the target volume.' },
+      expected_revision: { type: 'string', description: 'Fresh reading-order revision used for CAS.' },
+    },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(_args, exec) {
-      return await clientFor(exec).getJson('/api/reading-order', {}, exec.signal)
+    isConcurrencySafe: args => ['get'].includes(args.action),
+    async execute(args, exec) {
+      switch (args.action) {
+        case 'get': {
+              return await clientFor(exec).getJson('/api/reading-order', {}, exec.signal)
+            
+        }
+        case 'move': {
+        if (args.document_id === undefined) throw new Error('document_id is required for novel_reading_order(action="move")')
+        if (args.target_volume_id === undefined) throw new Error('target_volume_id is required for novel_reading_order(action="move")')
+        if (args.target_index === undefined) throw new Error('target_index is required for novel_reading_order(action="move")')
+        if (args.expected_revision === undefined) throw new Error('expected_revision is required for novel_reading_order(action="move")')
+              if (!args.document_id.trim()) throw new Error('document_id must be non-empty')
+              if (!args.target_volume_id.trim()) throw new Error('target_volume_id must be non-empty')
+              if (!args.expected_revision.trim()) throw new Error('expected_revision must be non-empty')
+              return await clientFor(exec).postJson('/api/reading-order/move', {
+                document_id: args.document_id,
+                target_volume_id: args.target_volume_id,
+                target_index: args.target_index,
+                expected_revision: args.expected_revision,
+              }, exec.signal)
+            
+        }
+        default: throw new Error(`novel_reading_order: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
@@ -474,15 +602,73 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
+    // ── scenes ────────────────────────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
-    name: 'novel_scene_structure',
-    description: 'Read the canonical scene structure with stable scene ids, reading/story-time order, chapter revisions, references, freshness, and explicit issues.',
-    parameters: {},
+    name: 'novel_scene',
+    description:
+      'Read the scene structure of a chapter, update one scene, and move a scene to another chapter ' +
+      'or position. Structure is read-only; update and move are optimistic and require the current ' +
+      'revision.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['structure', 'update', 'move'], description: 'Scene operation.' },
+      scene_id: { type: 'string', description: 'Stable scene id from novel_scene(action="structure").' },
+      expected_revision: { type: 'string', description: 'Fresh scene-structure revision used for CAS.' },
+      title: { type: 'string', description: 'Optional scene title.' },
+      story_time_sort_key: { type: 'string', description: 'Optional lexical story-time sort key.' },
+      story_time_label: { type: 'string', description: 'Optional author-facing story-time label.' },
+      characters: { type: 'array', items: { type: 'string' }, description: 'Character references; replaces the current list when supplied.' },
+      locations: { type: 'array', items: { type: 'string' }, description: 'Location references; replaces the current list when supplied.' },
+      events: { type: 'array', items: { type: 'string' }, description: 'Event references; replaces the current list when supplied.' },
+      target_chapter_id: { type: 'string', description: 'Target chapter id (ch_<digits>).' },
+      target_index: { type: 'integer', description: 'Zero-based scene position inside the target chapter.' },
+      expected_source_revision: { type: 'string', description: 'Fresh source chapter revision.' },
+      expected_target_revision: { type: 'string', description: 'Fresh target chapter revision.' },
+    },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(_args, exec) {
-      return await clientFor(exec).getJson('/api/scenes', {}, exec.signal)
+    isConcurrencySafe: args => ['structure'].includes(args.action),
+    async execute(args, exec) {
+      switch (args.action) {
+        case 'structure': {
+              return await clientFor(exec).getJson('/api/scenes', {}, exec.signal)
+            
+        }
+        case 'update': {
+        if (args.scene_id === undefined) throw new Error('scene_id is required for novel_scene(action="update")')
+        if (args.expected_revision === undefined) throw new Error('expected_revision is required for novel_scene(action="update")')
+              if (!args.scene_id.trim() || !args.expected_revision.trim()) throw new Error('scene_id and expected_revision must be non-empty')
+              const body: JsonObject = { scene_id: args.scene_id, expected_revision: args.expected_revision }
+              if (args.title !== undefined) body['title'] = args.title
+              if (args.story_time_sort_key !== undefined) body['story_time_sort_key'] = args.story_time_sort_key
+              if (args.story_time_label !== undefined) body['story_time_label'] = args.story_time_label
+              if (args.characters !== undefined) body['characters'] = args.characters
+              if (args.locations !== undefined) body['locations'] = args.locations
+              if (args.events !== undefined) body['events'] = args.events
+              return await clientFor(exec).postJson('/api/scenes/metadata', body, exec.signal)
+            
+        }
+        case 'move': {
+        if (args.scene_id === undefined) throw new Error('scene_id is required for novel_scene(action="move")')
+        if (args.target_chapter_id === undefined) throw new Error('target_chapter_id is required for novel_scene(action="move")')
+        if (args.target_index === undefined) throw new Error('target_index is required for novel_scene(action="move")')
+        if (args.expected_revision === undefined) throw new Error('expected_revision is required for novel_scene(action="move")')
+        if (args.expected_source_revision === undefined) throw new Error('expected_source_revision is required for novel_scene(action="move")')
+        if (args.expected_target_revision === undefined) throw new Error('expected_target_revision is required for novel_scene(action="move")')
+              if (!args.scene_id.trim() || !CHAPTER_ID_PATTERN.test(args.target_chapter_id)) throw new Error('scene_id and a valid target_chapter_id are required')
+              if (!args.expected_revision.trim() || !args.expected_source_revision.trim() || !args.expected_target_revision.trim()) throw new Error('all scene and chapter revisions are required')
+              return await clientFor(exec).postJson('/api/scenes/move', {
+                scene_id: args.scene_id,
+                target_chapter_id: args.target_chapter_id,
+                target_index: args.target_index,
+                expected_revision: args.expected_revision,
+                expected_source_revision: args.expected_source_revision,
+                expected_target_revision: args.expected_target_revision,
+              }, exec.signal)
+            
+        }
+        default: throw new Error(`novel_scene: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
@@ -501,30 +687,117 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
+    // ── scene migration ───────────────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
-    name: 'novel_scene_migration_preview',
-    description: 'Build a read-only, exact-revision preview that segments existing chapters into stable scenes. This does not write a sidecar.',
-    parameters: {},
+    name: 'novel_scene_migration',
+    description:
+      'Preview, apply and roll back the paragraph-to-scene migration of one chapter. The preview is ' +
+      'read-only; apply and rollback are guarded by the revisions the previous step reported.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['preview', 'apply', 'rollback'], description: 'Scene migration step; apply and rollback require the revision the previous step reported.' },
+      expected_preview_revision: { type: 'string', description: 'Exact preview_revision from novel_scene_migration(action="preview").' },
+      confirm: { type: 'boolean', description: 'Must be true after the author approves the preview.' },
+      migration_id: { type: 'string', description: 'Migration id returned by novel_scene_migration(action="apply").' },
+      expected_revision: { type: 'string', description: 'Fresh scene-structure revision used for CAS.' },
+    },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(_args, exec) {
-      return await clientFor(exec).getJson('/api/scenes/migration-preview', {}, exec.signal)
+    isConcurrencySafe: args => ['preview'].includes(args.action),
+    async execute(args, exec) {
+      switch (args.action) {
+        case 'preview': {
+              return await clientFor(exec).getJson('/api/scenes/migration-preview', {}, exec.signal)
+            
+        }
+        case 'apply': {
+        if (args.expected_preview_revision === undefined) throw new Error('expected_preview_revision is required for novel_scene_migration(action="apply")')
+        if (args.confirm === undefined) throw new Error('confirm is required for novel_scene_migration(action="apply")')
+              if (!args.expected_preview_revision.trim()) throw new Error('expected_preview_revision must be non-empty')
+              if (args.confirm !== true) throw new Error('confirm must be true')
+              return await clientFor(exec).postJson('/api/scenes/migration/apply', {
+                expected_preview_revision: args.expected_preview_revision,
+                confirm: true,
+              }, exec.signal)
+            
+        }
+        case 'rollback': {
+        if (args.migration_id === undefined) throw new Error('migration_id is required for novel_scene_migration(action="rollback")')
+        if (args.expected_revision === undefined) throw new Error('expected_revision is required for novel_scene_migration(action="rollback")')
+              if (!args.migration_id.trim() || !args.expected_revision.trim()) throw new Error('migration_id and expected_revision must be non-empty')
+              return await clientFor(exec).postJson('/api/scenes/migration/rollback', {
+                migration_id: args.migration_id,
+                expected_revision: args.expected_revision,
+              }, exec.signal)
+            
+        }
+        default: throw new Error(`novel_scene_migration: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
+    // ── writing assets ────────────────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
-    name: 'novel_assets_list',
-    description: 'List structured assets (characters, world entities, progression systems) of the current novel project.',
+    name: 'novel_assets',
+    description:
+      'List, read, create and update the writing assets of the current project (terminology, sample ' +
+      'pools, character attribute groups and related records).',
     parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'read', 'create', 'update'], description: 'Writing-asset operation.' },
       kind: { type: 'string', enum: ['character', 'world', 'progression'], description: 'Restrict to one asset kind; omit to list all kinds.' },
+      id: { type: 'string', description: 'Asset id; required for read/create/update. Must match [A-Za-z0-9][A-Za-z0-9_.-]{0,79}.' },
+      data: { type: 'json', description: 'Object of asset fields (e.g. name, summary, aliases).' },
+      body_markdown: { type: 'string', description: 'Markdown body (character/world assets).' },
+      revision: { type: 'string', description: 'The asset revision fingerprint from a fresh novel_assets(action="list") call.' },
+      raw_text: { type: 'string', description: 'Full replacement document text, validated by the server.' },
+      related_mode: { type: 'string', enum: ['merge', 'replace'], description: 'Preserve and merge existing related entries by default; replace explicitly clears or replaces relations.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
+    isConcurrencySafe: args => ['list', 'read'].includes(args.action),
     async execute(args, exec) {
-      const client = clientFor(exec)
-      return await client.getJson('/api/assets', { kind: args.kind ?? '' }, exec.signal)
+      switch (args.action) {
+        case 'list': {
+              const client = clientFor(exec)
+              return await client.getJson('/api/assets', { kind: args.kind ?? '' }, exec.signal)
+            
+        }
+        case 'read': {
+        if (args.kind === undefined) throw new Error('kind is required for novel_assets(action="read")')
+        if (args.id === undefined) throw new Error(assetIdRequired('read'))
+              const client = clientFor(exec)
+              assertAssetId(args.id)
+              return await client.getJson(`/api/assets/${args.kind}/${encodeURIComponent(args.id)}`, {}, exec.signal)
+            
+        }
+        case 'create': {
+        if (args.kind === undefined) throw new Error('kind is required for novel_assets(action="create")')
+        if (args.id === undefined) throw new Error(assetIdRequired('create'))
+              const client = clientFor(exec)
+              assertAssetId(args.id)
+              const body: JsonObject = { kind: args.kind as string, id: args.id }
+              if (args.data !== undefined) body['data'] = args.data
+              if (args.body_markdown !== undefined) body['body_markdown'] = args.body_markdown
+              return await client.postJson('/api/assets', body, exec.signal)
+            
+        }
+        case 'update': {
+        if (args.kind === undefined) throw new Error('kind is required for novel_assets(action="update")')
+        if (args.id === undefined) throw new Error(assetIdRequired('update'))
+        if (args.revision === undefined) throw new Error('revision is required for novel_assets(action="update")')
+              const client = clientFor(exec)
+              assertAssetId(args.id)
+              const body: JsonObject = { kind: args.kind as string, id: args.id, revision: args.revision }
+              if (args.data !== undefined) body['data'] = args.data
+              if (args.body_markdown !== undefined) body['body_markdown'] = args.body_markdown
+              if (args.raw_text !== undefined) body['raw_text'] = args.raw_text
+              if (args.related_mode !== undefined) body['related_mode'] = args.related_mode
+              return await client.postJson('/api/assets/update', body, exec.signal)
+            
+        }
+        default: throw new Error(`novel_assets: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
@@ -549,19 +822,72 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
+    // ── project documents ─────────────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
-    name: 'novel_doc_read',
-    description: 'Read a project document (path relative to the novel data root, e.g. "src/outline.md" or "data/manuscript/ch_0007.md"). Returns content plus a `version` fingerprint needed by novel_doc_write.',
+    name: 'novel_doc',
+    description:
+      'Read, write and create the plain documents of the current project (notes, briefs and other ' +
+      'author-owned files). Writes are optimistic and reject a stale version.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Document path relative to the novel data root.' },
+      action: { type: 'string', required: true, enum: ['read', 'write', 'create'], description: 'Document operation.' },
+      path: { type: 'string', description: 'Document path relative to the novel data root (read/write). Writable roots are src/ and data/manuscript/; create derives its path from kind and name.' },
+      content: { type: 'string', description: 'Full new document content (max 2 MB).' },
+      version: { type: 'string', description: 'The version fingerprint from novel_doc(action="read") (optimistic lock).' },
+      force: { type: 'boolean', description: 'Bypass the version check (default false).' },
+      kind: { type: 'string', description: 'Document kind for create: "character" or "world" (the server derives the file path).' },
+      name: { type: 'string', description: 'Document name.' },
+      description: { type: 'string', description: 'Short description of the document.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
+    isConcurrencySafe: args => ['read'].includes(args.action),
     async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.path.trim()) throw new Error('path must be a non-empty string')
-      return await client.getJson('/api/document', { path: args.path }, exec.signal)
+      switch (args.action) {
+        case 'read': {
+        if (args.path === undefined) throw new Error('path is required for novel_doc(action="read")')
+              const client = clientFor(exec)
+              if (!args.path.trim()) throw new Error('path must be a non-empty string')
+              return await client.getJson('/api/document', { path: args.path }, exec.signal)
+            
+        }
+        case 'write': {
+        if (args.path === undefined) throw new Error('path is required for novel_doc(action="write")')
+        if (args.content === undefined) throw new Error('content is required for novel_doc(action="write")')
+              const client = clientFor(exec)
+              if (!args.path.trim()) throw new Error('path must be a non-empty string')
+              const writable = normalize(args.path.replaceAll('\\', '/')).replace(/^\.\//, '')
+              if (!(writable.startsWith('src/') || writable.startsWith('data/manuscript/')) || !writable.toLowerCase().endsWith('.md')) {
+                throw new Error('path must be a .md document under src/ or data/manuscript/; Studio does not write other locations')
+              }
+              // The server only CAS-checks when `version` is present, so omitting
+              // it is an unlocked last-write-wins overwrite of an existing
+              // document. `force` is the explicit bypass; require one or the
+              // other rather than silently choosing "overwrite".
+              if (args.version === undefined && args.force !== true) {
+                throw new Error('version is required for novel_doc(action="write"); pass force=true to overwrite without a lock')
+              }
+              const body: JsonObject = { path: args.path, content: args.content }
+              if (args.version !== undefined) body['version'] = args.version
+              if (args.force !== undefined) body['force'] = args.force
+              return await client.putJson('/api/document', body, exec.signal)
+            
+        }
+        case 'create': {
+        if (args.kind === undefined) throw new Error('kind is required for novel_doc(action="create")')
+        if (args.name === undefined) throw new Error('name is required for novel_doc(action="create")')
+              const client = clientFor(exec)
+              if (!args.kind.trim() || !args.name.trim()) throw new Error('kind and name must be non-empty strings')
+              if (args.kind !== 'character' && args.kind !== 'world') {
+                throw new Error('kind must be "character" or "world" for novel_doc(action="create"); the server derives the document path from it')
+              }
+              const body: JsonObject = { kind: args.kind, name: args.name }
+              if (args.description !== undefined) body['description'] = args.description
+              return await client.postJson('/api/document/create', body, exec.signal)
+            
+        }
+        default: throw new Error(`novel_doc: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
@@ -571,7 +897,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     name: 'novel_outline_edit',
     description:
       'Immediate compatibility write for an outline change the author has already authorized exactly; otherwise use ' +
-      'novel_structured_change_plan. Apply ONE atomic structural edit to the outline tree. Edits are revision-gated: ' +
+      'novel_change_plan(action="structured"). Apply ONE atomic structural edit to the outline tree. Edits are revision-gated: ' +
       'read the current `revision` via novel_outline_read first and pass it back; the server ' +
       'rejects the edit with a conflict if the outline changed in between. ' +
       'Operations: "rename" (node_id + title), "update_summary" (node_id + summary), ' +
@@ -581,7 +907,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     parameters: {
       operation: { type: 'string', required: true, enum: ['rename', 'update_summary', 'add_child', 'add_after', 'delete', 'promote', 'get_meta', 'set_meta'], description: 'The structural operation to apply.' },
       cascade: { type: 'boolean', description: 'For delete, false removes only the container and keeps children and chapter IDs.' },
-      metadata: { type: 'json', description: 'Field object for set_meta; use target_words, beats, hooks or characters.' },
+      metadata: { type: 'json', description: 'Field object for set_meta; use dramatic_position, content_focus, goals, target_words, word_budget, characters, settings, emotional_arc, beats, hooks, promise, payoff_of or function. Text fields (dramatic_position, content_focus, emotional_arc) take one line of text; word counts (target_words, word_budget) take a number. List fields (goals, beats, hooks, characters, settings, payoff_of, function) take an array of strings or one comma-separated string; promise accepts both too.' },
       chapter_id: { type: 'string', description: 'Chapter ID alias for node_id in get_meta/set_meta.' },
       updates: { type: 'json', description: 'Batch of 1-50 {chapter_id, metadata} objects for set_meta, or {chapter_id} for get_meta; one revision guards the whole batch.' },
       revision: { type: 'string', required: true, description: 'The outline revision fingerprint from a fresh novel_outline_read call.' },
@@ -607,129 +933,13 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_reading_order_move',
-    description: 'Move one manuscript document within or across volumes. Requires the fresh reading-order revision and rejects ambiguous, missing, or concurrently changed order.',
-    parameters: {
-      document_id: { type: 'string', required: true, description: 'Stable document_id or unambiguous occurrence_id.' },
-      target_volume_id: { type: 'string', required: true, description: 'Target volume_id from novel_reading_order.' },
-      target_index: { type: 'integer', required: true, description: 'Zero-based position inside the target volume.' },
-      expected_revision: { type: 'string', required: true, description: 'Fresh reading-order revision used for CAS.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!args.document_id.trim()) throw new Error('document_id must be non-empty')
-      if (!args.target_volume_id.trim()) throw new Error('target_volume_id must be non-empty')
-      if (!args.expected_revision.trim()) throw new Error('expected_revision must be non-empty')
-      return await clientFor(exec).postJson('/api/reading-order/move', {
-        document_id: args.document_id,
-        target_volume_id: args.target_volume_id,
-        target_index: args.target_index,
-        expected_revision: args.expected_revision,
-      }, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_scene_migration_apply',
-    description: 'Apply one freshly read scene migration preview. Requires the exact preview revision and explicit confirmation.',
-    parameters: {
-      expected_preview_revision: { type: 'string', required: true, description: 'Exact preview_revision from novel_scene_migration_preview.' },
-      confirm: { type: 'boolean', required: true, description: 'Must be true after the author approves the preview.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!args.expected_preview_revision.trim()) throw new Error('expected_preview_revision must be non-empty')
-      if (args.confirm !== true) throw new Error('confirm must be true')
-      return await clientFor(exec).postJson('/api/scenes/migration/apply', {
-        expected_preview_revision: args.expected_preview_revision,
-        confirm: true,
-      }, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_scene_migration_rollback',
-    description: 'Restore the byte-exact scene sidecar that preceded a migration, guarded by the current scene-structure revision.',
-    parameters: {
-      migration_id: { type: 'string', required: true, description: 'Migration id returned by novel_scene_migration_apply.' },
-      expected_revision: { type: 'string', required: true, description: 'Fresh scene-structure revision used for CAS.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!args.migration_id.trim() || !args.expected_revision.trim()) throw new Error('migration_id and expected_revision must be non-empty')
-      return await clientFor(exec).postJson('/api/scenes/migration/rollback', {
-        migration_id: args.migration_id,
-        expected_revision: args.expected_revision,
-      }, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_scene_update',
-    description: 'CAS-update scene title, story time, and character/location/event references without changing manuscript prose.',
-    parameters: {
-      scene_id: { type: 'string', required: true, description: 'Stable scene id from novel_scene_structure.' },
-      expected_revision: { type: 'string', required: true, description: 'Fresh scene-structure revision used for CAS.' },
-      title: { type: 'string', description: 'Optional scene title.' },
-      story_time_sort_key: { type: 'string', description: 'Optional lexical story-time sort key.' },
-      story_time_label: { type: 'string', description: 'Optional author-facing story-time label.' },
-      characters: { type: 'array', items: { type: 'string' }, description: 'Character references; replaces the current list when supplied.' },
-      locations: { type: 'array', items: { type: 'string' }, description: 'Location references; replaces the current list when supplied.' },
-      events: { type: 'array', items: { type: 'string' }, description: 'Event references; replaces the current list when supplied.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!args.scene_id.trim() || !args.expected_revision.trim()) throw new Error('scene_id and expected_revision must be non-empty')
-      const body: JsonObject = { scene_id: args.scene_id, expected_revision: args.expected_revision }
-      if (args.title !== undefined) body['title'] = args.title
-      if (args.story_time_sort_key !== undefined) body['story_time_sort_key'] = args.story_time_sort_key
-      if (args.story_time_label !== undefined) body['story_time_label'] = args.story_time_label
-      if (args.characters !== undefined) body['characters'] = args.characters
-      if (args.locations !== undefined) body['locations'] = args.locations
-      if (args.events !== undefined) body['events'] = args.events
-      return await clientFor(exec).postJson('/api/scenes/metadata', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_scene_move',
-    description: 'Move one complete scene within or across chapters with scene/source/target revision guards. Cross-chapter moves start the existing manuscript acceptance flow.',
-    parameters: {
-      scene_id: { type: 'string', required: true, description: 'Stable scene id from novel_scene_structure.' },
-      target_chapter_id: { type: 'string', required: true, description: 'Target chapter id (ch_<digits>).' },
-      target_index: { type: 'integer', required: true, description: 'Zero-based scene position inside the target chapter.' },
-      expected_revision: { type: 'string', required: true, description: 'Fresh scene-structure revision.' },
-      expected_source_revision: { type: 'string', required: true, description: 'Fresh source chapter revision.' },
-      expected_target_revision: { type: 'string', required: true, description: 'Fresh target chapter revision.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!args.scene_id.trim() || !CHAPTER_ID_PATTERN.test(args.target_chapter_id)) throw new Error('scene_id and a valid target_chapter_id are required')
-      if (!args.expected_revision.trim() || !args.expected_source_revision.trim() || !args.expected_target_revision.trim()) throw new Error('all scene and chapter revisions are required')
-      return await clientFor(exec).postJson('/api/scenes/move', {
-        scene_id: args.scene_id,
-        target_chapter_id: args.target_chapter_id,
-        target_index: args.target_index,
-        expected_revision: args.expected_revision,
-        expected_source_revision: args.expected_source_revision,
-        expected_target_revision: args.expected_target_revision,
-      }, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
+            ctx.tools.register(defineTool({
     name: 'novel_write_chapter',
     description:
-      'Queue a chapter write and immediately return a durable task_id. Poll novel_task_get for progress/result. Omit chapter_id to write ' +
+      'Queue a chapter write and immediately return a durable task_id. Poll novel_task(action="get") for progress/result. Omit chapter_id to write ' +
       'the outline-recommended next chapter; a given chapter_id must match the current recommendation. ' +
       'Preview context first with novel_context_preview and consult novel_outline_read for the recommendation. ' +
-      'Cancel with novel_task_cancel. Generated partial prose is retained; resume_from_draft continues it in a new run when the source/context revisions still match.',
+      'Cancel with novel_task(action="cancel"). Generated partial prose is retained; resume_from_draft continues it in a new run when the source/context revisions still match.',
     parameters: {
       dry_run: { type: 'boolean', description: 'Only assemble the current writer input and per-document sizes; no model call and no writing task. Guidance and target_words are included in this preview.' },
       run_id_v2: { type: 'string', description: 'Resume this completed draft without generating it again.' },
@@ -781,7 +991,20 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     timeoutMs,
     async execute(args, exec) {
       const client = clientFor(exec)
-      if (args.action === 'versions' || args.action === 'compare') return await client.postJson('/api/review/history', { action: args.action, chapter_id: reviewChapterId(args), revision: args.revision ?? '' }, exec.signal)
+      if (args.action === 'versions' || args.action === 'compare') {
+        // "versions" lists saved reviews and needs no revision; only
+        // "compare" needs one. An empty revision for compare is not "unset":
+        // the store answers REVIEW_HISTORY_NOT_FOUND, so report the real cause
+        // before sending the request.
+        if (args.action === 'compare' && !args.revision?.trim()) {
+          throw new Error('revision is required for novel_review_chapter(action="compare")')
+        }
+        return await client.postJson('/api/review/history', {
+          action: args.action,
+          chapter_id: reviewChapterId(args),
+          revision: args.revision ?? '',
+        }, exec.signal)
+      }
       if (args.dimensions !== undefined && args.dimensions.some(value => !Number.isInteger(value) || value < 1 || value > 37)) {
         throw new Error('dimensions must contain only integers from 1 to 37')
       }
@@ -814,41 +1037,11 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_asset_update',
-    description:
-      'Immediate compatibility write for an asset change the author has already authorized exactly; otherwise use ' +
-      'novel_structured_change_plan. Update a structured asset (character / world / progression). Revision-gated: pass the `revision` ' +
-      'fingerprint from novel_assets_list; the server rejects the update with a conflict if the asset changed. ' +
-      'Pass field changes via `data` (merged into the asset front matter), `body_markdown` to replace the ' +
-      'markdown body, or `raw_text` to replace the whole document.',
-    parameters: {
-      kind: { type: 'string', required: true, enum: ['character', 'world', 'progression'], description: 'Asset kind.' },
-      id: { type: 'string', required: true, description: 'Asset id.' },
-      revision: { type: 'string', required: true, description: 'The asset revision fingerprint from a fresh novel_assets_list call.' },
-      data: { type: 'json', description: 'Object of asset fields to merge (e.g. name, summary, aliases).' },
-      body_markdown: { type: 'string', description: 'Replacement markdown body (character/world assets).' },
-      raw_text: { type: 'string', description: 'Full replacement document text, validated by the server.' },
-      related_mode: { type: 'string', enum: ['merge', 'replace'], description: 'Preserve and merge existing related entries by default; replace explicitly clears or replaces relations.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      const body: JsonObject = { kind: args.kind, id: args.id, revision: args.revision }
-      if (args.data !== undefined) body['data'] = args.data
-      if (args.body_markdown !== undefined) body['body_markdown'] = args.body_markdown
-      if (args.raw_text !== undefined) body['raw_text'] = args.raw_text
-      if (args.related_mode !== undefined) body['related_mode'] = args.related_mode
-      return await client.postJson('/api/assets/update', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
+    ctx.tools.register(defineTool({
     name: 'novel_foreshadowing',
     description:
       'Immediate compatibility write for a foreshadowing change the author has already authorized exactly; otherwise use ' +
-      'novel_structured_change_plan. Manage the foreshadowing DAG. action "create": node_id + content, optional weight (1-10, default 5), ' +
+      'novel_change_plan(action="structured"). Manage the foreshadowing DAG. action "create": node_id + content, optional weight (1-10, default 5), ' +
       'layer (default "支线"), target_chapter. action "update": node_id + status (e.g. planted/paid-off).',
     parameters: {
       action: { type: 'string', required: true, enum: ['create', 'update'], description: 'Create a new foreshadowing node or update an existing one.' },
@@ -874,108 +1067,76 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_doc_write',
-    description:
-      'Write a project document (path relative to the novel data root). Uses a version-based optimistic lock: ' +
-      'pass the `version` returned by novel_doc_read; the server rejects with a conflict if the document changed. ' +
-      'Omit version to create a new document; set force to bypass the lock.',
-    parameters: {
-      path: { type: 'string', required: true, description: 'Document path relative to the novel data root.' },
-      content: { type: 'string', required: true, description: 'Full new document content (max 2 MB).' },
-      version: { type: 'string', description: 'The version fingerprint from novel_doc_read (optimistic lock).' },
-      force: { type: 'boolean', description: 'Bypass the version check (default false).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.path.trim()) throw new Error('path must be a non-empty string')
-      const body: JsonObject = { path: args.path, content: args.content }
-      if (args.version !== undefined) body['version'] = args.version
-      if (args.force !== undefined) body['force'] = args.force
-      return await client.putJson('/api/document', body, exec.signal)
-    },
-  }))
+      // ── change plans ──────────────────────────────────────────────────────────────
 
   ctx.tools.register(defineTool({
-    name: 'novel_document_change_plan',
+    name: 'novel_change_plan',
     description:
-      'Stage and review revision-gated changes to an existing novel document. Use action "preview" with path and edits ' +
-      'to receive an immutable preview_token and real before/after summary. Use "apply" only after author acceptance, ' +
-      'passing that token and confirm: true; "reject" discards it, "retry" rebuilds it against the current source, and "undo" safely ' +
-      'applies an undo_preview_token returned by a prior apply. Each edit uses old_text/new_text or unique start_text/' +
-      'end_text/new_text anchors. Preview returns applied:false; changed/would_change describe only the proposed difference. ' +
-      'OLD_TEXT_NOT_FOUND is an anchor mismatch (400), while revision conflicts are 409; use the exact suggested bytes and reread the source before retrying. ' +
-      'The server rechecks the source revision and writes exactly the stored preview.',
+      'Preview, apply, reject, retry and undo a change plan. document plans edit one project document ' +
+      'as text; structured plans edit the manuscript model (outline, scenes, canon) as operations. ' +
+      'Both are two-step: preview returns a token the follow-up step must present.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['preview', 'apply', 'reject', 'retry', 'undo'], description: 'Plan lifecycle action.' },
+      action: { type: 'string', required: true, enum: ['document', 'structured'], description: 'Plan kind: document edits a project document, structured edits the manuscript model.' },
+      step: { type: 'string', enum: ['preview', 'apply', 'reject', 'retry', 'undo'], description: 'Plan lifecycle step.' },
       confirm: { type: 'boolean', description: 'Required true for apply and undo after author acceptance.' },
       path: { type: 'string', description: 'Existing document path for preview, relative to the novel root.' },
       edits: { type: 'json', description: 'Preview edits: [{old_text,new_text}] or [{start_text,end_text,new_text,end_inclusive}]. Range end defaults to inclusive for compatibility; end_inclusive:false preserves the end anchor (e.g. the next heading).' },
       preview_token: { type: 'string', description: 'Immutable preview or undo token for apply/reject/retry/undo.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      if (args.action === 'preview' && (!Array.isArray(args.edits) || (args.edits.length < 1 || args.edits.length > 50))) {
-        throw new Error(
-          'preview requires between 1 and 50 edits ' +
-            `(received ${describeValue(args.edits)})`,
-        )
-      }
-      if (args.action !== 'preview' && !args.preview_token?.trim()) {
-        throw new Error(`${args.action} requires preview_token`)
-      }
-      if (['apply', 'undo'].includes(args.action) && args.confirm !== true) throw new Error('apply/undo requires confirm: true')
-      const client = clientFor(exec)
-      const body: JsonObject = { action: args.action }
-      if (args.confirm !== undefined) body['confirm'] = args.confirm
-      if (args.path !== undefined) body['path'] = args.path
-      if (args.edits !== undefined) body['edits'] = args.edits
-      if (args.preview_token !== undefined) body['preview_token'] = args.preview_token
-      return await client.postJson('/api/document/change-plan', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_structured_change_plan',
-    description:
-      'Stage one structured OpenWrite domain change without writing it. Supported change_kind values are "outline", ' +
-      '"asset", "focus", "foreshadowing", and "writing_targets"; `change` uses the corresponding direct tool payload. ' +
-      'Use action "preview" to receive an immutable token and entity-level before/after summary. Only after author ' +
-      'acceptance pass that token unchanged to "apply". "reject" consumes it, "retry" rebuilds the same semantic ' +
-      'change against current source, and "undo" accepts only the revision-bound undo token returned by apply. The ' +
-      'server writes the exact validated preview and rejects source conflicts.',
-    parameters: {
-      action: { type: 'string', required: true, enum: ['preview', 'apply', 'reject', 'retry', 'undo'], description: 'Plan lifecycle action.' },
       change_kind: { type: 'string', enum: ['outline', 'asset', 'focus', 'foreshadowing', 'writing_targets'], description: 'Structured domain for a preview.' },
       change: { type: 'json', description: 'One direct-tool-shaped change object, required for preview.' },
-      preview_token: { type: 'string', description: 'Immutable preview or undo token for apply/reject/retry/undo.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
+    isConcurrencySafe: () => false,
     async execute(args, exec) {
-      if (args.action === 'preview') {
-        if (!args.change_kind) throw new Error('preview requires change_kind')
-        if (args.change === null || typeof args.change !== 'object' || Array.isArray(args.change)) {
-          throw new Error(`preview requires one change object (received ${describeValue(args.change)})`)
+      switch (args.action) {
+        case 'document': {
+        if (args.step === undefined) throw new Error('step is required for novel_change_plan(action="document")')
+              if (args.step === 'preview' && (!Array.isArray(args.edits) || (args.edits.length < 1 || args.edits.length > 50))) {
+                throw new Error(
+                  'preview requires between 1 and 50 edits ' +
+                    `(received ${describeValue(args.edits)})`,
+                )
+              }
+              if (args.step !== 'preview' && !args.preview_token?.trim()) {
+                throw new Error(`${args.step} requires preview_token`)
+              }
+              if (['apply', 'undo'].includes(args.step) && args.confirm !== true) throw new Error('apply/undo requires confirm: true')
+              const client = clientFor(exec)
+              const body: JsonObject = { action: args.step }
+              if (args.confirm !== undefined) body['confirm'] = args.confirm
+              if (args.path !== undefined) body['path'] = args.path
+              if (args.edits !== undefined) body['edits'] = args.edits
+              if (args.preview_token !== undefined) body['preview_token'] = args.preview_token
+              return await client.postJson('/api/document/change-plan', body, exec.signal)
+            
         }
-      } else if (!args.preview_token?.trim()) {
-        throw new Error(`${args.action} requires preview_token`)
+        case 'structured': {
+        if (args.step === undefined) throw new Error('step is required for novel_change_plan(action="structured")')
+              if (args.step === 'preview') {
+                if (!args.change_kind) throw new Error('preview requires change_kind')
+                if (args.change === null || typeof args.change !== 'object' || Array.isArray(args.change)) {
+                  throw new Error(`preview requires one change object (received ${describeValue(args.change)})`)
+                }
+              } else if (!args.preview_token?.trim()) {
+                throw new Error(`${args.step} requires preview_token`)
+              }
+              const client = clientFor(exec)
+              const body: JsonObject = { action: args.step }
+              if (args.change_kind !== undefined) body['change_kind'] = args.change_kind
+              if (args.change !== undefined) body['change'] = args.change
+              if (args.preview_token !== undefined) body['preview_token'] = args.preview_token
+              return await client.postJson('/api/structured/change-plan', body, exec.signal)
+            
+        }
+        default: throw new Error(`novel_change_plan: unknown action ${String(args.action)}`)
       }
-      const client = clientFor(exec)
-      const body: JsonObject = { action: args.action }
-      if (args.change_kind !== undefined) body['change_kind'] = args.change_kind
-      if (args.change !== undefined) body['change'] = args.change
-      if (args.preview_token !== undefined) body['preview_token'] = args.preview_token
-      return await client.postJson('/api/structured/change-plan', body, exec.signal)
     },
   }))
 
-  ctx.tools.register(defineTool({
+    ctx.tools.register(defineTool({
     name: 'novel_focus',
-    description: 'Immediate compatibility write for a focus change the author has already authorized exactly; otherwise use novel_structured_change_plan. Set the writing focus compass for the project.',
+    description: 'Immediate compatibility write for a focus change the author has already authorized exactly; otherwise use novel_change_plan(action="structured"). Set the writing focus compass for the project.',
     parameters: {
       goal: { type: 'string', required: true, description: 'The current writing goal.' },
       must_keep: { type: 'array', items: { type: 'string' }, description: 'Constraints that must be kept.' },
@@ -994,545 +1155,410 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_export_preflight',
-    description:
-      'Inspect the current manuscript export order, structural defects, writing targets, metadata, review freshness, ' +
-      'manuscript acceptance, blockers, and warnings. Pass the returned preflight_revision unchanged to novel_export ' +
-      'so the downloaded file is bound to the manuscript state that was inspected.',
-    parameters: {
-      format: { type: 'string', enum: ['md', 'txt', 'epub'], description: 'Export format (default "md").' },
-      purpose: { type: 'string', enum: ['backup', 'delivery', 'personal_archive'], description: 'Export purpose (default "delivery"). personal_archive preserves author copies with gate findings recorded as warnings.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      return await client.getJson('/api/export/preflight', {
-        format: args.format ?? 'md',
-        purpose: args.purpose ?? 'delivery',
-      }, exec.signal)
-    },
-  }))
+    // ── export ────────────────────────────────────────────────────────────────────
 
   ctx.tools.register(defineTool({
     name: 'novel_export',
     description:
-      'Export the manuscript as a file download and save it locally. Inspect novel_export_preflight first and pass its ' +
-      'preflight_revision unchanged to bind the download to that inspected manuscript state. Returns the saved file path.',
+      'Preflight and run a manuscript export. Preflight validates the selection, purpose and format ' +
+      'and returns a revision the export must present.',
     parameters: {
+      action: { type: 'string', required: true, enum: ['preflight', 'export'], description: 'Export step; preflight reports what would be written without writing it.' },
       format: { type: 'string', enum: ['md', 'txt', 'epub'], description: 'Export format (default "md").' },
-      purpose: { type: 'string', enum: ['backup', 'delivery', 'personal_archive'], description: 'Export purpose (default "delivery").' },
-      preflight_revision: { type: 'string', description: 'Revision returned by novel_export_preflight for the same format and purpose.' },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          path: { type: 'string', required: true, description: 'Absolute path of the saved export file.' },
-          filename: { type: 'string', required: true },
-          format: { type: 'string', required: true },
-          bytes: { type: 'integer', required: true },
-        },
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: `Exported ${value.filename} (${value.bytes} bytes) to ${value.path}`,
-      }],
-    },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      const format = args.format ?? 'md'
-      const purpose = args.purpose ?? 'delivery'
-      const download = await client.download('/api/export', {
-        format,
-        purpose,
-        ...(args.preflight_revision === undefined ? {} : { preflight_revision: args.preflight_revision }),
-      }, exec.signal)
-      const filename = exportFilename(download.filename, `novel.${format}`)
-      const exportDir = outputDirFor(outputDir, client)
-      await mkdir(exportDir, { recursive: true })
-      const path = join(exportDir, filename)
-      await writeFile(path, download.content)
-      return { path, filename, format, bytes: download.content.byteLength }
-    },
-  }))
-
-  // ── assets: create / read / packages ────────────────────────────────────
-
-  ctx.tools.register(defineTool({
-    name: 'novel_asset_read',
-    description: 'Read one structured asset by kind and id, including its relation view.',
-    parameters: {
-      kind: { type: 'string', required: true, enum: ['character', 'world', 'progression'], description: 'Asset kind.' },
-      id: { type: 'string', required: true, description: 'Asset id.' },
+      purpose: { type: 'string', enum: ['backup', 'delivery', 'personal_archive'], description: 'Export purpose (default "delivery"). personal_archive preserves author copies with gate findings recorded as warnings.' },
+      preflight_revision: { type: 'string', description: 'Revision returned by novel_export(action="preflight") for the same format and purpose.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
+    isConcurrencySafe: args => ['preflight'].includes(args.action),
     async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(args.id)) throw new Error(`invalid asset id "${args.id}"`)
-      return await client.getJson(`/api/assets/${args.kind}/${encodeURIComponent(args.id)}`, {}, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_asset_create',
-    description:
-      'Create a structured asset. character/world assets take front-matter fields via `data` plus an optional ' +
-      '`body_markdown`; progression assets take their YAML mapping via `data`. Fails with a conflict if the id exists — ' +
-      'use novel_asset_update instead.',
-    parameters: {
-      kind: { type: 'string', required: true, enum: ['character', 'world', 'progression'], description: 'Asset kind.' },
-      id: { type: 'string', required: true, description: 'Asset id (letters, digits, "_", "-", ".").' },
-      data: { type: 'json', description: 'Object of asset fields (e.g. name, summary, aliases).' },
-      body_markdown: { type: 'string', description: 'Markdown body (character/world assets).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(args.id)) throw new Error(`invalid asset id "${args.id}"`)
-      const body: JsonObject = { kind: args.kind, id: args.id }
-      if (args.data !== undefined) body['data'] = args.data
-      if (args.body_markdown !== undefined) body['body_markdown'] = args.body_markdown
-      return await client.postJson('/api/assets', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_assets_package_export',
-    description: 'Export assets as an .owasset.zip package and save it locally. Omit selections to export all assets.',
-    parameters: {
-      selections: { type: 'array', items: { type: 'string' }, description: 'Asset selectors in "kind:id" form, e.g. ["character:hero", "world:capital"].' },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          path: { type: 'string', required: true, description: 'Absolute path of the saved package file.' },
-          filename: { type: 'string', required: true },
-          bytes: { type: 'integer', required: true },
-        },
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: `Exported asset package ${value.filename} (${value.bytes} bytes) to ${value.path}`,
-      }],
-    },
-    timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      const selections = args.selections ?? []
-      for (const item of selections) {
-        if (!/^(character|world|progression):[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(item)) {
-          throw new Error(`invalid asset selection "${item}"; expected "kind:id"`)
+      switch (args.action) {
+        case 'preflight': {
+              const client = clientFor(exec)
+              return await client.getJson('/api/export/preflight', {
+                format: args.format ?? 'md',
+                purpose: args.purpose ?? 'delivery',
+              }, exec.signal)
+            
         }
+        case 'export': {
+              const client = clientFor(exec)
+              const format = args.format ?? 'md'
+              const purpose = args.purpose ?? 'delivery'
+              const download = await client.download('/api/export', {
+                format,
+                purpose,
+                ...(args.preflight_revision === undefined ? {} : { preflight_revision: args.preflight_revision }),
+              }, exec.signal)
+              const filename = exportFilename(download.filename, `novel.${format}`)
+              const exportDir = outputDirFor(outputDir, client)
+              await mkdir(exportDir, { recursive: true })
+              const path = join(exportDir, filename)
+              await writeFile(path, download.content)
+              return { path, filename, format, bytes: download.content.byteLength }
+            
+        }
+        default: throw new Error(`novel_export: unknown action ${String(args.action)}`)
       }
-      const download = await client.download('/api/assets/package/export', { select: selections }, exec.signal)
-      const filename = exportFilename(download.filename, 'assets.owasset.zip')
-      const exportDir = outputDirFor(outputDir, client)
-      await mkdir(exportDir, { recursive: true })
-      const path = join(exportDir, filename)
-      await writeFile(path, download.content)
-      return { path, filename, bytes: download.content.byteLength }
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_assets_package_preview',
-    description:
-      'Stage an .owasset.zip asset package (base64) and preview its contents and conflicts without importing. ' +
-      'Returns an upload_id to pass to novel_assets_package_import.',
-    parameters: {
-      package_base64: { type: 'string', required: true, description: 'Base64-encoded .owasset.zip package (max 25 MB decoded).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.package_base64.trim()) throw new Error('package_base64 must be a non-empty string')
-      return await client.postJson('/api/assets/package/preview', { package_base64: args.package_base64 }, exec.signal)
-    },
-  }))
+    // ── assets: create / read / packages ────────────────────────────────────
+
+        // ── asset packages ────────────────────────────────────────────────────────────
 
   ctx.tools.register(defineTool({
-    name: 'novel_assets_package_import',
+    name: 'novel_assets_package',
     description:
-      'Import a previously staged asset package (see novel_assets_package_preview). Resolves per-asset conflicts ' +
-      'via `resolutions`; set allow_missing_dependencies to skip missing dependency checks.',
+      'Export the project assets into a portable package, preview a package before importing it, and ' +
+      'import a reviewed package with explicit dependency resolutions.',
     parameters: {
-      upload_id: { type: 'string', required: true, description: 'The upload_id returned by novel_assets_package_preview.' },
-      package_sha256: { type: 'string', description: 'Optional expected package digest guard.' },
+      action: { type: 'string', required: true, enum: ['export', 'preview', 'import'], description: 'Asset package operation.' },
+      selections: { type: 'array', items: { type: 'string' }, description: 'Asset selectors in "kind:id" form, e.g. ["character:hero", "world:capital"].' },
+      package_base64: { type: 'string', description: 'Base64-encoded .owasset.zip package (max 25 MB decoded).' },
+      upload_id: { type: 'string', description: 'The upload_id returned by novel_assets_package(action="preview").' },
+      package_sha256: { type: 'string', description: 'Package digest. Required for import: pass the package_sha256 returned by action="preview"; the server rejects an import without it as a stale package.' },
       resolutions: { type: 'json', description: 'Object mapping conflicting asset keys to resolutions.' },
       allow_missing_dependencies: { type: 'boolean', description: 'Allow import despite missing asset dependencies (default false).' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
+    // `export` writes a local archive (non-atomic `writeFile` to a fixed name),
+    // so it must be serialized; `preview` is the server-side read-only action.
+    isConcurrencySafe: args => args.action === 'preview',
     async execute(args, exec) {
-      const client = clientFor(exec)
-      const body: JsonObject = { upload_id: args.upload_id }
-      if (args.package_sha256 !== undefined) body['package_sha256'] = args.package_sha256
-      if (args.resolutions !== undefined) body['resolutions'] = args.resolutions
-      if (args.allow_missing_dependencies !== undefined) body['allow_missing_dependencies'] = args.allow_missing_dependencies
-      return await client.postJson('/api/assets/package/import', body, exec.signal)
+      switch (args.action) {
+        case 'export': {
+              const client = clientFor(exec)
+              const selections = args.selections ?? []
+              for (const item of selections) {
+                if (!/^(character|world|progression):[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(item)) {
+                  throw new Error(`invalid asset selection "${item}"; expected "kind:id"`)
+                }
+              }
+              const download = await client.download('/api/assets/package/export', { select: selections }, exec.signal)
+              const filename = exportFilename(download.filename, 'assets.owasset.zip')
+              const exportDir = outputDirFor(outputDir, client)
+              await mkdir(exportDir, { recursive: true })
+              const path = join(exportDir, filename)
+              await writeFile(path, download.content)
+              return { path, filename, bytes: download.content.byteLength }
+            
+        }
+        case 'preview': {
+        if (args.package_base64 === undefined) throw new Error('package_base64 is required for novel_assets_package(action="preview")')
+              const client = clientFor(exec)
+              if (!args.package_base64.trim()) throw new Error('package_base64 must be a non-empty string')
+              return await client.postJson('/api/assets/package/preview', { package_base64: args.package_base64 }, exec.signal)
+            
+        }
+        case 'import': {
+        if (args.upload_id === undefined) throw new Error('upload_id is required for novel_assets_package(action="import")')
+              const client = clientFor(exec)
+              // The server treats a missing digest as a stale package, so an
+              // import without the preview digest always fails with
+              // ASSET_PACKAGE_CONFLICT. Require it and name the fix here.
+              if (!args.package_sha256?.trim()) {
+                throw new Error('package_sha256 is required for novel_assets_package(action="import"); pass the package_sha256 returned by action="preview"')
+              }
+              const body: JsonObject = { upload_id: args.upload_id }
+              if (args.package_sha256 !== undefined) body['package_sha256'] = args.package_sha256
+              if (args.resolutions !== undefined) body['resolutions'] = args.resolutions
+              if (args.allow_missing_dependencies !== undefined) body['allow_missing_dependencies'] = args.allow_missing_dependencies
+              return await client.postJson('/api/assets/package/import', body, exec.signal)
+            
+        }
+        default: throw new Error(`novel_assets_package: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
-  // ── revisions ────────────────────────────────────────────────────────────
+      // ── revisions ────────────────────────────────────────────────────────────
+
+    // ── revisions ─────────────────────────────────────────────────────────────────
 
   ctx.tools.register(defineTool({
-    name: 'novel_revisions_list',
-    description: 'List revision proposals, optionally filtered by chapter and/or status.',
+    name: 'novel_revision',
+    description:
+      'List, inspect, create, regenerate, apply and reject revision proposals for a chapter. Create ' +
+      'builds a proposal from review issues (source=review) or from an explicit text selection ' +
+      '(source=selection); apply writes the accepted hunks into the manuscript.',
     parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'get', 'create', 'regenerate', 'apply', 'reject'], description: 'Revision operation; create reads its source from the source parameter.' },
       chapter: { type: 'string', description: 'Chapter id filter (e.g. "ch_0007").' },
       status: { type: 'string', description: 'Status filter (e.g. "proposed", "applied", "rejected").' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      const params: Record<string, string> = {}
-      if (args.chapter !== undefined) params['chapter'] = args.chapter
-      if (args.status !== undefined) params['status'] = args.status
-      return await client.getJson('/api/revisions', params, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_revision_get',
-    description: 'Get one revision proposal with its diff hunks by proposal id (rev_*).',
-    parameters: {
-      proposal_id: { type: 'string', required: true, description: 'Revision proposal id (rev_*).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
-      return await client.getJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}`, {}, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_revision_create_selection',
-    description:
-      'Create a revision proposal for a text selection in a chapter (LONG-RUNNING, model-generated). ' +
-      'start/end are Unicode code-point offsets in the exact saved text, including original CR/LF characters; pass the selected text as original_text and the current expected_document_revision. The proposal is only staged — ' +
-      'apply it with novel_revision_apply.',
-    parameters: {
-      chapter_id: { type: 'string', required: true, description: 'Chapter id (ch_<digits>).' },
-      start: { type: 'integer', required: true, description: 'Selection start offset.' },
-      end: { type: 'integer', required: true, description: 'Selection end offset.' },
-      original_text: { type: 'string', description: 'The selected original text.' },
-      expected_document_revision: { type: 'string', description: 'Current exact manuscript revision; reject before generation if the source changed.' },
-      instruction: { type: 'string', description: 'Revision instruction (max 4000 characters).' },
-      action: { type: 'string', enum: ['rewrite', 'expand', 'compress', 'pace', 'dialogue', 'naturalize', 'custom'], description: 'Revision mode (default "rewrite").' },
-      target_units: { type: 'integer', description: 'Target length in writing units (0 = keep similar).' },
-      full_chapter: { type: 'boolean', description: 'Treat the whole chapter as the selection (default false).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
-      const body: JsonObject = { chapter_id: args.chapter_id, start: args.start, end: args.end }
-      if (args.original_text !== undefined) body['original_text'] = args.original_text
-      if (args.expected_document_revision !== undefined) body['expected_document_revision'] = args.expected_document_revision
-      if (args.instruction !== undefined) body['instruction'] = args.instruction
-      if (args.action !== undefined) body['action'] = args.action
-      if (args.target_units !== undefined) body['target_units'] = args.target_units
-      if (args.full_chapter !== undefined) body['full_chapter'] = args.full_chapter
-      return await client.postJson('/api/revisions/selection', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_revision_create_from_review',
-    description:
-      'Create a revision proposal that addresses selected issues from a chapter review (LONG-RUNNING, model-generated). ' +
-      'Issue ids come from novel_review_chapter\'s issue_details. Pass selection to constrain rewriting to an exact manuscript range; overlapping issue evidence never expands that range. The proposal is only staged — apply it with novel_revision_apply.',
-    parameters: {
-      chapter_id: { type: 'string', required: true, description: 'Chapter id (ch_<digits>).' },
-      issue_ids: { type: 'array', required: true, items: { type: 'string' }, description: 'Review issue ids to fix.' },
+      proposal_id: { type: 'string', description: 'Revision proposal id (rev_*).' },
+      source: { type: 'string', enum: ['review', 'selection'], description: 'Create source: review (default) fixes review issues, selection revises an explicit text range.' },
+      chapter_id: { type: 'string', description: 'Chapter id (ch_<digits>).' },
+      issue_ids: { type: 'array', items: { type: 'string' }, description: 'Review issue ids to fix; required for create with source="review".' },
       selection: { type: 'object', additionalProperties: false, description: 'Optional exact saved-text range in Unicode code points; preserve raw CR/LF characters.', properties: {
-        start: { type: 'integer', required: true, description: 'Inclusive source code-point offset.' },
-        end: { type: 'integer', required: true, description: 'Exclusive source code-point offset.' },
+        start: { type: 'integer', description: 'Inclusive source code-point offset.' },
+        end: { type: 'integer', description: 'Exclusive source code-point offset.' },
         original_text: { type: 'string', required: true, description: 'Exact saved text inside this range.' },
       } },
       instruction: { type: 'string', description: 'Additional revision instruction.' },
       target_units: { type: 'integer', description: 'Target length in writing units (0 = keep similar).' },
       expected_review_revision: { type: 'string', description: 'Exact review file revision from the chapter work brief.' },
       expected_document_revision: { type: 'string', description: 'Exact manuscript revision from the chapter work brief.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
-      if (args.issue_ids.length === 0) throw new Error('issue_ids must be a non-empty array')
-      const body: JsonObject = { chapter_id: args.chapter_id, issue_ids: args.issue_ids }
-      if (args.selection !== undefined) body['selection'] = args.selection
-      if (args.instruction !== undefined) body['instruction'] = args.instruction
-      if (args.target_units !== undefined) body['target_units'] = args.target_units
-      if (args.expected_review_revision !== undefined) body['expected_review_revision'] = args.expected_review_revision
-      if (args.expected_document_revision !== undefined) body['expected_document_revision'] = args.expected_document_revision
-      const response = await client.postJson('/api/revisions/from-review', body, exec.signal)
-      try {
-        return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, args.chapter_id, exec.signal) }
-      } catch (error) {
-        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
-      }
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_revision_apply',
-    description:
-      'Apply a staged revision proposal to the manuscript. Optionally override the generated text or apply only ' +
-      'selected diff hunks. Fails with a conflict if the document changed since the proposal was created.',
-    parameters: {
-      proposal_id: { type: 'string', required: true, description: 'Revision proposal id (rev_*).' },
+      start: { type: 'integer', description: 'Selection start offset.' },
+      end: { type: 'integer', description: 'Selection end offset.' },
+      original_text: { type: 'string', description: 'The selected original text.' },
+      mode: { type: 'string', enum: ['rewrite', 'expand', 'compress', 'pace', 'dialogue', 'naturalize', 'custom'], description: 'Revision mode (default "rewrite").' },
+      full_chapter: { type: 'boolean', description: 'Treat the whole chapter as the selection (default false).' },
       replacement_text: { type: 'string', description: 'Replacement text overriding the proposal.' },
       selected_hunk_ids: { type: 'array', items: { type: 'string' }, description: 'Apply only these diff hunk ids.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
+    isConcurrencySafe: args => ['list', 'get'].includes(args.action),
     async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
-      const body: JsonObject = {}
-      if (args.replacement_text !== undefined) body['replacement_text'] = args.replacement_text
-      if (args.selected_hunk_ids !== undefined) body['selected_hunk_ids'] = args.selected_hunk_ids
-      const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/apply`, body, exec.signal)
-      const responseValue = objectValue(response)
-      const proposal = objectValue(responseValue['proposal'] ?? response)
-      const chapterId = String(proposal['chapter_id'] ?? '')
-      try {
-        return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
-      } catch (error) {
-        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+      switch (args.action) {
+        case 'list': {
+              const client = clientFor(exec)
+              const params: Record<string, string> = {}
+              if (args.chapter !== undefined) params['chapter'] = args.chapter
+              if (args.status !== undefined) params['status'] = args.status
+              return await client.getJson('/api/revisions', params, exec.signal)
+            
+        }
+        case 'get': {
+        if (args.proposal_id === undefined) throw new Error('proposal_id is required for novel_revision(action="get")')
+              const client = clientFor(exec)
+              if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
+              return await client.getJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}`, {}, exec.signal)
+            
+        }
+        case 'create': {
+        if (args.chapter_id === undefined) throw new Error('chapter_id is required for novel_revision(action="create")')
+        // source=selection keeps the pre-merge create-from-selection contract;
+        // anything else (including an omitted source) stays on from-review.
+        if (args.source === 'selection') {
+        if (args.chapter_id === undefined) throw new Error('chapter_id is required for novel_revision(action="create", source="selection")')
+        if (args.start === undefined) throw new Error('start is required for novel_revision(action="create", source="selection")')
+        if (args.end === undefined) throw new Error('end is required for novel_revision(action="create", source="selection")')
+              const client = clientFor(exec)
+              if (!CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
+              const body: JsonObject = { chapter_id: args.chapter_id, start: args.start, end: args.end }
+              if (args.original_text !== undefined) body['original_text'] = args.original_text
+              if (args.expected_document_revision !== undefined) body['expected_document_revision'] = args.expected_document_revision
+              if (args.instruction !== undefined) body['instruction'] = args.instruction
+              if (args.mode !== undefined) body['action'] = args.mode
+              if (args.target_units !== undefined) body['target_units'] = args.target_units
+              if (args.full_chapter !== undefined) body['full_chapter'] = args.full_chapter
+              return await client.postJson('/api/revisions/selection', body, exec.signal)
+            
+        }
+        if (args.source !== undefined && args.source !== 'review' && args.source !== 'selection') {
+          throw new Error(`source must be "review" or "selection", got "${args.source}"`)
+        }
+        if (args.issue_ids === undefined) throw new Error('issue_ids is required for novel_revision(action="create", source="review")')
+              const client = clientFor(exec)
+              if (!CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
+              if (args.issue_ids.length === 0) throw new Error('issue_ids must be a non-empty array')
+              const body: JsonObject = { chapter_id: args.chapter_id, issue_ids: args.issue_ids }
+              if (args.selection !== undefined) body['selection'] = args.selection
+              if (args.instruction !== undefined) body['instruction'] = args.instruction
+              if (args.target_units !== undefined) body['target_units'] = args.target_units
+              if (args.expected_review_revision !== undefined) body['expected_review_revision'] = args.expected_review_revision
+              if (args.expected_document_revision !== undefined) body['expected_document_revision'] = args.expected_document_revision
+              const response = await client.postJson('/api/revisions/from-review', body, exec.signal)
+              try {
+                return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, args.chapter_id, exec.signal) }
+              } catch (error) {
+                return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+              }
+            
+        }
+        case 'regenerate': {
+        if (args.proposal_id === undefined) throw new Error('proposal_id is required for novel_revision(action="regenerate")')
+              const client = clientFor(exec)
+              if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
+              const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/regenerate`, {}, exec.signal)
+              const chapterId = String(objectValue(response)['chapter_id'] ?? '')
+              try {
+                return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
+              } catch (error) {
+                return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+              }
+            
+        }
+        case 'apply': {
+        if (args.proposal_id === undefined) throw new Error('proposal_id is required for novel_revision(action="apply")')
+              const client = clientFor(exec)
+              if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
+              const body: JsonObject = {}
+              if (args.replacement_text !== undefined) body['replacement_text'] = args.replacement_text
+              if (args.selected_hunk_ids !== undefined) body['selected_hunk_ids'] = args.selected_hunk_ids
+              const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/apply`, body, exec.signal)
+              const responseValue = objectValue(response)
+              const proposal = objectValue(responseValue['proposal'] ?? response)
+              const chapterId = String(proposal['chapter_id'] ?? '')
+              try {
+                return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
+              } catch (error) {
+                return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+              }
+            
+        }
+        case 'reject': {
+        if (args.proposal_id === undefined) throw new Error('proposal_id is required for novel_revision(action="reject")')
+              const client = clientFor(exec)
+              if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
+              const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/reject`, {}, exec.signal)
+              const chapterId = String(objectValue(response)['chapter_id'] ?? '')
+              try {
+                return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
+              } catch (error) {
+                return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
+              }
+            
+        }
+        default: throw new Error(`novel_revision: unknown action ${String(args.action)}`)
       }
     },
   }))
 
+              // ── background tasks ─────────────────────────────────────────────────────
+
+        // ── background tasks ──────────────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
-    name: 'novel_revision_reject',
+    name: 'novel_task',
     description:
-      'Reject and discard a staged revision proposal. This permanently drops the generated text — it cannot be ' +
-      'recovered except by regenerating.',
+      'Queue a background AI task and return immediately; poll with get or list. Task types and their ' +
+      '`input` keys: chapter_write {chapter_id?, guidance?, target_words?, temperature?, outline_revision?}; ' +
+      'chapter_review {chapter_id | path, strict?, dimensions?}; revision_selection / revision_from_review ' +
+      '(same inputs as the novel_revision create action); source_operation / reference_operation (same ' +
+      'inputs as novel_source_action / novel_reference_library_action); manuscript_import (same input as ' +
+      'novel_import); research {prompt, search?, language?, quality? (advisory|balanced|strict), llm?}; manuscript_reconcile (durable ' +
+      'acceptance analysis; usually started through novel_manuscript_acceptance_reconcile); settle_backfill ' +
+      '{chapter_ids?, only_missing?} - prefer the novel_settle_backfill convenience tool; continuous_write ' +
+      '- prefer the novel_multi_write convenience tool.',
     parameters: {
-      proposal_id: { type: 'string', required: true, description: 'Revision proposal id (rev_*).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
-      const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/reject`, {}, exec.signal)
-      const chapterId = String(objectValue(response)['chapter_id'] ?? '')
-      try {
-        return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
-      } catch (error) {
-        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
-      }
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_revision_regenerate',
-    description: 'Regenerate the text of a staged revision proposal (LONG-RUNNING, model-generated).',
-    parameters: {
-      proposal_id: { type: 'string', required: true, description: 'Revision proposal id (rev_*).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^rev_[A-Za-z0-9_-]+$/.test(args.proposal_id)) throw new Error(`invalid proposal_id "${args.proposal_id}"`)
-      const response = await client.postJson(`/api/revisions/${encodeURIComponent(args.proposal_id)}/regenerate`, {}, exec.signal)
-      const chapterId = String(objectValue(response)['chapter_id'] ?? '')
-      try {
-        return { ...objectValue(response), dog_delivery: await deliveryForResponse(client, response, chapterId, exec.signal) }
-      } catch (error) {
-        return { ...objectValue(response), dog_delivery: { status: 'unavailable', error: error instanceof Error ? error.message : String(error) } }
-      }
-    },
-  }))
-
-  // ── background tasks ─────────────────────────────────────────────────────
-
-  ctx.tools.register(defineTool({
-    name: 'novel_tasks_list',
-    description: 'List background tasks (queued/running/finished AI jobs) with per-status counts.',
-    parameters: {
-      since: { type: 'string', description: 'ISO timestamp filter for requests whose response was lost.' },
-      limit: { type: 'integer', description: 'Maximum number of tasks (server default 100).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      const params: Record<string, string> = {}
-      if (args.since !== undefined) params['since'] = args.since
-      if (args.limit !== undefined) params['limit'] = String(args.limit)
-      return await client.getJson('/api/tasks', params, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_task_get',
-    description: 'Get one background task with its event log by task id (tsk_*). Completed chapter write/review/revision tasks refresh the chapter-delivery DoG graph; chapter reviews also materialize the 37-dimension graph.',
-    parameters: {
-      task_id: { type: 'string', required: true, description: 'Task id (tsk_*).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
-      const response = await client.getJson(`/api/tasks/${encodeURIComponent(args.task_id)}`, {}, exec.signal)
-      const responseRecord = response !== null && typeof response === 'object' && !Array.isArray(response)
-        ? response as JsonObject
-        : {}
-      const taskValue = responseRecord['task'] ?? response
-      const taskRecord = taskValue !== null && typeof taskValue === 'object' && !Array.isArray(taskValue)
-        ? taskValue as JsonObject
-        : {}
-      if (taskRecord['status'] !== 'completed') return response
-      const taskType = String(taskRecord['type'] ?? '')
-      if (!['chapter_write', 'chapter_review', 'revision_from_review'].includes(taskType)) return response
-      const taskResult = objectValue(taskRecord['result'])
-      const taskInput = objectValue(taskRecord['input'])
-      const chapterId = String(taskRecord['chapter_id'] ?? taskResult['chapter_id'] ?? '').trim()
-        || String(taskInput['path'] ?? '').match(/(?:^|\/)(ch_\d+)\.md$/)?.[1]
-        || ''
-      const value = response !== null && typeof response === 'object' && !Array.isArray(response)
-        ? response as JsonObject
-        : { task: response }
-      if (!/^ch_\d+$/.test(chapterId)) {
-        return { ...value, dog_delivery: { status: 'unavailable', error: 'completed chapter task lacks a resolvable chapter id' } }
-      }
-      let workspace: JsonValue
-      try {
-        workspace = await client.getJson('/api/workspace', {}, exec.signal)
-      } catch (error) {
-        const unavailable = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
-        return taskType === 'chapter_review'
-          ? { ...value, dog_review: unavailable, dog_delivery: unavailable }
-          : { ...value, dog_delivery: unavailable }
-      }
-      let dogDelivery: JsonValue
-      try {
-        dogDelivery = await materializeChapterDelivery(workspace, chapterId, undefined, client.context?.workspaceRoot)
-      } catch (error) {
-        dogDelivery = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
-      }
-      if (taskType !== 'chapter_review') return { ...value, dog_delivery: dogDelivery }
-      let dogReview: JsonValue
-      try {
-        const framework = await client.getJson('/api/review/framework', {}, exec.signal)
-        dogReview = await materializeCompletedDogTaskReview(response, workspace, framework, 70, client.context?.workspaceRoot) ?? { status: 'unavailable', error: 'review task was not materialized' }
-      } catch (error) {
-        dogReview = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
-      }
-      return { ...value, dog_review: dogReview, dog_delivery: dogDelivery }
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_task_create',
-    description:
-      'Queue a background AI task and return immediately; poll with novel_task_get. Task types and their `input` keys: ' +
-      'chapter_write {chapter_id?, guidance?, target_words?, temperature?, outline_revision?}; ' +
-      'chapter_review {chapter_id | path, strict?, dimensions?}; ' +
-      'revision_selection / revision_from_review (same inputs as the novel_revision_create_* tools); ' +
-      'source_operation / reference_operation (same inputs as novel_source_action / novel_reference_library_action); ' +
-      'manuscript_import (same input as novel_import); research {prompt, search?, language?, quality?, llm?}; ' +
-      'manuscript_reconcile (durable acceptance analysis; usually started through novel_manuscript_acceptance_reconcile); ' +
-      'settle_backfill {chapter_ids?, only_missing?} — prefer the novel_settle_backfill convenience tool; ' +
-      'continuous_write — prefer the novel_multi_write convenience tool.',
-    parameters: {
+      action: { type: 'string', required: true, enum: ['create', 'get', 'list', 'cancel', 'confirm', 'retry'], description: 'Task operation; long-running work returns a task id immediately. confirm resumes a paused run and returns a continuation task: poll the returned task_id; re-confirming the paused task is idempotent.' },
       type: {
         type: 'string',
-        required: true,
         enum: ['chapter_write', 'chapter_review', 'revision_selection', 'revision_from_review', 'source_operation', 'reference_operation', 'manuscript_import', 'manuscript_reconcile', 'continuous_write', 'research', 'settle_backfill'],
-        description: 'Task type.',
+        description: 'Task type; required for create.',
       },
-      input: { type: 'json', required: true, description: 'Task input object; shape depends on the task type (see description).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (typeof args.input !== 'object' || args.input === null || Array.isArray(args.input)) {
-        throw new Error('input must be a JSON object')
-      }
-      return await client.postJson('/api/tasks', { type: args.type, input: args.input }, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_task_cancel',
-    description: 'Request cancellation of a queued or running task. Check cancelled and cancellation_status for the actual outcome; poll novel_task_get while cancellation is requested.',
-    parameters: {
+      input: { type: 'json', description: 'Task input object; required for create. Shape depends on the task type (see description).' },
+      task_id: { type: 'string', description: 'Task id (tsk_*).' },
+      since: { type: 'string', description: 'ISO timestamp filter for requests whose response was lost.' },
+      limit: { type: 'integer', description: 'Maximum number of tasks (server default 100).' },
       wait_seconds: { type: 'number', description: 'Wait up to 30 seconds for actual cancellation; running model calls may finish later.' },
-      task_id: { type: 'string', required: true, description: 'Task id (tsk_*).' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
+    isConcurrencySafe: args => ['list'].includes(args.action),
     async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
-      return await client.postJson(`/api/tasks/${encodeURIComponent(args.task_id)}/cancel`, { wait_seconds: args.wait_seconds ?? 0 }, exec.signal)
+      switch (args.action) {
+        case 'create': {
+        if (args.type === undefined) throw new Error('type is required for novel_task(action="create")')
+        if (args.input === undefined) throw new Error('input is required for novel_task(action="create")')
+              const client = clientFor(exec)
+              if (typeof args.input !== 'object' || args.input === null || Array.isArray(args.input)) {
+                throw new Error('input must be a JSON object')
+              }
+              return await client.postJson('/api/tasks', { type: args.type, input: args.input }, exec.signal)
+            
+        }
+        case 'get': {
+        if (args.task_id === undefined) throw new Error('task_id is required for novel_task(action="get")')
+              const client = clientFor(exec)
+              if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
+              const response = await client.getJson(`/api/tasks/${encodeURIComponent(args.task_id)}`, {}, exec.signal)
+              const responseRecord = response !== null && typeof response === 'object' && !Array.isArray(response)
+                ? response as JsonObject
+                : {}
+              const taskValue = responseRecord['task'] ?? response
+              const taskRecord = taskValue !== null && typeof taskValue === 'object' && !Array.isArray(taskValue)
+                ? taskValue as JsonObject
+                : {}
+              if (taskRecord['status'] !== 'completed') return response
+              const taskType = String(taskRecord['type'] ?? '')
+              if (!['chapter_write', 'chapter_review', 'revision_from_review'].includes(taskType)) return response
+              const taskResult = objectValue(taskRecord['result'])
+              const taskInput = objectValue(taskRecord['input'])
+              const chapterId = String(taskRecord['chapter_id'] ?? taskResult['chapter_id'] ?? '').trim()
+                || String(taskInput['path'] ?? '').match(/(?:^|\/)(ch_\d+)\.md$/)?.[1]
+                || ''
+              const value = response !== null && typeof response === 'object' && !Array.isArray(response)
+                ? response as JsonObject
+                : { task: response }
+              if (!/^ch_\d+$/.test(chapterId)) {
+                return { ...value, dog_delivery: { status: 'unavailable', error: 'completed chapter task lacks a resolvable chapter id' } }
+              }
+              let workspace: JsonValue
+              try {
+                workspace = await client.getJson('/api/workspace', {}, exec.signal)
+              } catch (error) {
+                const unavailable = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+                return taskType === 'chapter_review'
+                  ? { ...value, dog_review: unavailable, dog_delivery: unavailable }
+                  : { ...value, dog_delivery: unavailable }
+              }
+              let dogDelivery: JsonValue
+              try {
+                dogDelivery = await materializeChapterDelivery(workspace, chapterId, undefined, client.context?.workspaceRoot)
+              } catch (error) {
+                dogDelivery = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+              }
+              if (taskType !== 'chapter_review') return { ...value, dog_delivery: dogDelivery }
+              let dogReview: JsonValue
+              try {
+                const framework = await client.getJson('/api/review/framework', {}, exec.signal)
+                // Pass the threshold through rather than hardcoding 70: the
+                // manifest's threshold feeds deliveryStatus, so a caller who
+                // asked for another value must not silently get the default.
+                // `undefined` makes the materializer read it back from the
+                // persisted delivery.json, exactly as the direct path does.
+                dogReview = await materializeCompletedDogTaskReview(response, workspace, framework, undefined, client.context?.workspaceRoot) ?? { status: 'unavailable', error: 'review task was not materialized' }
+              } catch (error) {
+                dogReview = { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+              }
+              return { ...value, dog_review: dogReview, dog_delivery: dogDelivery }
+            
+        }
+        case 'list': {
+              const client = clientFor(exec)
+              const params: Record<string, string> = {}
+              if (args.since !== undefined) params['since'] = args.since
+              if (args.limit !== undefined) params['limit'] = String(args.limit)
+              return await client.getJson('/api/tasks', params, exec.signal)
+            
+        }
+        case 'cancel': {
+        if (args.task_id === undefined) throw new Error('task_id is required for novel_task(action="cancel")')
+              const client = clientFor(exec)
+              if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
+              return await client.postJson(`/api/tasks/${encodeURIComponent(args.task_id)}/cancel`, { wait_seconds: args.wait_seconds ?? 0 }, exec.signal)
+            
+        }
+        case 'confirm': {
+        if (args.task_id === undefined) throw new Error('task_id is required for novel_task(action="confirm")')
+              const client = clientFor(exec)
+              if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
+              return await client.postJson(`/api/tasks/${encodeURIComponent(args.task_id)}/confirm`, {}, exec.signal)
+            
+        }
+        case 'retry': {
+        if (args.task_id === undefined) throw new Error('task_id is required for novel_task(action="retry")')
+              const client = clientFor(exec)
+              if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
+              return await client.postJson(`/api/tasks/${encodeURIComponent(args.task_id)}/retry`, {}, exec.signal)
+            
+        }
+        default: throw new Error(`novel_task: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_task_retry',
-    description: 'Retry a failed or cancelled background task.',
-    parameters: {
-      task_id: { type: 'string', required: true, description: 'Task id (tsk_*).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
-      return await client.postJson(`/api/tasks/${encodeURIComponent(args.task_id)}/retry`, {}, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_task_confirm',
-    description: 'Confirm a background task that is awaiting confirmation (e.g. a continuous_write run paused between chapters), letting it resume.',
-    parameters: {
-      task_id: { type: 'string', required: true, description: 'Task id (tsk_*).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^tsk_[A-Za-z0-9_-]+$/.test(args.task_id)) throw new Error(`invalid task_id "${args.task_id}"`)
-      return await client.postJson(`/api/tasks/${encodeURIComponent(args.task_id)}/confirm`, {}, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
+        ctx.tools.register(defineTool({
     name: 'novel_multi_write',
     description:
       'Queue a BACKGROUND continuous-writing run: writes up to max_chapters chapters following the outline, ' +
       'reviewing each; stops early on review blockers, continuity errors, low scores, or budget limits. ' +
-      'Returns immediately with a task id — poll with novel_task_get and resume paused runs with novel_task_confirm.',
+      'Returns immediately with a task id — poll with novel_task(action="get"). A paused run is resumed with novel_task(action="confirm"), which returns a continuation task: poll that returned task_id. Confirming the same paused task again is idempotent.',
     parameters: {
       max_chapters: { type: 'integer', description: 'Chapters to write, 1-10 (default 1).' },
       minimum_review_score: { type: 'integer', description: 'Stop when a chapter scores below this, 0-100 (default 82).' },
@@ -1544,7 +1570,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       temperature: { type: 'number', description: 'Sampling temperature (default 0.7).' },
       stop_on_blocker: { type: 'boolean', description: 'Stop when a review reports a blocker issue (default true).' },
       stop_on_continuity_error: { type: 'boolean', description: 'Stop on high-severity continuity issues (default true).' },
-      require_confirmation_after_each_chapter: { type: 'boolean', description: 'Pause for novel_task_confirm after each chapter (default false).' },
+      require_confirmation_after_each_chapter: { type: 'boolean', description: 'Pause for novel_task(action="confirm") after each chapter (default false).' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
@@ -1568,85 +1594,129 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
 
   // ── project lifecycle ────────────────────────────────────────────────────
 
+    // ── projects ──────────────────────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
-    name: 'novel_project_init',
+    name: 'novel_project',
     description:
-      'Create a new OpenWrite novel project on the server machine and make it the active project. ' +
-      'Works without a currently open project. novel_id must be 2-64 chars of letters/digits/"-"/"_".',
+      'Initialize, open and delete a novel project, and manage its archive packages (list, get, ' +
+      'create, restore preview, restore, download). Archiving never touches the live project.',
     parameters: {
-      novel_id: { type: 'string', required: true, description: 'Project id, e.g. "my_novel" (2-64 chars: letters, digits, "-", "_").' },
-      title: { type: 'string', required: true, description: 'Book title (max 120 characters).' },
+      action: { type: 'string', required: true, enum: ['init', 'open', 'delete', 'archive', 'download'], description: 'Project operation.' },
+      novel_id: { type: 'string', description: 'Project id, e.g. "my_novel" (2-64 chars: letters, digits, "-", "_").' },
+      title: { type: 'string', description: 'Book title (max 120 characters).' },
       author: { type: 'string', description: 'Author credit for delivery export (max 120 characters).' },
       language: { type: 'string', description: 'Book language tag, e.g. zh-CN or en (default zh-CN).' },
       project_path: { type: 'string', description: 'Target directory on the server; omit to use the server default location.' },
       template: { type: 'string', enum: ['default', 'demo_short'], description: 'Project template (default "default").' },
+      confirm_novel_id: { type: 'string', description: 'Must exactly equal the project\'s novel_id (from its novel_config.yaml).' },
+      archive_op: { type: 'string', enum: ['preflight', 'list', 'get', 'create', 'restore_preview', 'restore'], description: 'Archive lifecycle operation.' },
+      archive_id: { type: 'string', description: 'Archive id shaped owa_<24 lowercase hex>.' },
+      expected_preflight_revision: { type: 'string', description: 'Current archive preflight revision for create.' },
+      target_root: { type: 'string', description: 'Absolute new or empty project directory for restore.' },
+      target_novel_id: { type: 'string', description: 'Optional restored novel id.' },
+      reference_policy: { type: 'string', enum: ['preserve_relative', 'rewrite_novel_id'], description: 'Reference handling during restore.' },
+      archive_sha256: { type: 'string', description: 'Checksum returned by restore_preview.' },
+      confirm: { type: 'boolean', description: 'Must be true for restore.' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
+    isConcurrencySafe: () => false,
     async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(args.novel_id)) {
-        throw new Error('novel_id must be 2-64 chars of letters, digits, "-" or "_"')
+      switch (args.action) {
+        case 'init': {
+        if (args.novel_id === undefined) throw new Error('novel_id is required for novel_project(action="init")')
+        if (args.title === undefined) throw new Error('title is required for novel_project(action="init")')
+              const client = clientFor(exec)
+              if (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(args.novel_id)) {
+                throw new Error('novel_id must be 2-64 chars of letters, digits, "-" or "_"')
+              }
+              if (!args.title.trim() || args.title.length > 120) throw new Error('title must be non-empty and at most 120 characters')
+              const body: JsonObject = { novel_id: args.novel_id, title: args.title }
+              if (args.author !== undefined) body['author'] = args.author
+              if (args.language !== undefined) body['language'] = args.language
+              if (args.project_path !== undefined) body['project_path'] = args.project_path
+              if (args.template !== undefined) body['template'] = args.template
+              return await client.postJson('/api/project/init', body, exec.signal)
+            
+        }
+        case 'open': {
+        if (args.project_path === undefined) throw new Error('project_path is required for novel_project(action="open")')
+              const client = clientFor(exec)
+              if (!args.project_path.trim()) throw new Error('project_path must be a non-empty string')
+              return await client.postJson('/api/project/open', { project_path: args.project_path }, exec.signal)
+            
+        }
+        case 'delete': {
+        if (args.project_path === undefined) throw new Error('project_path is required for novel_project(action="delete")')
+        if (args.confirm_novel_id === undefined) throw new Error('confirm_novel_id is required for novel_project(action="delete")')
+              const client = clientFor(exec)
+              if (!args.project_path.trim() || !args.confirm_novel_id.trim()) throw new Error('project_path and confirm are required')
+              return await client.postJson('/api/project/delete', { project_path: args.project_path, confirm: args.confirm_novel_id }, exec.signal)
+            
+        }
+        case 'archive': {
+        if (args.archive_op === undefined) throw new Error('archive_op is required for novel_project(action="archive")')
+              const client = clientFor(exec)
+              if (args.archive_op === 'preflight') return await client.getJson('/api/project-archives/preflight', {}, exec.signal)
+              if (args.archive_op === 'list') return await client.getJson('/api/project-archives', {}, exec.signal)
+              if (args.archive_op === 'create') {
+                if (!args.expected_preflight_revision?.trim()) throw new Error('create requires expected_preflight_revision')
+                return await client.postJson('/api/project-archives/create', {
+                  expected_preflight_revision: args.expected_preflight_revision,
+                }, exec.signal)
+              }
+              const archiveId = args.archive_id?.trim()
+              if (!archiveId || !/^owa_[0-9a-f]{24}$/.test(archiveId)) throw new Error(`${args.archive_op} requires a valid archive_id`)
+              if (args.archive_op === 'get') return await client.getJson(`/api/project-archives/${archiveId}`, {}, exec.signal)
+              if (!args.target_root?.trim()) throw new Error(`${args.archive_op} requires target_root`)
+              const body: JsonObject = {
+                archive_id: archiveId,
+                target_root: args.target_root,
+                reference_policy: args.reference_policy ?? 'preserve_relative',
+              }
+              if (args.target_novel_id !== undefined) body['target_novel_id'] = args.target_novel_id
+              if (args.archive_op === 'restore_preview') {
+                return await client.postJson('/api/project-archives/restore/preview', body, exec.signal)
+              }
+              if (!args.archive_sha256?.trim()) throw new Error('restore requires archive_sha256')
+              if (args.confirm !== true) throw new Error('restore requires confirm=true')
+              body['archive_sha256'] = args.archive_sha256
+              body['confirm'] = true
+              return await client.postJson('/api/project-archives/restore', body, exec.signal)
+            
+        }
+        case 'download': {
+        if (args.archive_id === undefined) throw new Error('archive_id is required for novel_project(action="download")')
+              if (!/^owa_[0-9a-f]{24}$/.test(args.archive_id)) throw new Error('archive_id must match owa_<24 lowercase hex>')
+              const client = clientFor(exec)
+              const download = await client.download(`/api/project-archives/${args.archive_id}/download`, {}, exec.signal)
+              const filename = exportFilename(download.filename, `${args.archive_id}.owarchive.zip`)
+              const exportDir = outputDirFor(outputDir, client)
+              await mkdir(exportDir, { recursive: true })
+              const path = join(exportDir, filename)
+              await writeFile(path, download.content)
+              return { path, filename, archive_id: args.archive_id, bytes: download.content.byteLength }
+            
+        }
+        default: throw new Error(`novel_project: unknown action ${String(args.action)}`)
       }
-      if (!args.title.trim() || args.title.length > 120) throw new Error('title must be non-empty and at most 120 characters')
-      const body: JsonObject = { novel_id: args.novel_id, title: args.title }
-      if (args.author !== undefined) body['author'] = args.author
-      if (args.language !== undefined) body['language'] = args.language
-      if (args.project_path !== undefined) body['project_path'] = args.project_path
-      if (args.template !== undefined) body['template'] = args.template
-      return await client.postJson('/api/project/init', body, exec.signal)
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_project_open',
-    description:
-      'Switch the Studio server to another existing project directory (must contain novel_config.yaml). ' +
-      'Works without a currently open project; afterwards every other novel_* tool targets the newly opened project. ' +
-      'The server rejects the switch while a background task is active.',
-    parameters: {
-      project_path: { type: 'string', required: true, description: 'Absolute project directory path on the server machine.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.project_path.trim()) throw new Error('project_path must be a non-empty string')
-      return await client.postJson('/api/project/open', { project_path: args.project_path }, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_project_delete',
-    description:
-      'PERMANENTLY delete a project directory and all its contents from the server machine (recursive delete, ' +
-      'not recoverable). The server requires confirm to exactly equal the project\'s novel_id as a safeguard.',
-    parameters: {
-      project_path: { type: 'string', required: true, description: 'Project directory to delete.' },
-      confirm: { type: 'string', required: true, description: 'Must exactly equal the project\'s novel_id (from its novel_config.yaml).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.project_path.trim() || !args.confirm.trim()) throw new Error('project_path and confirm are required')
-      return await client.postJson('/api/project/delete', { project_path: args.project_path, confirm: args.confirm }, exec.signal)
-    },
-  }))
-
-  // ── chapters, documents, import, sync ────────────────────────────────────
+      // ── chapters, documents, import, sync ────────────────────────────────────
 
   ctx.tools.register(defineTool({
     name: 'novel_chapter_delete',
     description:
       'Delete the LATEST manuscript chapter. The server enforces three safeguards: the path must be a chapter under ' +
       'data/manuscript, confirm must exactly equal the chapter id (e.g. "ch_0007"), and version must equal the ' +
-      'document version fingerprint from a fresh novel_doc_read. Only the newest chapter can be deleted, and never ' +
+      'document version fingerprint from a fresh novel_doc(action="read"). Only the newest chapter can be deleted, and never ' +
       'while a background task is active.',
     parameters: {
       path: { type: 'string', required: true, description: 'Chapter path, e.g. "data/manuscript/ch_0007.md".' },
       confirm: { type: 'string', required: true, description: 'Must exactly equal the chapter id, e.g. "ch_0007".' },
-      version: { type: 'string', required: true, description: 'The document version fingerprint from novel_doc_read.' },
+      version: { type: 'string', required: true, description: 'The document version fingerprint from novel_doc(action="read").' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
@@ -1670,7 +1740,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     parameters: {
       keep_through: { type: 'string', required: true, description: 'Last chapter to retain, e.g. "ch_0030".' },
       confirm: { type: 'string', required: true, description: 'Must exactly equal DELETE_AFTER:<keep_through>.' },
-      version: { type: 'string', required: true, description: 'The latest chapter version fingerprint from a fresh novel_doc_read.' },
+      version: { type: 'string', required: true, description: 'The latest chapter version fingerprint from a fresh novel_doc(action="read").' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
@@ -1684,32 +1754,16 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_doc_create',
-    description: 'Create a new project document by kind and name (e.g. a setting or character note), then returns the created document.',
-    parameters: {
-      kind: { type: 'string', required: true, description: 'Document kind (e.g. "setting", "character").' },
-      name: { type: 'string', required: true, description: 'Document name.' },
-      description: { type: 'string', description: 'Short description of the document.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.kind.trim() || !args.name.trim()) throw new Error('kind and name must be non-empty strings')
-      const body: JsonObject = { kind: args.kind, name: args.name }
-      if (args.description !== undefined) body['description'] = args.description
-      return await client.postJson('/api/document/create', body, exec.signal)
-    },
-  }))
+      // ── manuscript import ─────────────────────────────────────────────────────────
 
   ctx.tools.register(defineTool({
-    name: 'novel_import_preview',
+    name: 'novel_import',
     description:
-      'Preview a TXT/Markdown manuscript import without writing anything: detected chapters, numbering, and ' +
-      'conflicts with existing chapters. Run this before novel_import.',
+      'Preview an imported manuscript and then import it. Preview reports the parsed chapters, arc ' +
+      'mapping and conflicts without writing; import applies the reviewed plan.',
     parameters: {
-      content: { type: 'string', required: true, description: 'The manuscript text to import.' },
+      action: { type: 'string', required: true, enum: ['preview', 'import'], description: 'Import step; preview never writes anything.' },
+      content: { type: 'string', description: 'The manuscript text to import.' },
       filename: { type: 'string', description: 'Source filename; suffix must be .txt/.md/.markdown (default "import.md").' },
       arc_id: { type: 'string', description: 'Arc id like "arc_001" (default: the project\'s current arc).' },
       start_number: { type: 'integer', description: 'First chapter number (default: after the last existing chapter).' },
@@ -1717,46 +1771,39 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
+    isConcurrencySafe: args => ['preview'].includes(args.action),
     async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.content.trim()) throw new Error('content must be a non-empty string')
-      const body: JsonObject = { content: args.content }
-      if (args.filename !== undefined) body['filename'] = args.filename
-      if (args.arc_id !== undefined) body['arc_id'] = args.arc_id
-      if (args.start_number !== undefined) body['start_number'] = args.start_number
-      if (args.force !== undefined) body['force'] = args.force
-      return await client.postJson('/api/import/preview', body, exec.signal)
+      switch (args.action) {
+        case 'preview': {
+        if (args.content === undefined) throw new Error('content is required for novel_import(action="preview")')
+              const client = clientFor(exec)
+              if (!args.content.trim()) throw new Error('content must be a non-empty string')
+              const body: JsonObject = { content: args.content }
+              if (args.filename !== undefined) body['filename'] = args.filename
+              if (args.arc_id !== undefined) body['arc_id'] = args.arc_id
+              if (args.start_number !== undefined) body['start_number'] = args.start_number
+              if (args.force !== undefined) body['force'] = args.force
+              return await client.postJson('/api/import/preview', body, exec.signal)
+            
+        }
+        case 'import': {
+        if (args.content === undefined) throw new Error('content is required for novel_import(action="import")')
+              const client = clientFor(exec)
+              if (!args.content.trim()) throw new Error('content must be a non-empty string')
+              const body: JsonObject = { content: args.content }
+              if (args.filename !== undefined) body['filename'] = args.filename
+              if (args.arc_id !== undefined) body['arc_id'] = args.arc_id
+              if (args.start_number !== undefined) body['start_number'] = args.start_number
+              if (args.force !== undefined) body['force'] = args.force
+              return await client.postJson('/api/import', body, exec.signal)
+            
+        }
+        default: throw new Error(`novel_import: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_import',
-    description:
-      'Import a TXT/Markdown manuscript as chapters (split on headings). Preview first with novel_import_preview; ' +
-      'the server rejects conflicting chapter ids unless force is set.',
-    parameters: {
-      content: { type: 'string', required: true, description: 'The manuscript text to import.' },
-      filename: { type: 'string', description: 'Source filename; suffix must be .txt/.md/.markdown (default "import.md").' },
-      arc_id: { type: 'string', description: 'Arc id like "arc_001" (default: the project\'s current arc).' },
-      start_number: { type: 'integer', description: 'First chapter number (default: continue numbering).' },
-      force: { type: 'boolean', description: 'Overwrite conflicting existing chapters (default false).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.content.trim()) throw new Error('content must be a non-empty string')
-      const body: JsonObject = { content: args.content }
-      if (args.filename !== undefined) body['filename'] = args.filename
-      if (args.arc_id !== undefined) body['arc_id'] = args.arc_id
-      if (args.start_number !== undefined) body['start_number'] = args.start_number
-      if (args.force !== undefined) body['force'] = args.force
-      return await client.postJson('/api/import', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
+    ctx.tools.register(defineTool({
     name: 'novel_manuscript_import_action',
     description:
       'Operate the durable, resumable import workspace for the author\'s own TXT/Markdown manuscript. ' +
@@ -1770,7 +1817,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       limit: { type: 'integer', description: 'Maximum operations for list (default 50).' },
       filename: { type: 'string', description: 'Source filename ending in .txt, .md, or .markdown.' },
       content: { type: 'string', description: 'The author\'s own manuscript text for prepare.' },
-      arc_id: { type: 'string', description: 'Target arc id, e.g. arc_001.' },
+      arc_id: { type: 'string', description: 'Target arc id, e.g. arc_001. Optional for prepare; defaults to the project\'s current arc.' },
       start_number: { type: 'integer', description: 'Optional first chapter number.' },
       expected_preview_revision: { type: 'string', description: 'Current preview revision required by structure/confirm.' },
       chapters: { type: 'array', items: { type: 'json' }, description: 'Edited chapter objects: chapter_id, title, content.' },
@@ -1786,8 +1833,11 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       }
       if (args.action === 'prepare') {
         if (!args.content?.trim()) throw new Error('prepare requires non-empty content')
-        if (!args.arc_id?.trim()) throw new Error('prepare requires arc_id')
-        const body: JsonObject = { filename: args.filename ?? 'import.md', content: args.content, arc_id: args.arc_id }
+        // The server resolves the project's current arc when arc_id is absent,
+        // exactly like the sibling novel_import tool. Demanding it here only
+        // cost the agent a round trip.
+        const body: JsonObject = { filename: args.filename ?? 'import.md', content: args.content }
+        if (args.arc_id !== undefined) body['arc_id'] = args.arc_id
         if (args.start_number !== undefined) body['start_number'] = args.start_number
         return await client.postJson('/api/manuscript-imports/prepare', body, exec.signal)
       }
@@ -1821,89 +1871,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_project_archive_action',
-    description:
-      'Inspect, create, and restore complete .owarchive project archives. Use preflight before create; use ' +
-      'restore_preview before restore to inspect path/reference rewrites, conflicts, warnings, checksum, and the ' +
-      'archived-without-auto-resume task policy. Restore requires the preview archive_sha256 and explicit confirmation.',
-    parameters: {
-      action: { type: 'string', required: true, enum: ['preflight', 'list', 'get', 'create', 'restore_preview', 'restore'], description: 'Archive lifecycle action.' },
-      archive_id: { type: 'string', description: 'Archive id shaped owa_<24 lowercase hex>.' },
-      expected_preflight_revision: { type: 'string', description: 'Current archive preflight revision for create.' },
-      target_root: { type: 'string', description: 'Absolute new or empty project directory for restore.' },
-      target_novel_id: { type: 'string', description: 'Optional restored novel id.' },
-      reference_policy: { type: 'string', enum: ['preserve_relative', 'rewrite_novel_id'], description: 'Reference handling during restore.' },
-      archive_sha256: { type: 'string', description: 'Checksum returned by restore_preview.' },
-      confirm: { type: 'boolean', description: 'Must be true for restore.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (args.action === 'preflight') return await client.getJson('/api/project-archives/preflight', {}, exec.signal)
-      if (args.action === 'list') return await client.getJson('/api/project-archives', {}, exec.signal)
-      if (args.action === 'create') {
-        if (!args.expected_preflight_revision?.trim()) throw new Error('create requires expected_preflight_revision')
-        return await client.postJson('/api/project-archives/create', {
-          expected_preflight_revision: args.expected_preflight_revision,
-        }, exec.signal)
-      }
-      const archiveId = args.archive_id?.trim()
-      if (!archiveId || !/^owa_[0-9a-f]{24}$/.test(archiveId)) throw new Error(`${args.action} requires a valid archive_id`)
-      if (args.action === 'get') return await client.getJson(`/api/project-archives/${archiveId}`, {}, exec.signal)
-      if (!args.target_root?.trim()) throw new Error(`${args.action} requires target_root`)
-      const body: JsonObject = {
-        archive_id: archiveId,
-        target_root: args.target_root,
-        reference_policy: args.reference_policy ?? 'preserve_relative',
-      }
-      if (args.target_novel_id !== undefined) body['target_novel_id'] = args.target_novel_id
-      if (args.action === 'restore_preview') {
-        return await client.postJson('/api/project-archives/restore/preview', body, exec.signal)
-      }
-      if (!args.archive_sha256?.trim()) throw new Error('restore requires archive_sha256')
-      if (args.confirm !== true) throw new Error('restore requires confirm=true')
-      body['archive_sha256'] = args.archive_sha256
-      body['confirm'] = true
-      return await client.postJson('/api/project-archives/restore', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_project_archive_download',
-    description: 'Download one complete .owarchive project archive and save it in this workspace\'s local export directory.',
-    parameters: {
-      archive_id: { type: 'string', required: true, description: 'Archive id shaped owa_<24 lowercase hex>.' },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          path: { type: 'string', required: true },
-          filename: { type: 'string', required: true },
-          archive_id: { type: 'string', required: true },
-          bytes: { type: 'integer', required: true },
-        },
-      },
-      render: (_args, value) => [{ type: 'text', text: `Downloaded ${value.filename} (${value.bytes} bytes) to ${value.path}` }],
-    },
-    timeoutMs,
-    async execute(args, exec) {
-      if (!/^owa_[0-9a-f]{24}$/.test(args.archive_id)) throw new Error('archive_id must match owa_<24 lowercase hex>')
-      const client = clientFor(exec)
-      const download = await client.download(`/api/project-archives/${args.archive_id}/download`, {}, exec.signal)
-      const filename = exportFilename(download.filename, `${args.archive_id}.owarchive.zip`)
-      const exportDir = outputDirFor(outputDir, client)
-      await mkdir(exportDir, { recursive: true })
-      const path = join(exportDir, filename)
-      await writeFile(path, download.content)
-      return { path, filename, archive_id: args.archive_id, bytes: download.content.byteLength }
-    },
-  }))
-
-  ctx.tools.register(defineTool({
+      ctx.tools.register(defineTool({
     name: 'novel_sync',
     description:
       'Synchronize derived caches that are direct src derivatives: outline hierarchy (data/hierarchy.yaml) and ' +
@@ -1926,7 +1894,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'actual chapter prose (never rewriting it) and commit chapter memory, runtime-truth notes and a ' +
       'character-state index refresh. Run once after importing an old manuscript so later chapters, reviews and ' +
       'canon/continuity checks have real facts from earlier chapters (without it, review canon stays inconclusive ' +
-      'and context lacks previous-chapter recaps). Returns a background task (tsk_*); poll with novel_task_get.',
+      'and context lacks previous-chapter recaps). Returns a background task (tsk_*); poll with novel_task(action="get").',
     parameters: {
       chapter_ids: {
         type: 'array',
@@ -1950,7 +1918,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     name: 'novel_writing_targets',
     description:
       'Immediate compatibility write for targets the author has already authorized exactly; otherwise use ' +
-      'novel_structured_change_plan. Update the project writing targets. Ranges: book_words 10000-5000000, chapter_words 200-50000, ' +
+      'novel_change_plan(action="structured"). Update the project writing targets. Ranges: book_words 10000-5000000, chapter_words 200-50000, ' +
       'outline_volume_words 100-5000, outline_act_words 80-3000, outline_section_words 50-2000, ' +
       'outline_chapter_words 30-1000. Omitted fields keep their current values.',
     parameters: {
@@ -2062,9 +2030,11 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'Manage rolling plan candidates (mid-range plot planning windows). Actions: "list" (limit?), "create" ' +
       '(current_arc?, window_size? default 50, max 50). current_window/accepted_window is accepted manuscript ' +
       'facts only; next_window/planned_window is outline plan, not facts. "get" (candidate_id), "stage" ' +
-      '(candidate_id + proposal + revision — stages a plan proposal against the candidate; revision-gated), ' +
+      '(candidate_id + proposal + revision — stages a Markdown plan; chapter headings should read "第N章：标题" ' +
+      'or "第N章 标题" and Chinese numerals are accepted; revision-gated), ' +
       '"delete" (candidate_id + revision), "apply" (candidate_id + revision — appends staged draft chapters ' +
-      'that do not collide with the canonical outline into src/outline.md; never writes accepted facts).',
+      'that do not collide with the canonical outline into src/outline.md; never writes accepted facts; ' +
+      'a proposal without recognizable chapter headings is reported as such instead of as "already exists").',
     parameters: {
       action: { type: 'string', required: true, enum: ['list', 'create', 'get', 'stage', 'delete', 'apply'], description: 'The rolling-plan operation.' },
       limit: { type: 'integer', description: 'List limit (default 20).' },
@@ -2130,7 +2100,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       '"compare" (chapter_id + version_id — preview current-to-snapshot differences without writing), ' +
       '"restore" (chapter_id + version_id + revision — REVERTS the chapter to a snapshot; revision-gated and ' +
       'confirmation-gated: the server demands confirm: true), "annotations" (chapter_id), "annotate" (chapter_id + ' +
-      'revision + quote + note, optional start_hint/end_hint and color amber|rose|sky|lime|violet), ' +
+      'revision + quote + note, optional start_hint/end_hint (derived from the quote when omitted) and color amber|rose|sky|lime|violet), ' +
       '"resolve_annotation" (chapter_id + annotation_id).',
     parameters: {
       action: { type: 'string', required: true, enum: ['drafts', 'restore_draft', 'versions', 'version', 'compare', 'checkpoint', 'restore', 'annotations', 'annotate', 'resolve_annotation'], description: 'The manuscript-editing operation.' },
@@ -2155,16 +2125,46 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       if (args.action === 'drafts') return await client.getJson('/api/manuscript/drafts', {}, exec.signal)
       if (args.action === 'restore_draft') {
         if (!args.run_id_v2) throw new Error('run_id_v2 is required; list drafts first')
+        // A blank expected_revision is not "no guard": the server computes
+        // `expected = ""` when the chapter file is absent, so `'' != ''` is
+        // false and the revision check is silently satisfied. Sending
+        // `confirm: false` likewise guarantees CONFIRMATION_REQUIRED.
+        if (args.revision === undefined || !String(args.revision).trim()) {
+          throw new Error('revision is required for novel_manuscript_edit_action(action="restore_draft"); read the current chapter revision first')
+        }
+        if (args.confirm !== true) {
+          throw new Error('confirm: true is required for novel_manuscript_edit_action(action="restore_draft")')
+        }
         return await client.postJson('/api/manuscript/drafts/restore', {
-          run_id_v2: args.run_id_v2, expected_revision: args.revision ?? '', confirm: args.confirm === true,
+          run_id_v2: args.run_id_v2, expected_revision: args.revision, confirm: true,
         }, exec.signal)
       }
       if (!args.chapter_id || !CHAPTER_ID_PATTERN.test(args.chapter_id)) throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
+      // An empty quote selects `content[0:0]`, which trivially "matches", so the
+      // server would persist a junk annotation and consume the chapter revision.
+      if (args.action === 'annotate') {
+        if (!args.quote?.trim()) throw new Error('quote is required for novel_manuscript_edit_action(action="annotate")')
+        if (!args.note?.trim()) throw new Error('note is required for novel_manuscript_edit_action(action="annotate")')
+        if (args.revision === undefined || !String(args.revision).trim()) {
+          throw new Error('revision is required for novel_manuscript_edit_action(action="annotate")')
+        }
+      }
       const body: JsonObject = { action: args.action, chapter_id: args.chapter_id }
-      for (const key of ['version_id', 'label', 'revision', 'confirm', 'quote', 'note', 'start_hint', 'end_hint', 'color', 'annotation_id'] as const) {
+      let startHint = args.start_hint
+      let endHint = args.end_hint
+      if (args.action === 'annotate' && (startHint === undefined || endHint === undefined)) {
+        // The server matches content[start_hint:end_hint] literally against the
+        // quote, so optional hints must still produce exact offsets.
+        const derived = await resolveAnnotationHints(client, args.chapter_id, args.quote!, exec.signal)
+        startHint = derived.start
+        endHint = derived.end
+      }
+      for (const key of ['version_id', 'label', 'revision', 'confirm', 'quote', 'note', 'color', 'annotation_id'] as const) {
         const value = args[key]
         if (value !== undefined) body[key] = value
       }
+      if (startHint !== undefined) body['start_hint'] = startHint
+      if (endHint !== undefined) body['end_hint'] = endHint
       return await client.postJson('/api/manuscript-editing', body, exec.signal)
     },
   }))
@@ -2189,14 +2189,20 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
     async execute(args, exec) {
-      if (args.chapter_id !== undefined && !CHAPTER_ID_PATTERN.test(args.chapter_id)) {
+      // An empty chapter id is the project-level operation, not a malformed
+      // one: the server resolves it to the first chapter and covers the book.
+      // Rejecting "" here made the documented project-level call unreachable
+      // for any caller that passes the field as an empty string.
+      const chapterId = args.chapter_id?.trim()
+      if (chapterId !== undefined && chapterId !== '' && !CHAPTER_ID_PATTERN.test(chapterId)) {
         throw new Error(`chapter_id must match ch_<digits>, got "${args.chapter_id}"`)
       }
       const body: JsonObject = {}
-      for (const key of ['chapter_id', 'operation_id', 'domains', 'confirm', 'mode', 'no_model'] as const) {
+      for (const key of ['operation_id', 'domains', 'confirm', 'mode', 'no_model'] as const) {
         const value = args[key]
         if (value !== undefined) body[key] = value
       }
+      if (chapterId) body['chapter_id'] = chapterId
       if (args.action === 'acknowledge' && args.domains === undefined) body['domains'] = ['outline', 'foreshadowing']
       const route = args.action === 'acknowledge' ? 'ack' : args.action === 'resume' ? 'reconcile' : args.action
       return await clientFor(exec).postJson(`/api/manuscript/acceptance/${route}`, body, exec.signal)
@@ -2221,7 +2227,16 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     async execute(args, exec) {
       const client = clientFor(exec)
       if (args.action === 'get') return await client.getJson('/api/writing-assets', {}, exec.signal)
-      if (args.action === 'save_anchor') return await client.postJson('/api/writing-assets', { action: args.action, name: args.name ?? '', content: args.content ?? '', expected_revision: args.expected_revision ?? '' }, exec.signal)
+      if (args.action === 'save_anchor') {
+        // A blank name/content reaches the server as INVALID_WRITING_ASSETS
+        // (400), which is also what a stale expected_revision answers — the two
+        // are indistinguishable by code. Validate the payload locally so the
+        // caller is told which parameter is actually wrong.
+        if (!args.name?.trim()) throw new Error('name is required for novel_writing_assets(action="save_anchor")')
+        if (!/^[\w-]{1,80}\.md$/.test(args.name)) throw new Error(`save_anchor name must be a simple .md filename, got "${args.name}"`)
+        if (!args.content?.trim()) throw new Error('content is required for novel_writing_assets(action="save_anchor")')
+        return await client.postJson('/api/writing-assets', { action: args.action, name: args.name, content: args.content, expected_revision: args.expected_revision ?? '' }, exec.signal)
+      }
       if (args.action === 'mark_usage') return await client.postJson('/api/writing-assets', { action: args.action, chapter_id: args.chapter_id ?? '', groups: requireRecord(args.groups, 'groups') }, exec.signal)
       const assets = requireRecord(args.assets, 'assets')
       return await client.postJson('/api/writing-assets', { assets: assets as JsonObject, expected_revision: args.expected_revision ?? '' }, exec.signal)
@@ -2308,7 +2323,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       chunk_id: { type: 'string', description: 'Chunk to retry (retry_v2).' },
       source_ids: { type: 'array', items: { type: 'string' }, description: 'Sources to synthesize (synthesize_v2).' },
       profile_id: { type: 'string', description: 'Analysis profile id (profile_v2/promotion_preview_v2).' },
-      target: { type: 'string', description: 'Promotion target (promotion_preview_v2/promote, default "all").' },
+      target: { type: 'string', description: 'Promotion target: style/rules/inspiration/setting_candidates for promotion_preview_v2 (required); style/setting/world/all for legacy promote (default "all").' },
       preview_id: { type: 'string', description: 'Promotion preview id (promote_v2).' },
       confirm: { type: 'boolean', description: 'Confirm a gated promotion (default false).' },
     },
@@ -2317,6 +2332,15 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     isConcurrencySafe: (args) => args.action === 'status_v2' || args.action === 'profile_v2' || args.action === 'promotion_preview_v2',
     async execute(args, exec) {
       const client = clientFor(exec)
+      if (args.action === 'promotion_preview_v2') {
+        const target = args.target?.trim()
+        if (!target) {
+          throw new Error('target is required for novel_source_action(action="promotion_preview_v2"); choose style, rules, inspiration, or setting_candidates')
+        }
+        if (!['style', 'rules', 'inspiration', 'setting_candidates'].includes(target)) {
+          throw new Error('target must be style, rules, inspiration, or setting_candidates for promotion_preview_v2')
+        }
+      }
       const body: JsonObject = { action: args.action }
       for (const key of ['source_id', 'content', 'focus', 'relative_name', 'input_budget_tokens', 'chunk_id', 'source_ids', 'profile_id', 'target', 'preview_id', 'confirm'] as const) {
         const value = args[key]
@@ -2355,7 +2379,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: (args) => args.action === 'list' || args.action === 'status' || args.action === 'profile' || args.action === 'adoption_preview',
+    isConcurrencySafe: (args) => args.action === 'list' || args.action === 'status' || args.action === 'profile',
     async execute(args, exec) {
       const client = clientFor(exec)
       const body: JsonObject = { action: args.action }
@@ -2422,7 +2446,7 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
 
   ctx.tools.register(defineTool({
     name: 'novel_research_status',
-    description: 'Get the deep-research surface: settings status, report list, and the configured model route. Run a research job via novel_task_create with type "research".',
+    description: 'Get the deep-research surface: settings status, report list, and the configured model route. Run a research job via novel_task(action="create") with type "research".',
     parameters: {},
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
@@ -2468,16 +2492,98 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
 
   // ── model configuration ──────────────────────────────────────────────────
 
+    // ── model configuration ───────────────────────────────────────────────────────
+
   ctx.tools.register(defineTool({
     name: 'novel_model_profiles',
-    description: 'List the server\'s model profiles and per-task routing (which provider/model OpenWrite uses for writing, review, etc.).',
-    parameters: {},
+    description:
+      'List, save, delete and test OpenWrite model profiles, per-task routing and the active model ' +
+      'settings. Profiles select which provider/model each task uses; routes map tasks to profiles.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'save', 'delete', 'save_routes', 'configure', 'test'], description: 'Model configuration operation.' },
+      profile: { type: 'json', description: 'Profile object, e.g. {"id": "fast", "label": "...", "provider": "openai", "model": "...", "base_url": "...", "max_output_tokens": 24000}.' },
+      api_key: { type: 'string', description: 'Chat API key to store with the profile.' },
+      remember_api_key: { type: 'boolean', description: 'Persist the API key on the server (default true).' },
+      profile_id: { type: 'string', description: 'Profile id to delete.' },
+      fallback_id: { type: 'string', description: 'Profile id to reroute to (default: the server default profile).' },
+      routes: { type: 'json', description: 'Object mapping operation names to profile ids.' },
+      provider: { type: 'string', enum: ['openai', 'anthropic', 'custom'], description: 'Provider (default "openai").' },
+      model: { type: 'string', description: 'Model name (max 120 characters).' },
+      base_url: { type: 'string', description: 'Base URL (required for provider "custom").' },
+      api_format: { type: 'string', enum: ['chat', 'responses'], description: 'API format (default "chat").' },
+      context_tokens: { type: 'integer', description: 'Context budget (min 12000).' },
+      max_tokens: { type: 'integer', description: 'Max output tokens (min 256, must be < context_tokens).' },
+      id: { type: 'string', description: 'Stored profile id to test.' },
+    },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(_args, exec) {
-      const client = clientFor(exec)
-      return await client.getJson('/api/model/profiles', {}, exec.signal)
+    isConcurrencySafe: args => ['list', 'test'].includes(args.action),
+    async execute(args, exec) {
+      switch (args.action) {
+        case 'list': {
+              const client = clientFor(exec)
+              return await client.getJson('/api/model/profiles', {}, exec.signal)
+            
+        }
+        case 'save': {
+        if (args.profile === undefined) throw new Error('profile is required for novel_model_profiles(action="save")')
+              const client = clientFor(exec)
+              if (typeof args.profile !== 'object' || args.profile === null || Array.isArray(args.profile)) {
+                throw new Error('profile must be a JSON object')
+              }
+              const body: JsonObject = { ...args.profile }
+              for (const key of ['api_key', 'remember_api_key'] as const) {
+                const value = args[key]
+                if (value !== undefined) body[key] = value
+              }
+              return await client.postJson('/api/model/profiles', body, exec.signal)
+            
+        }
+        case 'delete': {
+        if (args.profile_id === undefined) throw new Error('profile_id is required for novel_model_profiles(action="delete")')
+              const client = clientFor(exec)
+              if (!args.profile_id.trim()) throw new Error('profile_id must be a non-empty string')
+              const body: JsonObject = { profile_id: args.profile_id }
+              if (args.fallback_id !== undefined) body['fallback_id'] = args.fallback_id
+              return await client.postJson('/api/model/profiles/delete', body, exec.signal)
+            
+        }
+        case 'save_routes': {
+        if (args.routes === undefined) throw new Error('routes is required for novel_model_profiles(action="save_routes")')
+              const client = clientFor(exec)
+              if (typeof args.routes !== 'object' || args.routes === null || Array.isArray(args.routes)) {
+                throw new Error('routes must be a JSON object')
+              }
+              return await client.postJson('/api/model/routes', { routes: args.routes }, exec.signal)
+            
+        }
+        case 'configure': {
+        if (args.model === undefined) throw new Error('model is required for novel_model_profiles(action="configure")')
+              const client = clientFor(exec)
+              if (!args.model.trim() || args.model.length > 120) throw new Error('model must be non-empty and at most 120 characters')
+              const body: JsonObject = { model: args.model }
+              for (const key of ['provider', 'api_key', 'base_url', 'api_format', 'context_tokens', 'max_tokens', 'remember_api_key'] as const) {
+                const value = args[key]
+                if (value !== undefined) body[key] = value
+              }
+              return await client.postJson('/api/model', body, exec.signal)
+            
+        }
+        case 'test': {
+              const client = clientFor(exec)
+              if (args.id === undefined && (args.model === undefined || !args.model.trim())) {
+                throw new Error('either id (stored profile) or model (candidate) is required')
+              }
+              const body: JsonObject = {}
+              for (const key of ['id', 'provider', 'model', 'base_url', 'api_format', 'api_key', 'context_tokens', 'max_tokens'] as const) {
+                const value = args[key]
+                if (value !== undefined) body[key] = value
+              }
+              return await client.postJson('/api/model/test', body, exec.signal)
+            
+        }
+        default: throw new Error(`novel_model_profiles: unknown action ${String(args.action)}`)
+      }
     },
   }))
 
@@ -2537,151 +2643,5 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
     },
   }))
 
-  ctx.tools.register(defineTool({
-    name: 'novel_model_configure',
-    description:
-      'Apply and persist the server\'s active model connection (OpenWrite\'s own LLM for writing/review — ' +
-      'independent of the dsh model). max_tokens must stay below context_tokens.',
-    parameters: {
-      provider: { type: 'string', enum: ['openai', 'anthropic', 'custom'], description: 'Provider (default "openai").' },
-      model: { type: 'string', required: true, description: 'Model name (max 120 characters).' },
-      api_key: { type: 'string', description: 'API key; omit to reuse the server environment key.' },
-      base_url: { type: 'string', description: 'Base URL (required for provider "custom").' },
-      api_format: { type: 'string', enum: ['chat', 'responses'], description: 'API format (default "chat").' },
-      context_tokens: { type: 'integer', description: 'Context budget (min 12000).' },
-      max_tokens: { type: 'integer', description: 'Max output tokens (min 256, must be < context_tokens).' },
-      remember_api_key: { type: 'boolean', description: 'Persist the API key on the server (default true).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.model.trim() || args.model.length > 120) throw new Error('model must be non-empty and at most 120 characters')
-      const body: JsonObject = { model: args.model }
-      for (const key of ['provider', 'api_key', 'base_url', 'api_format', 'context_tokens', 'max_tokens', 'remember_api_key'] as const) {
-        const value = args[key]
-        if (value !== undefined) body[key] = value
-      }
-      return await client.postJson('/api/model', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_model_test',
-    description:
-      'Test a model connection without changing active settings. Pass id to test a stored profile, or a full ' +
-      'candidate (provider/model/base_url/api_key...).',
-    parameters: {
-      id: { type: 'string', description: 'Stored profile id to test.' },
-      provider: { type: 'string', enum: ['openai', 'anthropic', 'custom'], description: 'Provider (default "openai").' },
-      model: { type: 'string', description: 'Model name (required when id is omitted).' },
-      base_url: { type: 'string', description: 'Base URL (required for provider "custom").' },
-      api_format: { type: 'string', enum: ['chat', 'responses'], description: 'API format (default "chat").' },
-      api_key: { type: 'string', description: 'API key; omit to reuse the server environment key.' },
-      context_tokens: { type: 'integer', description: 'Context budget.' },
-      max_tokens: { type: 'integer', description: 'Max output tokens.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (args.id === undefined && (args.model === undefined || !args.model.trim())) {
-        throw new Error('either id (stored profile) or model (candidate) is required')
-      }
-      const body: JsonObject = {}
-      for (const key of ['id', 'provider', 'model', 'base_url', 'api_format', 'api_key', 'context_tokens', 'max_tokens'] as const) {
-        const value = args[key]
-        if (value !== undefined) body[key] = value
-      }
-      return await client.postJson('/api/model/test', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_model_embedding_test',
-    description: 'Probe an independent Embedding profile without changing Chat profiles.',
-    parameters: {
-      id: { type: 'string', description: 'Stored profile id to probe.' },
-      candidate: { type: 'json', description: 'Embedding candidate settings object (merged into the request).' },
-      api_key: { type: 'string', description: 'Embedding API key override.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      const body: JsonObject = {}
-      if (args.candidate !== undefined) {
-        if (typeof args.candidate !== 'object' || args.candidate === null || Array.isArray(args.candidate)) {
-          throw new Error('candidate must be a JSON object')
-        }
-        Object.assign(body, args.candidate)
-      }
-      for (const key of ['id', 'api_key'] as const) {
-        const value = args[key]
-        if (value !== undefined) body[key] = value
-      }
-      return await client.postJson('/api/model/embedding/test', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_model_profile_save',
-    description: 'Save (create or update) a named model profile on the server, with an optional API key.',
-    parameters: {
-      profile: { type: 'json', required: true, description: 'Profile object, e.g. {"id": "fast", "label": "...", "provider": "openai", "model": "...", "base_url": "...", "max_output_tokens": 24000}.' },
-      api_key: { type: 'string', description: 'Chat API key to store with the profile.' },
-      remember_api_key: { type: 'boolean', description: 'Persist the API key on the server (default true).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (typeof args.profile !== 'object' || args.profile === null || Array.isArray(args.profile)) {
-        throw new Error('profile must be a JSON object')
-      }
-      const body: JsonObject = { ...args.profile }
-      for (const key of ['api_key', 'remember_api_key'] as const) {
-        const value = args[key]
-        if (value !== undefined) body[key] = value
-      }
-      return await client.postJson('/api/model/profiles', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_model_profile_delete',
-    description: 'Delete a stored model profile. Routes pointing at it fall back to fallback_id.',
-    parameters: {
-      profile_id: { type: 'string', required: true, description: 'Profile id to delete.' },
-      fallback_id: { type: 'string', description: 'Profile id to reroute to (default: the server default profile).' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (!args.profile_id.trim()) throw new Error('profile_id must be a non-empty string')
-      const body: JsonObject = { profile_id: args.profile_id }
-      if (args.fallback_id !== undefined) body['fallback_id'] = args.fallback_id
-      return await client.postJson('/api/model/profiles/delete', body, exec.signal)
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'novel_model_routes_save',
-    description: 'Save per-task model routing: map operation names (e.g. "chapter_write", "review", "research") to profile ids.',
-    parameters: {
-      routes: { type: 'json', required: true, description: 'Object mapping operation names to profile ids.' },
-    },
-    output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
-    timeoutMs,
-    async execute(args, exec) {
-      const client = clientFor(exec)
-      if (typeof args.routes !== 'object' || args.routes === null || Array.isArray(args.routes)) {
-        throw new Error('routes must be a JSON object')
-      }
-      return await client.postJson('/api/model/routes', { routes: args.routes }, exec.signal)
-    },
-  }))
+            
 }

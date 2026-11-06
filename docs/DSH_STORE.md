@@ -11,7 +11,7 @@ OpenWrite 是一个完整的小说创作插件套件。商城安装目标是仓�
 - manifestPath：`package.json`
 - Bundle Patch：`cordis.patch.yml`
 
-根包统一加载 `openwrite-bundle`、`openwrite-bridge`、`studio-panel`、`openwrite-dog`。这些既有 ID 保持稳定。`packages/openwrite-bridge`、`packages/studio-panel` 是内部开发包，不应和根包一起登记到同一个 Profile，也不需要删除它们或拆成独立商城条目。
+根包统一加载 `openwrite-bundle`、`openwrite-bridge`、`studio-panel`。这些既有 ID 保持稳定。`packages/openwrite-bridge`、`packages/studio-panel` 是内部开发包，不应和根包一起登记到同一个 Profile，也不需要删除它们或拆成独立商城条目。
 
 源码验收必须固定到完整 Commit；`prepare` 会自包含构建三个内部插件，包含 Core wheel、编辑器静态资源、预设和许可证，不依赖相邻源码。构建授权仍遵循用户的 pnpm 设置。普通用户优先使用 npm 预编译包：`dsh plugin --profile web add -w dsh-openwrite@latest`。latest 只在执行安装或升级时解析，运行中不自动更新。市场的版本、兼容和验收字段应记录实际核验的精确版本；不能把已有验收结果自动套用到未来版本。精确 npm 版本及对应 GitHub Release `.tgz` 继续用于复现与回退，见 README。
 
@@ -39,7 +39,9 @@ OpenWrite 是一个完整的小说创作插件套件。商城安装目标是仓�
 
 alpha 浏览器验收进一步发现 persona 配置由 `text` 改成了必填 `prefix`；预设使用 YAML 锚点将同一份身份文本提供给两个字段，并以两版实际 Config / apply 验证身份只注册一次。
 
-构建基线仍是 `0.1.2-rc.1`。兼容声明覆盖精确版本 `0.1.2-rc.1`、`0.1.5-alpha.1`、`0.2.0-rc.2`、`0.2.1-rc.2`、`0.2.1-rc.3`，并分别保留已完成的 Web 客户端验收；`0.1.3-alpha.1`、`0.1.3-alpha.2` 保持未知。这不自动升级用户宿主，也不承诺整个 alpha 或 0.2 范围都兼容。`0.2.23` 已发布到 npm `latest` 与 GitHub Release，完整平台矩阵、源码安装和四份宿主客户端报告见[发布验收](RELEASE_ACCEPTANCE.md#023)；本机另复验了 `0.2.1-rc.2` 的安装闸门、客户端激活、预设选择、工作台入口与三页签、DoG 面板及其他插件共存。
+构建基线仍是 `0.1.2-rc.1`。兼容声明覆盖精确版本 `0.1.2-rc.1`、`0.1.5-alpha.1`、`0.2.0-rc.2`、`0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`，并分别保留已完成的 Web 客户端验收；`0.1.3-alpha.1`、`0.1.3-alpha.2` 保持未知。这不自动升级用户宿主，也不承诺整个 alpha 或 0.2 范围都兼容。`0.2.23` 已发布到 npm `latest` 与 GitHub Release，完整平台矩阵、源码安装和四份宿主客户端报告见[发布验收](RELEASE_ACCEPTANCE.md#023)；本机另复验了 `0.2.1-rc.2` 的安装闸门、客户端激活、预设选择、工作台入口与三页签及其他插件共存。内置 DoG 引擎已移除（见 README），需要图形化 DoG 验证可自行安装 `@dsh-external/dsh-dog`。
+
+`0.2.1-rc.4` 与 `0.2.1-rc.5` 于 0.2.29 候选加入声明：此前 `dsh plugin add dsh-openwrite` 在这两个宿主上直接被版本闸门拒绝（[#150](https://github.com/LiPu-jpg/Openwrite/issues/150)/[#151](https://github.com/LiPu-jpg/Openwrite/issues/151)/[#142](https://github.com/LiPu-jpg/Openwrite/issues/142)）。两个宿主各用官方 registry 的精确包完成安装闸门、客户端激活、预设选择、工作台三页签及其他插件共存验证，方法与边界见 [#149/#150/#151 修复说明](ISSUES_149_150_151.md)。已发布版本（含 `0.2.28`）不追溯补声明，需要这两个宿主的用户应等 `0.2.29` 正式发布。
 
 2026-09-09，从官方 npm Registry 直接安装 `@deepseek-ai/dsh@0.1.5-alpha.1` 时，上游范围依赖选中了正在发布的 alpha.2，其中 `@deepseek-ai/dsh-tool-pwsh-persistent@^0.1.5-alpha.2` 当时缺失，安装失败（ETARGET）。兼容测试使用 npm 的 `--before=2026-09-09T00:00:00Z` 解析 alpha.1 发布时的依赖，并保留解析锁。没有修改官方包源码或用 replacements/overrides 冒充官方组件。此证据仅适用于报告中的宿主依赖图，不代表后续浮动依赖安装也通过。
 

@@ -9,8 +9,6 @@ npm ci --ignore-scripts
 node scripts/prepare.mjs
 npm run check:plugin
 npm run test:managed
-npm --prefix vendor/dsh-dog run typecheck
-npm --prefix vendor/dsh-dog test
 node scripts/release-provenance.mjs
 npm pack --ignore-scripts
 node scripts/release-check.mjs
@@ -23,7 +21,7 @@ node scripts/release-smoke.mjs
 
 ## 发布产物
 
-根包 `dsh-openwrite` 组合运行时、bridge、panel、DoG 和版本预设。Core 使用 `native-core` 固定 commit 的 wheel；用户无需切换分支。版本、来源和所有平台下载哈希记录在 runtime manifest。
+根包 `dsh-openwrite` 组合运行时、bridge、panel 和版本预设。Core 使用 `native-core` 固定 commit 的 wheel；用户无需切换分支。版本、来源和所有平台下载哈希记录在 runtime manifest。
 
 Python 主依赖从该 wheel 的 METADATA 导出到 `release/core-requirements.in`，用固定 uv 重建：
 

@@ -1,6 +1,6 @@
 import { downloadBlob, downloadFilename } from './browser-download.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, ExternalLink, FileUp, FlaskConical, Gauge, ListTodo, RefreshCw, Cpu } from 'lucide-react'
+import { Download, FileUp, FlaskConical, Gauge, ListTodo, RefreshCw } from 'lucide-react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { API_PROXY_BASE, studioContextHeaders } from './api.ts'
@@ -8,7 +8,7 @@ import { parseExportPreflight, type ExportFormatDto, type ExportPreflightDto, ty
 import { ProjectMetadataEditor } from './ProjectMetadataEditor.tsx'
 import { ResearchView } from './ResearchView.tsx'
 import { BenchmarkView } from './BenchmarkView.tsx'
-import { ModelView, type ModelNavigationGuard } from './ModelView.tsx'
+import type { ModelNavigationGuard } from './ModelView.tsx'
 import { modelMemoryContextKey, WorkspaceViewMemory } from './model-view-memory.ts'
 import { TasksView, type NavigationRequest } from './TasksView.tsx'
 import { ManuscriptImportWorkspace, ProjectArchiveWorkspace } from './TransferWorkspaces.tsx'
@@ -17,7 +17,14 @@ import { useWorkbench, workbenchStore } from './WorkbenchStore.ts'
 import { createNovelWorkspace, initWorkspaceProject, useBindStudioContext, type StudioPanelInjected } from './workspace-context.ts'
 import css from './Workbench.module.css'
 
-type OperationsMode = 'tasks' | 'benchmark' | 'models' | 'research' | 'transfer' | 'serial'
+/**
+ * The modes of this page.
+ *
+ * The model profile library is a setting, not a task: it lives in the host's
+ * settings dialog under 「设置 → OpenWrite → 模型」, where it is edited
+ * without a bound workspace.
+ */
+type OperationsMode = 'tasks' | 'benchmark' | 'research' | 'transfer' | 'serial'
 const operationsModeMemory = new WorkspaceViewMemory<OperationsMode>()
 
 export type OperationsViewProps = ConvViewProps & InjectFace<StudioPanelInjected> & PropsLocale<'studio-panel'>
@@ -135,39 +142,43 @@ function OperationsWorkspace(props: OperationsViewProps) {
     operationsModeMemory.write(memoryKey, mode)
     return () => operationsModeMemory.write(memoryKey, mode)
   }, [memoryKey, mode])
-  const modelNavigationGuard = useRef<ModelNavigationGuard | null>(null)
-  const registerModelNavigationGuard = useCallback((guard: ModelNavigationGuard | null) => {
-    modelNavigationGuard.current = guard
+  const navigationGuard = useRef<ModelNavigationGuard | null>(null)
+  const registerNavigationGuard = useCallback((guard: ModelNavigationGuard | null) => {
+    navigationGuard.current = guard
   }, [])
   const navigateToMode = (next: OperationsMode) => {
     if (next === mode) return
     const navigate = () => setMode(next)
-    if ((mode === 'models' || mode === 'serial') && modelNavigationGuard.current) modelNavigationGuard.current(navigate)
+    if (mode === 'serial' && navigationGuard.current) navigationGuard.current(navigate)
     else navigate()
   }
   const items = [
     { id: 'tasks' as const, icon: ListTodo, label: props.t('view.tasks') },
     { id: 'benchmark' as const, icon: Gauge, label: props.t('view.benchmark') },
-    { id: 'models' as const, icon: Cpu, label: props.t('view.models') },
     { id: 'research' as const, icon: FlaskConical, label: props.t('view.research') },
     { id: 'transfer' as const, icon: FileUp, label: props.t('operations.transfer') },
     { id: 'serial' as const, icon: Gauge, label: props.t('serial.title') },
   ]
-  return <div className={css.workspaceRoot}>
+  // `data-conversation-composer-overlay` opts this view into the host's
+  // floating composer, so the workbench reaches the viewport bottom instead of
+  // stopping above a bare white band. See LibraryView for the full rationale.
+  // `data-openwrite-workspace` is our own marker: while it is mounted the
+  // host's composer seat is hidden (see workspace-chrome.ts), because a
+  // centered composer card would cover the workbench's own content.
+  return <div className={css.workspaceRoot} data-openwrite-workspace="" data-conversation-composer-overlay="">
     <nav className={css.workspaceNav} aria-label={props.t('view.operations')}>
       {items.map(item => <button key={item.id} type="button" data-active={mode === item.id} aria-current={mode === item.id ? 'page' : undefined} onClick={() => navigateToMode(item.id)}>
         <item.icon size={16} /><span>{item.label}</span>
         {item.id === 'tasks' && workbench.activeTasks > 0 && <b>{workbench.activeTasks}</b>}
       </button>)}
-      <button type="button" title="查看 DoG 的独立验收记录" onClick={() => window.dispatchEvent(new Event('openwrite:dog-open'))}>DoG 验收</button>
     </nav>
     <section className={css.workspaceContent}>
       {mode === 'tasks' && <TasksView key={workbench.contextEpoch} {...props} onNavigate={target => { setResultTarget(target); setMode(target.view) }} />}
       {mode === 'benchmark' && <BenchmarkView key={workbench.contextEpoch} {...props} refreshEpoch={workbench.epochs.benchmark} initialRunId={resultTarget?.view === 'benchmark' ? resultTarget.id : ''} />}
-      {mode === 'models' && <ModelView key={workbench.contextEpoch} {...props} onNavigationGuardChange={registerModelNavigationGuard} />}
       {mode === 'research' && <ResearchView key={workbench.epochs.research} {...props} initialReportId={resultTarget?.view === 'research' ? resultTarget.id : ''} />}
       {mode === 'transfer' && <TransferPanel {...props} />}
-      {mode === 'serial' && <SerialWritingView {...props} onNavigationGuardChange={registerModelNavigationGuard} />}
+      {mode === 'serial' && <SerialWritingView key={workbench.contextEpoch} {...props} onNavigationGuardChange={registerNavigationGuard}
+          refreshEpoch={workbench.epochs.assets + workbench.epochs.outline + workbench.epochs.manuscript + workbench.epochs.dag} />}
     </section>
   </div>
 }
@@ -396,8 +407,5 @@ function TransferPanel(props: OperationsViewProps) {
         busy={busy} setBusy={setBusy} say={say} workspaceReady={workspace !== undefined && !notInitialized}
         tasksEpoch={workbench.epochs.tasks} workspaceEpoch={workbench.epochs.workspace} />
     </section>
-    <a className={css.externalLink} href="http://127.0.0.1:4567" target="_blank" rel="noreferrer">
-      <ExternalLink size={15} />{t('openExternal')}
-    </a>
   </div>
 }

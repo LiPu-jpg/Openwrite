@@ -57,6 +57,12 @@ assert.equal(normalizeMinimapProperties('maskColor sk-example --other-mask-color
 assert.match(bundle, /__ModuleLoader__\.load\(\{[\s\S]*id: "@dsh-novel\/studio-panel"/)
 assert.ok(bundle.includes('dsh-vditor-runtime.mjs') && bundle.includes('vditorModule.exports'), 'Vditor runtime is bundled into the plugin client')
 assert.ok(bundle.includes('/studio-panel/vendor/vditor') && bundle.includes('lute/lute.min.js'), 'Vditor auxiliary assets use the packaged same-origin route')
+// The turn-tail change summary is a single flex row. Without wrapping it, the
+// row squeezes its Chinese labels down to one character per line, because CJK
+// text has no break opportunities to shrink against.
+assert.match(bundle, /\w+_turnSummary\{[^}]*flex-wrap:wrap/, 'turn summary row must wrap')
+assert.match(bundle, /\w+_turnSummaryLabel,\.\w+_turnMutationLabel\{[^}]*white-space:nowrap/, 'turn summary labels must not break per character')
+assert.ok(bundle.includes('turnMutationLabel'), 'the path-less mutation label must carry the nowrap class')
 const clientFiles = (await readdir(`${root}src/client`, { recursive: true }))
   .filter(file => /\.(?:ts|tsx)$/.test(file))
 const clientSource = (await Promise.all(clientFiles.map(file => readFile(`${root}src/client/${file}`, 'utf8')))).join('\n')
@@ -153,7 +159,7 @@ assert.equal(registrations.filter(entry => entry.options.name === 'conversation.
 assert.equal(registrations.filter(entry => entry.options.name === 'conversation.chat.turnTail').length, 1)
 
 const toolKeys = registrations.filter(entry => entry.options.name === 'tool.call.toolview').map(entry => entry.options.key)
-for (const key of ['novel_review_chapter', 'novel_status', 'novel_context_preview', 'novel_doc_write', 'novel_revision_apply', 'novel_tasks_list', 'novel_search', 'novel_asset_update', 'novel_outline_edit']) {
+for (const key of ['novel_review_chapter', 'novel_status', 'novel_context_preview', 'novel_doc', 'novel_revision', 'novel_task', 'novel_search', 'novel_assets', 'novel_outline_edit']) {
   assert.ok(toolKeys.includes(key), `${key} has a native tool card`)
 }
 assert.ok(toolKeys.length >= 30, 'common novel tools use family cards')
@@ -186,7 +192,7 @@ try {
   const failingSlots = {
     ...fakeClientCtx.slots,
     register(options) {
-      if (options.key === 'novel_doc_write') throw new Error('changed tool slot contract')
+      if (options.key === 'novel_doc') throw new Error('changed tool slot contract')
       if (options.name === 'tool.call.toolview') activeTools.add(options.key)
       return () => activeTools.delete(options.key)
     },
@@ -222,10 +228,14 @@ try {
     assert.equal(input.workspaceId, 'launch-workspace')
     return 'launch-session'
   }
+  // The panel prefers the stable id and falls back to the release identity;
+  // the release directory on disk is what the fallback must resolve against.
   fakeClientCtx.remote.agentPresets.select = async (sessionId, presetId) => {
     assert.equal(sessionId, 'launch-session')
-    const marker = JSON.parse(await readFile(join(presetHome, '.agent-presets', presetId, '.openwrite-managed.json')))
     const installedVersion = JSON.parse(await readFile(new URL('../../../package.json', import.meta.url))).version
+    const releaseId = `openwrite-${installedVersion.replace(/[^a-z0-9-]/g, '-')}`
+    const resolvedId = presetId === 'openwrite' ? releaseId : presetId
+    const marker = JSON.parse(await readFile(join(presetHome, '.agent-presets', resolvedId, '.openwrite-managed.json')))
     assert.equal(marker.version, installedVersion)
     calls.push(['preset', presetId])
     return { ok: true }

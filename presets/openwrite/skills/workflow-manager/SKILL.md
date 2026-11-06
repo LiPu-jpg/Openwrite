@@ -13,9 +13,9 @@ Language: follow the author's current conversation language for responses and he
 ## 作者可见阶段
 
 1. 上下文预检 — `novel_context_preview`
-2. 写章 — `novel_write_chapter` 或后台 `novel_task_create(type=chapter_write)` / `novel_multi_write`
-3. 评审 — `novel_review_chapter` 或 `novel_task_create(type=chapter_review)`
-4. 作者确认修订 — `novel_revisions_list` → apply / reject
+2. 写章 — `novel_write_chapter` 或后台 `novel_task(action="create"(type=chapter_write)` / `novel_multi_write`
+3. 评审 — `novel_review_chapter` 或 `novel_task(action="create"(type=chapter_review)`
+4. 作者确认修订 — `novel_revision(action="list"` → apply / reject
 5. 复评与交付 — 应用后复评；交付图为 writing → review → revision → application → rereview → closure
 
 ## 工具
@@ -24,10 +24,10 @@ Language: follow the author's current conversation language for responses and he
 |------|------|
 | `novel_status` | 全书阶段、缺口、待确认项 |
 | `novel_chapter_work` | 单章正文/评审 revision、目标、伏笔义务、最近修改 |
-| `novel_tasks_list` | 后台任务列表 |
-| `novel_task_get` | 轮询任务 phase 与 result |
-| `novel_task_create` | 提交 chapter_write / chapter_review / revision_from_review / research |
-| `novel_task_cancel` / `novel_task_retry` / `novel_task_confirm` | 取消、可恢复重试、确认继续 |
+| `novel_task(action="list"` | 后台任务列表 |
+| `novel_task(action="get"` | 轮询任务 phase 与 result |
+| `novel_task(action="create"` | 提交 chapter_write / chapter_review / revision_from_review / research |
+| `novel_task(action="cancel"` / `novel_task(action="retry"` / `novel_task(action="confirm"` | 取消、可恢复重试、确认继续 |
 | `novel_multi_write` | 按大纲连续写章 |
 | `novel_chapter_run_action` | Chapter Run V2 干预 |
 | `novel_write_chapter` | 同步写一章（长耗时；编排优先走任务） |
@@ -43,7 +43,7 @@ Language: follow the author's current conversation language for responses and he
 
 1. `novel_status`
 2. 需要章级细节时 `novel_chapter_work`（chapter_id）
-3. 进行中的后台工作 `novel_tasks_list`
+3. 进行中的后台工作 `novel_task(action="list"`
 
 向作者报告：当前章、正文是否存在、评审是否新鲜、任务 phase、伏笔到期/超期/待埋入计数。不要输出内部 JSON 当主界面。
 
@@ -51,15 +51,15 @@ Language: follow the author's current conversation language for responses and he
 
 1. `novel_outline_read` 确认建议章纲
 2. `novel_context_preview`
-3. `novel_task_create(type=chapter_write)` 或 `novel_write_chapter`
-4. `novel_task_get` 直到完成或需要确认
+3. `novel_task(action="create"(type=chapter_write)` 或 `novel_write_chapter`
+4. `novel_task(action="get"` 直到完成或需要确认
 
 ### 中断恢复
 
 会话中断后：
 
-1. `novel_tasks_list` 找 running / failed / awaiting_confirmation
-2. recoverable 失败用 `novel_task_retry`；需要作者拍板用 `novel_task_confirm`
+1. `novel_task(action="list"` 找 running / failed / awaiting_confirmation
+2. recoverable 失败用 `novel_task(action="retry"`；需要作者拍板用 `novel_task(action="confirm"`
 3. 不要对已有正文再次 `novel_write_chapter`（服务端会 409）；回炉走 `revision_from_review` → regenerate → apply → 复评
 
 ### 连写
@@ -80,4 +80,4 @@ Language: follow the author's current conversation language for responses and he
 
 - **novel-creator**：单章创作编排
 - **novel-reviewer**：评审与修订提案
-- **dog-delivery-query**：查询已物化交付图
+- **delivery-artifact-query**：查询已物化交付记录

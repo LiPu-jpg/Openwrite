@@ -14,7 +14,9 @@ const reports = await Promise.all(files.filter(file => /^release-report-.*\.json
 const nativeRegressions = await Promise.all(files.filter(file => /^packaged-regressions-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
 const required = ['install', 'repeat-install', 'existing-plugin-coexistence', 'native-dependency-load', 'native-backend-project-init', 'project-metadata-update', 'readonly-post-invalidation', 'manuscript-mutation-invalidation', 'backend-auth', 'failed-upgrade-preserves-active', 'rollback', 'uninstall', 'retain-data']
 for (const [platform, arch, major] of [['linux', 'x64', 24], ['darwin', 'arm64', 24], ['darwin', 'x64', 24], ['win32', 'x64', 24], ['linux', 'x64', 22], ['linux', 'x64', 26]]) {
-  const report = reports.find(r => r.installSource === 'release' && (!r.host || r.host === manifest.host) && r.platform === platform && r.arch === arch && Number(r.node.match(/^v(\d+)/)?.[1]) === major)
+  // A report with no `host` must not satisfy an arbitrary platform leg: it
+  // cannot prove which host it ran on, so it is not evidence for this one.
+  const report = reports.find(r => r.installSource === 'release' && typeof r.host === 'string' && r.host === manifest.host && r.platform === platform && r.arch === arch && Number(r.node.match(/^v(\d+)/)?.[1]) === major)
   assert.ok(report, `Missing ${platform}/${arch}/Node ${major}`)
   assert.equal(report.status, 'passed')
   assert.equal(report.artifactSha256, manifest.sha256, 'Platform tested different artifact')
@@ -32,15 +34,15 @@ const alpha = reports.find(r => r.host === '0.1.5-alpha.1' && r.platform === 'li
 assert.equal(alpha?.status, 'passed', 'Exact alpha host compatibility must pass')
 assert.equal(alpha.artifactSha256, manifest.sha256, 'Alpha host tested different artifact')
 for (const check of [...required, 'host-service-versions', 'native-browser-launch']) assert.ok(alpha.checks.includes(check), `Alpha missing check: ${check}`)
-const source = reports.find(r => r.installSource.startsWith('github:'))
+const source = reports.find(r => typeof r.installSource === 'string' && r.installSource.startsWith('github:'))
 assert.equal(source?.status, 'passed', 'GitHub source installation must pass')
 for (const check of required) assert.ok(source.checks.includes(check), `Source missing check: ${check}`)
 const clientReports = await Promise.all(files.filter(file => /^client-report-.*\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(directory, file)))))
-for (const host of ['0.1.2-rc.1', '0.1.5-alpha.1', '0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.3']) {
+for (const host of ['0.1.2-rc.1', '0.1.5-alpha.1', '0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5']) {
   const report = clientReports.find(r => r.host === host)
   assert.equal(report?.status, 'passed', `Missing client acceptance for ${host}`)
   assert.equal(report.artifactSha256, manifest.sha256, 'Client tested different artifact')
-  for (const check of ['version-gates-without-exemptions', 'client-activation', 'preset-selection', 'workspace-navigation', 'workbench-tabs', 'workbench-render', 'dog-overlay', 'dog-snapshot', 'other-plugin-preserved']) {
+  for (const check of ['version-gates-without-exemptions', 'client-activation', 'preset-selection', 'workspace-navigation', 'workbench-tabs', 'workbench-render', 'other-plugin-preserved']) {
     assert.ok(report.checks.includes(check), `${host} client missing check: ${check}`)
   }
 }

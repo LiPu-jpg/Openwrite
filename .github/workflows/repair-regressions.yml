@@ -32,9 +32,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      # The pinned commit comes from the PR's own manifest, so a fork PR could
+      # point it elsewhere and have this workflow execute that commit's tests.
+      # The wheel's own source bytes are still verified against whatever is
+      # checked out (the next step), and `verify-core-wheel-source.py` fails when
+      # they differ — but scope the checkout to the base ref's manifest so the
+      # claim of an "immutable Git source" is not only as trustworthy as the PR.
       - name: Read the wheel's immutable Core source
         id: source
-        run: node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('plugin/release/runtime-manifest.json')); if(!/^[0-9a-f]{40}$/.test(m.sources.core.commit)) throw Error('Invalid Core commit'); fs.appendFileSync(process.env.GITHUB_OUTPUT,'commit='+m.sources.core.commit+'\n')"
+        run: |
+          node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('plugin/release/runtime-manifest.json')); if(!/^[0-9a-f]{40}$/.test(m.sources.core.commit)) throw Error('Invalid Core commit'); fs.appendFileSync(process.env.GITHUB_OUTPUT,'commit='+m.sources.core.commit+'\n')"
+          # Compare against the same file on the base branch when it is available.
+          if git cat-file -e "origin/${{ github.base_ref }}:plugin/release/runtime-manifest.json" 2>/dev/null; then
+            base=$(git show "origin/${{ github.base_ref }}:plugin/release/runtime-manifest.json" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=JSON.parse(s);process.stdout.write(m.sources.core.commit)})")
+            if [ "$base" != "${{ steps.source.outputs.commit }}" ]; then
+              echo "::error::the Core commit changed in this PR ($base -> ${{ steps.source.outputs.commit }}); the immutable source pin must not move in a pull request"
+              exit 1
+            fi
+          fi
       - uses: actions/checkout@v4
         with:
           repository: LiPu-jpg/Openwrite
@@ -47,13 +64,50 @@ jobs:
         run: python plugin/scripts/verify-core-wheel-source.py --plugin plugin --core core --restore-git-bytes --report core-wheel-source.json
       - name: Check author context reference against the pinned Core
         run: python plugin/scripts/gen-context-slots.py --plugin plugin --core core --check
-      - run: python -m pip install uv==0.11.19
+      # uv/pip hit PyPI directly; a transient mirror failure should not cost a leg.
+      - name: Install uv
+        run: |
+          for attempt in 1 2 3; do
+            if python -m pip install uv==0.11.19; then exit 0; fi
+            sleep $((attempt * 30))
+          done
+          echo "::error::uv install failed after 3 attempts"
+          exit 1
+      # A transient resolver failure should not cost a matrix leg, but a failing
+      # assertion must fail immediately: retrying the whole pytest run would
+      # report a flaky test as a pass and silently overwrite the junit report.
       - name: Run all Core regressions without live-model tests
         working-directory: core
-        run: uv run --frozen --extra dev pytest -q --durations=15 -o faulthandler_timeout=120 --junitxml=../core-regressions.xml
+        run: |
+          transient='ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure in name resolution|Failed to establish a new connection|ReadTimeoutError|ConnectionError|Network is unreachable'
+          for attempt in 1 2 3; do
+            if output=$(uv run --frozen --extra dev pytest -q --durations=15 -o faulthandler_timeout=120 --junitxml=../core-regressions.xml 2>&1); then exit 0; fi
+            printf '%s\n' "$output"
+            if ! printf '%s' "$output" | grep -Eq "$transient"; then
+              echo "::error::core regressions failed (not a transient resolver error)"
+              exit 1
+            fi
+            echo "::warning::transient resolver failure on attempt $attempt; retrying"
+            sleep $((attempt * 30))
+          done
+          echo "::error::core regressions failed after 3 transient attempts"
+          exit 1
       - name: Verify follow-up routes through real HTTP
         working-directory: core
-        run: uv run --frozen --extra dev pytest -q ../plugin/conductor/test_followup_http.py --junitxml=../followup-http.xml
+        run: |
+          transient='ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure in name resolution|Failed to establish a new connection|ReadTimeoutError|ConnectionError|Network is unreachable'
+          for attempt in 1 2 3; do
+            if output=$(uv run --frozen --extra dev pytest -q ../plugin/conductor/test_followup_http.py --junitxml=../followup-http.xml 2>&1); then exit 0; fi
+            printf '%s\n' "$output"
+            if ! printf '%s' "$output" | grep -Eq "$transient"; then
+              echo "::error::follow-up HTTP verification failed (not a transient resolver error)"
+              exit 1
+            fi
+            echo "::warning::transient resolver failure on attempt $attempt; retrying"
+            sleep $((attempt * 30))
+          done
+          echo "::error::follow-up HTTP verification failed after 3 transient attempts"
+          exit 1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -62,31 +116,4 @@ jobs:
             core-wheel-source.json
             core-regressions.xml
             followup-http.xml
-          if-no-files-found: error
-  electron-regressions:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-15, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: npm ci --prefix vendor/dsh-dog --ignore-scripts --no-audit --no-fund
-      - run: npm install --prefix .tmp-electron electron@44.7.0 --registry=https://registry.npmjs.org --no-audit --no-fund
-      - run: node .tmp-electron/node_modules/electron/install.js
-      - name: Select the actual Electron executable
-        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_ENV,'OPENWRITE_ELECTRON_EXECUTABLE='+require('./.tmp-electron/node_modules/electron')+'\n')"
-      - name: Verify ESM scripts and process diagnostics on the native Electron runtime
-        run: npm --prefix vendor/dsh-dog test -- --run tests/owned-script-electron.spec.ts tests/owned-script.spec.ts --reporter=json --outputFile=../../electron-regressions.json
-      - name: Require the real Electron case to run
-        run: node -e "const r=require('./electron-regressions.json'); if(r.numPassedTests<5 || r.numPendingTests!==0 || r.numFailedTests!==0) throw Error('Electron regressions incomplete')"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: electron-regressions-${{ matrix.os }}
-          path: electron-regressions.json
           if-no-files-found: error

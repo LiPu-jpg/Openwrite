@@ -1,8 +1,7 @@
 # Third-party components
 
 OpenWrite is Apache-2.0. The separately maintained Studio panel retains its MIT
-license. DoG is based on Fun10165/dsh-dog v1.2.0, BSD-3-Clause; its full license
-and integration changes are in vendor/dsh-dog/LICENSE and UPSTREAM.md.
+license.
 
 The editor ships Vditor and its auxiliary files with the upstream license in
 packages/studio-panel/vendor/vditor/LICENSE. OpenWrite preset skills retain
@@ -21,7 +20,9 @@ they are not inlined into the plugin's browser code.
 The release includes an OpenWrite-built cryptography 50.0.1 wheel for macOS
 x86_64 because upstream discontinued Intel Mac wheels. It is built from the
 SHA-256 pinned upstream source with statically linked OpenSSL 3.6.3. The wheel
-retains upstream licenses; OpenSSL's full license is in release/wheels/licenses.
+retains upstream licenses; OpenSSL's full license is in
+release/wheels/licenses/OPENSSL-3.6.3-LICENSE.txt (Apache License 2.0,
+reproduced verbatim from the wheel with its SHA-256 recorded in that file).
 Source hash, toolchain, linkage inspection and the native CI build URL are in
 release/wheels/provenance.json. No cryptography source code was modified.
 

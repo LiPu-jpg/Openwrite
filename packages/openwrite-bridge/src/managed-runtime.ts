@@ -42,6 +42,28 @@ export interface RuntimeOptions {
   delay?: typeof delay
   restartLimit?: number
   backoffMs?: number[]
+  /**
+   * The host's OpenAI-compatible relay, handed to Core over the stdio
+   * handshake. Core needs it to call the models dsh itself can reach; the
+   * relay address is ephemeral, so it is resolved per start, never cached.
+   */
+  hostLlm?: () => Promise<HostLlmHandshake | undefined> | HostLlmHandshake | undefined
+  /** The host's search/fetch relay, handed to Core over the same handshake. */
+  hostWeb?: () => Promise<HostWebHandshake | undefined> | HostWebHandshake | undefined
+}
+
+/** The relay coordinates Core receives in its private startup handshake. */
+export interface HostLlmHandshake {
+  /** OpenAI-compatible base URL of the relay. */
+  url: string
+  /** Machine token the relay requires as a bearer credential. */
+  token: string
+}
+
+/** The host's web search/fetch relay coordinates. */
+export interface HostWebHandshake {
+  url: string
+  token: string
 }
 
 export const DEFAULT_RESTART_LIMIT = 5
@@ -49,6 +71,8 @@ export const DEFAULT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000]
 
 /** Budget for the per-request liveness probe of a previously-ready backend. */
 const HEALTH_PROBE_TIMEOUT_MS = 1_500
+/** Second, longer budget for an ambiguous probe before calling it `unknown`. */
+const HEALTH_PROBE_RETRY_MS = 8_000
 /** A download with no progress for this long is cut and retried on the next source. */
 const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000
 /** The backend stderr log on disk keeps only the newest chunk. */
@@ -195,10 +219,14 @@ export class ManagedRuntime {
   private readonly backoffMs: number[]
   private readonly pythonPath?: string
   private readonly pythonModulePaths: string[]
+  private readonly hostLlm?: RuntimeOptions['hostLlm']
+  private readonly hostWeb?: RuntimeOptions['hostWeb']
 
   constructor(readonly root: string, readonly artifacts: string, options: RuntimeOptions = {}) {
     this.pythonPath = options.pythonPath?.trim() || process.env['OPENWRITE_PYTHON']?.trim() || undefined
     this.pythonModulePaths = [...(options.pythonModulePaths ?? [])]
+    this.hostLlm = options.hostLlm
+    this.hostWeb = options.hostWeb
     this.spawnFn = options.spawn ?? spawn
     this.wait = options.delay ?? delay
     this.restartLimit = options.restartLimit ?? DEFAULT_RESTART_LIMIT
@@ -254,8 +282,20 @@ export class ManagedRuntime {
    * forcefully and pushed through the normal recovery path.
    */
   private async verifyConnection(connection: BackendConnection): Promise<BackendConnection> {
-    if (await this.probeHealth(connection)) {
+    const liveness = await this.probeLiveness(connection)
+    // Only a *confirmed* dead backend justifies tearing it down. A probe that
+    // merely timed out is ambiguous — a backend busy running chapter_write or
+    // review answers /api/health late — and killing it destroys exactly the
+    // in-flight work this recovery path exists to protect.
+    if (liveness === 'alive') {
       if (this.closed) throw new Error('OpenWrite was removed')
+      const current = this.connection
+      if (current) return current
+      return this.queueRestart()
+    }
+    if (liveness === 'unknown') {
+      // Keep serving the cached connection and let the real request decide; a
+      // slow health answer is not a reason to invalidate a working backend.
       const current = this.connection
       if (current) return current
       return this.queueRestart()
@@ -271,19 +311,61 @@ export class ManagedRuntime {
     return this.queueRestart()
   }
 
-  /** Short-timeout liveness probe; false covers exit, refusal, hang, and auth drift. */
-  private async probeHealth(connection: BackendConnection): Promise<boolean> {
-    const child = this.child
-    if (!child || child.exitCode !== null || child.signalCode !== null) return false
+  /**
+   * The host relay coordinates, if the host offers one.
+   *
+   * A relay that cannot be reached is not a startup failure: Core still runs,
+   * it simply has no host models to offer. The failure is silent on purpose —
+   * the relay's own diagnostics belong to the host, not to the backend boot.
+   */
+  private async resolveHostLlm(): Promise<HostLlmHandshake | undefined> {
+    if (this.hostLlm === undefined) return undefined
     try {
-      const response = await fetch(connection.baseUrl + '/api/health', {
-        headers: { Authorization: `Bearer ${connection.token}` },
-        signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
-      })
-      return response.ok
-    } catch {
-      return false
+      const resolved = await this.hostLlm()
+      if (resolved === undefined || resolved === null) return undefined
+      if (typeof resolved.url !== 'string' || resolved.url === '') return undefined
+      if (typeof resolved.token !== 'string' || resolved.token === '') return undefined
+      return { url: resolved.url, token: resolved.token }
+    } catch { return undefined }
+  }
+  private async resolveHostWeb(): Promise<HostWebHandshake | undefined> {
+    if (this.hostWeb === undefined) return undefined
+    try {
+      const resolved = await this.hostWeb()
+      if (resolved === undefined) return undefined
+      return { url: resolved.url, token: resolved.token }
+    } catch { return undefined }
+  }
+
+
+  /**
+   * Liveness with three outcomes. `dead` is only returned on positive evidence —
+   * the child exited, or the connection was refused, or health answered
+   * non-ok (auth drift). A probe that timed out returns `unknown`, because a
+   * busy backend is indistinguishable from a hung one at a 1.5 s deadline and
+   * killing the former destroys in-flight work.
+   */
+  private async probeLiveness(connection: BackendConnection): Promise<'alive' | 'unknown' | 'dead'> {
+    const child = this.child
+    if (!child || child.exitCode !== null || child.signalCode !== null) return 'dead'
+    for (const budget of [HEALTH_PROBE_TIMEOUT_MS, HEALTH_PROBE_RETRY_MS]) {
+      try {
+        const response = await fetch(connection.baseUrl + '/api/health', {
+          headers: { Authorization: `Bearer ${connection.token}` },
+          signal: AbortSignal.timeout(budget),
+        })
+        return response.ok ? 'alive' : 'dead'
+      } catch (error: unknown) {
+        // A refusal or a dead socket is positive evidence; anything else (the
+        // timeout we just imposed, DNS, reset) is not.
+        const code = (error as { code?: string; cause?: { code?: string } }).code
+          ?? (error as { cause?: { code?: string } }).cause?.code
+        if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'dead'
+        if (error instanceof Error && error.name === 'TimeoutError') continue
+        return 'dead'
+      }
     }
+    return 'unknown'
   }
   async cancel(): Promise<void> {
     this.cancelEpoch += 1
@@ -679,7 +761,14 @@ export class ManagedRuntime {
       signal.addEventListener('abort', abort, { once: true })
       let port: number
       try {
-        child.stdin!.write(JSON.stringify({ token, state_dir: join(this.root, 'state') }) + '\n')
+        const handshake: Record<string, unknown> = { token, state_dir: join(this.root, 'state') }
+        // The relay address is ephemeral, so it is resolved per start and
+        // never cached: a stale URL would point Core at a dead port.
+        const hostLlm = await this.resolveHostLlm()
+        if (hostLlm !== undefined) handshake['host_llm'] = hostLlm
+        const hostWeb = await this.resolveHostWeb()
+        if (hostWeb !== undefined) handshake['host_web'] = hostWeb
+        child.stdin!.write(JSON.stringify(handshake) + '\n')
         port = await ready
       } finally { signal.removeEventListener('abort', abort) }
       signal.throwIfAborted()

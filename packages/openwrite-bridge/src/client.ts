@@ -57,6 +57,9 @@ export interface WorkspaceContext {
 }
 
 /** A normalized Studio failure: HTTP status plus the server's machine-readable code. */
+/** Hard ceiling for one download (export / project archive). */
+const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
+
 export class StudioError extends Error {
   readonly status: number
   readonly code: string
@@ -232,7 +235,42 @@ export class StudioClient {
       // Error downloads are still JSON payloads.
       await this.readJson(response)
     }
-    const content = new Uint8Array(await response.arrayBuffer())
+    // Bound the buffer: an export or project archive is read fully into memory,
+    // so an unbounded body is an OOM vector against the host process. Reject on
+    // a declared oversize, and on a stream that exceeds the cap mid-read.
+    const declared = Number(response.headers.get('content-length') ?? '')
+    if (Number.isFinite(declared) && declared > MAX_DOWNLOAD_BYTES) {
+      await response.body?.cancel()
+      throw new StudioError(`Studio download is too large (${declared} bytes)`, 502, 'DOWNLOAD_TOO_LARGE', { limit: MAX_DOWNLOAD_BYTES })
+    }
+    const reader = response.body?.getReader()
+    if (reader === undefined) {
+      const content = new Uint8Array(await response.arrayBuffer())
+      if (content.byteLength > MAX_DOWNLOAD_BYTES) {
+        throw new StudioError(`Studio download is too large (${content.byteLength} bytes)`, 502, 'DOWNLOAD_TOO_LARGE', { limit: MAX_DOWNLOAD_BYTES })
+      }
+      return {
+        filename: parseDispositionFilename(response.headers.get('content-disposition')) ?? 'export.bin',
+        contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+        content,
+      }
+    }
+    const chunks: Uint8Array[] = []
+    let total = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done !== undefined && done) break
+      if (value === undefined) continue
+      total += value.byteLength
+      if (total > MAX_DOWNLOAD_BYTES) {
+        await reader.cancel().catch(() => {})
+        throw new StudioError(`Studio download exceeded ${MAX_DOWNLOAD_BYTES} bytes`, 502, 'DOWNLOAD_TOO_LARGE', { limit: MAX_DOWNLOAD_BYTES })
+      }
+      chunks.push(value)
+    }
+    const content = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) { content.set(chunk, offset); offset += chunk.byteLength }
     return {
       filename: parseDispositionFilename(response.headers.get('content-disposition')) ?? 'export.bin',
       contentType: response.headers.get('content-type') ?? 'application/octet-stream',
@@ -242,16 +280,31 @@ export class StudioClient {
 
   /** One fetch honoring both the caller's abort signal and the configured timeout. */
   private async request(url: URL, init: RequestInit, signal: AbortSignal | undefined): Promise<Response> {
+    // Arm the deadline only once the connection is known. The runtime bootstrap
+    // (`connect()`) is deliberately uncapped — a 23 MB archive over a slow link
+    // needs minutes — so a timeout started before it turns every cold-start
+    // first call into a spurious network error carrying a misleading "the
+    // server may have accepted the request" hint.
+    const connection = await this.connect?.()
     const signals = [AbortSignal.timeout(this.timeoutMs)]
     if (signal !== undefined) signals.push(signal)
     try {
-      const connection = await this.connect?.()
       const target = connection ? new URL(url.pathname + url.search, connection.baseUrl) : url
       const headers = connection?.token ? { ...(init.headers as Record<string, string>), Authorization: `Bearer ${connection.token}` } : init.headers
       const response = await fetch(target, { ...init, headers, signal: AbortSignal.any(signals) })
       const actual = response.headers.get('X-OpenWrite-Project-Path')
       if (response.ok && actual && this.context?.workspaceRoot) {
-        const expected = realpathSync(this.context.workspaceRoot)
+        let expected: string
+        try {
+          expected = realpathSync(this.context.workspaceRoot)
+        } catch {
+          // The root was deleted or moved mid-session. Letting ENOENT reach the
+          // transport handler would report it as NETWORK_ERROR and write a
+          // diagnostic blaming the network.
+          await response.body?.cancel()
+          throw new StudioError('The requested workspace root no longer exists', 400, 'WORKSPACE_ROOT_INVALID',
+            { requested_path: this.context.workspaceRoot })
+        }
         const received = decodeURIComponent(actual)
         if (!workspaceRootsEqual(received, expected)) {
           await response.body?.cancel()
@@ -264,21 +317,32 @@ export class StudioClient {
       if (error instanceof UnsupportedRuntimePlatformError) {
         throw new StudioError(error.message, error.status, error.code, { platform: error.platform })
       }
+      // The caller's own abort is a cancellation, not a failure; it must not be
+      // rewritten into a StudioError that looks like a transport problem, and it
+      // must not race the client's own timeout for the same outcome.
+      if (signal?.aborted) throw error
+      // Distinguish the deadline we imposed from "the backend is unreachable".
+      // Both are ambiguous about whether the server applied a write, but only
+      // the timeout carries that meaning, and collapsing them makes an agent
+      // retry a write that may already have landed.
+      const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
       if (this.context?.workspaceRoot) {
         try {
           const root = join(this.context.workspaceRoot, '.openwrite', 'transport-errors')
           await mkdir(root, { recursive: true })
           await writeFile(join(root, `${randomUUID()}.json`), JSON.stringify({
-            source: 'transport', code: signal?.aborted ? 'REQUEST_ABORTED' : 'NETWORK_ERROR',
+            source: 'transport', code: timedOut ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR',
             created_at: new Date().toISOString(), path: url.pathname,
             tool_name: this.context.toolName ?? '', tool_call_id: this.context.toolCallId ?? '',
           }))
         } catch { /* A diagnostic failure must not hide the transport failure. */ }
       }
-      if (signal?.aborted) throw error
       const cause = error instanceof Error ? error.cause : undefined
       const detail = cause instanceof Error ? ` (${cause.message})` : cause === undefined ? '' : ` (${String(cause)})`
-      throw new StudioError(`Studio request failed: ${error instanceof Error ? error.message : String(error)}${detail}`, 0, 'NETWORK_ERROR')
+      throw new StudioError(
+        `Studio request failed: ${error instanceof Error ? error.message : String(error)}${detail}`,
+        0, timedOut ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR',
+      )
     }
   }
 
@@ -291,7 +355,14 @@ export class StudioClient {
     let parsed: unknown
     try {
       parsed = await response.json()
-    } catch {
+    } catch (error: unknown) {
+      // The abort signal applies to the body stream too, so a mid-body abort or
+      // a truncated body would otherwise surface as INVALID_RESPONSE with the
+      // original success status — an error code on a 2xx, which defeats any
+      // caller that keys off `status`.
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+        throw new StudioError(`Studio response body was not fully received: ${error.message}`, 0, 'REQUEST_TIMEOUT')
+      }
       throw new StudioError(`Studio returned HTTP ${response.status} with a non-JSON body`, response.status, 'INVALID_RESPONSE')
     }
     const body = asJson(parsed)
@@ -300,7 +371,16 @@ export class StudioClient {
       if (error !== undefined && error !== null && error !== false && error !== '') {
         const nested = typeof error === 'object' && !Array.isArray(error) ? error : {}
         const code = typeof body['code'] === 'string' ? body['code'] : typeof nested['code'] === 'string' ? nested['code'] : 'STUDIO_ERROR'
-        const message = typeof body['message'] === 'string' ? body['message'] : typeof error === 'string' ? error : typeof nested['message'] === 'string' ? nested['message'] : JSON.stringify(error)
+        // Core sends the generic "Request failed (CODE, HTTP n)" envelope in
+        // `message` and the actionable reason in `error`. Prefer the message
+        // only when it carries real detail; otherwise surface `error`.
+        const envelope = typeof body['message'] === 'string' ? body['message'].trim() : ''
+        const genericEnvelope = envelope !== '' && /^Request failed \([^)]*\)$/.test(envelope)
+        const errorText = typeof error === 'string' && error !== '' ? error : undefined
+        const nestedMessage = typeof nested['message'] === 'string' && nested['message'] !== '' ? nested['message'] : undefined
+        const message = envelope !== '' && !genericEnvelope
+          ? envelope
+          : errorText ?? nestedMessage ?? (envelope !== '' ? envelope : JSON.stringify(error))
         const details: JsonValue = body['details'] ?? nested['details'] ?? null
         const failure = new StudioError(message, response.status, code, details)
         failure.requestId = typeof body['request_id'] === 'string' ? body['request_id'] : null

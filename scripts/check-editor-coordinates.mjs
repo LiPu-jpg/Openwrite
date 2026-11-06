@@ -19,5 +19,17 @@ if (coreIndex >= 0) {
   const manifest = JSON.parse(readFileSync(join(root, 'release/runtime-manifest.json'), 'utf8'))
   const wheel = unzipSync(readFileSync(join(root, 'release', manifest.wheel.file)))
   if (!wheel[name] || Buffer.from(wheel[name]).toString('utf8') !== expected) throw Error('Bundled editor coordinate module differs from its TypeScript source')
+  // The wheel copy is not what the browser runs. The panel bundles the same
+  // source into lib/client.js, so the claim printed below used to rest on the
+  // wheel alone: if src/client/selection-coordinates.ts ever stopped being
+  // reachable from the panel entry, the module would go dead, the wheel copy
+  // would stay in sync, and the panel would execute different code - all while
+  // this gate passed. Assert the built panel carries the same functions.
+  const built = readFileSync(join(root, 'packages/studio-panel/lib/client.js'), 'utf8')
+  for (const symbol of ['normalize', 'boundaries', 'indexOfBoundary']) {
+    if (!built.includes(symbol)) {
+      throw Error('Built panel does not contain the editor coordinate ' + symbol + '(); the TypeScript source may be unreachable from the panel entry')
+    }
+  }
   console.log('Native panel and Core editor coordinate implementations match')
 }

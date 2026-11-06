@@ -10,6 +10,7 @@ export type StudioPanelKey =
   | 'serial.title'
   | 'serial.hint'
   | 'serial.saved'
+  | 'serial.conflictReload'
   | 'serial.audit'
   | 'serial.scope'
   | 'serial.all'
@@ -88,7 +89,6 @@ export type StudioPanelKey =
   | 'view.assets'
   | 'view.tasks'
   | 'view.benchmark'
-  | 'view.models'
   | 'view.graph'
   | 'view.research'
   | 'view.search'
@@ -402,12 +402,12 @@ export type StudioPanelKey =
   | 'turn.applied'
   | 'turn.retried'
   | 'turn.undone'
+  | 'turn.stalePreview'
   | 'resolving'
   | 'loading'
   | 'unreachable'
   | 'retry'
   | 'refresh'
-  | 'openExternal'
   | 'outline.empty'
   | 'outline.drafted'
   | 'outline.planned'
@@ -419,6 +419,24 @@ export type StudioPanelKey =
   | 'outline.collapseAll'
   | 'outline.del'
   | 'outline.confirmDelete'
+  | 'outline.plan.conflict'
+  | 'outline.plan.confirmDelete'
+  | 'outline.plan.confirmApply'
+  | 'outline.plan.saved'
+  | 'outline.plan.deleted'
+  | 'outline.plan.merged'
+  | 'outline.plan.new'
+  | 'outline.plan.edit'
+  | 'outline.plan.apply'
+  | 'outline.plan.delete'
+  | 'outline.plan.editing'
+  | 'outline.plan.attach'
+  | 'outline.plan.attachNone'
+  | 'outline.plan.rolling'
+  | 'outline.plan.direction'
+  | 'outline.plan.cancel'
+  | 'outline.plan.placeholder'
+  | 'outline.plan.stage'
   | 'outline.newTitlePlaceholder'
   | 'outline.opConflict'
   | 'outline.opFailed'
@@ -648,6 +666,22 @@ export type StudioPanelKey =
   | 'research.launch.submitted'
   | 'research.launch.failed'
   | 'research.launch.hint'
+  | 'research.settings'
+  | 'research.settings.provider'
+  | 'research.settings.apiKey'
+  | 'research.settings.remember'
+  | 'research.settings.save'
+  | 'research.settings.saving'
+  | 'research.settings.saved'
+  | 'research.settings.failed'
+  | 'research.settings.dshHint'
+  | 'research.settings.unavailable'
+  | 'research.settings.notConfigured'
+  | 'research.settings.ready'
+  | 'research.settings.noKeyRequired'
+  | 'research.settings.apiKeyRequired'
+  | 'research.settings.globalHint'
+  | 'research.settings.dshUnavailable'
   | 'tasks.result.toggle'
   | 'tasks.result.score'
   | 'tasks.result.issues'
@@ -738,6 +772,9 @@ export type StudioPanelKey =
   | 'assets.field.role'
   | 'assets.edit.liveFailed'
   | 'assets.selectHint'
+  | 'assets.emptyTitle'
+  | 'assets.emptyHint'
+  | 'assets.emptyAgent'
   | 'assets.create.open'
   | 'assets.create.submit'
   | 'assets.create.idHint'
@@ -779,6 +816,11 @@ export type StudioPanelKey =
   | 'graph.relationships'
   | 'graph.nodes'
   | 'graph.connections'
+  | 'models.embeddingNew'
+  | 'models.embeddingDeleteConfirm'
+  | 'models.chatTab'
+  | 'models.embeddingTab'
+  | 'creation.marker.defaultState'
   | 'graph.relayout'
   | 'graph.weight'
   | 'graph.target'
@@ -960,6 +1002,15 @@ export type StudioPanelKey =
   | 'benchmark.sourcePresent'
   | 'benchmark.sourceMissing'
   | 'benchmark.responseIdentity'
+  | 'benchmark.callBudget'
+  | 'benchmark.cancelNote'
+  | 'benchmark.cancelRun'
+  | 'benchmark.cancelling'
+  | 'benchmark.cancellingEllipsis'
+  | 'benchmark.cancellingInflight'
+  | 'benchmark.outputCap'
+  | 'benchmark.selectModelFirst'
+  | 'benchmark.unconfigured'
   | 'models.title'
   | 'models.list'
   | 'models.editor'
@@ -1017,13 +1068,22 @@ export type StudioPanelKey =
   | 'models.chooseFallback'
   | 'models.routes'
   | 'models.routesSave'
+  | 'models.routeChatSplit'
+  | 'models.hostModels'
+  | 'models.hostModelsUnavailable'
+  | 'models.hostModelsEmpty'
+  | 'models.hostUse'
+  | 'models.hostProfileCreated'
+  | 'models.hostProfileHint'
   | 'models.saved'
+  | 'models.savePending'
   | 'models.deleted'
   | 'models.chatOk'
   | 'models.embeddingOk'
   | 'models.configured'
   | 'models.missing'
   | 'models.routesSaved'
+  | 'models.staleHostHint'
   | 'models.group.basic'
   | 'models.group.connection'
   | 'models.group.generation'
@@ -1049,8 +1109,7 @@ export type StudioPanelKey =
   | 'models.embeddingMissing'
   | 'models.active'
   | 'models.inactive'
-  | 'models.route.goethe'
-  | 'models.route.dante'
+  | 'models.route.chat'
   | 'models.route.chapter_write'
   | 'models.route.review'
   | 'models.route.source_extract'
@@ -1160,6 +1219,40 @@ export type StudioPanelKey =
   | 'review.status.stale'
   | 'review.status.unknown'
   | 'review.rawTitle'
+  | 'settings.section.label'
+  | 'settings.section.intro'
+  | 'settings.section.runtime'
+  | 'settings.section.backend'
+  | 'settings.section.hostModel'
+  | 'settings.section.unavailable'
+  | 'settings.section.prepare'
+  | 'settings.section.retry'
+  | 'settings.section.working'
+  | 'settings.section.cancel'
+  | 'settings.section.backendManaged'
+  | 'settings.section.backendExternal'
+  | 'settings.section.backendDown'
+  | 'settings.section.hostModelNone'
+  | 'settings.section.hostModelHint'
+  | 'settings.section.hostModels'
+  | 'settings.section.hostModelsUnavailable'
+  | 'settings.section.hostModelsEmpty'
+  | 'settings.section.hostModelsHint'
+  | 'settings.section.diagnostics'
+  | 'settings.section.diagnosticsHint'
+  | 'settings.section.phaseLabel'
+  | 'settings.tab.environment'
+  | 'settings.tab.models'
+  | 'settings.tab.search'
+  | 'settings.tab.host'
+  | 'settings.tab.modelsHint'
+  | 'settings.phase.idle'
+  | 'settings.phase.busy'
+  | 'settings.phase.ready'
+  | 'settings.phase.error'
+  | 'settings.phase.cancelled'
+  | 'settings.phase.stopped'
+  | 'settings.phase.uninstalled'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -1175,6 +1268,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'serial.title': "连载体检",
   'serial.hint': "查看可数事实，维护写作资产与漂移记录。",
   'serial.saved': "已保存",
+  'serial.conflictReload': '内容已在别处变化，已重新拉取最新版本，请重试。',
   'serial.audit': "章组体检与章节承诺",
   'serial.scope': "章组",
   'serial.all': "全书",
@@ -1256,7 +1350,6 @@ export const zh: Record<StudioPanelKey, string> = {
   'view.assets': '资产',
   'view.tasks': '任务',
   'view.benchmark': '模型测试',
-  'view.models': '模型',
   'view.graph': '图谱',
   'view.research': '研究',
   'view.search': '搜索',
@@ -1570,12 +1663,12 @@ export const zh: Record<StudioPanelKey, string> = {
   'turn.applied': '变更已按预览内容提交。',
   'turn.retried': '已根据当前源文件生成新预览。',
   'turn.undone': '变更已安全撤销。',
+  'turn.stalePreview': '预览已过期或正文已变化。请刷新本轮摘要后重新生成预览。',
   resolving: '正在读取 Studio 配置…',
   loading: '正在载入…',
   unreachable: '无法连接 OpenWrite Studio。请确认 Studio 已启动（默认 http://127.0.0.1:4567）。',
   retry: '重试',
   refresh: '刷新',
-  openExternal: '在新标签页打开',
   'outline.empty': '大纲为空。在 Studio 中创建 src/outline.md 后刷新。',
   'outline.drafted': '已成稿',
   'outline.planned': '待写',
@@ -1591,6 +1684,24 @@ export const zh: Record<StudioPanelKey, string> = {
   'outline.opConflict': '大纲已在其他位置变化，已刷新结构，请重试操作。',
   'outline.opFailed': '操作失败',
   'outline.summaryEmpty': '（空）',
+  'outline.plan.conflict': '草案已在别处变化，已重新拉取；请重试。',
+  'outline.plan.confirmDelete': '删除草案「{label}」？（只删候选，不改大纲）',
+  'outline.plan.confirmApply': '把草案「{label}」并入正式大纲（只追加不冲突的章节）？\n\n会写入 src/outline.md。',
+  'outline.plan.saved': '草案已保存（{label}）',
+  'outline.plan.deleted': '已删除草案「{label}」',
+  'outline.plan.merged': '已并入',
+  'outline.plan.new': '＋新建草案',
+  'outline.plan.edit': '编辑草案',
+  'outline.plan.apply': '并入正式大纲',
+  'outline.plan.delete': '删除草案',
+  'outline.plan.editing': '正在编辑：',
+  'outline.plan.attach': '接预演',
+  'outline.plan.attachNone': '（不接 · 仅正式大纲）',
+  'outline.plan.rolling': '草案·',
+  'outline.plan.direction': '方向·',
+  'outline.plan.cancel': '取消',
+  'outline.plan.placeholder': '粘贴/编写 Markdown 大纲草案（# 篇 / ## 节 / ### 第N章 …）',
+  'outline.plan.stage': '保存草案（stage）',
   'tools.title': '工具箱',
   'tools.export': '导出',
   'tools.export.done': '已导出 {name}',
@@ -1816,6 +1927,22 @@ export const zh: Record<StudioPanelKey, string> = {
   'research.launch.submitted': '研究任务已提交，进度见「任务」tab。',
   'research.launch.failed': '提交失败',
   'research.launch.hint': '后台执行（DeepResearch），完成后报告出现在左侧列表。',
+  'research.settings': '搜索设置',
+  'research.settings.provider': '搜索提供方',
+  'research.settings.apiKey': 'API Key',
+  'research.settings.remember': '记住 API Key',
+  'research.settings.save': '保存搜索设置',
+  'research.settings.saving': '保存中…',
+  'research.settings.saved': '搜索设置已保存',
+  'research.settings.failed': '保存失败',
+  'research.settings.dshHint': '使用 DSH 的 web_search / web_fetch，无需 API Key。',
+  'research.settings.unavailable': '当前不可用',
+  'research.settings.notConfigured': '未配置',
+  'research.settings.ready': '已就绪',
+  'research.settings.noKeyRequired': '无需 Key',
+  'research.settings.apiKeyRequired': '需要 API Key',
+  'research.settings.globalHint': '这里的默认值用于新作品；单个作品可在「研究」页覆盖。',
+  'research.settings.dshUnavailable': 'DSH 搜索只在托管运行时可用；当前请选择其他提供方。',
   'tasks.result.toggle': '展开或收起评审问题',
   'tasks.result.score': '评分',
   'tasks.result.issues': '问题',
@@ -1903,6 +2030,9 @@ export const zh: Record<StudioPanelKey, string> = {
   'assets.field.role': '角色定位',
   'assets.edit.liveFailed': '实时编辑器加载失败，已回退到纯文本编辑。',
   'assets.selectHint': '选择左侧的条目查看或编辑。',
+  'assets.emptyTitle': '这里还没有内容',
+  'assets.emptyHint': '从左侧选择一个条目即可查看和编辑；这一区放的是当前分类下的全部条目。',
+  'assets.emptyAgent': '也可以让 agent 用 novel_asset_* 工具写入，然后点「刷新」。',
   'assets.create.open': '新建',
   'assets.create.submit': '创建',
   'assets.create.idHint': '字母或数字开头，可含 _ . -',
@@ -2173,13 +2303,22 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.chooseFallback': '选择回退档案',
   'models.routes': '操作路由',
   'models.routesSave': '保存路由',
+  'models.routeChatSplit': 'Goethe 与 Dante 原本指向不同档案，保存后统一为所选档案。',
+  'models.hostModels': '宿主模型',
+  'models.hostModelsUnavailable': '宿主模型通道未连接：重启宿主后即可使用 dsh 本体与其它插件提供的模型。',
+  'models.hostModelsEmpty': '宿主没有可用的模型。',
+  'models.hostUse': '使用',
+  'models.hostProfileCreated': '已添加宿主模型档案。',
+  'models.hostProfileHint': '这个档案由宿主模型目录提供：地址与凭据由宿主在调用时解析，无需填写密钥。',
   'models.saved': '模型档案已保存。',
+  'models.savePending': '保存进行中，请稍候再切换页面。',
   'models.deleted': '模型档案已删除。',
   'models.chatOk': '聊天连接测试成功。',
   'models.embeddingOk': 'Embedding 连接测试成功。',
   'models.configured': 'Chat 已配置',
   'models.missing': 'Chat 未配置',
   'models.routesSaved': '操作路由已保存。',
+  'models.staleHostHint': '宿主还在运行上一版 OpenWrite：模型域暂时通过作品上下文访问。重启宿主后就会走全局通道。',
   'models.group.basic': '基本信息',
   'models.group.connection': 'API 连接',
   'models.group.generation': '生成参数',
@@ -2205,8 +2344,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.embeddingMissing': 'Embedding 未配置',
   'models.active': '当前使用',
   'models.inactive': '未使用',
-  'models.route.goethe': 'Goethe 对话',
-  'models.route.dante': 'Dante 对话',
+  'models.route.chat': '对话',
   'models.route.chapter_write': '章节写作',
   'models.route.review': '章节评审',
   'models.route.source_extract': '素材抽取',
@@ -2220,6 +2358,11 @@ export const zh: Record<StudioPanelKey, string> = {
   'models.embedMissing': 'Embedding 未配置',
   'models.capability.chat': 'Chat',
   'models.capability.embedding': 'Embedding',
+  'models.embeddingNew': '新 Embedding 档案',
+  'models.embeddingDeleteConfirm': '删除这个 Embedding 档案？',
+  'models.chatTab': '对话',
+  'models.embeddingTab': '向量',
+  'creation.marker.defaultState': '综合状态',
   'benchmark.actualWords': '实际字数',
   'benchmark.finishReason': '终止原因',
   'benchmark.error': '错误',
@@ -2263,6 +2406,15 @@ export const zh: Record<StudioPanelKey, string> = {
   'benchmark.sourcePresent': '存在',
   'benchmark.sourceMissing': '缺失',
   'benchmark.responseIdentity': '实际响应模型',
+  'benchmark.callBudget': '评审数为上限；实际调用取决于候选完成情况。费用由服务商返回，未返回时标记为未知。',
+  'benchmark.cancelNote': '正在取消后续任务。已发送的请求仍可能产生费用；返回后会保存结果和实际用量。',
+  'benchmark.cancelRun': '取消测试',
+  'benchmark.cancelling': '取消中',
+  'benchmark.cancellingEllipsis': '取消中…',
+  'benchmark.cancellingInflight': '取消中：还有 {count} 个请求在途。以下为已保存的部分结果，费用尚未结算完整。',
+  'benchmark.outputCap': '每次请求的输出 token 上限',
+  'benchmark.selectModelFirst': '请先选择模型',
+  'benchmark.unconfigured': '未配置',
   'research.reports': '报告',
   'research.unavailable': '深度研究运行环境未就绪，请先在 Studio 中完成初始化。',
   'research.empty': '暂无研究报告。让 agent 发起一次深度研究后刷新。',
@@ -2325,15 +2477,68 @@ export const zh: Record<StudioPanelKey, string> = {
   'reference.chars': '字符',
   'reference.content.loading': '正在载入参考作品正文…',
   'reference.content.full': '全文',
+  'settings.section.label': 'OpenWrite',
+  'settings.section.intro': '写作环境、模型档案、宿主当前模型与联动插件。',
+  'settings.section.runtime': '写作环境',
+  'settings.section.backend': 'Studio 后端',
+  'settings.section.hostModel': '宿主当前模型',
+  'settings.section.unavailable': '暂时读不到这项状态。',
+  'settings.section.prepare': '准备写作环境',
+  'settings.section.retry': '重试',
+  'settings.section.working': '处理中…',
+  'settings.section.cancel': '取消准备',
+  'settings.section.backendManaged': '由 dsh 托管的写作环境。',
+  'settings.section.backendExternal': '连接到一个外部写作环境。',
+  'settings.section.backendDown': 'Studio 后端当前不可用。',
+  'settings.section.hostModelNone': '宿主还没有配置默认模型。',
+  'settings.section.hostModels': '宿主模型',
+  'settings.section.hostModelsUnavailable': '宿主模型通道未连接：重启宿主后即可使用 dsh 本体与其它插件提供的模型。',
+  'settings.section.hostModelsEmpty': '宿主没有可用的模型。',
+  'settings.section.hostModelsHint': '这些模型由宿主提供：dsh 本体的模型，以及其它插件注册到同一目录的模型。在「模型」页可以一键把它们加进模型库。',
+  'settings.section.hostModelHint': 'OpenWrite 目前使用自己的模型档案，在下面的「模型」里配置。',
+  'settings.section.diagnostics': '诊断',
+  'settings.section.diagnosticsHint': '环境准备在后台继续；关掉这个对话框不会中断它。',
+  'settings.section.phaseLabel': '环境状态',
+  'settings.tab.environment': '环境',
+  'settings.tab.models': '模型',
+  'settings.tab.search': '搜索',
+  'settings.tab.host': '宿主',
+  'settings.tab.modelsHint': '模型档案是全局的，对所有作品生效。',
+  'settings.phase.idle': '未准备',
+  'settings.phase.busy': '准备中',
+  'settings.phase.ready': '已就绪',
+  'settings.phase.error': '准备失败',
+  'settings.phase.cancelled': '已取消',
+  'settings.phase.stopped': '已停止',
+  'settings.phase.uninstalled': '已卸载',
 }
 
 /** English dictionary. */
 export const en: Record<StudioPanelKey, string> = {
   'serial.used': "Used in this chapter",
+  'outline.plan.conflict': 'The draft changed elsewhere and has been reloaded; please retry.',
+  'outline.plan.confirmDelete': 'Delete draft "{label}"? (removes the candidate only; the outline is unchanged)',
+  'outline.plan.confirmApply': 'Merge draft "{label}" into the outline (appends only non-conflicting chapters)?\n\nThis writes src/outline.md.',
+  'outline.plan.saved': 'Draft saved ({label})',
+  'outline.plan.deleted': 'Deleted draft "{label}"',
+  'outline.plan.merged': 'Merged',
+  'outline.plan.new': '+ New draft',
+  'outline.plan.edit': 'Edit draft',
+  'outline.plan.apply': 'Merge into outline',
+  'outline.plan.delete': 'Delete draft',
+  'outline.plan.editing': 'Editing: ',
+  'outline.plan.attach': 'Attach preview',
+  'outline.plan.attachNone': '(none - outline only)',
+  'outline.plan.rolling': 'draft - ',
+  'outline.plan.direction': 'direction - ',
+  'outline.plan.cancel': 'Cancel',
+  'outline.plan.placeholder': 'Paste or write the Markdown outline draft (# volume / ## section / ### chapter N ...)',
+  'outline.plan.stage': 'Save draft (stage)',
   'serial.recoverTransaction': "Recover interrupted reconciliation",
   'serial.title': "Serial writing",
   'serial.hint': "Inspect countable facts, writing assets and drift.",
   'serial.saved': "Saved",
+  'serial.conflictReload': 'The content changed elsewhere. The latest version has been reloaded; please retry.',
   'serial.audit': "Chapter groups and promises",
   'serial.scope': "Chapter group",
   'serial.all': "Whole book",
@@ -2415,7 +2620,6 @@ export const en: Record<StudioPanelKey, string> = {
   'view.assets': 'Assets',
   'view.tasks': 'Tasks',
   'view.benchmark': 'Model test',
-  'view.models': 'Models',
   'view.graph': 'Graph',
   'view.research': 'Research',
   'view.search': 'Search',
@@ -2729,12 +2933,12 @@ export const en: Record<StudioPanelKey, string> = {
   'turn.applied': 'The exact preview was committed.',
   'turn.retried': 'A new preview was built from the current source.',
   'turn.undone': 'The change was safely undone.',
+  'turn.stalePreview': 'The preview expired or the document changed. Refresh this turn summary and preview again.',
   resolving: 'Reading Studio configuration…',
   loading: 'Loading…',
   unreachable: 'OpenWrite Studio is unreachable. Make sure Studio is running (default http://127.0.0.1:4567).',
   retry: 'Retry',
   refresh: 'Refresh',
-  openExternal: 'Open in new tab',
   'outline.empty': 'The outline is empty. Create src/outline.md in Studio, then refresh.',
   'outline.drafted': 'Drafted',
   'outline.planned': 'Planned',
@@ -2975,6 +3179,22 @@ export const en: Record<StudioPanelKey, string> = {
   'research.launch.submitted': 'Research task submitted — track it in the Tasks tab.',
   'research.launch.failed': 'Submit failed',
   'research.launch.hint': 'Runs in the background (DeepResearch); the report lands in the list on the left when done.',
+  'research.settings': 'Search settings',
+  'research.settings.provider': 'Search provider',
+  'research.settings.apiKey': 'API key',
+  'research.settings.remember': 'Remember API key',
+  'research.settings.save': 'Save search settings',
+  'research.settings.saving': 'Saving…',
+  'research.settings.saved': 'Search settings saved',
+  'research.settings.failed': 'Save failed',
+  'research.settings.dshHint': 'Uses DSH web_search / web_fetch; no API key needed.',
+  'research.settings.unavailable': 'unavailable',
+  'research.settings.notConfigured': 'Not configured',
+  'research.settings.ready': 'Ready',
+  'research.settings.noKeyRequired': 'No key needed',
+  'research.settings.apiKeyRequired': 'API key required',
+  'research.settings.globalHint': 'These defaults apply to new works; a single work can override them in Research.',
+  'research.settings.dshUnavailable': 'DSH search is only available in the managed runtime; choose another provider for now.',
   'tasks.result.toggle': 'Expand or collapse review issues',
   'tasks.result.score': 'Score',
   'tasks.result.issues': 'Issues',
@@ -3062,6 +3282,9 @@ export const en: Record<StudioPanelKey, string> = {
   'assets.field.role': 'Role',
   'assets.edit.liveFailed': 'The live editor failed to load; fell back to plain text editing.',
   'assets.selectHint': 'Select an entry on the left to view or edit.',
+  'assets.emptyTitle': 'Nothing here yet',
+  'assets.emptyHint': 'Pick an entry on the left to view and edit it. This section holds everything filed under the current category.',
+  'assets.emptyAgent': 'You can also have the agent write entries with the novel_asset_* tools, then press Refresh.',
   'assets.create.open': 'New',
   'assets.create.submit': 'Create',
   'assets.create.idHint': 'Starts with a letter or digit; may contain _ . -',
@@ -3318,6 +3541,15 @@ export const en: Record<StudioPanelKey, string> = {
   'benchmark.sourcePresent': 'present',
   'benchmark.sourceMissing': 'missing',
   'benchmark.responseIdentity': 'Actual response model',
+  'benchmark.callBudget': 'The review count is the ceiling; actual calls depend on candidate completion. Cost comes from the provider and is marked unknown when absent.',
+  'benchmark.cancelNote': 'Cancelling the remaining tasks. Requests already sent may still incur cost; results and actual usage are saved on return.',
+  'benchmark.cancelRun': 'Cancel run',
+  'benchmark.cancelling': 'Cancelling',
+  'benchmark.cancellingEllipsis': 'Cancelling…',
+  'benchmark.cancellingInflight': 'Cancelling: {count} requests still in flight. Below are the saved partial results; cost is not fully settled.',
+  'benchmark.outputCap': 'Per-request output token ceiling',
+  'benchmark.selectModelFirst': 'Select a model first',
+  'benchmark.unconfigured': 'not configured',
   'models.title': 'Model profiles',
   'models.list': 'Profile list',
   'models.editor': 'Profile editor',
@@ -3375,13 +3607,22 @@ export const en: Record<StudioPanelKey, string> = {
   'models.chooseFallback': 'Choose fallback',
   'models.routes': 'Operation routes',
   'models.routesSave': 'Save routes',
+  'models.routeChatSplit': 'Goethe and Dante pointed at different profiles; saving unifies them on the selected one.',
+  'models.hostModels': 'Host models',
+  'models.hostModelsUnavailable': 'The host model channel is not connected: restart the host to use the models dsh itself and other plugins provide.',
+  'models.hostModelsEmpty': 'The host has no model available.',
+  'models.hostUse': 'Use',
+  'models.hostProfileCreated': 'The host model profile was added.',
+  'models.hostProfileHint': 'This profile comes from the host model directory: the address and the credential are resolved by the host at call time, so no key is needed.',
   'models.saved': 'Model profile saved.',
+  'models.savePending': 'A save is in progress; please wait before switching pages.',
   'models.deleted': 'Model profile deleted.',
   'models.chatOk': 'Chat connection succeeded.',
   'models.embeddingOk': 'Embedding connection succeeded.',
   'models.configured': 'Chat configured',
   'models.missing': 'Chat not configured',
   'models.routesSaved': 'Operation routes saved.',
+  'models.staleHostHint': 'The host is still running the previous OpenWrite: the model domain is reached through the project context for now. Restarting the host switches it to the global route.',
   'models.group.basic': 'Basic info',
   'models.group.connection': 'API connection',
   'models.group.generation': 'Generation parameters',
@@ -3407,8 +3648,7 @@ export const en: Record<StudioPanelKey, string> = {
   'models.embeddingMissing': 'Embedding not configured',
   'models.active': 'Active',
   'models.inactive': 'Inactive',
-  'models.route.goethe': 'Goethe chat',
-  'models.route.dante': 'Dante chat',
+  'models.route.chat': 'Chat',
   'models.route.chapter_write': 'Chapter writing',
   'models.route.review': 'Chapter review',
   'models.route.source_extract': 'Source extraction',
@@ -3422,6 +3662,11 @@ export const en: Record<StudioPanelKey, string> = {
   'models.embedMissing': 'Embedding not configured',
   'models.capability.chat': 'Chat',
   'models.capability.embedding': 'Embedding',
+  'models.embeddingNew': 'New Embedding profile',
+  'models.embeddingDeleteConfirm': 'Delete this Embedding profile?',
+  'models.chatTab': 'Chat',
+  'models.embeddingTab': 'Embedding',
+  'creation.marker.defaultState': 'Overall state',
   'research.reports': 'Reports',
   'research.unavailable': 'The deep-research runtime is not ready. Finish the setup in Studio first.',
   'research.empty': 'No research reports yet. Ask the agent to run a deep research, then refresh.',
@@ -3484,4 +3729,38 @@ export const en: Record<StudioPanelKey, string> = {
   'reference.chars': 'chars',
   'reference.content.loading': 'Loading reference text…',
   'reference.content.full': 'Full text',
+  'settings.section.label': 'OpenWrite',
+  'settings.section.intro': 'The writing environment, the model profile library, the host’s current model and the companion plugins.',
+  'settings.section.runtime': 'Writing environment',
+  'settings.section.backend': 'Studio backend',
+  'settings.section.hostModel': 'Host’s current model',
+  'settings.section.unavailable': 'This status could not be read just now.',
+  'settings.section.prepare': 'Prepare the writing environment',
+  'settings.section.retry': 'Retry',
+  'settings.section.working': 'Working…',
+  'settings.section.cancel': 'Cancel the preparation',
+  'settings.section.backendManaged': 'The writing environment is managed by dsh.',
+  'settings.section.backendExternal': 'Connected to an external writing environment.',
+  'settings.section.backendDown': 'The Studio backend is not available right now.',
+  'settings.section.hostModelNone': 'The host has no default model configured.',
+  'settings.section.hostModels': 'Host models',
+  'settings.section.hostModelsUnavailable': 'The host model channel is not connected: restart the host to use the models dsh itself and other plugins provide.',
+  'settings.section.hostModelsEmpty': 'The host has no model available.',
+  'settings.section.hostModelsHint': 'These models come from the host: dsh own models and the ones other plugins register into the same directory. The Models tab adds them to the model library with one click.',
+  'settings.section.hostModelHint': 'OpenWrite uses its own model profiles for now; configure them under “Model” below.',
+  'settings.section.diagnostics': 'Diagnostics',
+  'settings.section.diagnosticsHint': 'The environment keeps preparing in the background; closing this dialog does not interrupt it.',
+  'settings.section.phaseLabel': 'Environment state',
+  'settings.tab.environment': 'Environment',
+  'settings.tab.models': 'Model',
+  'settings.tab.search': 'Search',
+  'settings.tab.host': 'Host',
+  'settings.tab.modelsHint': 'Model profiles are global — they apply to every work.',
+  'settings.phase.idle': 'Not prepared',
+  'settings.phase.busy': 'Preparing',
+  'settings.phase.ready': 'Ready',
+  'settings.phase.error': 'Preparation failed',
+  'settings.phase.cancelled': 'Cancelled',
+  'settings.phase.stopped': 'Stopped',
+  'settings.phase.uninstalled': 'Uninstalled',
 }

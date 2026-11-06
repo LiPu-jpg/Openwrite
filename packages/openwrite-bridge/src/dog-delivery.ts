@@ -48,7 +48,7 @@ async function readJson(path: string): Promise<RecordValue | undefined> {
   return value
 }
 
-async function atomicWrite(path: string, value: unknown): Promise<void> {
+export async function atomicWrite(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}`)
   try {
@@ -342,6 +342,8 @@ export async function materializeChapterDelivery(
     root: {
       kind: 'composite', title: `${chapterId} 章节交付`, constraint: 'hard', target: `${relativeDir}/delivery.json`,
       completion: { op: 'all', items: Object.keys(stages).map(id => ({ op: 'ref', id })) },
+      // Inert contract metadata naming the verification stage kind (see the note
+      // in dog-review.ts): not resolved or executed by this plugin.
       verifier: { mode: 'programmatic', script: 'delivery-stage' },
     },
   }

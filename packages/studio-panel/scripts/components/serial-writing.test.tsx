@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { SerialWritingView } from '../../src/client/SerialWritingView.tsx'
+import { StudioApiError } from '../../src/client/api.ts'
 
 const audit = {
   chapters: [{ chapter_id: 'ch_001', promise: 'A -> B', function: ['推进'], payoff_of: [], word_budget: 1000, actual_words: 800, manuscript_status: 'current' }],
@@ -49,5 +50,26 @@ describe('serial-writing workbench', () => {
     await waitFor(() => expect(props.postStudioApi).toHaveBeenCalledWith('/outline/edit', {
       operation: 'set_meta', revision: 'outline-1', updates: [{ node_id: 'ch_001', metadata: { promise: 'A -> C' } }],
     }))
+  })
+
+  it('re-pulls the audit and explains a revision conflict instead of surfacing the raw server error', async () => {
+    // Every write here is revision-gated. Without a 409 branch the raw server
+    // message was shown and the stale expected_revision was kept, so retrying
+    // conflicted again with no way forward.
+    const props = api()
+    props.postStudioApi = vi.fn(async () => {
+      throw new StudioApiError('OUTLINE_REVISION_CONFLICT', 409, 'OUTLINE_REVISION_CONFLICT')
+    })
+    render(<SerialWritingView {...props} />)
+    const promise = await screen.findByDisplayValue('A -> B')
+    fireEvent.change(promise, { target: { value: 'A -> C' } })
+    fireEvent.click(screen.getByRole('button', { name: /serial.saveOutline/ }))
+    await waitFor(() => expect(props.postStudioApi).toHaveBeenCalled())
+    await waitFor(() => expect(props.fetchStudioApi).toHaveBeenCalledWith(
+      expect.stringContaining('/outline/audit'),
+    ))
+    expect((await screen.findByRole('alert')).textContent).toBe('serial.conflictReload')
+    // The stale edit must not be left looking saved.
+    expect(screen.queryByText('serial.saved')).toBeNull()
   })
 })

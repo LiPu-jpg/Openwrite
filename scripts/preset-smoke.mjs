@@ -12,8 +12,10 @@ const presetDir = new URL('presets/openwrite/', root)
 const composition = await readFile(new URL('agent.cordis.yml', presetDir), 'utf8')
 const hostCli = process.argv.find(arg => arg.startsWith('--host-cli='))?.slice('--host-cli='.length)
 const require = createRequire(hostCli ? resolve(hostCli) : new URL('package.json', root))
-let modern = false
-try { require.resolve('@deepseek-ai/dsh-agent-preset-registry'); modern = true } catch {}
+// `plugin.mjs` always registers the modern definition, so the gate must validate
+// that same one. Deriving `modern` from a package that is not installed made the
+// resolution sweep check a definition the plugin never registers.
+const modern = true
 const version = JSON.parse(await readFile(new URL('package.json', root), 'utf8')).version
 const rows = (await presetDefinition(version, modern)).plugins
 assert.ok(Array.isArray(rows) && rows.length > 10, 'unified preset must be a non-trivial entry list')
@@ -21,9 +23,18 @@ const flatten = entries => entries.flatMap(row => [row, ...(row.group && Array.i
 const allRows = flatten(rows)
 assert.equal(allRows.some(row => row?.name === '@dsh-novel/openwrite-bridge'), false,
   'openwrite-bridge belongs to the host profile and must not be mounted by the preset')
+// Host packages the modern definition names but this repo's node_modules does not
+// carry, because the checkout pins an older host. Listed explicitly so the sweep
+// still fails on any *other* unresolvable row — silently skipping them would
+// recreate the blind spot this loop exists to close.
+const expectedAbsent = new Set(['@deepseek-ai/dsh-workflow-ptc'])
+const unresolvable = []
 for (const row of allRows) {
-  if (row.name?.startsWith('@deepseek-ai/')) require.resolve(row.name)
+  if (!row.name?.startsWith('@deepseek-ai/')) continue
+  if (expectedAbsent.has(row.name)) continue
+  try { require.resolve(row.name) } catch { unresolvable.push(row.name) }
 }
+assert.deepEqual(unresolvable, [], `unresolvable host rows in the registered preset: ${unresolvable.join(', ')}`)
 
 // Validate against the actual host schema: alpha renamed persona.text to prefix.
 const persona = rows.find(row => row.name === '@deepseek-ai/dsh-persona')
@@ -73,14 +84,14 @@ const forbiddenLegacy = [
   'validate_truth',
 ]
 const authorEntries = [
-  { name: 'progress', phrase: '看进度', tools: ['novel_status', 'novel_chapter_work', 'novel_tasks_list'] },
+  { name: 'progress', phrase: '看进度', tools: ['novel_status', 'novel_chapter_work', 'novel_task'] },
   { name: 'write-next', phrase: '写下一章', tools: ['novel_outline_read', 'novel_context_preview', 'novel_write_chapter'] },
   { name: 'review-chapter', phrase: '审这一章', tools: ['novel_chapter_work', 'novel_review_chapter'] },
-  { name: 'revise-span', phrase: '改这段', tools: ['novel_revision_create_selection', 'novel_revision_apply'] },
+  { name: 'revise-span', phrase: '改这段', tools: ['novel_revision'] },
   { name: 'foreshadow', phrase: '查伏笔', tools: ['novel_chapter_work', 'novel_continuity'] },
-  { name: 'canon', phrase: '查设定', tools: ['novel_assets_list', 'novel_asset_read'] },
-  { name: 'learn', phrase: '写法记忆', tools: ['novel_source_action', 'novel_structured_change_plan', 'novel_assets_list'] },
-  { name: 'export-book', phrase: '导出', tools: ['novel_export_preflight', 'novel_export'] },
+  { name: 'canon', phrase: '查设定', tools: ['novel_assets'] },
+  { name: 'learn', phrase: '写法记忆', tools: ['novel_source_action', 'novel_change_plan', 'novel_assets'] },
+  { name: 'export-book', phrase: '导出', tools: ['novel_export'] },
 ]
 const authorNames = new Set(authorEntries.map(entry => entry.name))
 
@@ -125,6 +136,37 @@ for (const entry of authorEntries) {
 for (const name of Object.keys(skillSources)) {
   if (authorNames.has(name)) continue
   assert.equal(skillMeta[name]['user-invocable'], false, `${name} must stay off the slash menu`)
+}
+
+// Every shipped skill, including the ones no list enumerates. The hardcoded
+// `forbiddenLegacy` list is only as good as its last update; scanning all of
+// them keeps a renamed/removed skill from silently skipping every check.
+const enumerated = new Set([...writeReviewWorkflow, ...authorNames])
+for (const name of Object.keys(skillSources)) {
+  if (enumerated.has(name)) continue
+  assertNoLegacyCommands(name, skillSources[name])
+}
+
+// The DoG handoff graph is executed by an external plugin; a placeholder id or
+// a missing title makes dog_validate reject the whole graph only after the
+// author has already agreed to spend verifier calls.
+const dogSkill = skillSources['dog-delivery-verification']
+const dogGraphBlock = /```json\n([\s\S]*?)```/.exec(dogSkill)
+assert.ok(dogGraphBlock !== null, 'dog-delivery-verification must ship a JSON graph')
+const dogGraph = JSON.parse(dogGraphBlock[1])
+assert.equal(dogGraph.schemaVersion, '0.9')
+assert.match(dogGraph.id, /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)
+assert.ok(dogGraph.nodes?.[dogGraph.root])
+for (const [id, node] of Object.entries(dogGraph.nodes)) {
+  assert.ok(typeof node.title === 'string' && node.title.length > 0, `${id} must have a title`)
+  assert.ok(typeof node.target === 'string' && node.target.length > 0, `${id} must have a target`)
+  // dog_create captures from the session cwd; a bare "manuscript.md" would look
+  // in the workspace root instead of the handoff directory.
+  assert.match(node.target, /^\.openwrite\/dog-handoff\/[^/<>]+\//, `${id} target must be relative to the workspace root`)
+}
+for (const edge of dogGraph.contains ?? []) {
+  assert.ok(dogGraph.nodes[edge.parent], `contains parent ${edge.parent} exists`)
+  assert.ok(dogGraph.nodes[edge.child], `contains child ${edge.child} exists`)
 }
 
 assert.equal(skillSources['export-book'].includes('/export-book'), true)

@@ -58,7 +58,14 @@ function detailFromMutation(value: unknown): ReturnType<typeof parseManuscriptIm
   return root['operation'] === undefined ? null : parseManuscriptImportDetail(value)
 }
 
-const ACTIVE_IMPORT_STATUSES = new Set(['running', 'published'])
+/**
+ * Only a status that advances on its own belongs here. `running` is driven by a
+ * background run; every other status waits on the author (confirm, resume) or is
+ * terminal. `published` used to be listed and kept a 2.5 s poll running forever
+ * on every import that had ever finished — it is terminal for the publish stage
+ * (still resumable, see below) and must not poll.
+ */
+const ACTIVE_IMPORT_STATUSES = new Set(['running'])
 const RESUMABLE_IMPORT_STATUSES = new Set(['ready_to_publish', 'published', 'awaiting_reconciliation', 'failed'])
 
 export function ManuscriptImportWorkspace(props: WorkspaceProps) {

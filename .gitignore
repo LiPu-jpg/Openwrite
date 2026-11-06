@@ -27,3 +27,7 @@ release-report-*.json
 packaged-regressions-report-*.json
 
 mobile-browser-report-*.json
+client-report-*.json
+
+# Stray zero-byte files left by a mistyped command such as `npm run build =`.
+/=

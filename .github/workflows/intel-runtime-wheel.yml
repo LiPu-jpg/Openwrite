@@ -6,6 +6,9 @@ on:
     paths: ['.github/workflows/intel-runtime-wheel.yml', 'scripts/build-intel-wheel.py']
 permissions:
   contents: read
+concurrency:
+  group: intel-wheel-${{ github.ref_name }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: macos-15-intel

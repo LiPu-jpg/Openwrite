@@ -11,6 +11,8 @@ interface SceneIssue {
   code: string
   sceneId: string
   chapterId: string
+  /** Core's severity; `info` means "not produced yet", not "broken". */
+  severity: string
 }
 
 interface SceneRecord {
@@ -125,19 +127,34 @@ function statusOf(value: unknown): StructureStatus {
   return 'absent'
 }
 
+/**
+ * Issues the Core marks `info` are state notices, not defects.
+ *
+ * A freshly initialized project has a planning skeleton but no manuscript text,
+ * so it has no native scene structure either, and there is nothing to migrate.
+ * Core reports both as issues — `SCENE_STRUCTURE_ABSENT` already carries
+ * `severity: "info"` — and the scene card's own copy says the same thing in
+ * plainer words ("还没有原生场景结构：初始化只建了规划骨架…"). Listing an
+ * info-level notice under the red "结构问题（N）" heading made a normal start
+ * look like a failed one.
+ *
+ * Anything the Core does not label stays an error: a missing `severity` means
+ * an older Core, and its issues must keep showing.
+ */
 function parseIssues(value: unknown, prefix: string): SceneIssue[] {
   if (!Array.isArray(value)) return []
   return value.map((raw, index) => {
     if (typeof raw === 'string') {
-      return { key: `${prefix}-${String(index)}`, message: raw, code: '', sceneId: '', chapterId: '' }
+      return { key: `${prefix}-${String(index)}`, message: raw, code: '', sceneId: '', chapterId: '', severity: 'error' }
     }
     const issue = asObject(raw)
     const code = asString(issue['code'] ?? issue['kind'] ?? issue['type'])
     const sceneId = asString(issue['scene_id'])
     const chapterId = asString(issue['chapter_id'] ?? issue['ch_id'])
+    const severity = asString(issue['severity'] ?? issue['level']).toLowerCase() || 'error'
     const message = asString(issue['message'] ?? issue['detail'] ?? issue['reason'] ?? issue['description']) || '需要处理'
-    return { key: `${prefix}-${code}-${sceneId}-${chapterId}-${String(index)}`, message, code, sceneId, chapterId }
-  }).filter(issue => issue.code !== 'MISSING_CHAPTER_FILE')
+    return { key: `${prefix}-${code}-${sceneId}-${chapterId}-${String(index)}`, message, code, sceneId, chapterId, severity }
+  }).filter(issue => issue.code !== 'MISSING_CHAPTER_FILE' && issue.severity !== 'info')
 }
 
 function listFrom(container: Record<string, unknown>, ...keys: string[]): unknown[] {
@@ -258,7 +275,7 @@ export function parseSceneStructure(value: unknown): SceneStructure {
   ]
   if (version !== '' && version !== 'openwrite.scene-structure.v1') {
     issues.unshift({
-      key: 'schema-version', code: 'SCHEMA_VERSION_UNSUPPORTED', sceneId: '', chapterId: '',
+      key: 'schema-version', code: 'SCHEMA_VERSION_UNSUPPORTED', sceneId: '', chapterId: '', severity: 'error',
       message: `不支持的场景结构版本：${version}`,
     })
   }
@@ -297,7 +314,7 @@ export function parseMigrationPreview(value: unknown): MigrationPreview | null {
   const canApply = typeof preview['can_apply'] === 'boolean' ? preview['can_apply'] : issues.length === 0
   if (version !== '' && version !== 'openwrite.scene-migration-preview.v1') {
     issues.unshift({
-      key: 'preview-schema-version', code: 'SCHEMA_VERSION_UNSUPPORTED', sceneId: '', chapterId: '',
+      key: 'preview-schema-version', code: 'SCHEMA_VERSION_UNSUPPORTED', sceneId: '', chapterId: '', severity: 'error',
       message: `不支持的迁移预览版本：${version}`,
     })
   }
@@ -338,7 +355,7 @@ function storyTimeCompare(left: SceneRecord, right: SceneRecord): number {
 }
 
 const STATUS_TEXT: Readonly<Record<StructureStatus, { label: string, explanation: string }>> = {
-  absent: { label: 'absent · 尚未迁移', explanation: '当前项目还没有原生场景结构。请先审阅下方迁移预览。' },
+  absent: { label: 'absent · 尚未迁移', explanation: '还没有原生场景结构：初始化只建了规划骨架，写出章节稿件后才会生成。请先审阅下方迁移预览。' },
   current: { label: 'current · 当前', explanation: '场景结构与当前章节一致，可以编辑元数据和顺序。' },
   stale: { label: 'stale · 已过期', explanation: '章节已变化；元数据与移动已停用，可在下方核对预览后重新迁移并稳定锚定。' },
   ambiguous: { label: 'ambiguous · 有歧义', explanation: '结构存在无法自动判定的场景，请先逐项解决问题。' },
@@ -687,7 +704,9 @@ export function SceneWorkbench({ fetchStudioApi, postStudioApi }: SceneWorkbench
               <>
                 {preview.rows.length > 0
                   ? <ol className={css.previewList}>{preview.rows.map((row, index) => <li key={`${String(index)}-${row}`}>{row}</li>)}</ol>
-                  : <p className={css.notice}>预览中没有迁移项。</p>}
+                  : <p className={css.notice}>
+                      预览中没有迁移项：规划章节还没有稿件正文，暂时无法迁移。请先写出章节稿件，再回到此处刷新。
+                    </p>}
                 {preview.issues.length > 0 && <ul className={css.previewIssues}>{preview.issues.map(issue => <li key={issue.key}>{issueLabel(issue)}</li>)}</ul>}
                 {(structure.status === 'absent' || structure.status === 'stale') && (
                   <div className={css.confirmRow}>

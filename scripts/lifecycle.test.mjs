@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, copyFile, appendFile, cp, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,8 +38,11 @@ async function fixture(t) {
     await mkdir(join(root, 'scripts'), { recursive: true });
     await copyFile(join(source, 'scripts', name), join(root, 'scripts', name));
   }
-  await put(join(root, 'presets/openwrite/agent.cordis.yml'), 'preset: openwrite\n');
-  await put(join(root, 'scripts/dog/review.js'), '// adapter\n');
+  // Seed the preset from the real tree so the install path exercises a realistic
+  // layout (nested skills, preset.yml). A literal stub made every preset-content
+  // assertion vacuous, so install.sh's move-aside branch was never executed.
+  const presetSource = join(source, 'presets/openwrite')
+  await cp(presetSource, join(root, 'presets/openwrite'), { recursive: true })
   for (const name of ['openwrite-bridge', 'studio-panel']) {
     await put(join(root, 'packages', name, 'package.json'), JSON.stringify({ name: `@dsh-novel/${name}` }));
   }
@@ -48,20 +51,6 @@ fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({command:path.basename(pr
   for (const name of ['npm', 'pnpm']) {
     await put(join(root, 'bin', name), `#!/usr/bin/env node\n${logCode}\n`, true);
   }
-  await put(join(root, 'bin/git'), `#!/usr/bin/env node
-${logCode}
-const a=process.argv.slice(2);
-const cloneIndex=a.indexOf('clone');
-if(cloneIndex<0) { console.error('Unexpected git invocation: '+a.join(' ')); process.exit(89); }
-const failMarker=path.join(process.env.HOME,'.git-clone-failed-once');
-if(process.env.GIT_CLONE_FAIL_ONCE && !fs.existsSync(failMarker)) {
-  fs.mkdirSync(path.dirname(failMarker),{recursive:true}); fs.writeFileSync(failMarker,'failed'); process.exit(17);
-}
-const target=a.at(-1);
-fs.mkdirSync(target,{recursive:true});
-fs.writeFileSync(path.join(target,'package.json'),JSON.stringify({name:'@dsh-external/dsh-dog'}));
-fs.writeFileSync(path.join(target,'pnpm-lock.yaml'),'lockfileVersion: 9\\n');
-`, true);
   await put(join(root, 'bin/rsync'), `#!/usr/bin/env node
 const fs = require('node:fs'); const args=process.argv.slice(2);
 fs.cpSync(args.at(-2),args.at(-1),{recursive:true});
@@ -154,6 +143,7 @@ async function freePort() {
 
 test('install uses locks and offline config, repairs registration, preserves earlier preset backups', async (t) => {
   const f = await fixture(t);
+  const root = f.root;
   await put(join(f.home, '.agent-presets-legacy/goethe/original'), 'old backup');
   await put(join(f.home, '.agent-presets/goethe/agent'), 'first migration');
   let result = await launch(f, 'install.sh').done;
@@ -165,10 +155,63 @@ test('install uses locks and offline config, repairs registration, preserves ear
   await writeFile(manifest, JSON.stringify(first));
   await rm(join(f.home, 'profiles/web/node_modules'), { recursive: true });
   await put(join(f.home, '.agent-presets/goethe/agent'), 'second migration');
+  // An author-only file in the installed preset, and an author edit to a file the
+  // package ships. Both must survive the next install.
+  await put(join(f.home, '.agent-presets/openwrite/skills/author-only.md'), 'author skill\n');
+  await appendFile(join(f.home, '.agent-presets/openwrite/agent.cordis.yml'), '# author tuning\n');
   result = await launch(f, 'install.sh').done;
   assert.equal(result.code, 0, result.output);
   assert.deepEqual((await json(manifest)).dsh.profile.bundles, ['@dsh-novel/openwrite-bridge', '@dsh-novel/studio-panel']);
   assert.equal(await readFile(join(f.home, 'profiles/web/node_modules/@dsh-novel/openwrite-bridge/ready'), 'utf8'), 'installed');
+  // The preset actually landed, byte-identical to the package.
+  const installedPreset = join(f.home, '.agent-presets/openwrite')
+  // The ownership marker must be written and be complete JSON: maintenance.mjs
+  // uses it to tell a package-managed preset from an author-owned one, and a
+  // truncated one is indistinguishable from a corrupt one.
+  const marker = await readFile(join(installedPreset, '.openwrite-managed.json'), 'utf8')
+  const parsed = JSON.parse(marker)
+  assert.equal(parsed.source, 'package')
+  assert.match(parsed.tree, /^sha256:/)
+  // The fixture's root package.json has no version field, so the marker's version
+  // is empty here; the real package.json always has one. Assert the key exists.
+  assert.ok('version' in parsed, 'the marker must carry a version key')
+  // And that the installer writes it atomically. A content check cannot tell the
+  // two apart (both produce the same bytes on success), so assert the structure:
+  // the marker must be moved into place, never written in place.
+  const installer = await readFile(join(root, 'scripts', 'install.sh'), 'utf8')
+  assert.match(
+    installer,
+    /marker_tmp=.*mktemp.*\n[\s\S]*?mv "\$marker_tmp" "\$target\/\.openwrite-managed\.json"/,
+    'the ownership marker must be written to a temp file and moved into place',
+  )
+  assert.doesNotMatch(
+    installer,
+    /cat > "\$target\/\.openwrite-managed\.json"/,
+    'the ownership marker must not be written in place (a crash truncates it)',
+  )
+  assert.equal(await readFile(join(installedPreset, 'agent.cordis.yml'), 'utf8'),
+    await readFile(join(root, 'presets/openwrite/agent.cordis.yml'), 'utf8'),
+    'the installed preset must match the packaged one')
+  // An author-only file must survive rather than being dropped or clobbered.
+  const legacy = join(f.home, '.agent-presets-legacy')
+  const legacyNames = await readdir(legacy)
+  const authorSurvived = []
+  for (const name of legacyNames) {
+    const candidate = join(legacy, name, 'skills/author-only.md')
+    if (await exists(candidate)) authorSurvived.push(candidate)
+  }
+  assert.ok(authorSurvived.length > 0,
+    `the author's own preset file must be preserved, not deleted: ${legacyNames.join(', ')}`)
+  // An author edit to a *shipped* file must also be preserved, not reverted.
+  const editSurvived = []
+  for (const name of legacyNames) {
+    const candidate = join(legacy, name, 'agent.cordis.yml')
+    if (await exists(candidate) && (await readFile(candidate, 'utf8')).includes('author tuning')) {
+      editSurvived.push(candidate)
+    }
+  }
+  assert.ok(editSurvived.length > 0,
+    `the author's edit to a shipped preset file must be preserved, not silently reverted: ${legacyNames.join(', ')}`)
   assert.equal(await readFile(join(f.home, '.agent-presets-legacy/goethe/original'), 'utf8'), 'old backup');
   const backups = (await readdir(join(f.home, '.agent-presets-legacy'))).filter((name) => name.startsWith('goethe.'));
   assert.equal(backups.length, 2);
@@ -181,6 +224,32 @@ test('install uses locks and offline config, repairs registration, preserves ear
   assert.ok(calls.every((c) => c.dshHome === f.home));
 });
 
+// The author-only-file case above moves the whole preset directory aside, which
+// incidentally carries an edit to a shipped file with it. That makes the
+// `cmp -s` branch untestable from that scenario: with the branch removed the
+// assertion still passes. This case isolates it — an installed preset whose
+// every file is one the package ships, with one of them edited.
+test('install backs up an author edit to a shipped preset file even with no author-only file', async (t) => {
+  const f = await fixture(t);
+  const root = f.root;
+  // No author-only file this time: only an edit to a file the package ships.
+  await put(join(f.home, '.agent-presets/openwrite/agent.cordis.yml'), '# base preset\n');
+  await appendFile(join(f.home, '.agent-presets/openwrite/agent.cordis.yml'), '# author tuning\n');
+  const result = await launch(f, 'install.sh').done;
+  assert.equal(result.code, 0, result.output);
+
+  const legacy = join(f.home, '.agent-presets-legacy');
+  const backed = [];
+  for (const name of await readdir(legacy)) {
+    const candidate = join(legacy, name, 'agent.cordis.yml');
+    if (await exists(candidate) && (await readFile(candidate, 'utf8')).includes('author tuning')) {
+      backed.push(candidate);
+    }
+  }
+  assert.ok(backed.length > 0,
+    `an edit to a shipped preset file must be backed up, not silently reverted: ${(await readdir(legacy)).join(', ')}`)
+});
+
 test('install exposes headless initialization failures and honors DSH_HOME', async (t) => {
   const f = await fixture(t);
   const custom = join(f.root, 'custom-dsh');
@@ -189,36 +258,6 @@ test('install exposes headless initialization failures and honors DSH_HOME', asy
   const calls = await commands(f);
   assert.ok(calls.every((c) => c.dshHome === custom));
   assert.equal(calls.filter((c) => c.args[0] === 'plugin').length, 0);
-});
-
-test('install automatically bootstraps and reuses the pinned dsh-dog integration', async (t) => {
-  const f = await fixture(t);
-  const overrides = {
-    DSH_DOG_AUTO_INSTALL: '1',
-    DSH_DOG_REPOSITORY: 'https://example.invalid/Fun10165/dsh-dog.git',
-    DSH_DOG_REF: 'v1.2.0',
-    GIT_CLONE_FAIL_ONCE: '1',
-  };
-  let result = await launch(f, 'install.sh', overrides).done;
-  assert.equal(result.code, 0, result.output);
-
-  const dogDir = join(f.home, 'extensions/dsh-dog');
-  const web = await json(join(f.home, 'profiles/web/package.json'));
-  const headless = await json(join(f.home, 'profiles/headless/package.json'));
-  assert.deepEqual(web.dsh.profile.bundles, [
-    '@dsh-novel/openwrite-bridge', '@dsh-novel/studio-panel', '@dsh-external/dsh-dog',
-  ]);
-  assert.deepEqual(headless.dsh.profile.bundles, ['@dsh-novel/openwrite-bridge']);
-  assert.match(await readFile(join(f.home, 'settings.yaml'), 'utf8'), new RegExp(`workspaceRoot: ${f.root}`));
-  assert.equal(await exists(join(dogDir, '.dsh-openwrite-managed')), true);
-
-  result = await launch(f, 'install.sh', overrides).done;
-  assert.equal(result.code, 0, result.output);
-  const calls = await commands(f);
-  const clones = calls.filter((call) => call.command === 'git' && call.args.includes('clone'));
-  assert.equal(clones.length, 2);
-  assert.deepEqual(clones[1].args.slice(0, 4), ['-c', 'http.proxy=', '-c', 'https.proxy=']);
-  assert.match(result.output, /复用已安装的 dsh-dog/);
 });
 
 test('dev rejects an occupied Studio port without starting or killing other services', async (t) => {

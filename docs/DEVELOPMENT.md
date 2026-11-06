@@ -18,7 +18,7 @@
 
 | 路径 | 说明 |
 |---|---|
-| `packages/openwrite-bridge/` | dsh 插件：95 个 `novel_*` 工具，覆盖 Studio HTTP 动作面并提供隔离模型横评与脱敏 trace |
+| `packages/openwrite-bridge/` | dsh 插件：56 个 `novel_*` 工具，覆盖 Studio HTTP 动作面并提供隔离模型横评与脱敏 trace |
 | `packages/studio-panel/` | dsh web 原生工作台：创作 / 资料 / 任务，含规范章节导航、连续审读、场景双序、正文编辑器、双 DAG、模型测试台与工具卡 |
 | `presets/openwrite/` | OpenWrite 全流程 agent 预设（规划/资产/写章/评审/修订） |
 | `scripts/install.sh` | 构建插件、安装预设到 `~/.dsh/.agent-presets/`、插件装进 dsh profile |
@@ -52,14 +52,9 @@ npm run doctor -- --profiles    # 只读核对本机 web/headless 是否链接�
 `check:plugin` 不需要服务、小说或模型凭据，GitHub Actions 也执行此门禁。
 真实系统另跑 `scripts/verify.sh` 和 `npm run test:e2e`；E2E 跳过不算运行时通过。
 
-## DoG 集成
+## 评审/交付产物
 
-`scripts/install.sh` 默认自动获取固定的 `dsh-dog v1.2.0`，保存到
-`$DSH_HOME/extensions/dsh-dog`，完成构建并只挂载到 web profile；重复运行会复用该目录。
-如需使用已有工作树，可传入 `DSH_DOG_DIR=/path/to/dsh-dog`；明确不安装时设置
-`DSH_DOG_AUTO_INSTALL=0`。
-
-安装器会在缺少 `dog:` 配置时写入安全兜底值。DoG v1.2 优先使用发起调用的 dsh 会话
-Workspace，所以切换作品会自动切换评审/交付图根目录，无需修改 `workspaceRoot` 或重启。
-`novel_review_chapter` 和后台章节评审完成时会自动实例化标准章节审稿 DAG；DoG 只查询
-已物化产物，不会重复调用模型。
+`novel_review_chapter` 和后台章节评审完成时会自动实例化标准章节审稿记录，
+查询技能（`review-artifact-query` / `delivery-artifact-query` / `import-artifact-query`）
+只读这些已物化产物，不会重复调用模型。0.2.29 起不再内置第三方 DoG 引擎，
+需要图形化验证可自行安装 `@dsh-external/dsh-dog`。

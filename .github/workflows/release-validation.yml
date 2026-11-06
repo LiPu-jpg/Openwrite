@@ -31,13 +31,11 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm install --global pnpm@9.15.9
       - run: node scripts/prepare.mjs
-      - run: npm --prefix vendor/dsh-dog run typecheck
       - run: npm run doctor
       - run: npm run test:managed
       - run: npm --prefix packages/studio-panel run smoke
-      - run: node --test scripts/preset-lifecycle.test.mjs scripts/maintenance.test.mjs
+      - run: node --test scripts/preset-lifecycle.test.mjs scripts/companions.test.mjs scripts/maintenance.test.mjs
       - run: npm run test:components
-      - run: npm --prefix vendor/dsh-dog test
       - run: node scripts/release-provenance.mjs
       - run: npm pack --ignore-scripts
       - run: node scripts/release-check.mjs
@@ -48,7 +46,12 @@ jobs:
             dsh-openwrite-*.tgz
             dsh-openwrite-*.tgz.manifest.json
           if-no-files-found: error
+          retention-days: 7
   client-contracts:
+    env:
+      # One browser location per job: the composite action caches and installs it,
+      # and every later step (smoke, browser acceptance) finds it there.
+      PLAYWRIGHT_BROWSERS_PATH: .tmp-ms-playwright
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -68,29 +71,39 @@ jobs:
             # rc.3 was published on Oct 23. Keep a historical cutoff so a
             # partially published upstream dependency batch cannot enter CI.
             before: '2026-10-24T00:00:00Z'
+          - host: '0.2.1-rc.4'
+            # rc.4 was published on Oct 26; rc.5 landed on Oct 29 and must not
+            # leak into the rc.4 leg through a partially published batch.
+            before: '2026-10-27T00:00:00Z'
+          - host: '0.2.1-rc.5'
+            before: '2026-10-30T00:00:00Z'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/studio-panel/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
-      - if: runner.os == 'Linux'
-        # GitHub-hosted ubuntu runners intermittently lose outbound port 80
-        # (the default Azure apt mirror goes dead and archive.ubuntu.com:80
-        # connection-fails while https stays healthy), leaving apt hanging
-        # single-threaded until the job timeout kills the whole matrix leg.
-        # Pin the mirror list to the public archive over https and bound
-        # every connection so a sick runner fails fast instead of wedging.
-        run: |
-          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
-      - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
+      - uses: ./.github/actions/ci-setup
+        with:
+          browser: chromium
       - uses: actions/download-artifact@v4
         with:
           name: release-package
-      - run: npm install --prefix .tmp-client-host @deepseek-ai/dsh@${{ matrix.host }} --before=${{ matrix.before }} --registry=https://registry.npmjs.org --ignore-scripts --no-audit --no-fund
+      # A partially published upstream batch can 404 mid-resolve; retry before
+      # failing the leg so one bad registry minute does not cost a matrix leg.
+      - name: Install the exact host
+        run: |
+          for attempt in 1 2 3; do
+            if npm install --prefix .tmp-client-host @deepseek-ai/dsh@${{ matrix.host }} --before=${{ matrix.before }} --registry=https://registry.npmjs.org --ignore-scripts --no-audit --no-fund; then exit 0; fi
+            sleep $((attempt * 30))
+          done
+          echo "::error::host install failed after 3 attempts"
+          exit 1
       - run: node scripts/preset-smoke.mjs --host-cli=.tmp-client-host/node_modules/@deepseek-ai/dsh/lib/bin.js
       - run: node scripts/client-boot-smoke.mjs dsh-openwrite-*.tgz --host-cli=.tmp-client-host/node_modules/@deepseek-ai/dsh/lib/bin.js --report=client-report-${{ matrix.host }}.json
       - uses: actions/upload-artifact@v4
@@ -98,7 +111,12 @@ jobs:
           name: acceptance-client-${{ matrix.host }}
           path: client-report-*.json
           if-no-files-found: error
+          retention-days: 7
   install:
+    env:
+      # One browser location per job: the composite action caches and installs it,
+      # and every later step (smoke, browser acceptance) finds it there.
+      PLAYWRIGHT_BROWSERS_PATH: .tmp-ms-playwright
     needs: build
     strategy:
       fail-fast: false
@@ -126,18 +144,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/studio-panel/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm install --global pnpm@9.15.9
       - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
-      - if: runner.os == 'Linux'
-        # See client-contracts: guard apt against dead Azure mirrors.
-        run: |
-          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
-      - if: runner.os != 'Windows'
-        run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
-      - if: runner.os == 'Windows'
-        run: node packages/studio-panel/node_modules/playwright/cli.js install chromium
+      - uses: ./.github/actions/ci-setup
+        with:
+          browser: chromium
       - uses: actions/download-artifact@v4
         with:
           name: release-package
@@ -154,6 +170,7 @@ jobs:
             release-browser-*.png
             packaged-regressions-report-*.json
           if-no-files-found: warn
+          retention-days: 7
   source-install:
     needs: build
     runs-on: ubuntu-latest
@@ -163,6 +180,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+      - uses: ./.github/actions/ci-setup
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm install --global pnpm@9.15.9
       - run: node scripts/release-smoke.mjs github:LiPu-jpg/Openwrite#${{ github.event.pull_request.head.sha || github.sha }}
@@ -172,7 +191,12 @@ jobs:
           name: acceptance-github-source
           path: release-report-source-*.json
           if-no-files-found: warn
+          retention-days: 7
   compatibility-alpha:
+    env:
+      # One browser location per job: the composite action caches and installs it,
+      # and every later step (smoke, browser acceptance) finds it there.
+      PLAYWRIGHT_BROWSERS_PATH: .tmp-ms-playwright
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -181,19 +205,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+      - uses: ./.github/actions/ci-setup
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm install --global pnpm@9.15.9
+      - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
       # Freeze the published alpha.1 dependency graph: a later partial alpha.2
       # publication currently breaks unconstrained upstream npm installation.
-      - run: npm install --prefix .tmp-dsh-alpha @deepseek-ai/dsh@0.1.5-alpha.1 --before=2026-09-09T00:00:00Z --registry=https://registry.npmjs.org --no-audit --no-fund
-      - run: node scripts/preset-smoke.mjs --host-cli=.tmp-dsh-alpha/node_modules/@deepseek-ai/dsh/lib/bin.js
-      - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
-      - if: runner.os == 'Linux'
-        # See client-contracts: guard apt against dead Azure mirrors.
+      - name: Install the frozen alpha host
         run: |
-          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
-      - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps chromium
+          for attempt in 1 2 3; do
+            if npm install --prefix .tmp-dsh-alpha @deepseek-ai/dsh@0.1.5-alpha.1 --before=2026-09-09T00:00:00Z --registry=https://registry.npmjs.org --no-audit --no-fund; then exit 0; fi
+            sleep $((attempt * 30))
+          done
+          echo "::error::alpha host install failed after 3 attempts"
+          exit 1
+      - run: node scripts/preset-smoke.mjs --host-cli=.tmp-dsh-alpha/node_modules/@deepseek-ai/dsh/lib/bin.js
+      - uses: ./.github/actions/ci-setup
+        with:
+          browser: chromium
       - uses: actions/download-artifact@v4
         with:
           name: release-package
@@ -208,7 +238,12 @@ jobs:
             .tmp-dsh-alpha/package-lock.json
           include-hidden-files: true
           if-no-files-found: warn
+          retention-days: 7
   mobile-browsers:
+    env:
+      # One browser location per job: the composite action caches and installs it,
+      # and every later step (smoke, browser acceptance) finds it there.
+      PLAYWRIGHT_BROWSERS_PATH: .tmp-ms-playwright
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -224,10 +259,9 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix packages/studio-panel --ignore-scripts --no-audit --no-fund
-      - run: |
-          echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-guard
-      - run: node packages/studio-panel/node_modules/playwright/cli.js install --with-deps ${{ matrix.browser }}
+      - uses: ./.github/actions/ci-setup
+        with:
+          browser: ${{ matrix.browser }}
       - uses: actions/download-artifact@v4
         with:
           name: release-package
@@ -237,9 +271,11 @@ jobs:
           name: acceptance-mobile-${{ matrix.browser }}
           path: mobile-browser-report-*.json
           if-no-files-found: error
+          retention-days: 7
   acceptance:
     needs: [build, install, source-install, compatibility-alpha, client-contracts, mobile-browsers]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -256,3 +292,4 @@ jobs:
           path: .tmp-release-final/*
           include-hidden-files: true
           if-no-files-found: error
+          retention-days: 30

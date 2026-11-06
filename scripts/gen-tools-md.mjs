@@ -34,7 +34,13 @@ walk(source, node => {
       calls.add(ts.isPropertyAccessExpression(expression) ? expression.name.text : expression.getText(source))
     }
   })
-  const writes = [...calls].filter(name => ['postJson', 'putJson', 'patchJson', 'deleteJson', 'writeFile', 'mkdir'].includes(name))
+  // Classify by exclusion, not by a whitelist of method names: any call that is
+  // not a provably read-only verb makes the tool a writer. A whitelist silently
+  // relabelled a destructive tool as read-only when its write was routed through
+  // a helper (`client.post`, `client.upload`, ...), and `--check` - which only
+  // regenerates and byte-compares - could not see the mistake.
+  const readOnlyVerbs = new Set(['getJson', 'get', 'download', 'head'])
+  const writes = [...calls].filter(name => !readOnlyVerbs.has(name))
   // Export and review helpers can also materialize files after a GET.
   const materializes = [...calls].some(name => /^materialize/.test(name) || name === 'deliveryForResponse')
   const effect = writes.length || materializes ? '会提交操作或保存文件；具体取决于 action/参数' : '只读查询（可更新检索缓存）'
@@ -47,12 +53,12 @@ const lines = [
   '# 小说工具参考', '',
   `本候选共 ${tools.length} 个 novel_* 工具。由 tools.ts 的注册定义生成；说明与参数保留实际 schema 原文，避免手册与接口漂移。用浏览器或编辑器搜索工具名即可定位。`, '',
   '## 先选入口', '',
-  '- 看当前作品：`novel_status`；查文件：`novel_doc_read`；看本章输入：`novel_context_preview`。上下文来源与预算见 [上下文槽位](CONTEXT_SLOTS.md)。',
-  '- 修改大纲/设定/创作罗盘：先用 `novel_structured_change_plan` 预览并核对；只有作者已明确授权的精确变更才使用兼容的直接写入工具，如 `novel_focus`。',
+  '- 看当前作品：`novel_status`；查文件：`novel_doc(action="read"`；看本章输入：`novel_context_preview`。上下文来源与预算见 [上下文槽位](CONTEXT_SLOTS.md)。',
+  '- 修改大纲/设定/创作罗盘：先用 `novel_change_plan`（action="structured"）预览并核对；只有作者已明确授权的精确变更才使用兼容的直接写入工具，如 `novel_focus`。',
   '- 正文确认：`novel_manuscript_acceptance {}` 只读查 operation_id，核对影响后用 `novel_manuscript_acceptance_reconcile {"action":"acknowledge","operation_id":"实际返回值","confirm":true}` 确认；这不会补跑结算或审稿。',
   '- 结算缺失：核对目标章节后使用 `novel_settle_backfill {"chapter_ids":["ch_001"],"only_missing":true}`，再查返回任务；会调用模型并写入记忆/运行态资料，不重写正文。不要把 canon 未定论一律解释为缺结算。',
-  '- 模型与嵌入：Chat 与 Embedding 档案独立；配置不等于连接成功。`novel_model_test` / `novel_model_embedding_test` 会实际请求提供方，可能计费。',
-  '- 写章返回 task_id 后用 `novel_task_get` 查询；取消用 `novel_task_cancel`。超时/网络错误后先查任务与运行，避免重复提交。', '',
+  '- 模型与嵌入：Chat 与 Embedding 档案独立；配置不等于连接成功。`novel_model_profiles(action="list"`（action="test"）/ `novel_embedding_profiles(action="list"`（action="test"）会实际请求提供方，可能计费。',
+  '- 写章返回 task_id 后用 `novel_task`（action="get"）查询；取消用 action="cancel"。超时/网络错误后先查任务与运行，避免重复提交。', '',
   '## 参数和错误', '',
   '必填项是 schema 的静态必填；action 描述里的条件必填也要满足。JSON 参数传对象或数组，不要传 Markdown 代码块。章节 ID 使用 ch_数字。文档写入先读当前 version，大纲变更使用当前 revision；冲突时重读并重新预览。', '',
   '参数错误会在请求前或服务端拒绝并说明原因；服务端错误提供 code/message/status/details/request_id。这里只读/会操作按执行路径保守分类：POST 也可能是预览或查询，GET 后的导出/审稿辅助操作也可能落盘；请同时看 action 和下面的完整说明。', '',

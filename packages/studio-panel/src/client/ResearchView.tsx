@@ -43,11 +43,19 @@ interface ResearchReport {
   metrics: Record<string, unknown>
 }
 
+interface ResearchSearchProvider {
+  id: string
+  label: string
+  requiresApiKey: boolean
+  configured: boolean
+}
+
 interface ResearchSurface {
   available: boolean
   setupHint: string
   reports: ResearchReport[]
   searchProvider: string | null
+  searchProviders: ResearchSearchProvider[]
   modelRoute: ResearchModelProfile | null
 }
 
@@ -144,6 +152,17 @@ function parseSurface(value: unknown): ResearchSurface {
     setupHint: text(inner['setup_hint']),
     reports: Array.isArray(inner['reports']) ? inner['reports'].map(raw => parseReport(raw)) : [],
     searchProvider: nullableText(settings['search_provider']),
+    searchProviders: Array.isArray(settings['search_providers'])
+      ? (settings['search_providers'] as unknown[]).map(raw => {
+          const item = record(raw)
+          return {
+            id: text(item['id']),
+            label: text(item['label']) || text(item['id']),
+            requiresApiKey: item['requires_api_key'] === true,
+            configured: item['configured'] === true,
+          }
+        }).filter(item => item.id !== '')
+      : [],
     modelRoute: parseModel(inner['model_route']),
   }
 }
@@ -201,28 +220,42 @@ export function ResearchView({ fetchStudioApi, postStudioApi, t, initialReportId
   const [launchPrompt, setLaunchPrompt] = useState('')
   const [launchBusy, setLaunchBusy] = useState(false)
   const [launchNote, setLaunchNote] = useState<{ text: string; bad: boolean } | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [provider, setProvider] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [remember, setRemember] = useState(true)
+  const [settingsBusy, setSettingsBusy] = useState(false)
+  const [settingsNote, setSettingsNote] = useState<{ text: string; bad: boolean } | null>(null)
   const mounted = useRef(true)
   const detailRequest = useRef(0)
+  const loadSequence = useRef(0)
   const openedInitial = useRef('')
 
   useEffect(() => () => { mounted.current = false }, [])
 
   const load = useCallback(async () => {
+    // Two overlapping loads are reachable (mount load vs a Refresh click, or a
+    // submit's load racing a manual one). Without a sequence guard the older
+    // response lands last and its catch wipes a successful newer refresh.
+    const sequence = ++loadSequence.current
     setState('loading')
     try {
       const next = parseSurface(await fetchStudioApi('/research'))
-      if (!mounted.current) return
+      if (!mounted.current || sequence !== loadSequence.current) return
       setSurface(next)
       setError('')
       setState('ready')
     } catch (cause: unknown) {
-      if (!mounted.current) return
+      if (!mounted.current || sequence !== loadSequence.current) return
       setError(cause instanceof Error ? cause.message : String(cause))
       setState('error')
     }
   }, [fetchStudioApi])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (surface !== null && provider === '') setProvider(surface.searchProvider ?? surface.searchProviders[0]?.id ?? '')
+  }, [provider, surface])
 
   const openReport = useCallback(async (id: string) => {
     const request = ++detailRequest.current
@@ -263,6 +296,26 @@ export function ResearchView({ fetchStudioApi, postStudioApi, t, initialReportId
     })
   }, [keyword, sourceFilter, statusFilter, surface])
 
+  const saveSearchSettings = async () => {
+    if (provider === '') return
+    setSettingsBusy(true)
+    setSettingsNote(null)
+    try {
+      await postStudioApi('/research/settings', {
+        search_provider: provider,
+        search_api_key: apiKey,
+        remember_api_key: remember,
+      })
+      setSettingsNote({ text: t('research.settings.saved'), bad: false })
+      setApiKey('')
+      await load()
+    } catch (cause: unknown) {
+      setSettingsNote({ text: `${t('research.settings.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, bad: true })
+    } finally {
+      if (mounted.current) setSettingsBusy(false)
+    }
+  }
+
   const submitResearch = async () => {
     const prompt = launchPrompt.trim()
     if (prompt === '' || launchBusy) return
@@ -296,6 +349,7 @@ export function ResearchView({ fetchStudioApi, postStudioApi, t, initialReportId
           ? `${t('research.reports')}: ${visibleReports.length}/${surface.reports.length} · ${surface.searchProvider ?? '—'} · ${surface.modelRoute?.model ?? '—'}`
           : surface.setupHint || t('research.unavailable'))}
       </span>
+      <button type="button" className={css.button} onClick={() => { setSettingsOpen(previous => !previous); setSettingsNote(null) }}>{t('research.settings')}</button>
       <button type="button" className={css.button} disabled={!surface?.available || launchBusy} title={surface?.available === false ? surface.setupHint : undefined} onClick={() => setLaunchOpen(previous => !previous)}>{t('research.launch')}</button>
       <button type="button" className={css.button} onClick={() => void load()}><RefreshCw size={14} /> {t('refresh')}</button>
     </div>
@@ -306,6 +360,19 @@ export function ResearchView({ fetchStudioApi, postStudioApi, t, initialReportId
         <span className={css.toolbarMeta}>{t('research.launch.hint')}</span>
       </div>
       {launchNote !== null && <div className={css.notice}><span className={launchNote.bad ? css.errorText : undefined}>{launchNote.text}</span></div>}
+    </div>}
+    {settingsOpen && <div className={css.launchPanel}>
+      <label>{t('research.settings.provider')}<select aria-label={t('research.settings.provider')} value={provider} onChange={event => setProvider(event.target.value)}>
+        {(surface?.searchProviders ?? []).map(item => <option key={item.id} value={item.id}>{item.label}{item.configured ? '' : ` (${t('research.settings.unavailable')})`}</option>)}
+      </select></label>
+      {surface?.searchProviders.find(item => item.id === provider)?.requiresApiKey === true && <label>{t('research.settings.apiKey')}<input type="password" value={apiKey} autoComplete="off" onChange={event => setApiKey(event.target.value)} /></label>}
+      {provider === 'dsh' && <p className={css.toolbarMeta}>{t('research.settings.dshHint')}</p>}
+      <label><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} /> {t('research.settings.remember')}</label>
+      <div className={css.inlineActions}>
+        <button type="button" className={css.button} disabled={settingsBusy || provider === ''} onClick={() => void saveSearchSettings()}>{settingsBusy ? t('research.settings.saving') : t('research.settings.save')}</button>
+        <span className={css.toolbarMeta}>{surface?.searchProvider ?? '—'}</span>
+      </div>
+      {settingsNote !== null && <div className={css.notice}><span className={settingsNote.bad ? css.errorText : undefined}>{settingsNote.text}</span></div>}
     </div>}
     {state === 'loading' && surface === null && <div className={css.body}><div className={css.notice}>{t('loading')}</div></div>}
     {state === 'error' && <div className={css.body}><div className={css.notice}><span className={css.errorText}>{error}</span><button type="button" className={css.button} onClick={() => void load()}>{t('retry')}</button></div></div>}

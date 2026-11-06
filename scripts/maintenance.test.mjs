@@ -29,6 +29,10 @@ async function homeFixture(t) {
   await writeFile(join(home, 'settings.yaml'), 'theme: author\n')
   const sentinel = '/* sentinel: do not patch user node_modules */\nexport const name = "@dsh-novel/openwrite-bridge"\n'
   await writeFile(join(home, 'profiles/web/node_modules/@dsh-novel/openwrite-bridge/index.js'), sentinel)
+  // A real install has the bundle on disk; without it diagnose now reports
+  // bundlePresent: false, which is the point of that check.
+  await mkdir(join(home, 'profiles/web/node_modules/dsh-openwrite'), { recursive: true })
+  await writeFile(join(home, 'profiles/web/node_modules/dsh-openwrite/package.json'), '{"name":"dsh-openwrite","version":"0.2.25"}')
   return { home, sentinel }
 }
 
@@ -139,15 +143,24 @@ test('failed host remove restores the backed-up profile and leaves other plugins
   const original = JSON.stringify(manifestWith(), null, 2) + '\n'
   await writeFile(file, original)
   let removed = 0
+  const reinstalled = []
   await assert.rejects(migrate(home, 'web', true, {
     runPlugin: async (dshHome, profile, args) => {
       if (removed++ === 0) return fakeRemove(dshHome, profile, args)
+      if (args[3] === 'add') { reinstalled.push(args.at(-1)); return '' }
       throw new Error('simulated pnpm failure')
     },
   }), /simulated pnpm failure; restored profile from /)
   assert.equal(await readFile(file, 'utf8'), original)
   assert.equal(await readFile(join(home, 'profiles/web/node_modules/@dsh-novel/openwrite-bridge/index.js'), 'utf8'), sentinel)
   assert.equal(await readFile(join(home, '.agent-presets/custom/agent.cordis.yml'), 'utf8'), 'author-owned')
+  // The manifest is restored AND the removed package is put back: a profile whose
+  // manifest lists a dependency node_modules no longer has is broken. Only the
+  // first remove succeeded before the simulated failure, so only its spec is
+  // eligible for reinstall.
+  console.error('REINSTALLED', JSON.stringify(reinstalled))
+  assert.deepEqual(reinstalled, ['file:/old/source'])
+  assert.deepEqual(inspectProfile(JSON.parse(await readFile(file))).leftoverDeps, LEGACY)
 })
 
 test('restoreBackup rewrites only the profile package files', async t => {
@@ -258,3 +271,27 @@ test('real dsh plugin remove/add does not revive leftover deps as duplicate open
   assert.equal(await readFile(join(home, '.agent-presets/custom/agent.cordis.yml'), 'utf8'), 'author-owned')
   assert.equal(await readFile(join(home, 'credentials.json'), 'utf8'), '{"token":"keep"}')
 }, { timeout: 180_000 })
+
+test('a truncated ownership marker is reported distinctly from author-owned', async t => {
+  // install.sh writes the marker; a crash mid-write used to leave a truncated
+  // file that read back as "no marker" and therefore "author-owned", which
+  // permanently blocked upgrades with no diagnostic.
+  const home = await mkdtemp(join(tmpdir(), 'openwrite-presets-'))
+  t.after(async () => await rm(home, { recursive: true, force: true }))
+  const managed = join(home, '.agent-presets', 'openwrite')
+  await mkdir(managed, { recursive: true })
+  await writeFile(join(managed, '.openwrite-managed.json'), '{"source":"package","tree":"sha256:abc"}\n')
+  await mkdir(join(home, '.agent-presets', 'mine'), { recursive: true })
+  await writeFile(join(home, '.agent-presets', 'mine', 'SKILL.md'), 'mine\n')
+  const corrupt = join(home, '.agent-presets', 'broken')
+  await mkdir(corrupt, { recursive: true })
+  await writeFile(join(corrupt, '.openwrite-managed.json'), '{"source":"pack')
+
+  const { inspectPresets } = await import('./maintenance.mjs')
+  const presets = await inspectPresets(home)
+  const byName = Object.fromEntries(presets.map(item => [item.name, item]))
+
+  assert.equal(byName.openwrite.origin, 'package-managed')
+  assert.equal(byName.mine.origin, 'author-owned')
+  assert.equal(byName.broken.origin, 'marker-corrupt', 'a truncated marker must not read as author-owned')
+})

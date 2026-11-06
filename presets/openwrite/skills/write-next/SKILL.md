@@ -10,7 +10,7 @@ Language: follow the author's current conversation language for responses and he
 接到已有 `novel_*`。已有正文不得覆盖。
 
 1. `novel_status` 看阶段与待确认项；`outline_scope` 待确认时先让作者确认大纲范围。
-2. `novel_outline_read` 定位章纲：未指定则取大纲顺序中最早尚无正文的章。
+2. `novel_outline_read` 定位章纲，并读它的 `recommendation`。未指定章节时**省略 `chapter_id`**，让服务端取大纲推荐的下一章——自己推算的 id 只要和推荐不一致就会被拒绝。
 3. `novel_context_preview` 预检上下文包。
 4. `novel_chapter_work` 读取本章到期/超期/待埋入伏笔与字数目标。
 5. `novel_write_chapter` 写下一章或指定章。

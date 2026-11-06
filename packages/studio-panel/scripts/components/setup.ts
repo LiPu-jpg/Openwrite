@@ -6,6 +6,8 @@
  */
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { resetGlobalFallbackState } from '../../src/client/api.ts'
+import { resetModelViewMemory } from '../../src/client/ModelView.tsx'
 
 if (typeof window.matchMedia !== 'function') {
   window.matchMedia = (query: string): MediaQueryList => ({
@@ -39,4 +41,9 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   window.localStorage.clear()
+  // The model library is global, so its draft slot is global too: one case's
+  // half-edited profile would otherwise reach the next.
+  resetModelViewMemory()
+  // The stale-host fallback is a module-level flag; it must not leak either.
+  resetGlobalFallbackState()
 })

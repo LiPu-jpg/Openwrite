@@ -45,7 +45,7 @@ dsh 对话模型在宿主中配置。小说生成、评审与测试模型在「�
 依赖包要求 Apple Silicon Mac 至少 macOS 14，Intel Mac 至少 macOS 13；
 其他系统小版本的覆盖范围以 Release 报告为准。
 
-- 插件装在指定 profile。bridge、panel、DoG、技能、编辑器资源和 Core wheel 位于同一包。
+- 插件装在指定 profile。bridge、panel、技能、编辑器资源和 Core wheel 位于同一包。
 - `$DSH_HOME/openwrite/` 保存下载缓存、Python 环境、管理记录、隔离配置与凭据；未指定 DSH_HOME 时使用 dsh 默认目录。
 - 作品保存在作者选定目录。受管理 Core 仅监听回环地址，端口自动分配，实例认证只在宿主与 Core 之间传递。
 - 只启动、停止本插件创建的进程。不修改系统 Python、全局 PATH 或 Shell 配置。
@@ -101,7 +101,7 @@ dsh plugin --profile web remove -w dsh-openwrite
 
 ## 自定义预设和高级配置
 
-自定义预设从官方版本复制，目录 ID 使用 `openwrite-` 前缀以启用创作界面。小说工具行是 `dsh-openwrite/tools`，DoG 工具行是 `dsh-openwrite/dog-tools`；不要再次注册全局 bridge 或 DoG 引擎。工具集合随会话预设保持稳定，不随界面切换。
+自定义预设从官方版本复制，目录 ID 使用 `openwrite-` 前缀以启用创作界面。小说工具行是 `dsh-openwrite/tools`；不要再次注册全局 bridge。工具集合随会话预设保持稳定，不随界面切换。
 
 小说工具支持 `presentation: native`（默认）、`ptc` 或 `both`。只读策略和计划模式独立约束副作用。模型服务商已接收的请求可能无法撤回：取消后停止新调度和重试，保存已完成结果与用量；费用未知时显示未知，不计为零。
 
@@ -255,6 +255,8 @@ node package/scripts/safe-upgrade.mjs --profile desktop --package dsh-openwrite@
 
 `dsh-openwrite@0.2.23` 起，根包和全部内嵌子包的声明同时覆盖精确宿主 `0.2.1-rc.2`，安装和激活不需要版本豁免。宿主判断的是 `package.json` 的 `peerDependencies`（`@deepseek-ai/dsh-*`），不是 `dsh.compatibility` 字段；因此只改 `dsh.compatibility` 字符串并不能让 0.2.22 在 0.2.1-rc.2 上加载。若安装日志出现 `plugin does not support the DSH version in use`，请直接升级到 `0.2.23` 或更高的已验收版本，不要手工改版本号或给旧子包授权。本版已在 `0.2.1-rc.2` 完成 Web 启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存的验证；`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过，Windows Electron 桌面端仍未实机复测。
 
+`0.2.29` 候选起，声明同时覆盖精确宿主 `0.2.1-rc.4` 与 `0.2.1-rc.5`；这两个宿主上 `0.2.28` 及更早版本会被同一闸门拒绝（[#150](https://github.com/LiPu-jpg/Openwrite/issues/150)/[#151](https://github.com/LiPu-jpg/Openwrite/issues/151)/[#142](https://github.com/LiPu-jpg/Openwrite/issues/142)）。已发布版本不追溯补声明，遇到该错误请升级到声明覆盖该宿主的版本，方法与边界见 [#149/#150/#151 修复说明](ISSUES_149_150_151.md)。
+
 本修复同时处理 `conversation.chat.turnTail` 从 chain 到 list 的变化，以及 `uiSession.pendingInteractions` 到 `uiSession.sessionStatus` 的变化。客户端初始化或延迟槽位注册失败时，插件回滚对应注册并在浏览器控制台输出 `[OpenWrite/Studio]` / `[OpenWrite/DoG]` 和原始异常，避免让这类插件初始化异常升级为宿主 web boot 失败。此修复不更改桌面端自身的 profile 恢复策略。
 
 如果旧版本已经触发桌面端恢复，关闭桌面端后备份整个 profile，找到恢复前的 `cordis.patch.yml.bak-*`，恢复 patch 和原 `package.json` 中的 `dsh.profile.bundles`。这两项需一起核对，才能重新加载其他插件。保留已安装依赖和作品目录，不要用空 profile 替换完整配置。
@@ -268,7 +270,7 @@ node scripts/client-boot-smoke.mjs --host-cli=/absolute/path/to/dsh-0.2.0-rc.2/n
 node scripts/client-boot-smoke.mjs dsh-openwrite-<version>.tgz --host-cli=/absolute/path/to/dsh-0.2.1-rc.2/node_modules/@deepseek-ai/dsh/lib/bin.js
 ```
 
-脚本需要 Playwright Chromium，创建临时 Web profile，检查无豁免版本闸门、两个客户端加载、真实预设选择、会话导航、三个工作台页签出现和创作视图激活、DoG 面板及其他插件共存，后端就绪与未初始化响应由测试夹具提供，不准备 Python 环境、不调用模型；实际安装与后端动作由独立发布验收覆盖。它验证 Web 客户端兼容性；Windows Electron 的原生启动和恢复流程仍须在对应平台完成发布验收。
+脚本需要 Playwright Chromium，创建临时 Web profile，检查无豁免版本闸门、客户端加载、真实预设选择、会话导航、三个工作台页签出现和创作视图激活、预设选择器不出现重复别名及其他插件共存，后端就绪与未初始化响应由测试夹具提供，不准备 Python 环境、不调用模型；实际安装与后端动作由独立发布验收覆盖。它验证 Web 客户端兼容性；Windows Electron 的原生启动和恢复流程仍须在对应平台完成发布验收。
 
 ## 0.2.12 的预设与审读修复
 
@@ -278,6 +280,6 @@ node scripts/client-boot-smoke.mjs dsh-openwrite-<version>.tgz --host-cli=/absol
 
 ## 作品信息与推理模型预算
 
-在「任务 → 导入与导出 → 编辑作品信息」填写或修改书名、作者署名和语言。旧作品也可补齐作者，无需手工编辑配置文件。保存冲突时保留输入；请取消编辑并重新载入最新信息后再修改。未填写作者仍不能进行交付导出。`novel_project_init` 也支持可选 `author` 与 `language`。
+在「任务 → 导入与导出 → 编辑作品信息」填写或修改书名、作者署名和语言。旧作品也可补齐作者，无需手工编辑配置文件。保存冲突时保留输入；请取消编辑并重新载入最新信息后再修改。未填写作者仍不能进行交付导出。`novel_project(action="init")` 也支持可选 `author` 与 `language`。
 
 写章、事实提取和状态结算（包括重试）统一使用「任务 → 模型」中所选模型的输出 token 预算，不再在非创作阶段偷偷降到 4096/8192。推理模型的隐藏推理通常也占用输出额度：若仍出现截断，请在服务商允许的范围内提高所选模型的输出预算（例如 32768 或 49152），同时核对上下文窗口。正文目标字数与 token 预算是两回事；较高上限不等于一定消耗该数量，也不能保证所有模型都支持它。此次验证使用模型替身，未进行真实模型计费测试。

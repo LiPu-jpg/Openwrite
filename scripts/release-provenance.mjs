@@ -37,7 +37,7 @@ async function collect(name, from) {
   for (const child of Object.keys(pkg.dependencies ?? {})) await collect(child, directory)
 }
 for (const name of Object.keys(manifest.dependencies ?? {})) await collect(name, root)
-for (const relative of ['packages/openwrite-bridge', 'packages/studio-panel', 'vendor/dsh-dog']) {
+for (const relative of ['packages/openwrite-bridge', 'packages/studio-panel']) {
   const directory = join(root, relative)
   const pkg = JSON.parse(await readFile(join(directory, 'package.json')))
   for (const name of Object.keys(pkg.dependencies ?? {})) await collect(name, directory)
@@ -49,7 +49,11 @@ const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).t
 const sourceHash = createHash('sha256')
 async function hashSource(directory, prefix = '') {
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (['node_modules', 'lib', '.git', '.venv', 'build', '__pycache__', '.pytest_cache', '.ruff_cache', 'licenses', '.pw-browsers', 'test-results', 'playwright-report'].includes(entry.name) || (entry.name === 'dist' && !prefix.includes('vendor/')) || entry.name.startsWith('.tmp-') || entry.name.startsWith('.wt-') || /(?:\.log|\.tgz|\.manifest\.json)$/.test(entry.name) || entry.name.startsWith('release-report-') || entry.name.startsWith('packaged-regressions-report-') || prefix + entry.name === 'release/source.json') continue
+    // `lib` is NOT skipped wholesale: packages/*/lib/index.js and
+    // packages/studio-panel/lib/client.js are the shipped, executed runtime, so
+    // a tampered build must change the source identity. Only genuinely unshipped
+    // build directories are excluded (the skip list below names them).
+    if (['node_modules', '.git', '.venv', 'build', '__pycache__', '.pytest_cache', '.ruff_cache', 'licenses', '.pw-browsers', 'test-results', 'playwright-report'].includes(entry.name) || (entry.name === 'dist' && !prefix.includes('vendor/')) || entry.name.startsWith('.tmp-') || entry.name.startsWith('.wt-') || /(?:\.log|\.tgz|\.manifest\.json)$/.test(entry.name) || entry.name.startsWith('release-report-') || entry.name.startsWith('packaged-regressions-report-') || prefix + entry.name === 'release/source.json') continue
     sourceHash.update(prefix + entry.name + '\0')
     if (entry.isDirectory()) await hashSource(join(directory, entry.name), prefix + entry.name + '/')
     else if (entry.isFile()) sourceHash.update(await readFile(join(directory, entry.name)))

@@ -23,27 +23,19 @@ const ICONS: Record<ToolFamily, LucideIcon> = {
 
 const MUTATIONS: Readonly<Record<string, ResourceKey>> = {
   novel_write_chapter: 'manuscript',
-  novel_doc_write: 'manuscript',
+  novel_doc: 'manuscript',
   novel_chapter_delete: 'manuscript',
   novel_chapter_delete_batch: 'manuscript',
   novel_manuscript_edit_action: 'manuscript',
   novel_outline_edit: 'outline',
-  novel_asset_create: 'assets',
-  novel_asset_update: 'assets',
-  novel_assets_package_import: 'assets',
-  novel_revision_create_selection: 'revisions',
-  novel_revision_create_from_review: 'revisions',
-  novel_revision_apply: 'manuscript',
-  novel_revision_reject: 'revisions',
-  novel_revision_regenerate: 'revisions',
-  novel_task_create: 'tasks',
-  novel_task_cancel: 'tasks',
-  novel_task_retry: 'tasks',
-  novel_task_confirm: 'tasks',
-  novel_multi_write: 'tasks',
-  novel_import: 'manuscript',
-  novel_sync: 'workspace',
+  novel_assets: 'assets',
+  novel_assets_package: 'assets',
+  // A merged tool maps several actions onto one resource key; the panel keeps
+  // the union of what the original per-action tools contributed.
+  novel_revision: 'revisions',
+  novel_task: 'tasks',
 }
+
 
 const invalidatedCalls = new Set<string>()
 

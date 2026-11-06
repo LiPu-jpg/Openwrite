@@ -633,7 +633,7 @@ export function CreationView(props: CreationViewProps) {
   const [insertKind, setInsertKind] = useState<'state' | 'relation'>('state')
   const [insertSourceId, setInsertSourceId] = useState('')
   const [insertTargetId, setInsertTargetId] = useState('')
-  const [insertField, setInsertField] = useState('综合状态')
+  const [insertField, setInsertField] = useState(t('creation.marker.defaultState'))
   const [insertOldState, setInsertOldState] = useState('')
   const [insertNewState, setInsertNewState] = useState('')
   const [insertDescription, setInsertDescription] = useState('')
@@ -1035,13 +1035,30 @@ export function CreationView(props: CreationViewProps) {
     workbench.epochs.tasks,
   ])
 
+  const manuscriptEpochRef = useRef(0)
   useEffect(() => {
     if (workbench.epochs.manuscript === 0 || documentState !== 'ready') return
     if (saveInFlightRef.current || saveQueuedRef.current) return
+    // Record only what is actually acted on. Recording unconditionally meant an
+    // epoch that arrived while a load was in flight was marked consumed, the
+    // recovery effect below then saw the two as equal, and the author was left
+    // editing text the server had already superseded.
+    manuscriptEpochRef.current = workbench.epochs.manuscript
     void loadDocument(false)
     // Resource epochs are the signal; documentState/loadDocument are intentionally read at signal time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workbench.epochs.manuscript])
+  // An epoch that arrives while a load is already in flight is otherwise
+  // consumed and lost: the pre-commit fetch resolves and is shown, and no
+  // further refresh ever comes. Re-check once the document settles.
+  useEffect(() => {
+    if (documentState !== 'ready') return
+    if (manuscriptEpochRef.current === workbench.epochs.manuscript) return
+    if (saveInFlightRef.current || saveQueuedRef.current) return
+    manuscriptEpochRef.current = workbench.epochs.manuscript
+    void loadDocument(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentState, workbench.epochs.manuscript])
 
   useEffect(() => {
     if (path === '' || !inspectorRequested || inspectorTab !== 'context') return
@@ -1634,6 +1651,15 @@ export function CreationView(props: CreationViewProps) {
     const currentDocument = documentRef.current
     if (preview === null || currentDocument === null || historyBusy !== '') return
     if (!window.confirm(t('creation.history.restoreConfirm'))) return
+    // The revert lands on the saved text and the reload discards the editor, so
+    // an unsaved draft must be flushed (or the action refused) first.
+    if (dirtyRef.current) {
+      await saveRef.current(false, 'manual')
+      if (dirtyRef.current) {
+        setHistoryNotice(t('creation.notes.saveRequired'))
+        return
+      }
+    }
     setHistoryBusy(preview.version.versionId)
     setHistoryNotice('')
     try {
@@ -1875,6 +1901,18 @@ export function CreationView(props: CreationViewProps) {
     const selected = revisionSelections[proposal.proposalId] ?? []
     if (action === 'apply' && selected.length === 0) return
     if (action === 'apply') {
+      // `documentRef.current.revision` is the *saved* revision, so the check
+      // below passes while the author still has unsaved text. Save first, the
+      // way every sibling handler does, or the apply lands on older text and
+      // `loadDocument(true)` silently discards the editor's contents.
+      if (dirtyRef.current) {
+        await saveRef.current(false, 'manual')
+        if (dirtyRef.current) {
+          setHistoryNotice(t('creation.notes.saveRequired'))
+          setInspectorTab('revisions')
+          return
+        }
+      }
       const currentRevision = documentRef.current?.revision ?? ''
       if (proposal.sourceRevision !== '' && currentRevision !== '' && proposal.sourceRevision !== currentRevision) {
         setHistoryNotice(t('creation.proposals.sourceConflict'))
@@ -1912,7 +1950,13 @@ export function CreationView(props: CreationViewProps) {
   }
 
   return (
-    <div className={css.creationRoot} data-chapter-rail-visible={chapterRailVisible} data-inspector-visible={inspectorVisible}>
+    // The host gives the view its whole content area when it carries
+    // `data-conversation-composer-overlay`, and hides the composer seat while
+    // `data-openwrite-workspace` is mounted (see workspace-chrome.ts). The
+    // editor therefore reaches the viewport bottom instead of stopping above
+    // the composer's band, and nothing floats over the manuscript.
+    <div className={css.creationRoot} data-openwrite-workspace="" data-conversation-composer-overlay=""
+      data-chapter-rail-visible={chapterRailVisible} data-inspector-visible={inspectorVisible}>
       <div className={css.mobileBar}>
         <button type="button" className={css.iconButton} title={t('creation.chapters')}
           aria-label={t('creation.chapters')} aria-expanded={leftOpen} onClick={() => setLeftOpen(value => !value)}>
