@@ -33,7 +33,12 @@ export async function acceptBrowser(loginUrl, temporary) {
     await page.getByRole('tab', { name: /^(创作|Create)$/ }).click()
     console.log('Browser: blank-session workbench opened')
     // The blank workbench and its initialization form must work without a model turn.
-    await page.locator('button[data-actionable="true"]').click()
+    // The workbench pages no longer show the composer, so the context chip that
+    // used to open this form is not on the page. The operations view carries the
+    // same form in its import/export panel, for a workspace that is bound but not
+    // initialized yet.
+    await page.getByRole('tab', { name: /^(任务|Tasks)$/ }).click()
+    await page.getByRole('button', { name: /^(导入与导出|Import & export)$/ }).click()
     await page.getByPlaceholder('my-novel', { exact: true }).fill('release-test')
     await page.getByLabel(/^(书名|Title)$/).fill('中文作品验收')
     initializationStarted = Date.now()
