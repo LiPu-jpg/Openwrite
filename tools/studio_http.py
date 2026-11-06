@@ -1085,9 +1085,14 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
 
     def _require_instance_auth(self) -> None:
         token = getattr(self.server, "instance_token", None)
-        if token and not hmac.compare_digest(
-            self.headers.get("Authorization", ""), f"Bearer {token}"
-        ):
+        if not token:
+            return
+        # compare_digest rejects str arguments containing non-ASCII characters
+        # with a TypeError, which would turn a malformed Bearer header into a
+        # 500. Compare bytes: the wrong credential still gets the same 401.
+        provided = self.headers.get("Authorization", "").encode("utf-8", "surrogatepass")
+        expected = f"Bearer {token}".encode("utf-8", "surrogatepass")
+        if not hmac.compare_digest(provided, expected):
             raise StudioError("实例认证失败", HTTPStatus.UNAUTHORIZED, code="INSTANCE_AUTH_REQUIRED")
 
     def _require_write_header(self) -> None:

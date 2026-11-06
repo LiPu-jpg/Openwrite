@@ -279,7 +279,6 @@ def test_write_document_never_reports_failure_after_committing(tmp_path):
     assert (escape / "src" / "pwned.md").read_text(encoding="utf-8") == "OUTSIDE\n"
 
 
-@pytest.mark.xfail(strict=True, reason="open defect")
 def test_non_ascii_authorization_header_is_rejected_as_unauthorized(tmp_path):
     """``hmac.compare_digest`` on str raises for non-ASCII input.
 
