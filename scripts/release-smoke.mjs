@@ -1,10 +1,10 @@
 // Install the actual packed artifact into an isolated profile and boot the real host.
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, mkdir, writeFile, rm, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir, release as osRelease } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
 import { createHash } from 'node:crypto'
@@ -22,6 +22,27 @@ async function pack(root, version, destination) {
   })
   return join(destination, `dsh-openwrite-${version}.tgz`)
 }
+/**
+ * Resolve a named artifact, expanding a wildcard the shell left alone.
+ *
+ * PowerShell does not expand a wildcard for a native command, so a CI job that
+ * names `dsh-openwrite-*.tgz` hands the pattern over literally on Windows.
+ */
+async function resolveArtifact(argument, version) {
+  const path = resolve(argument)
+  if (existsSync(path) || !/[*?]/.test(argument)) return path
+  const directory = dirname(path)
+  const pattern = basename(path)
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.')
+  const matches = (await readdir(directory)).filter(name => new RegExp(`^${pattern}$`).test(name)).sort()
+  if (matches.length === 0) return path
+  const exact = `dsh-openwrite-${version}.tgz`
+  const preferred = matches.includes(exact) ? exact : matches[matches.length - 1]
+  console.log(`Resolved artifact ${argument} -> ${join(directory, preferred)}`)
+  return join(directory, preferred)
+}
 const version = JSON.parse(await readFile(join(root, 'package.json'))).version
 const named = process.argv.find(arg => arg.endsWith('.tgz'))
 // Never fall back to whatever tarball is lying in the repo root: that file is
@@ -31,7 +52,7 @@ const named = process.argv.find(arg => arg.endsWith('.tgz'))
 // artifact, which is how the CI jobs hand over the package the build job
 // produced. A named artifact that is not on disk is a caller error, not a
 // reason to silently validate a different one.
-const namedPath = named ? resolve(named) : null
+const namedPath = named ? await resolveArtifact(named, version) : null
 if (namedPath && !existsSync(namedPath)) {
   throw new Error(`the named artifact does not exist: ${namedPath}`)
 }

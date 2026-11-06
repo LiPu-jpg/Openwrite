@@ -47,14 +47,18 @@ runs:
 
     # One workspace-relative location: identical on every OS (macOS otherwise
     # uses ~/Library/Caches, Linux ~/.cache) and free of context restrictions.
+    # The architecture belongs in the key: macOS runners come in both arm64 and
+    # x64 flavours, and a shared key lets the x64 leg restore the arm64
+    # browsers — which Playwright then considers installed, so it never
+    # downloads the mac-x64 build the leg needs.
     - name: Restore the Playwright browser cache
       if: inputs.browser != ''
       uses: actions/cache@v4
       with:
         path: .tmp-ms-playwright
-        key: ms-playwright-${{ runner.os }}-${{ inputs.browser }}-${{ hashFiles('packages/studio-panel/package-lock.json') }}
+        key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.browser }}-${{ hashFiles('packages/studio-panel/package-lock.json') }}
         restore-keys: |
-          ms-playwright-${{ runner.os }}-${{ inputs.browser }}-
+          ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.browser }}-
 
     - name: Install the Playwright browser (retrying, then cached)
       if: inputs.browser != ''
