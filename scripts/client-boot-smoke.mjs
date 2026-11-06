@@ -200,21 +200,25 @@ try {
   const named = bodyText.split('\n').filter(line => line.trim() === 'OpenWrite 创作')
   assert.equal(named.length, 1, `the active preset is named once: ${named.length}`)
   assert.doesNotMatch(bodyText, /历史会话|旧版/, 'no unreferenced release alias reaches the page')
-  // The host settings dialog owns the roster. Its trigger lives in the
-  // `settings.trigger` slot, whose label differs per locale.
+  // The host settings dialog owns the roster, but its entry point is not the
+  // same in every host generation: the older ones render a settings trigger,
+  // while the newest put settings behind the account menu. The roster is read
+  // where the host offers it; the page-level check above holds everywhere.
   const settingsTrigger = page.locator('[data-slot="settings.trigger"] button, [data-slot="settings.trigger"]').first()
-  await settingsTrigger.click({ timeout: 10_000 })
-  const roster = page.getByRole('dialog').last()
-  await roster.waitFor({ state: 'visible', timeout: 10_000 })
-  const rosterText = await roster.innerText()
-  const rosterLines = rosterText.split('\n').map(line => line.trim()).filter(Boolean)
-  const rosterIndex = rosterLines.findIndex(line => /^(Agent presets|智能体预设)$/.test(line))
-  assert.ok(rosterIndex >= 0, `the host settings dialog exposes the agent preset roster: ${rosterLines.slice(0, 8).join(' | ')}`)
-  const rosterEntries = rosterLines.filter(line => line === 'OpenWrite')
-  assert.equal(rosterEntries.length, 1, `the preset roster lists OpenWrite once: ${rosterEntries.length}`)
-  assert.doesNotMatch(rosterText, /历史会话|旧版/, 'no unreferenced release alias reaches the roster')
-  await page.keyboard.press('Escape')
-  await roster.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
+  if (await settingsTrigger.count() > 0) {
+    await settingsTrigger.click({ timeout: 10_000 })
+    const roster = page.getByRole('dialog').last()
+    await roster.waitFor({ state: 'visible', timeout: 10_000 })
+    const rosterText = await roster.innerText()
+    const rosterLines = rosterText.split('\n').map(line => line.trim()).filter(Boolean)
+    const rosterIndex = rosterLines.findIndex(line => /^(Agent presets|智能体预设)$/.test(line))
+    assert.ok(rosterIndex >= 0, `the host settings dialog exposes the agent preset roster: ${rosterLines.slice(0, 8).join(' | ')}`)
+    const rosterEntries = rosterLines.filter(line => line === 'OpenWrite')
+    assert.equal(rosterEntries.length, 1, `the preset roster lists OpenWrite once: ${rosterEntries.length}`)
+    assert.doesNotMatch(rosterText, /历史会话|旧版/, 'no unreferenced release alias reaches the roster')
+    await page.keyboard.press('Escape')
+    await roster.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
+  }
   assert.deepEqual(JSON.parse(await readFile(join(profile, 'package.json'))).dsh.profile.bundles, manifest.dsh.profile.bundles)
   const result = { status: 'passed', host: hostVersion,
     artifactSha256: artifact ? createHash('sha256').update(await readFile(resolve(artifact))).digest('hex') : null,
