@@ -578,3 +578,16 @@ def test_dsh_default_wins_over_a_legacy_machine_provider_but_not_a_workspace_cho
         assert base.for_workspace(workspace).load_settings()["search_provider"] == "bocha"
     finally:
         reset_host_web()
+
+
+def test_research_rejects_an_unsupported_quality_before_starting_the_child(tmp_path: Path):
+    framework = tmp_path / "framework"
+    (framework / "node_modules").mkdir(parents=True)
+    (framework / "package.json").write_text("{}", encoding="utf-8")
+    service = ResearchService(tmp_path / "novel", framework_root=framework)
+    with pytest.raises(ResearchServiceError) as error:
+        service.run(
+            {"prompt": "测试", "search": "none", "quality": "fast"},
+            _FakeContext(),
+        )
+    assert error.value.code == "INVALID_INPUT"

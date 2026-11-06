@@ -293,6 +293,12 @@ class ResearchService:
         ).strip().lower()
         if search not in {"dsh", "bocha", "bing", "jina", "none"}:
             raise ResearchServiceError("深度研究搜索提供方无效", code="INVALID_INPUT")
+        quality = str(payload.get("quality") or "balanced").strip().lower()
+        if quality not in {"advisory", "balanced", "strict"}:
+            raise ResearchServiceError(
+                "深度研究质量必须是 advisory、balanced 或 strict",
+                code="INVALID_INPUT",
+            )
         # The vendored framework already speaks the Bocha protocol; the DSH
         # provider is that protocol pointed at the host relay.
         search_flag = "bocha" if search == "dsh" else search
@@ -308,7 +314,7 @@ class ResearchService:
             "--lang",
             str(payload.get("language") or "zh-CN"),
             "--quality",
-            str(payload.get("quality") or "balanced"),
+            quality,
             "--search",
             search_flag,
         ]
