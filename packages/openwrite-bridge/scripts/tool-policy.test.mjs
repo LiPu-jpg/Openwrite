@@ -187,9 +187,11 @@ test('unlocked document writes and half-specified restores are rejected before a
 
   // The server CAS-checks a document only when `version` is present, so omitting
   // it is an unlocked last-write-wins overwrite. `force` is the explicit bypass.
-  await assert.rejects(() => byName.get('novel_doc').execute({ action: 'write', path: 'a.md', content: 'x' }, exec),
+  // The path must itself be writable, or the path guard answers first and the
+  // version guard is never reached.
+  await assert.rejects(() => byName.get('novel_doc').execute({ action: 'write', path: 'src/a.md', content: 'x' }, exec),
     /version is required for novel_doc\(action="write"\)/)
-  await byName.get('novel_doc').execute({ action: 'write', path: 'a.md', content: 'x', force: true }, exec)
+  await byName.get('novel_doc').execute({ action: 'write', path: 'src/a.md', content: 'x', force: true }, exec)
   assert.equal(requests.at(-1)?.path, '/api/document')
 
   // A blank expected_revision does not mean "no guard": the server computes

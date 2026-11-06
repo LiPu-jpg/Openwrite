@@ -15,11 +15,15 @@ inputs:
     default: auto
 runs:
   using: composite
-  env:
-    # Workspace-relative so no context is needed: job-level and step-level env
-    # cannot both see `runner`, and a literal path works in every scope.
-    PLAYWRIGHT_BROWSERS_PATH: .tmp-ms-playwright
   steps:
+    # A composite action has no `runs.env`: the runner accepts only `using`
+    # and `steps` there and rejects the whole manifest otherwise. The path is
+    # workspace-relative, so it needs no context and can be exported into the
+    # job environment for every later step instead.
+    - name: Pin the Playwright browser location
+      shell: bash
+      run: echo "PLAYWRIGHT_BROWSERS_PATH=.tmp-ms-playwright" >> "$GITHUB_ENV"
+
     - name: Harden npm against registry flakiness
       shell: bash
       run: |
