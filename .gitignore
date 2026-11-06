@@ -20,6 +20,8 @@ packages/studio-panel/playwright-report/
 .tmp-*.json
 
 release-report-*.json
+# Browser acceptance screenshots; the CI job uploads them as artifacts.
+release-browser-*.png
 *.tgz.manifest.json
 
 /release/source.json
