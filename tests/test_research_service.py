@@ -554,3 +554,27 @@ def test_studio_exposes_research_status_and_report_route(tmp_path: Path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_dsh_default_wins_over_a_legacy_machine_provider_but_not_a_workspace_choice(tmp_path: Path):
+    from tools.host_web import configure_host_web, reset_host_web
+
+    reset_host_web()
+    preferences = tmp_path / "preferences"
+    preferences.mkdir()
+    (preferences / "research-settings.json").write_text(
+        json.dumps({"search_provider": "bocha"}), encoding="utf-8"
+    )
+    try:
+        configure_host_web("http://127.0.0.1:45678", "relay-token")
+        base = StudioResearchSettingsStore(preferences)
+        workspace = tmp_path / "novel" / "data" / "research" / "settings.json"
+        # No workspace choice yet: the managed host default is DSH, even though
+        # an older machine-global file says bocha.
+        assert base.for_workspace(workspace).load_settings()["search_provider"] == "dsh"
+        # An explicit workspace choice wins.
+        workspace.parent.mkdir(parents=True)
+        workspace.write_text(json.dumps({"search_provider": "bocha"}), encoding="utf-8")
+        assert base.for_workspace(workspace).load_settings()["search_provider"] == "bocha"
+    finally:
+        reset_host_web()

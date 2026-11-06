@@ -199,7 +199,12 @@ class StudioResearchSettingsStore:
         if self.workspace_path is not None:
             payload = self._read_json(self.workspace_path)
         if not payload:
-            payload = self._read_json(self.settings_path)
+            # A workspace setting is the author's explicit choice. Without one,
+            # a managed host's DSH web tools are the default even when an older
+            # machine-global file still says bocha; that file predates this
+            # provider and would otherwise pin every new project to an API key.
+            if not host_web_available():
+                payload = self._read_json(self.settings_path)
         provider = str(payload.get("search_provider") or "").strip().lower()
         remember = payload.get("remember_api_key")
         default = self._default_provider()
