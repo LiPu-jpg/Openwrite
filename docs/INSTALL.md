@@ -255,6 +255,8 @@ node package/scripts/safe-upgrade.mjs --profile desktop --package dsh-openwrite@
 
 `dsh-openwrite@0.2.23` 起，根包和全部内嵌子包的声明同时覆盖精确宿主 `0.2.1-rc.2`，安装和激活不需要版本豁免。宿主判断的是 `package.json` 的 `peerDependencies`（`@deepseek-ai/dsh-*`），不是 `dsh.compatibility` 字段；因此只改 `dsh.compatibility` 字符串并不能让 0.2.22 在 0.2.1-rc.2 上加载。若安装日志出现 `plugin does not support the DSH version in use`，请直接升级到 `0.2.23` 或更高的已验收版本，不要手工改版本号或给旧子包授权。本版已在 `0.2.1-rc.2` 完成 Web 启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存的验证；`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过，Windows Electron 桌面端仍未实机复测。
 
+`0.2.36` 起，声明同时覆盖精确宿主 `0.1.7-rc.2` 与 `0.2.2-rc.1`；这两个宿主上 `0.2.35` 及更早版本会被同一闸门拒绝（[#160](https://github.com/LiPu-jpg/Openwrite/issues/160)/[#161](https://github.com/LiPu-jpg/Openwrite/issues/161)/[#163](https://github.com/LiPu-jpg/Openwrite/issues/163)）。已发布版本不追溯补声明，遇到该错误请升级到声明覆盖该宿主的版本，方法与边界见 [#160/#161/#163 修复说明](ISSUES_160_161_163.md)。
+
 `0.2.29` 候选起，声明同时覆盖精确宿主 `0.2.1-rc.4` 与 `0.2.1-rc.5`；这两个宿主上 `0.2.28` 及更早版本会被同一闸门拒绝（[#150](https://github.com/LiPu-jpg/Openwrite/issues/150)/[#151](https://github.com/LiPu-jpg/Openwrite/issues/151)/[#142](https://github.com/LiPu-jpg/Openwrite/issues/142)）。已发布版本不追溯补声明，遇到该错误请升级到声明覆盖该宿主的版本，方法与边界见 [#149/#150/#151 修复说明](ISSUES_149_150_151.md)。
 
 本修复同时处理 `conversation.chat.turnTail` 从 chain 到 list 的变化，以及 `uiSession.pendingInteractions` 到 `uiSession.sessionStatus` 的变化。客户端初始化或延迟槽位注册失败时，插件回滚对应注册并在浏览器控制台输出 `[OpenWrite/Studio]` / `[OpenWrite/DoG]` 和原始异常，避免让这类插件初始化异常升级为宿主 web boot 失败。此修复不更改桌面端自身的 profile 恢复策略。

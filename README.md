@@ -10,7 +10,7 @@
 <p align="center">在 DeepSeek Harness 中规划、写作、审稿和管理长篇小说。</p>
 
 <p align="center">
-  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.2.1--rc.5-2563eb" alt="dsh 0.2.1-rc.5"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.2.2--rc.1-2563eb" alt="dsh 0.2.2-rc.1"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node-%E2%89%A522.19-15803d" alt="Node >= 22.19"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0f766e" alt="Apache-2.0"></a>
   <a href="https://dsh-plugin.org/plugins/lipu-jpg/openwrite"><img src="https://dsh-plugin.org/badges/listed.svg" alt="Listed on dsh-plugin.org"></a>
@@ -51,6 +51,9 @@ Android 完整工具验收与宿主升级保护发布继续在 [#123](https://gi
 ## 0.2.30
 
 - **联动插件可执行接入**：`dsh-our-free-model` 接入按钮现在写 profile 并把写作/评审路由切到该模型（其余路由保留、二次确认、部分失败如实报告）；`dsh-ops` 的挂载计划（文件工具/渐进发现/无 shell/不替换官方工具）显示在「联动插件」区；`dsh-dog` 新增非斜杠技能 `dog-delivery-verification`，把正文与评审证据写成 handoff 图交给 `dog_validate`/`dog_create`/`dog_run` 独立验收。详见 [联动插件说明](docs/COMPANION_PLUGINS.md)。
+
+兼容声明扩到精确宿主 dsh `0.2.2-rc.1` 与 `0.1.7-rc.2`，修复这两个宿主上的
+`plugin does not support the DSH version in use` 直接拒装（[#160](https://github.com/LiPu-jpg/Openwrite/issues/160)/[#161](https://github.com/LiPu-jpg/Openwrite/issues/161)/[#163](https://github.com/LiPu-jpg/Openwrite/issues/163)），见 [#160/#161/#163 修复说明](docs/ISSUES_160_161_163.md)。
 
 本轮候选还包含两项发布阻塞修复，见 [#149/#150/#151 修复说明](docs/ISSUES_149_150_151.md)：
 

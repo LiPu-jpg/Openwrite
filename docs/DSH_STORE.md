@@ -39,7 +39,9 @@ OpenWrite 是一个完整的小说创作插件套件。商城安装目标是仓�
 
 alpha 浏览器验收进一步发现 persona 配置由 `text` 改成了必填 `prefix`；预设使用 YAML 锚点将同一份身份文本提供给两个字段，并以两版实际 Config / apply 验证身份只注册一次。
 
-构建基线仍是 `0.1.2-rc.1`。兼容声明覆盖精确版本 `0.1.2-rc.1`、`0.1.5-alpha.1`、`0.2.0-rc.2`、`0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`，并分别保留已完成的 Web 客户端验收；`0.1.3-alpha.1`、`0.1.3-alpha.2` 保持未知。这不自动升级用户宿主，也不承诺整个 alpha 或 0.2 范围都兼容。`0.2.23` 已发布到 npm `latest` 与 GitHub Release，完整平台矩阵、源码安装和四份宿主客户端报告见[发布验收](RELEASE_ACCEPTANCE.md#023)；本机另复验了 `0.2.1-rc.2` 的安装闸门、客户端激活、预设选择、工作台入口与三页签及其他插件共存。内置 DoG 引擎已移除（见 README），需要图形化 DoG 验证可自行安装 `@dsh-external/dsh-dog`。
+构建基线仍是 `0.1.2-rc.1`。兼容声明覆盖精确版本 `0.1.2-rc.1`、`0.1.5-alpha.1`、`0.1.7-rc.2`、`0.2.0-rc.2`、`0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-rc.1`，并分别保留已完成的 Web 客户端验收；`0.1.3-alpha.1`、`0.1.3-alpha.2` 保持未知。这不自动升级用户宿主，也不承诺整个 alpha 或 0.2 范围都兼容。`0.2.23` 已发布到 npm `latest` 与 GitHub Release，完整平台矩阵、源码安装和四份宿主客户端报告见[发布验收](RELEASE_ACCEPTANCE.md#023)；本机另复验了 `0.2.1-rc.2` 的安装闸门、客户端激活、预设选择、工作台入口与三页签及其他插件共存。内置 DoG 引擎已移除（见 README），需要图形化 DoG 验证可自行安装 `@dsh-external/dsh-dog`。
+
+`0.1.7-rc.2` 与 `0.2.2-rc.1` 于 0.2.36 加入声明：此前 `dsh plugin add dsh-openwrite` 在这两个宿主上同样被版本闸门直接拒绝（[#160](https://github.com/LiPu-jpg/Openwrite/issues/160)/[#161](https://github.com/LiPu-jpg/Openwrite/issues/161)/[#163](https://github.com/LiPu-jpg/Openwrite/issues/163)）。两个宿主各用官方 registry 的精确包完成安装闸门、客户端激活、预设选择与工作台入口验证，方法与边界见 [#160/#161/#163 修复说明](ISSUES_160_161_163.md)。已发布版本（含 `0.2.35`）不追溯补声明，需要这两个宿主的用户应等 `0.2.36` 正式发布。
 
 `0.2.1-rc.4` 与 `0.2.1-rc.5` 于 0.2.29 候选加入声明：此前 `dsh plugin add dsh-openwrite` 在这两个宿主上直接被版本闸门拒绝（[#150](https://github.com/LiPu-jpg/Openwrite/issues/150)/[#151](https://github.com/LiPu-jpg/Openwrite/issues/151)/[#142](https://github.com/LiPu-jpg/Openwrite/issues/142)）。两个宿主各用官方 registry 的精确包完成安装闸门、客户端激活、预设选择、工作台三页签及其他插件共存验证，方法与边界见 [#149/#150/#151 修复说明](ISSUES_149_150_151.md)。已发布版本（含 `0.2.28`）不追溯补声明，需要这两个宿主的用户应等 `0.2.29` 正式发布。
 

@@ -77,6 +77,14 @@ jobs:
             before: '2026-10-27T00:00:00Z'
           - host: '0.2.1-rc.5'
             before: '2026-10-30T00:00:00Z'
+          - host: '0.2.2-rc.1'
+            # rc.1 was published on Nov 4, after the 0.2.1 line closed. Keep a
+            # cutoff so a later 0.2.2 build cannot leak into this leg.
+            before: '2026-11-05T00:00:00Z'
+          - host: '0.1.7-rc.2'
+            # rc.2 was published on Sep 24 and 0.2.0-rc.1 followed on Sep 28;
+            # the cutoff keeps this leg on the 0.1.7 batch.
+            before: '2026-09-25T00:00:00Z'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
