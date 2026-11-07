@@ -3,7 +3,7 @@
   "dsh": "0.1.2-rc.1",
   "uv_version": "0.11.19",
   "python_version": "3.12.13",
-  "core_version": "5.8.30",
+  "core_version": "5.8.31",
   "contract_version": 1,
   "platforms": {
     "darwin-arm64": {
@@ -56,8 +56,8 @@
     }
   },
   "wheel": {
-    "file": "openwrite-5.8.30-py3-none-any.whl",
-    "sha256": "d9e48cbaa0263c7cc194005606a61abdd9194e56adb5e3365b52e4c2be805a37"
+    "file": "openwrite-5.8.31-py3-none-any.whl",
+    "sha256": "498754bd300d092d3153a5f373d9b78d17a460f6b97080f4a46bdded8e2ea0e8"
   },
   "requirements": {
     "file": "requirements.lock",
@@ -67,7 +67,7 @@
     "core": {
       "repository": "https://github.com/LiPu-jpg/Openwrite",
       "branch": "native-core",
-      "commit": "d7ac7eaa64ade90e28508f5959d2f19e8425ae9e"
+      "commit": "89dd74c31d74d6408523b9b427f6250e6fff410a"
     },
     "cryptography": {
       "package": "cryptography",

@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.2.36 / Core 5.8.31：宿主兼容扩到 dsh 0.2.2-rc.1 与 0.1.7-rc.2，并修掉大纲插入与 Windows 启动器
+
+### 宿主兼容矩阵扩展
+
+- 宿主在安装前读取包里的 `@deepseek-ai/dsh-*` **peer 范围**做版本闸门，`dsh.compatibility` 只是展示元数据，
+  因此根包、两个内嵌子包（`@dsh-novel/openwrite-bridge`、`@dsh-novel/studio-panel`）和四个 lock 文件
+  的 peer 范围、`dsh.compatibility.dsh`、`dshReleases` 同步加入精确宿主 `0.1.7-rc.2` 与 `0.2.2-rc.1`。
+- 这修复了 [#160](https://github.com/LiPu-jpg/Openwrite/issues/160)、
+  [#163](https://github.com/LiPu-jpg/Openwrite/issues/163)（dsh 0.2.2-rc.1）与
+  [#161](https://github.com/LiPu-jpg/Openwrite/issues/161)（dsh 0.1.7-rc.2）的
+  `plugin does not support the DSH version in use` 拒装——失败发生在安装之前，与 Node、pnpm、操作系统无关。
+- 旧宿主的 peer 匹配集合逐项对比只增不改（`0.1.2-rc.1`、`0.1.5-alpha.1`、`0.2.0-rc.2`、
+  `0.2.1-rc.2`–`0.2.1-rc.5` 不受影响）。
+- 发布矩阵新增这两个宿主的客户端验收任务，并各自保留 `--before` 截止时间，
+  避免上游部分发布时把更新的依赖批次带进旧宿主验收。
+
+### 预设行的宿主判定改到宿主自己的包树
+
+- dsh 0.2.2 把 `list_agents` 并入 `@deepseek-ai/dsh-tool-subagent-control` 主入口并删掉了
+  `./list-agents` 子路径导出。宿主解析不到这一行就会**拒绝整个预设**，工作台因此挂不起来。
+- 先前这行的去留是在**插件自己的 node_modules** 里探测的，而宿主是在**自己的包树**里解析预设行的
+  （cordis loader 直接 `import(name)`）。两个树不是一回事：真实 profile 里插件根本没装宿主的包，
+  而仓库里又常驻着旧宿主，探测永远给出错误答案。
+- 现在改为在宿主的包根上解析该 specifier：能解析就保留，不能解析才丢弃。
+  判定跟着宿主真实导出的走，不再跟某个写死的版本号走。
+- 同一份代码在 `0.2.2-rc.1` 上丢弃该行、在 `0.2.1-rc.5` 与 `0.1.7-rc.2` 上保留该行；
+  `scripts/preset-smoke.mjs` 按被测宿主判定，工作台挂载在两个宿主上都已实测通过。
+
+### Core 5.8.31
+
+- **[#162](https://github.com/LiPu-jpg/Openwrite/issues/162)：`novel_outline_edit(add_after)` 在卷/幕/节上永久 400。**
+  该操作此前只接受与目标同级的层级，而容器节点没有同级的下级，于是「在某个卷之后新增一幕」
+  对任何 `kind` 都撞上「新增层级与当前节点不匹配」。
+  新节点现在可以落在两处：目标的**下一个兄弟**（同层级，行为不变），或目标的**最后一个下级**
+  （即目标容器接受的层级：卷→幕、幕→节、节→章）。拒绝时的提示改为列出此处可新增的层级，调用方不必再猜。
+- **[#164](https://github.com/LiPu-jpg/Openwrite/issues/164)：Windows 启动脚本命令偏移。**
+  `启动 OpenWrite.bat` 以 LF 行尾随 wheel 一起发布，而 cmd.exe 按字节偏移续读批处理文件：
+  LF 行尾叠加文件里的多字节 UTF-8，cmd 会从词中间接着读，把 `set` 的尾巴 `t`、`nul` 的尾巴 `ul`
+  当成命令执行。文件现在以 CRLF 提交（`.gitattributes` 固定），macOS 的 `.command` 保持 LF。
+- **[#164](https://github.com/LiPu-jpg/Openwrite/issues/164)：装依赖时找不到 setuptools。**
+  启动器先把 setuptools 装进运行环境，随后那次带隔离的 editable 安装又会**再下载一份**构建后端；
+  镜像取不到时就报「No matching distribution found for setuptools>=77」——这条报错与 OpenWrite
+  自己的依赖无关。editable 安装改为复用环境里已装好的构建后端。
+- `requirements.txt` 原先比 `pyproject.toml` 少了六个运行时依赖，其中四个正是启动器自检时要 import 的
+  （openai / anthropic / markdown_it / prompt_toolkit），按该文件装出来的环境会被判为不可用；
+  两份清单现已对齐，并有回归用例防止再次漂移。
+- Core 全量 1777 passed / 33 skipped；捆绑 wheel 与来源提交 `89dd74c` 逐字节校验通过（506 个源文件）。
+
+
 ## 0.2.35：联动区的模型选择不再被默认模型覆盖
 
 功能与 0.2.34 一致；本次只带一个修复。
