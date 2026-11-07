@@ -113,6 +113,13 @@ jobs:
           echo "::error::host install failed after 3 attempts"
           exit 1
       - run: node scripts/preset-smoke.mjs --host-cli=.tmp-client-host/node_modules/@deepseek-ai/dsh/lib/bin.js
+      # The plugin's peer ranges have to hold against the host it is installed
+      # into. The host ships its own @deepseek-ai/dsh-* packages and its own
+      # cordis, and a peer range that excludes them fails the installation
+      # itself - npm refuses the tree, pnpm only warns. Resolving the plugin
+      # against the installed host is the check the declaration deserves.
+      - name: The plugin resolves against that host
+        run: npm install --prefix .tmp-client-host --dry-run dsh-openwrite-*.tgz --registry=https://registry.npmjs.org --ignore-scripts --no-audit --no-fund
       - run: node scripts/client-boot-smoke.mjs dsh-openwrite-*.tgz --host-cli=.tmp-client-host/node_modules/@deepseek-ai/dsh/lib/bin.js --report=client-report-${{ matrix.host }}.json
       - uses: actions/upload-artifact@v4
         with:
