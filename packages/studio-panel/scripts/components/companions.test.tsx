@@ -50,9 +50,17 @@ describe('CompanionSection', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<CompanionSection status={status} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: '写入 OpenWrite 模型配置' })).toBeTruthy())
+    // The button is disabled until the default model has been applied, and that
+    // happens in an effect after the gateway arrives. Waiting for the button to
+    // merely exist can resolve before the effect has run, which leaves the
+    // selection below racing the default.
+    await waitFor(() => expect((screen.getByRole('button', { name: '写入 OpenWrite 模型配置' }) as HTMLButtonElement).disabled).toBe(false))
     expect(screen.getByText(/本地网关 http:\/\/127\.0\.0\.1:8326\/v1 已就绪，可用模型 2 个/)).toBeTruthy()
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'kimi-k3' } })
+    // The gateway arrives asynchronously, so the default-model effect can
+    // still be pending when the author picks one. Assert the selection so a
+    // late reset fails here instead of silently writing the first model.
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('kimi-k3')
     fireEvent.click(screen.getByRole('button', { name: '写入 OpenWrite 模型配置' }))
     // Switching the writing/review routes is a second, explicit decision.
     await waitFor(() => expect(screen.getByText(/写作\/评审路由将切换到 our-free-model/)).toBeTruthy())
@@ -94,7 +102,11 @@ describe('CompanionSection', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<CompanionSection status={status} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: '写入 OpenWrite 模型配置' })).toBeTruthy())
+    // The button is disabled until the default model has been applied, and that
+    // happens in an effect after the gateway arrives. Waiting for the button to
+    // merely exist can resolve before the effect has run, which leaves the
+    // selection below racing the default.
+    await waitFor(() => expect((screen.getByRole('button', { name: '写入 OpenWrite 模型配置' }) as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: '写入 OpenWrite 模型配置' }))
     // An existing profile is never overwritten without a confirmation.
     await waitFor(() => expect(screen.getByText(/已存在模型配置 our-free-model/)).toBeTruthy())
@@ -124,7 +136,11 @@ describe('CompanionSection', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<CompanionSection status={status} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: '写入 OpenWrite 模型配置' })).toBeTruthy())
+    // The button is disabled until the default model has been applied, and that
+    // happens in an effect after the gateway arrives. Waiting for the button to
+    // merely exist can resolve before the effect has run, which leaves the
+    // selection below racing the default.
+    await waitFor(() => expect((screen.getByRole('button', { name: '写入 OpenWrite 模型配置' }) as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: '写入 OpenWrite 模型配置' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '确认切换' })).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: '确认切换' }))
@@ -148,7 +164,11 @@ describe('CompanionSection', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<CompanionSection status={status} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: '写入 OpenWrite 模型配置' })).toBeTruthy())
+    // The button is disabled until the default model has been applied, and that
+    // happens in an effect after the gateway arrives. Waiting for the button to
+    // merely exist can resolve before the effect has run, which leaves the
+    // selection below racing the default.
+    await waitFor(() => expect((screen.getByRole('button', { name: '写入 OpenWrite 模型配置' }) as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByRole('checkbox', { name: /同时把写作\/评审切到该模型/ }))
     fireEvent.click(screen.getByRole('button', { name: '写入 OpenWrite 模型配置' }))
     await waitFor(() => expect(screen.getByText(/已写入模型配置 our-free-model/)).toBeTruthy())

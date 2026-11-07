@@ -204,8 +204,14 @@ export function CompanionSection({ status }: { status: CompanionStatus | null })
   const gateway = read.kind === 'ok' ? read.gateway : null
   const gatewayReady = gateway !== null && gateway.running && gateway.baseUrl.trim() !== ''
   useEffect(() => {
-    const first = gateway?.models[0]
-    if (first !== undefined) setModel(first)
+    const models = gateway?.models ?? []
+    const first = models[0]
+    if (first === undefined) return
+    // Adopt the first model only while the author has not chosen one. The
+    // gateway arrives after the section has mounted, so this effect can run
+    // after the author already picked a model; resetting unconditionally
+    // would overwrite that choice and write the wrong model.
+    setModel(current => (current === '' || !models.includes(current) ? first : current))
   }, [gateway])
   useEffect(() => {
     if (gateway === null) return
