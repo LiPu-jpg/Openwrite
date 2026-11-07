@@ -300,7 +300,24 @@ def ensure_runtime(root: Path) -> Path:
             ],
             cwd=root,
         )
-        _run([python, "-m", "pip", "install", "--editable", root], cwd=root)
+        # The build backend is installed into the runtime environment above, so
+        # the editable install must use it instead of downloading a second copy
+        # into an isolated build environment. That second download is where a
+        # mirror that cannot serve setuptools fails, with the misleading
+        # "No matching distribution found for setuptools>=77" that has nothing
+        # to do with OpenWrite's own dependencies.
+        _run(
+            [
+                python,
+                "-m",
+                "pip",
+                "install",
+                "--editable",
+                "--no-build-isolation",
+                root,
+            ],
+            cwd=root,
+        )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise LauncherError(
             "依赖下载或安装失败。请检查网络、代理和磁盘空间后重新双击启动。"

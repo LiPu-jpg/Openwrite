@@ -1,0 +1,9 @@
+# Batch files are executed by cmd.exe, which resumes a batch file by byte
+# offset. LF-only endings, combined with the multi-byte UTF-8 these files
+# carry, make cmd resume mid-token and run the tail of a command - "t" out of
+# "set", "ul" out of "nul". Keep the bytes exactly as committed.
+*.bat -text
+*.cmd -text
+
+# The macOS launcher is a shell script: LF endings, always.
+*.command text eol=lf

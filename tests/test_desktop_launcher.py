@@ -80,6 +80,10 @@ def test_ensure_runtime_creates_and_installs_missing_environment(tmp_path: Path,
     assert commands[1][1:4] == ["-m", "pip", "install"]
     assert commands[2][1:4] == ["-m", "pip", "install"]
     assert "--editable" in commands[2]
+    # The build backend is installed into the runtime environment by the step
+    # above; an isolated build environment would download a second copy, and
+    # that download is what fails on a mirror without setuptools.
+    assert "--no-build-isolation" in commands[2]
     assert (runtime / ".openwrite-dependencies.json").is_file()
 
 
@@ -124,6 +128,60 @@ def test_double_click_launchers_are_present_and_use_shared_bootstrap():
     assert " -u " in windows
     assert "-m tools.desktop_launcher" in mac
     assert "-m tools.desktop_launcher" in windows
+
+
+def test_windows_launcher_keeps_crlf_endings_and_no_bom():
+    """cmd.exe resumes a batch file by byte offset.
+
+    LF-only endings in a batch file that carries multi-byte UTF-8 make cmd
+    resume mid-token and run the tail of a command - "t" out of "set", "ul"
+    out of "nul" - so the launcher died before it started. The file ships
+    inside the wheel, so the endings have to be part of the committed bytes.
+    """
+    root = Path(__file__).parent.parent
+    ignored = {".venv", "venv", "build", "dist", ".git", "__pycache__", ".ruff_cache"}
+    launchers = sorted(
+        path for path in root.rglob("*.bat") if not ignored.intersection(path.parts)
+    )
+
+    assert launchers, "the Windows launcher must live in the repository"
+    for path in launchers:
+        data = path.read_bytes()
+        assert not data.startswith(b"\xef\xbb\xbf"), f"{path.name}: a BOM breaks the first command"
+        assert data.count(b"\n") > 0, f"{path.name}: the launcher is empty"
+        assert data.count(b"\n") == data.count(b"\r\n"), f"{path.name}: every line must end with CRLF"
+        data.decode("utf-8")
+
+
+def test_macos_launcher_keeps_lf_endings():
+    root = Path(__file__).parent.parent
+    data = (root / "启动 OpenWrite.command").read_bytes()
+
+    assert data.count(b"\r\n") == 0, "a shell script must not carry CRLF endings"
+
+
+def test_requirements_file_covers_the_declared_runtime_dependencies():
+    """The two dependency lists must not drift.
+
+    The launcher's environment check imports openai, anthropic, markdown_it
+    and prompt_toolkit directly, so an environment installed from
+    requirements.txt alone was reported as broken.
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+        pytest.skip("tomllib requires Python 3.11")
+    root = Path(__file__).parent.parent
+    declared = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    required = {item.split(">")[0].split("<")[0].split("=")[0].split("[")[0].strip()
+                for item in declared["project"]["dependencies"]}
+    listed = {
+        line.split(">")[0].split("<")[0].split("=")[0].split("[")[0].split(";")[0].strip()
+        for line in (root / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+
+    assert required <= listed, f"requirements.txt is missing: {sorted(required - listed)}"
 
 
 def test_installed_launcher_reuses_the_active_environment(monkeypatch) -> None:

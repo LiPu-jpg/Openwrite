@@ -1,6 +1,16 @@
 # OpenWrite Skill — 运行时依赖
+#
+# 与 pyproject.toml 的 `project.dependencies` 保持一致：启动器的环境自检会
+# 直接 import openai / anthropic / markdown_it / prompt_toolkit，缺少任何一项
+# 都会让"按本文件安装"的运行环境被判定为不可用。
 pydantic>=2.0,<3.0
 pyyaml>=6.0
+openai>=1.0
+anthropic>=0.18
+litellm>=1.82.6,<1.83
+httpx[socks]>=0.27,<1.0
+markdown-it-py>=3.0
+prompt_toolkit>=3.0
 lightrag-hku>=1.5.5,<2.0
 fastembed>=0.7.0,<1.0
 tomli>=2.0; python_version < "3.11"
