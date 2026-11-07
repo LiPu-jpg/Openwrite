@@ -171,6 +171,11 @@ def test_outline_edit_tool_requires_revision_and_bounded_operations():
     assert "连续补位" in tool.description
     assert "summary" in tool.parameters["properties"]
     assert "连续重编号" in tool.parameters["properties"]["operation"]["description"]
+    # add_after takes either the reference node's own level or the level its
+    # container accepts; the schema has to say which, or a caller cannot tell
+    # why "新增层级与当前节点不匹配" came back.
+    assert "卷→幕" in tool.parameters["properties"]["kind"]["description"]
+    assert "同级兄弟" in tool.parameters["properties"]["kind"]["description"]
     assert "confirm" in tool.parameters["properties"]
     assert "默认 false" in tool.parameters["properties"]["confirm"]["description"]
 

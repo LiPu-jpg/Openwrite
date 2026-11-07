@@ -380,6 +380,7 @@ def mutate_outline_structure(
     elif operation in {"add_child", "add_after"}:
         if operation == "add_child" and not node_id:
             expected_kind = "volume"
+            accepted_kinds = ["volume"]
             insert_index = next(
                 (int(node["line"]) - 1 for node in nodes if node["kind"] == "appendix"),
                 len(lines),
@@ -391,14 +392,32 @@ def mutate_outline_structure(
                 expected_kind = str(target.get("child_kind") or "")
                 if not expected_kind:
                     raise OutlineEditError("章节下面不能再新增结构层级")
+                accepted_kinds = [expected_kind]
                 insert_index = int(target["end_line"])
                 parent_title = target["title"]
             else:
-                expected_kind = target["kind"]
+                # `add_after` puts the new node right after the target: either
+                # the target's next sibling (the same kind) or the target's last
+                # child (the kind the target's own container accepts). A
+                # container node has no sibling of the requested kind, so
+                # rejecting that made the operation impossible on every
+                # volume, act and section: the caller asking for an act after a
+                # volume got "新增层级与当前节点不匹配" for every kind.
+                child_kind = CHILD_KIND.get(target["kind"], "")
+                if kind and kind == child_kind:
+                    expected_kind = child_kind
+                    accepted_kinds = [child_kind]
+                    parent_title = target["title"]
+                else:
+                    expected_kind = target["kind"]
+                    accepted_kinds = [target["kind"]]
+                    if child_kind:
+                        accepted_kinds.append(child_kind)
+                    parent_title = target.get("path", [""])[-1] if target.get("path") else "大纲根节点"
                 insert_index = int(target["end_line"])
-                parent_title = target.get("path", [""])[-1] if target.get("path") else "大纲根节点"
         if kind and kind != expected_kind:
-            raise OutlineEditError("新增层级与当前节点不匹配，请刷新后重试")
+            accepted = "、".join(_kind_label(item) for item in accepted_kinds)
+            raise OutlineEditError(f"此处只能新增{accepted}，请刷新后重试")
         clean_title = _validate_title(title, expected_kind)
         if expected_kind == "chapter":
             chapter_id = _canonical_chapter_id(clean_title)

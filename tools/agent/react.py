@@ -1991,11 +1991,14 @@ OPENWRITE_TOOLS = [
                     "type": "string",
                     "description": "get_outline_structure 返回的 revision",
                 },
-                "node_id": {"type": "string", "description": "目标节点 ID；根新增卷时可留空"},
+                "node_id": {"type": "string", "description": "目标节点 ID；add_after 时为参照节点，插入位置紧随其后；根新增卷时可留空"},
                 "kind": {
                     "type": "string",
                     "enum": ["volume", "act", "section", "chapter"],
-                    "description": "新增节点层级",
+                    "description": (
+                        "新增节点层级；add_after 时可用参照节点自身层级（同级兄弟），"
+                        "也可用其容器层级（成为参照节点的最后一个下级：卷→幕、幕→节、节→章）"
+                    ),
                 },
                 "title": {"type": "string", "description": "新标题；删除时留空"},
                 "summary": {

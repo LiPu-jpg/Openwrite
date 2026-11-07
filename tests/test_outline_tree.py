@@ -450,3 +450,118 @@ def test_outline_tree_rejects_stale_duplicate_and_drafted_destructive_edits(tmp_
             node_id="ch_001",
             title="第十章：换号",
         )
+
+
+def test_add_after_places_a_new_node_after_the_target_at_the_right_level(tmp_path: Path):
+    """`add_after` accepts the target's own sibling level and its child level.
+
+    A container node has no sibling of the kind a caller usually asks for, so
+    rejecting everything but `target["kind"]` made the operation impossible on
+    every volume, act and section: an act after a volume was refused for every
+    kind. The new node lands after the target's subtree either way - as the
+    target's next sibling, or as the target's last child.
+    """
+    root = tmp_path / "container"
+    _write_outline(root)
+    structure = build_outline_structure(root)
+
+    # An act after a volume becomes the volume's last child, before the next
+    # volume-level node.
+    added = mutate_outline_structure(
+        root,
+        operation="add_after",
+        revision=structure["revision"],
+        node_id="volume_001",
+        kind="act",
+        title="第三幕：夜奔",
+    )
+    content = added["content"]
+    assert "## 第三幕：夜奔" in content
+    assert content.index("## 第三幕：夜奔") > content.index("## 第二幕：回声")
+    assert content.index("## 第三幕：夜奔") < content.index("# 附录")
+    assert "已在“第一卷：雾城”新增幕“第三幕：夜奔”" in added["message"]
+
+    # The same shape one level down: a section after an act lands after the
+    # act's own children, not after the act's sibling.
+    root = tmp_path / "act"
+    _write_outline(root)
+    structure = build_outline_structure(root)
+    added = mutate_outline_structure(
+        root,
+        operation="add_after",
+        revision=structure["revision"],
+        node_id="act_001",
+        kind="section",
+        title="第二节：钟楼",
+    )
+    content = added["content"]
+    assert "### 第二节：钟楼" in content
+    assert content.index("### 第二节：钟楼") > content.index("#### 第二章：少掉的十三秒")
+    assert content.index("### 第二节：钟楼") < content.index("## 第二幕：回声")
+
+    # And one level down again: a chapter after a section is the section's last
+    # child.
+    root = tmp_path / "section"
+    _write_outline(root)
+    structure = build_outline_structure(root)
+    added = mutate_outline_structure(
+        root,
+        operation="add_after",
+        revision=structure["revision"],
+        node_id="section_001",
+        kind="chapter",
+        title="第五章：新的钟声",
+    )
+    content = added["content"]
+    assert "#### 第五章：新的钟声" in content
+    assert content.index("#### 第五章：新的钟声") > content.index("#### 第二章：少掉的十三秒")
+    assert content.index("#### 第五章：新的钟声") < content.index("## 第二幕：回声")
+
+    # The sibling level keeps working: a chapter after a chapter stays the
+    # chapter's next sibling.
+    root = tmp_path / "sibling"
+    _write_outline(root)
+    structure = build_outline_structure(root)
+    added = mutate_outline_structure(
+        root,
+        operation="add_after",
+        revision=structure["revision"],
+        node_id="ch_001",
+        kind="chapter",
+        title="第五章：新的钟声",
+    )
+    content = added["content"]
+    assert "#### 第五章：新的钟声" in content
+    assert content.index("#### 第五章：新的钟声") > content.index("收到一封没有寄件人的信。")
+    assert content.index("#### 第五章：新的钟声") < content.index("#### 第二章：少掉的十三秒")
+
+
+def test_add_after_rejects_a_level_the_target_cannot_take(tmp_path: Path):
+    _write_outline(tmp_path)
+    structure = build_outline_structure(tmp_path)
+
+    with pytest.raises(OutlineEditError) as volume:
+        mutate_outline_structure(
+            tmp_path,
+            operation="add_after",
+            revision=structure["revision"],
+            node_id="volume_001",
+            kind="chapter",
+            title="第一章：不该出现",
+        )
+    # The rejection names the levels that do fit, so a caller can recover
+    # without guessing.
+    assert "卷" in str(volume.value)
+    assert "幕" in str(volume.value)
+
+    with pytest.raises(OutlineEditError) as section:
+        mutate_outline_structure(
+            tmp_path,
+            operation="add_after",
+            revision=structure["revision"],
+            node_id="section_001",
+            kind="volume",
+            title="第二卷：不该出现",
+        )
+    assert "节" in str(section.value)
+    assert "章" in str(section.value)
