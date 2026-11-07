@@ -67,7 +67,7 @@
     "core": {
       "repository": "https://github.com/LiPu-jpg/Openwrite",
       "branch": "native-core",
-      "commit": "82bae73fd2e1cab88dc05f36cc3945c2d6ee6756"
+      "commit": "d7ac7eaa64ade90e28508f5959d2f19e8425ae9e"
     },
     "cryptography": {
       "package": "cryptography",
