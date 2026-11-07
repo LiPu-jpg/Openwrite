@@ -526,7 +526,7 @@ Read countable chapter-group facts: budgets/actual words, declared promises and 
 
 ## novel_outline_edit
 
-Immediate compatibility write for an outline change the author has already authorized exactly; otherwise use novel_change_plan(action="structured"). Apply ONE atomic structural edit to the outline tree. Edits are revision-gated: read the current `revision` via novel_outline_read first and pass it back; the server rejects the edit with a conflict if the outline changed in between. Operations: "rename" (node_id + title), "update_summary" (node_id + summary), "add_child" (node_id = parent, + title/summary/kind), "add_after" (node_id = sibling, + title/summary/kind), "delete" (node_id, cascade=false keeps children), "promote" (remove a container), and "get_meta"/"set_meta" (chapter metadata, optionally updates[] for a batch).
+Immediate compatibility write for an outline change the author has already authorized exactly; otherwise use novel_change_plan(action="structured"). Apply ONE atomic structural edit to the outline tree. Edits are revision-gated: read the current `revision` via novel_outline_read first and pass it back; the server rejects the edit with a conflict if the outline changed in between. Operations: "rename" (node_id + title), "update_summary" (node_id + summary), "add_child" (node_id = parent, + title/summary/kind), "add_after" (node_id = the node to insert after, + title/summary/kind; kind is either the target's own level - a sibling right after it - or the level its container accepts - its last child: a volume takes an act, an act a section, a section a chapter), "delete" (node_id, cascade=false keeps children), "promote" (remove a container), and "get_meta"/"set_meta" (chapter metadata, optionally updates[] for a batch).
 
 影响：会提交操作或保存文件；具体取决于 action/参数。
 
@@ -538,10 +538,10 @@ Immediate compatibility write for an outline change the author has already autho
 | chapter_id | string | 否 | Chapter ID alias for node_id in get_meta/set_meta. |
 | updates | json | 否 | Batch of 1-50 {chapter_id, metadata} objects for set_meta, or {chapter_id} for get_meta; one revision guards the whole batch. |
 | revision | string | 是 | The outline revision fingerprint from a fresh novel_outline_read call. |
-| node_id | string | 否 | Target node id (parent for add_child, sibling for add_after); not needed for add_child at root. |
+| node_id | string | 否 | Target node id (parent for add_child, the node to insert after for add_after); not needed for add_child at root. |
 | title | string | 否 | Node title (rename / add_child / add_after). |
 | summary | string | 否 | Node summary (update_summary / add_child / add_after). |
-| kind | string | 否 | Node kind, e.g. "volume" or "chapter" (add_child / add_after). |
+| kind | string | 否 | Node kind, e.g. "volume" or "chapter" (add_child / add_after). For add_after: the target's own level, or the level its container accepts (volume→act, act→section, section→chapter). |
 
 ## novel_outline_read
 

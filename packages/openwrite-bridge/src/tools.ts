@@ -901,7 +901,10 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       'read the current `revision` via novel_outline_read first and pass it back; the server ' +
       'rejects the edit with a conflict if the outline changed in between. ' +
       'Operations: "rename" (node_id + title), "update_summary" (node_id + summary), ' +
-      '"add_child" (node_id = parent, + title/summary/kind), "add_after" (node_id = sibling, + title/summary/kind), ' +
+      '"add_child" (node_id = parent, + title/summary/kind), ' +
+      '"add_after" (node_id = the node to insert after, + title/summary/kind; kind is either the ' +
+      'target\'s own level - a sibling right after it - or the level its container accepts - its last ' +
+      'child: a volume takes an act, an act a section, a section a chapter), ' +
       '"delete" (node_id, cascade=false keeps children), "promote" (remove a container), and ' +
       '"get_meta"/"set_meta" (chapter metadata, optionally updates[] for a batch).',
     parameters: {
@@ -911,10 +914,10 @@ export function registerNovelTools(ctx: Context, clientFactory: (exec: ToolRunCo
       chapter_id: { type: 'string', description: 'Chapter ID alias for node_id in get_meta/set_meta.' },
       updates: { type: 'json', description: 'Batch of 1-50 {chapter_id, metadata} objects for set_meta, or {chapter_id} for get_meta; one revision guards the whole batch.' },
       revision: { type: 'string', required: true, description: 'The outline revision fingerprint from a fresh novel_outline_read call.' },
-      node_id: { type: 'string', description: 'Target node id (parent for add_child, sibling for add_after); not needed for add_child at root.' },
+      node_id: { type: 'string', description: 'Target node id (parent for add_child, the node to insert after for add_after); not needed for add_child at root.' },
       title: { type: 'string', description: 'Node title (rename / add_child / add_after).' },
       summary: { type: 'string', description: 'Node summary (update_summary / add_child / add_after).' },
-      kind: { type: 'string', description: 'Node kind, e.g. "volume" or "chapter" (add_child / add_after).' },
+      kind: { type: 'string', description: 'Node kind, e.g. "volume" or "chapter" (add_child / add_after). For add_after: the target\'s own level, or the level its container accepts (volume→act, act→section, section→chapter).' },
     },
     output: { schema: JSON_OUTPUT_SCHEMA, render: (_args, value) => renderJson(value) },
     timeoutMs,
