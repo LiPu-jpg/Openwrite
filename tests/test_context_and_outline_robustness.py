@@ -43,11 +43,19 @@ def test_a_chapters_tasks_survive_a_large_task_store(project: Path):
     from tools.task_store import TaskStore
 
     store = TaskStore(project, "demo")
-    for index in range(600):
-        store.create("chapter_review", {}, chapter_id=f"ch_{index % 3 + 1:03d}")
+    # The chapter's tasks are the OLDEST ones and the store holds more tasks
+    # than the limit, so a store that applied the limit before the filter
+    # would return nothing at all. Interleaving the chapters instead — as an
+    # earlier revision of this test did — let a limit-then-filter
+    # implementation pass, because the chapter's tasks were still inside the
+    # newest window.
+    for _ in range(6):
+        store.create("chapter_review", {}, chapter_id="ch_001")
+    for index in range(40):
+        store.create("chapter_review", {}, chapter_id=f"ch_{index % 2 + 2:03d}")
     # Filtering happens inside the store, before the limit is applied.
-    found = store.list(limit=500, chapter_id="ch_001")
-    assert len(found) > 0, "the chapter's tasks must not be lost to the limit"
+    found = store.list(limit=10, chapter_id="ch_001")
+    assert len(found) == 6, "the chapter's tasks must not be lost to the limit"
     assert all(store._task_chapter(item) == "ch_001" for item in found)
 
 
