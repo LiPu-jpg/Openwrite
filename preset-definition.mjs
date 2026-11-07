@@ -1,10 +1,11 @@
 import { open, readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { load, Type, JSON_SCHEMA } from 'js-yaml'
-import { detectCompanions } from './companions.mjs'
+import { detectCompanions, hostPackageRoot } from './companions.mjs'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 
 // Preserve Loader expressions; evaluating them here loses the preset's baseUrl
@@ -137,14 +138,68 @@ export async function referencedPresetIds(home) {
 }
 
 /**
+ * Rows the running host may not provide.
+ *
+ * dsh 0.2.2 folded `list_agents` into its module's main entry and dropped the
+ * dedicated `./list-agents` subpath export. A row the host cannot resolve
+ * makes it refuse the whole preset - the workbench then never mounts - so
+ * the row is dropped where the host does not expose it. The main module
+ * still registers the tool there.
+ */
+const hostOptionalRows = new Set([
+  '@deepseek-ai/dsh-tool-subagent-control/list-agents',
+])
+
+/**
+ * The host's own resolution context.
+ *
+ * The host imports a preset row's `name` as a bare specifier from inside its
+ * own package tree (the cordis loader calls `import(name)` with the loader's
+ * own location), so "can the host resolve this row?" has to be asked in the
+ * host's context. The plugin's own node_modules are a different tree - in a
+ * real profile they do not carry the host's packages at all - so probing
+ * there answers for the wrong resolver: it keeps a row the host will refuse.
+ *
+ * The host is looked for in the order that answers "the host that is running":
+ * an explicit entry (the acceptance scripts know the host they installed),
+ * the process the plugin runs in (the plugin is loaded by the host), and the
+ * installed profiles.
+ */
+async function hostResolutionRoot(home, options) {
+  const candidates = []
+  if (typeof options.hostEntry === 'string') candidates.push(options.hostEntry)
+  if (typeof process.argv?.[1] === 'string') candidates.push(process.argv[1])
+  for (const profile of await readdir(join(home, 'profiles')).catch(() => [])) {
+    candidates.push(join(home, 'profiles', profile, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'index.js'))
+  }
+  for (const candidate of candidates) {
+    const root = await hostPackageRoot(candidate)
+    if (root) return root
+  }
+  return null
+}
+
+/**
+ * Whether the host can resolve a module specifier from its own package tree.
+ *
+ * `createRequire` walks the same `node_modules` chain the host's `import()`
+ * walks, and the host's packages publish a `default` export condition, so
+ * this answers the host's question instead of a near miss of it.
+ */
+function hostProvides(name, root) {
+  try { createRequire(join(root, 'package.json')).resolve(name); return true }
+  catch { return false }
+}
+
+/**
  * Mount dsh-ops into this preset when the companion is installed, its declared
  * host range covers the running host, and it exposes the integration entry.
  */
-async function adaptCompanions(plugins, options) {
+async function adaptCompanions(plugins, home, options) {
   if (plugins.some(row => row.id === 'openwrite-ops')) return
   let companions = null
   try {
-    companions = await detectCompanions(resolveDshHome(), options)
+    companions = await detectCompanions(home, options)
   } catch { /* an unreadable home leaves the preset exactly as shipped */ }
   if (!companions?.ops?.usable) return
   plugins.push({ id: 'openwrite-ops', name: 'dsh-openwrite/ops-integration' })
@@ -154,9 +209,17 @@ export async function presetDefinition(version, modern = false, options = {}) {
   const baseUrl = new URL('./presets/openwrite/', import.meta.url)
   const plugins = load(await readFile(new URL('agent.cordis.yml', baseUrl), 'utf8'), { schema })
   const metadata = load(await readFile(new URL('preset.yml', baseUrl), 'utf8'))
+  const home = resolveDshHome()
   if (modern) {
+    // The host's tree is found once: every row is judged against the same
+    // resolver the host will use for it.
+    const root = await hostResolutionRoot(home, options)
     const adapt = rows => {
+      const kept = []
       for (const row of rows) {
+        // A row the host cannot resolve must not be mounted: the host refuses
+        // the whole preset, so the workbench would never come up.
+        if (row.name && hostOptionalRows.has(row.name) && root && !hostProvides(row.name, root)) continue
         // The workflow row is renamed for hosts that ship the PTC variant. This
         // repo's node_modules carries an older host without that package, so the
         // resolution gate treats it as expected-absent rather than failing (see
@@ -168,10 +231,12 @@ export async function presetDefinition(version, modern = false, options = {}) {
           row.config.customSkillDirs = [fileURLToPath(new URL('skills/', baseUrl))]
         }
         if (row.group && Array.isArray(row.config)) adapt(row.config)
+        kept.push(row)
       }
+      rows.splice(0, rows.length, ...kept)
     }
     adapt(plugins)
   }
-  await adaptCompanions(plugins, options)
+  await adaptCompanions(plugins, home, options)
   return { ...metadata, id: stablePresetId, order: -1, plugins }
 }

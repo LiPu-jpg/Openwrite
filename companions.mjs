@@ -250,8 +250,16 @@ export function satisfiesRange(version, range) {
   return false
 }
 
-/** Walk up from one path to the version of the host package that owns it. */
-async function hostVersionAbove(path) {
+/**
+ * Walk up from one path to the `@deepseek-ai/dsh` package directory that owns
+ * it, or null when the path belongs to no host package.
+ *
+ * That directory is the host's own resolution context: the cordis loader
+ * imports a bare specifier from inside its own package tree, so a specifier
+ * the host cannot resolve from there is a specifier the host cannot resolve
+ * at all.
+ */
+export async function hostPackageRoot(path) {
   // Resolve symlinks first. The running host is usually started through the
   // `dsh` shim in the npm global bin directory, which is a symlink into
   // lib/node_modules/@deepseek-ai/dsh/lib/bin.js. `path.resolve` does not follow
@@ -262,11 +270,19 @@ async function hostVersionAbove(path) {
   let directory = dirname(await realpath(path).catch(() => resolve(path)))
   while (true) {
     const manifest = await readJson(join(directory, 'package.json')).catch(() => null)
-    if (manifest?.name === '@deepseek-ai/dsh' && typeof manifest.version === 'string') return manifest.version
+    if (manifest?.name === '@deepseek-ai/dsh') return directory
     const parent = dirname(directory)
     if (parent === directory) return null
     directory = parent
   }
+}
+
+/** Walk up from one path to the version of the host package that owns it. */
+async function hostVersionAbove(path) {
+  const root = await hostPackageRoot(path)
+  if (root === null) return null
+  const manifest = await readJson(join(root, 'package.json')).catch(() => null)
+  return typeof manifest?.version === 'string' ? manifest.version : null
 }
 
 /**

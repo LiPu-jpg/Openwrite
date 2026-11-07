@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { load } from 'js-yaml'
 import { presetDefinition } from '../preset-definition.mjs'
@@ -17,7 +17,14 @@ const require = createRequire(hostCli ? resolve(hostCli) : new URL('package.json
 // resolution sweep check a definition the plugin never registers.
 const modern = true
 const version = JSON.parse(await readFile(new URL('package.json', root), 'utf8')).version
-const rows = (await presetDefinition(version, modern)).plugins
+// The row gate is judged against the host under test: the plugin resolves a
+// row from the host's own package tree, so the host that is being installed
+// is the only context that answers whether the host can resolve it. Without
+// `--host-cli` the host under test is the one this checkout pins.
+const hostEntry = hostCli
+  ? resolve(hostCli)
+  : fileURLToPath(new URL('node_modules/@deepseek-ai/dsh/lib/bin.js', root))
+const rows = (await presetDefinition(version, modern, { hostEntry })).plugins
 assert.ok(Array.isArray(rows) && rows.length > 10, 'unified preset must be a non-trivial entry list')
 const flatten = entries => entries.flatMap(row => [row, ...(row.group && Array.isArray(row.config) ? flatten(row.config) : [])])
 const allRows = flatten(rows)

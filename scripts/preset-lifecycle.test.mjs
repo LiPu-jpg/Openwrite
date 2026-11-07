@@ -314,3 +314,59 @@ test('editor noise and foreign files do not brick the managed preset', async t =
   await assert.rejects(apply(ctx()), /was modified/)
   for (const dispose of disposers) await dispose()
 })
+
+/**
+ * A host package tree that publishes the `./list-agents` subpath, and one that
+ * does not. Both claim the same host version: the row has to follow what the
+ * host actually exports, because the host refuses a preset whose row it
+ * cannot resolve.
+ */
+async function hostTree(listAgents) {
+  const root = await mkdtemp(join(tmpdir(), 'openwrite-host-tree-'))
+  const host = join(root, 'node_modules', '@deepseek-ai', 'dsh')
+  await mkdir(join(host, 'lib'), { recursive: true })
+  await writeFile(join(host, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.2-rc.1' }) + '\n')
+  await writeFile(join(host, 'lib', 'bin.js'), '// host entry\n')
+  const control = join(root, 'node_modules', '@deepseek-ai', 'dsh-tool-subagent-control')
+  await mkdir(join(control, 'lib'), { recursive: true })
+  const published = { '.': { default: './lib/index.js' }, './src/*': './src/*', './package.json': './package.json' }
+  if (listAgents) published['./list-agents'] = { default: './lib/list-agents.js' }
+  await writeFile(join(control, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-tool-subagent-control', version: '0.2.2-rc.1', exports: published,
+  }) + '\n')
+  // The resolver checks that the exported target exists, not only that the
+  // subpath is declared.
+  await writeFile(join(control, 'lib', 'index.js'), '// tool control\n')
+  if (listAgents) await writeFile(join(control, 'lib', 'list-agents.js'), '// list agents\n')
+  return { root, entry: join(host, 'lib', 'bin.js') }
+}
+
+/** The preset rows, flattened the way the host walks them. */
+function presetRows(definition) {
+  const rows = []
+  const walk = entries => {
+    for (const row of entries) {
+      rows.push(row)
+      if (row.group && Array.isArray(row.config)) walk(row.config)
+    }
+  }
+  walk(definition.plugins)
+  return rows
+}
+
+test('a preset row follows the host exports rather than a host version', async t => {
+  const dropped = await hostTree(false)
+  const kept = await hostTree(true)
+  t.after(async () => {
+    await rm(dropped.root, { recursive: true, force: true })
+    await rm(kept.root, { recursive: true, force: true })
+  })
+  const name = '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+  // The host imports a preset row from its own package tree, so the plugin has
+  // to ask the host's tree - the plugin's own node_modules are a different one
+  // and would answer for the wrong resolver.
+  assert.equal(presetRows(await presetDefinition('0.2.36', true, { hostEntry: dropped.entry }))
+    .some(row => row.name === name), false, 'a row the host cannot resolve must be dropped')
+  assert.equal(presetRows(await presetDefinition('0.2.36', true, { hostEntry: kept.entry }))
+    .some(row => row.name === name), true, 'a row the host can resolve must be kept')
+})
