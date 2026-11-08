@@ -56,6 +56,23 @@ export function apply(ctx: Context): void {
   }
 }
 
+/**
+ * The preset identities a host roster lists.
+ *
+ * The roster arrives as `{ presets: [...] }` on some host generations and as
+ * a bare array on others; both shapes are read here.
+ */
+function rosterIdentities(roster: unknown): string[] {
+  const rows = Array.isArray(roster)
+    ? roster
+    : Array.isArray((roster as { presets?: unknown } | null)?.presets)
+      ? (roster as { presets: unknown[] }).presets
+      : []
+  return rows
+    .map(row => (row as { id?: unknown } | null)?.id)
+    .filter((id): id is string => typeof id === 'string' && id !== '')
+}
+
 function* install(ctx: Context): Generator<() => void> {
   yield ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'studio-panel: dictionaries')
   // The workbench owns the whole content area of its views: the host's
@@ -113,6 +130,38 @@ function* install(ctx: Context): Generator<() => void> {
     }
   }
 
+  /**
+   * Select the OpenWrite preset for a session.
+   *
+   * The host owns the roster, and the identity it registered depends on the
+   * host generation: a 0.2 host registers the stable id, an older one only the
+   * release identity. The first attempt that fails carries the real reason - a
+   * row the host could not mount, a session that already started - so it is
+   * reported first and in full. The release identity is a fallback, never the
+   * headline: its "unknown agent preset" message describes the fallback, not
+   * the cause, and reporting only that message hid every real failure behind
+   * one sentence that named an identity this host never registered (#166).
+   */
+  const selectOpenWritePreset = async (sessionId: Parameters<typeof ctx.remote.agentPresets.select>[0]): Promise<void> => {
+    const failures: string[] = []
+    const attempt = async (id: string): Promise<boolean> => {
+      const result = await ctx.remote.agentPresets.select(sessionId, id)
+      if (result.ok) return true
+      failures.push(`${id}: ${result.error?.message ?? 'unknown error'}`)
+      return false
+    }
+    if (await attempt('openwrite')) return
+    if (await attempt(__OPENWRITE_PRESET_ID__)) return
+    // The roster is the host's own account of what it registered; an identity
+    // listed there is one this host really knows.
+    const roster = await (ctx.remote.agentPresets as { list?: () => Promise<unknown> }).list?.().catch(() => null)
+    for (const id of rosterIdentities(roster)) {
+      if (id === 'openwrite' || id === __OPENWRITE_PRESET_ID__) continue
+      if (await attempt(id)) return
+    }
+    throw new Error(`OpenWrite preset unavailable: ${failures.join(' | ')}`)
+  }
+
   const workspaceServices: StudioPanelInjected['workspaces'] = {
     list: ctx.workspaces.list,
     create: input => ctx.workspaces.create(input),
@@ -124,11 +173,7 @@ function* install(ctx: Context): Generator<() => void> {
     pickDirectory: pickDirectoryCompat,
     connectWorkspace: async id => {
       const sessionId = await ctx.uiWorkspace.connectWorkspace(id)
-      // The stable identity is what the selector lists; the release identity is
-      // the fallback for hosts that register only that one (issue #149).
-      const bound = await ctx.remote.agentPresets.select(sessionId, 'openwrite')
-      const result = bound.ok ? bound : await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
-      if (!result.ok) throw new Error(result.error?.message ?? 'OpenWrite preset unavailable')
+      await selectOpenWritePreset(sessionId)
       return sessionId
     },
     // dsh 0.2 moved "show this session" out of the Session Controller
@@ -166,9 +211,7 @@ function* install(ctx: Context): Generator<() => void> {
       if (selected === null) return false
       const workspace = await ctx.workspaces.create({ path: selected })
       const sessionId = await ctx.sessions.create({ workspaceId: workspace.workspaceId })
-      const bound = await ctx.remote.agentPresets.select(sessionId, 'openwrite')
-      const result = bound.ok ? bound : await ctx.remote.agentPresets.select(sessionId, __OPENWRITE_PRESET_ID__)
-      if (!result.ok) throw new Error(result.error?.message ?? 'OpenWrite preset unavailable')
+      await selectOpenWritePreset(sessionId)
       workspaceServices.openSession(sessionId)
       return true
     } }),

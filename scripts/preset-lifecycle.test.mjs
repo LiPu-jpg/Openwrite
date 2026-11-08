@@ -370,3 +370,25 @@ test('a preset row follows the host exports rather than a host version', async t
   assert.equal(presetRows(await presetDefinition('0.2.36', true, { hostEntry: kept.entry }))
     .some(row => row.name === name), true, 'a row the host can resolve must be kept')
 })
+
+test('a row the host may not provide is dropped when no host can be located', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'openwrite-host-unknown-'))
+  const previousHome = process.env.DSH_HOME
+  const previousEntry = process.argv[1]
+  process.env.DSH_HOME = home
+  // The running process and the installed profiles are where the host is
+  // looked for. Point both at empty ground so that no host can be located -
+  // the shape of the Electron desktop application, whose host lives in the
+  // application bundle and whose profile holds plugins only.
+  process.argv[1] = join(home, 'entry.mjs')
+  t.after(async () => {
+    process.argv[1] = previousEntry
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    await rm(home, { recursive: true, force: true })
+  })
+  const name = '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+  const rows = presetRows(await presetDefinition('0.2.37', true))
+  assert.equal(rows.some(row => row.name === name), false,
+    'a row that may not resolve must not be kept when no host can be located: the host refuses the whole preset')
+})

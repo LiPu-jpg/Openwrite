@@ -5,7 +5,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
-import { legacyPresetIds, legacyAliasName, presetDefinition, referencedPresetIds } from './preset-definition.mjs'
+import { legacyPresetIds, legacyAliasName, presetDefinition, referencedPresetIds, stablePresetId } from './preset-definition.mjs'
 import { detectCompanions, OPENWRITE_OPS_OPTIONS, summarizeOpsPlan } from './companions.mjs'
 
 export const name = 'dsh-openwrite'
@@ -122,6 +122,20 @@ async function digestShipped(source, destination) {
   return hash.digest('hex')
 }
 
+/**
+ * Why the host considers the registered preset unusable, if it does.
+ *
+ * The roster is the host's own account of its presets: a row it could not
+ * import leaves a diagnostic there. Reading it back turns a silent failure
+ * into one line in the host log.
+ */
+async function presetDiagnosis(presetCtx) {
+  const roster = await presetCtx.agentPresets.list?.()
+  if (!Array.isArray(roster)) return null
+  const row = roster.find(entry => entry?.id === stablePresetId)
+  return typeof row?.broken === 'string' && row.broken !== '' ? row.broken : null
+}
+
 /** Keep legacy filesystem presets and resolve durable session identities on upgrade. */
 export async function apply(ctx) {
   const home = resolveDshHome()
@@ -177,7 +191,15 @@ export async function apply(ctx) {
   // 0.1 discovers the managed directory above; 0.2 only accepts registered
   // definitions. The declaring context owns registration and its resolution base.
   ctx.inject(['agentPresets'], async function* (presetCtx) {
-    if (typeof presetCtx.agentPresets.register !== 'function') return
+    if (typeof presetCtx.agentPresets.register !== 'function') {
+      // A host from the 0.1 generation discovers presets from the filesystem
+      // and registers nothing, so the managed directory above is all it needs.
+      // A host that offers the service without this method would get no
+      // preset at all, and the workbench would fail with a message that names
+      // only a fallback identity. Say so in the host log instead.
+      ctx.logger?.warn?.('OpenWrite: this host registers no agent preset; the managed preset directory is used')
+      return
+    }
     const definition = await presetDefinition(version, true)
     yield await presetCtx.agentPresets.register(definition)
     const discovered = (await readdir(join(home, '.agent-presets')).catch(() => []))
@@ -201,6 +223,11 @@ export async function apply(ctx) {
         order: 1000, name: legacyAliasName(legacyId, definition.name),
       })
     }
+    // A preset the host could not mount is listed but unusable. The workbench
+    // then fails with a message that names only the fallback identity, so the
+    // host log has to carry the real reason.
+    const broken = await presetDiagnosis(presetCtx).catch(() => null)
+    if (broken) ctx.logger?.warn?.(`OpenWrite preset ${stablePresetId} did not mount: ${broken}`)
   })
   // Companion status for the workbench's companion section, and the host's own
   // default-model selection, so OpenWrite's page in the host's settings dialog

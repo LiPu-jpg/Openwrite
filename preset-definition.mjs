@@ -5,7 +5,7 @@ import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { load, Type, JSON_SCHEMA } from 'js-yaml'
-import { detectCompanions, hostPackageRoot } from './companions.mjs'
+import { detectCompanions, hostPackageRoot, hostPackageRootInAncestors } from './companions.mjs'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 
 // Preserve Loader expressions; evaluating them here loses the preset's baseUrl
@@ -162,8 +162,9 @@ const hostOptionalRows = new Set([
  *
  * The host is looked for in the order that answers "the host that is running":
  * an explicit entry (the acceptance scripts know the host they installed),
- * the process the plugin runs in (the plugin is loaded by the host), and the
- * installed profiles.
+ * the process the plugin runs in (the plugin is loaded by the host), the
+ * host installed above that process (the Electron desktop application keeps
+ * the host in its own bundle), and the installed profiles.
  */
 async function hostResolutionRoot(home, options) {
   const candidates = []
@@ -175,6 +176,10 @@ async function hostResolutionRoot(home, options) {
   for (const candidate of candidates) {
     const root = await hostPackageRoot(candidate)
     if (root) return root
+    // The desktop application starts from an entry no package owns; its host
+    // sits in a node_modules above that entry.
+    const bundled = await hostPackageRootInAncestors(candidate)
+    if (bundled) return bundled
   }
   return null
 }
@@ -218,8 +223,15 @@ export async function presetDefinition(version, modern = false, options = {}) {
       const kept = []
       for (const row of rows) {
         // A row the host cannot resolve must not be mounted: the host refuses
-        // the whole preset, so the workbench would never come up.
-        if (row.name && hostOptionalRows.has(row.name) && root && !hostProvides(row.name, root)) continue
+        // the whole preset, so the workbench would never come up. The row is
+        // therefore dropped unless the host is positively known to provide it.
+        // Keeping it on a host that cannot be located is the worse mistake:
+        // an unlocated host means the profile is not the one this plugin was
+        // installed into (the Electron desktop application keeps the host in
+        // its own bundle), and the host that runs the workbench may be a 0.2.2
+        // one that dropped the subpath. Losing this one tool is survivable;
+        // losing the whole workbench is not.
+        if (row.name && hostOptionalRows.has(row.name) && !(root && hostProvides(row.name, root))) continue
         // The workflow row is renamed for hosts that ship the PTC variant. This
         // repo's node_modules carries an older host without that package, so the
         // resolution gate treats it as expected-absent rather than failing (see

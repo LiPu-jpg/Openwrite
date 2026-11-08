@@ -277,6 +277,28 @@ export async function hostPackageRoot(path) {
   }
 }
 
+/**
+ * The host package directory held by an ancestor's `node_modules`.
+ *
+ * `hostPackageRoot` answers "which package owns this file?". This answers
+ * "which host does this directory install?": the Electron desktop application
+ * keeps the host inside its own bundle and starts from an entry that no
+ * package owns, so the only trace of the host is a `node_modules` directory
+ * above the entry that holds it. Without this the desktop profile answers
+ * nothing about the host that is running it.
+ */
+export async function hostPackageRootInAncestors(path) {
+  let directory = dirname(await realpath(path).catch(() => resolve(path)))
+  while (true) {
+    const candidate = join(directory, 'node_modules', '@deepseek-ai', 'dsh')
+    const manifest = await readJson(join(candidate, 'package.json')).catch(() => null)
+    if (manifest?.name === '@deepseek-ai/dsh') return candidate
+    const parent = dirname(directory)
+    if (parent === directory) return null
+    directory = parent
+  }
+}
+
 /** Walk up from one path to the version of the host package that owns it. */
 async function hostVersionAbove(path) {
   const root = await hostPackageRoot(path)
