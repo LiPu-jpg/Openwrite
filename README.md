@@ -10,7 +10,8 @@
 <p align="center">在 DeepSeek Harness 中规划、写作、审稿和管理长篇小说。</p>
 
 <p align="center">
-  <a href="package.json"><img src="https://img.shields.io/badge/dsh-0.2.2--rc.1-2563eb" alt="dsh 0.2.2-rc.1"></a>
+  <a href="https://www.npmjs.com/package/dsh-openwrite"><img src="https://img.shields.io/npm/v/dsh-openwrite" alt="npm dsh-openwrite"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/host%20dsh-0.2.2--rc.1-2563eb" alt="dsh 0.2.2-rc.1"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node-%E2%89%A522.19-15803d" alt="Node >= 22.19"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0f766e" alt="Apache-2.0"></a>
   <a href="https://dsh-plugin.org/plugins/lipu-jpg/openwrite"><img src="https://dsh-plugin.org/badges/listed.svg" alt="Listed on dsh-plugin.org"></a>
@@ -20,6 +21,7 @@
   <a href="#快速安装">快速安装</a> ·
   <a href="#开始使用">开始使用</a> ·
   <a href="#功能">功能</a> ·
+  <a href="#遇到问题">遇到问题</a> ·
   <a href="#文档与开发">文档</a> ·
   <a href="https://github.com/LiPu-jpg/Openwrite/issues">反馈问题</a>
 </p>
@@ -27,84 +29,28 @@
 这是 [OpenWrite](https://github.com/LiPu-jpg/Openwrite/tree/native-core) 的 dsh 插件版本。
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Agent 与交互界面，OpenWrite Core 提供小说领域能力；人物、设定、大纲、正文和评审保存在本地作品目录。
 
-## 开发中：0.2.29（未发布）
-
-增加 `pythonPath` / `OPENWRITE_PYTHON` 和显式依赖目录配置，允许使用已准备依赖的 Python，
-跳过 uv 与解释器下载；补充 Android/Termux 的本机 external Studio 步骤，以及旧版安装选择诊断。
-配置和边界见 [安装说明](docs/INSTALL.md#bring-your-own-python)。同时补齐手机后台输入保留、独立 Studio 正文草稿恢复、触屏选区与下载，并加入 Chromium / WebKit 发布回归，见 [手机验收说明](docs/MOBILE_READINESS.md)。正式可安装版本仍为下方的 0.2.28；
-同时修复审稿证据漏填误判与机器批注污染，候选捆绑 Core 5.8.22，见 [#146 修复说明](docs/ISSUE_146_REVIEW_EVIDENCE.md)。
-Android 完整工具验收与宿主升级保护发布继续在 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123) 跟踪。
-
-## 0.2.33
-
-- **深度研究搜索默认走宿主 DSH**：托管运行时把 `ctx.web` 的搜索/抓取经环回中继交给 Core，默认 provider `dsh`，
-  不需要第三方搜索 Key；外部 Studio 仍默认 `bocha`。
-- **研究页新增搜索设置**：提供方、API Key、记住 Key；`dsh` 显示无需 Key。保存与 `novel_research_settings_save`
-  同路由，设置按作品作用域落盘。
-- 新增宿主 `host-web.ts` 中继（`/search`、`/fetch`、Bocha 兼容 `/bocha`，仅 127.0.0.1 + 机器 token）和 Core
-  handshake；DeepResearch 仍可选，首次使用需在 integration 目录 `pnpm install --frozen-lockfile`。
-- 搜索默认值放到左下角 **OpenWrite → 设置 → 搜索**（机器级默认，新作品生效；单个作品可在研究页覆盖）。
-- 研究 `quality` 在启动子进程前校验为 `advisory` / `balanced` / `strict`。
-- 修复非 ASCII `Authorization` 头返回 500 的问题，认证比较改为 UTF-8 bytes。
-- 左下角设置页视觉重做：搜索 provider 卡片、胶囊 Tab、卡片化配置块与主渐变保存按钮，对齐 dsh-our-free-model。
-
-## 0.2.30
-
-- **联动插件可执行接入**：`dsh-our-free-model` 接入按钮现在写 profile 并把写作/评审路由切到该模型（其余路由保留、二次确认、部分失败如实报告）；`dsh-ops` 的挂载计划（文件工具/渐进发现/无 shell/不替换官方工具）显示在「联动插件」区；`dsh-dog` 新增非斜杠技能 `dog-delivery-verification`，把正文与评审证据写成 handoff 图交给 `dog_validate`/`dog_create`/`dog_run` 独立验收。详见 [联动插件说明](docs/COMPANION_PLUGINS.md)。
-
-兼容声明扩到精确宿主 dsh `0.2.2-rc.1` 与 `0.1.7-rc.2`，修复这两个宿主上的
-`plugin does not support the DSH version in use` 直接拒装（[#160](https://github.com/LiPu-jpg/Openwrite/issues/160)/[#161](https://github.com/LiPu-jpg/Openwrite/issues/161)/[#163](https://github.com/LiPu-jpg/Openwrite/issues/163)），见 [#160/#161/#163 修复说明](docs/ISSUES_160_161_163.md)。
-
-本轮候选还包含两项发布阻塞修复，见 [#149/#150/#151 修复说明](docs/ISSUES_149_150_151.md)：
-
-- 兼容精确宿主 dsh `0.2.1-rc.4` 与 `0.2.1-rc.5`，修复 `plugin does not support the DSH version in use` 直接拒装（[#150](https://github.com/LiPu-jpg/Openwrite/issues/150)/[#151](https://github.com/LiPu-jpg/Openwrite/issues/151)/[#142](https://github.com/LiPu-jpg/Openwrite/issues/142)）。
-- 新建会话选择器不再为每个已发布版本注册预设别名，只保留会话真实引用过的旧版本（[#149](https://github.com/LiPu-jpg/Openwrite/issues/149)）；工作台入口改用稳定预设 id。
-
-本轮候选还加入**可选联动插件**支持，见 [联动插件说明](docs/COMPANION_PLUGINS.md)：检测到 [dsh-ops](https://github.com/T-Auto/dsh-ops)
-时，用其官方预设接口挂载有界文件工具与渐进发现；检测到 [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 时，
-在工作台「联动插件」区显示状态与接入提示。两者均为可选项，未安装时行为与之前一致；任何判定失败都回退到 OpenWrite 自己的实现。
-同时**移除了内置的 DoG 引擎**（原 `vendor/dsh-dog`）：包里不再有 `dog_*` 工具与「DoG 验收」入口，
-三个查询技能改为直接读 OpenWrite 自己的评审/交付/导入产物；需要 DoG 图形验证可自行安装
-[@dsh-external/dsh-dog](https://github.com/Fun10165/dsh-dog)。
-
-## 0.2.28
-
-0.2.28 捆绑 Core 5.8.20，最终 22 项 CI 全部通过；修复正文最后输入漏存、审稿修订越过选区，以及真实 Markdown 编辑器格式转换导致的选区拒绝，见 [正文编辑与审稿补修](docs/EDITOR_SAFETY_REPAIRS.md)。并包含前轮 [选区与升级补修](docs/SELECTION_UPGRADE_REPAIRS.md)、[写作与审稿改进](docs/ISSUES_121_123.md)。
-
-[GitHub 0.2.28](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.28) 与 [npm 0.2.28](https://www.npmjs.com/package/dsh-openwrite/v/0.2.28) 均已发布，npm `latest` 已更新为 0.2.28；两处公开下载包均与 CI 原始安装包逐字节一致。#123 的宿主正式发布和 Android/Termux 真机两项仍未完成，作为已知限制继续跟踪。
-
-## 0.2.27
-
-工作台新增 OpenCode Go Console 认证，捆绑 Core 5.8.16，自动读取本机官方 CLI 的有效凭据和工作区信息；不必手工复制会过期的 Console 令牌。评审首次调用遵守模型输出预算，补充旧会话永久别名和跨平台回归。真实工作台连接测试、流式写作及 Go 安全评审已通过。见 [OpenCode Go 接入](docs/OPENCODE_GO.md) 和 [旧报告复核与待办](docs/CLOSED_ISSUE_FOLLOWUPS.md)。正式发行状态、各平台验收和安装包校验值见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。
-
-[GitHub 0.2.27](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.27) 与 [npm 0.2.27](https://www.npmjs.com/package/dsh-openwrite/v/0.2.27) 均已发布，`@latest` 已更新到 0.2.27。两处公开下载包均与 CI 验收包逐字节一致，可使用下方安装命令获取本次修复。
-
-## 0.2.26 更新
-
-本版捆绑 Core **5.8.14**，包含旧会话恢复、精确 DSH `0.2.1-rc.3` 兼容、
-Android/ARM 外部 Studio 诊断，以及连载写作可靠性、完整上下文预览和 Embedding 配置修复。
-详见 [#105–#113 修复说明](docs/ISSUES_105_113.md)、[连载报告修复](docs/ISSUE_109_REPAIRS.md)
-及 [OpenCode Go 配置及适配](docs/OPENCODE_GO.md)。
+长篇小说的规划、写作、审稿和改稿都在 dsh 里的三个原生工作台页签完成：**创作**（正文、批注、版本）、**资料**（人物、设定、大纲、研究）、**任务**（模型、导入导出）。适合愿意自己配置模型、在本机管理稿件的作者与工作室；不适合期待开箱即用的云端成品、或不愿提供模型 API Key 的场景。
 
 ## 快速安装
 
-**0.2.28 标准插件包**兼容精确 dsh 版本 **0.1.2-rc.1 / 0.1.5-alpha.1 / 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.1-rc.3**。五个版本均已完成 Web 工作台渲染与 DoG 数据读取验证；三系统原生安装和 Electron 回归通过，报告者也补齐了 Windows 历史会话恢复实测。可下载版本、各平台验收结果和 SHA-256 以 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 附件为准；验收方法见 [发布验收](docs/RELEASE_ACCEPTANCE.md)。商城所需的精确预览版兼容性、验证范围和安装限制见 [DSH STORE 接入](docs/DSH_STORE.md)。
+**运行要求**：dsh 宿主（精确版本见下）· Node ≥ 22.19 · macOS arm64/x64、Linux x64、Windows x64 · 首次使用会下载 uv、Python 3.12 与锁定依赖 · 真正写稿与审稿需要你自己的模型 API Key。
 
-正式发行状态以 [npm 版本列表](https://www.npmjs.com/package/dsh-openwrite?activeTab=versions) 和 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 为准。以下是 0.2.28 精确版本的安装命令；发布时两处使用同一份验收产物：
+兼容的精确 dsh 宿主版本：
 
-```sh
-dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/download/v0.2.28/dsh-openwrite-0.2.28.tgz
-dsh web
-```
+`0.1.2-rc.1` · `0.1.5-alpha.1` · `0.1.7-rc.2` · `0.2.0-rc.2` · `0.2.1-rc.2` · `0.2.1-rc.3` · `0.2.1-rc.4` · `0.2.1-rc.5` · `0.2.2-rc.1`
 
-已有匹配版本 dsh 的用户执行：
+安装前先执行 `dsh --version` 核对宿主版本；安装不会自动升级 dsh。
 
 ```sh
 dsh plugin --profile web add -w dsh-openwrite@latest
 dsh web
 ```
 
-`@latest` 在执行安装或升级命令时选择 npm 最新发布版本，不会自动替换正在运行的服务。无需在安装时编译源码。升级前停止 dsh，并核对目标版本的宿主兼容说明。需要复现或回退时，使用 `dsh-openwrite@0.2.8` 等精确版本；对应版本的 [npm 包](https://www.npmjs.com/package/dsh-openwrite)与 [Release 预编译包](https://github.com/LiPu-jpg/Openwrite/releases) 为同一份已验收产物。
+需要固定版本或离线安装时，用 npm 的 `dsh-openwrite@<精确版本>`，或从 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/latest) 下载对应 `.tgz`；同一版本的 npm 包与 Release `.tgz` 是同一份已验收产物，包含预编译插件、编辑器资源与 Core wheel。
+
+`@latest` 只在执行命令时解析 npm 最新发布版本，安装后不会后台自动升级，也不会替换正在运行的服务。
+
+首次使用会下载固定版本的 uv、Python 3.12 和锁定依赖，保存在当前 dsh 的专属目录。无需预装 Python，也无需克隆仓库。目标平台为 macOS arm64/x64、Linux x64、Windows x64；各平台通过情况以发布验收报告为准。模型费用另计。
 
 也可把这段话交给有终端权限的 Agent：
 
@@ -117,47 +63,25 @@ dsh web
 不要调用写作模型做安装检查，不要自动升级宿主或放宽 pnpm 构建授权。
 ```
 
-首次使用会下载固定版本的 uv、Python 3.12 和锁定依赖，保存在当前 dsh 的专属目录。无需预装 Python，也无需克隆两个分支。目标平台为 macOS arm64/x64、Linux x64、Windows x64；各平台通过情况以发布验收报告为准。模型费用另计。
-
 具体的源码安装、升级、迁移和卸载见 [安装指南](docs/INSTALL.md)。
 
-### dsh 0.2 桌面端升级
+## 升级与回退
 
-`0.2.28`（Core 5.8.20）已发布。升级前完全退出 Desktop（含托盘）及 dsh，备份 profile；宿主原生升级保护尚未正式发布，停机升级工具及限制见 [升级说明](docs/ISSUES_98_100.md#离线升级和损坏修复)。完成后重启宿主并刷新界面。
+- 升级前完全退出 dsh 与 Desktop（含托盘），并备份 profile；安装完成后重启宿主并刷新浏览器页面。
+- `@latest` 不会自动替换正在运行的服务，升级前先停机。
+- 需要复现或回退时安装精确版本：`dsh-openwrite@<精确版本>` 与 GitHub Release 的同名 `.tgz` 为同一份已验收产物。
+- 宿主的原生升级保护补丁尚未进入正式宿主，插件侧的停机升级工具不等于宿主原生安装命令已有保护。
+- 若旧客户端在 0.2 宿主上激活失败，桌面端可能触发 profile 恢复。恢复后：关闭桌面端并备份当前 profile，从自己的 `cordis.patch.yml.bak-*` 备份恢复 patch，同时恢复原 `package.json` 的 `dsh.profile.bundles` 列表。安装包和作品目录通常仍在；不要用出厂模板覆盖其他插件配置。也不要靠给旧子包授权来代替升级——`dsh-openwrite` 的版本豁免不覆盖 `@dsh-novel/studio-panel@<ver>`。
+- 卸载：停止 dsh 后执行 `dsh plugin --profile web remove -w dsh-openwrite`。作品、配置、凭据和会话默认保留。
 
-`0.2.27`（Core 5.8.16）包含 Go 工作台认证、评审输出预算及后台重试补漏，并保留 #105–#113 与 #103/#104 的既有修复；原始场景仍待验证的条目见 [#123](https://github.com/LiPu-jpg/Openwrite/issues/123)。升级前完全退出 dsh/桌面客户端；安装后重新启动并刷新浏览器。原有作品、凭据和会话继续保留，历史版本预设用于恢复旧会话。受限平台使用外部 Studio，OpenCode Go 的服务商使用范围和配置要求见上述文档。
+细节见 [更新与回退](docs/INSTALL.md#更新与回退) 和 [离线升级和损坏修复](docs/ISSUES_98_100.md#离线升级和损坏修复)，目录选择问题见 [Windows Desktop 目录选择](docs/INSTALL.md#windows-desktop-目录选择)。
 
-`0.2.25`（Core 5.8.12）已在 [GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.25) 与 [npm](https://www.npmjs.com/package/dsh-openwrite/v/0.2.25) 发布，新增连载体检、分段续写、共享术语/范本、章组审计和漂移裁决，并修复验收与任务可观测性。范围、离线升级工具及宿主侧限制见 [#98–#100 实现说明](docs/ISSUES_98_100.md)，完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#025)。
+## 遇到问题
 
-`0.2.24`（Core 5.8.11）修复 [#88–#95](docs/ISSUES_88_95.md)：删章验收账本、结算降级、长文本流式生成、后台写章进度、统一字数门限、草稿发现与恢复及诊断/路由语义。[GitHub Release](https://github.com/LiPu-jpg/Openwrite/releases/tag/v0.2.24) 与 [npm](https://www.npmjs.com/package/dsh-openwrite/v/0.2.24) 均已发布，完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#024)。升级后停止并重新启动 dsh，再刷新浏览器页面。
-
-`0.2.23` 修复 [#83](https://github.com/LiPu-jpg/Openwrite/issues/83)/[#84](https://github.com/LiPu-jpg/Openwrite/issues/84)/[#85](https://github.com/LiPu-jpg/Openwrite/issues/85)：根包与全部内嵌子包的兼容声明加入精确宿主 `0.2.1-rc.2`，安装和激活不再被宿主版本闸门拒绝，无需版本豁免或手工编辑 `compatibility.json`。已在 `0.2.1-rc.2` 完成 Web 客户端验收（启动、OpenWrite 入口、工作台三页签、DoG 面板与其他插件共存），`0.1.2-rc.1`、`0.2.0-rc.2` 回归通过；Windows Electron 桌面端未实机复测。该版本完整验收见 [发布验收](docs/RELEASE_ACCEPTANCE.md#023)。升级后停止并重新启动 dsh，再刷新浏览器页面。
-
-`0.2.21` 修复 [#79](https://github.com/LiPu-jpg/Openwrite/issues/79) 的 Windows Desktop 目录选择：宿主接口失败后使用桌面提供的系统文件夹对话框，覆盖侧栏进入与工作台内目录选择。Core 保持 5.8.10。排查与手填路径方式见 [安装指南](docs/INSTALL.md#windows-desktop-目录选择)。
-
-`0.2.20` 捆绑 Core 5.8.10，修复 [#76](https://github.com/LiPu-jpg/Openwrite/issues/76) 的草稿恢复、任务状态、编辑和审稿契约，并补充 [#65](https://github.com/LiPu-jpg/Openwrite/issues/65) 的英文使用支持。行为与范围见 [修复说明](docs/ISSUE_76_REPAIRS.md)。正式可下载版本以 npm `latest` 和 GitHub Release 为准。
-
-`0.2.19` 候选包修复两个加载/工具问题：部分安装下「OpenWrite 创作」预设从列表消失、DoG 工具不可用（dsh-dog 宿主包解析失败，[#74](https://github.com/LiPu-jpg/Openwrite/issues/74)），以及 `novel_*` 工具的对象/数组参数在模型输出 JSON 字符串时预览失败、`data` 字段丢失（[#75](https://github.com/LiPu-jpg/Openwrite/issues/75)）。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
-
-`0.2.18` 候选包修正 `auto:cheapest`（Core 5.8.9）：零价模型不再参与比价，自动落到付费低价模型上。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
-
-`0.2.17` 候选包新增自动选模（Core 5.8.8）：模型档案的模型名写成 `auto:cheapest` 会自动选用服务商价格目录中总价最低且满足上下文/输出要求的模型（目录缓存一小时，价格变动自动跟随），写成 `auto:popular`（OpenRouter）则由官方 `openrouter/auto` 按社区用量自动选模型。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
-
-`0.2.16` 候选包补漏 [#64](https://github.com/LiPu-jpg/Openwrite/issues/64)/[#67](https://github.com/LiPu-jpg/Openwrite/issues/67)：字数精简重试耗尽后保稿时，`length_out_of_range`/`length_warning` 标记与校验问题现在随草稿产物持久化（Core 5.8.7），导出/审阅侧可追溯。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，再刷新浏览器页面。
-
-`0.2.15` 候选包修复 [#63](https://github.com/LiPu-jpg/Openwrite/issues/63)/[#66](https://github.com/LiPu-jpg/Openwrite/issues/66)（Windows 残留 `project.lock` 永久阻断写作，报错 `[WinError 87]`；Core 5.8.6 自动清理死进程残留锁并带上下文报错）、[#64](https://github.com/LiPu-jpg/Openwrite/issues/64)/[#67](https://github.com/LiPu-jpg/Openwrite/issues/67)（`continuous_write` 单章失败即整队终止、`max_failures` 失效、字数超限丢弃初稿；现在按容错上限续跑并保留超长稿）、[#68](https://github.com/LiPu-jpg/Openwrite/issues/68)（横评进行中详情接口恒 400）和 [#69](https://github.com/LiPu-jpg/Openwrite/issues/69)（推理模型评审输出预算被锁死 4096 导致评审全灭）。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
-
-`0.2.14` 候选包修复 [#60](https://github.com/LiPu-jpg/Openwrite/issues/60) 和 [#61](https://github.com/LiPu-jpg/Openwrite/issues/61)：系统代理下 `NO_PROXY` 含 `[::1]` 不再让所有模型连接测试误报"服务商拒绝了请求"（桥接层消毒 + Core 5.8.5 归类为本地配置错误）；Embedding 连接测试的依赖预热、硬超时与收尾兜底，加上桥接层的健康探活与 stderr 落盘，不再出现"后端活着但不服务、只能重启 dsh"的僵尸态。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
-
-`0.2.13` 修复 [#57](https://github.com/LiPu-jpg/Openwrite/issues/57) 的创作页刷新循环：批注与版本读取不再作为写操作通知刷新，Core 的只读请求也不再增加工作区变更序号。正式可下载版本以 npm `latest` 和 GitHub Release 为准。升级后需停止并重新启动 dsh，使桥接服务端加载新代码，再刷新浏览器页面。
-
-`0.2.12` 进一步修复 [#50](https://github.com/LiPu-jpg/Openwrite/issues/50)、[#51](https://github.com/LiPu-jpg/Openwrite/issues/51)、[#52](https://github.com/LiPu-jpg/Openwrite/issues/52) 的预设注册、导航、工作台挂载和 DoG 接口。连续审读按内容修订刷新，避免轮询闪烁（[#54](https://github.com/LiPu-jpg/Openwrite/issues/54)）。
-
-`0.2.11` 修复 [#45](https://github.com/LiPu-jpg/Openwrite/issues/45)，适配精确宿主版本 `0.2.0-rc.2`：工作台兼容新的 turn-tail list 槽位，DoG 调试面板使用新的 `sessionStatus`；根包和所有子包的兼容声明同步更新。已验证 0.2.0-rc.2 的 Web 客户端启动、OpenWrite 入口、DoG 面板及其他插件共存；Windows Electron 桌面端恢复链路尚未实机复测。
-
-**`dsh-openwrite@0.2.10` 不包含这项修复，请升级到 `0.2.23` 或更高的已验收版本。** 不要通过给旧子包授权来代替升级：`dsh-openwrite` 的版本豁免不会覆盖 `@dsh-novel/studio-panel@<ver>` 和 `@dsh-external/dsh-dog@<ver>`，而旧客户端在 0.2 宿主上激活失败可能触发桌面端的 profile 恢复。
-
-若已发生恢复，先关闭桌面端并备份当前 profile，再从自己的 `cordis.patch.yml.bak-*` 备份恢复 patch，同时恢复原 `package.json` 的 `dsh.profile.bundles` 列表。安装包和作品目录通常仍在；不要用出厂模板覆盖其他插件配置。详细排查见 [安装指南](docs/INSTALL.md#dsh-02-客户端兼容排查)。
+- 界面「OpenWrite → 诊断与帮助」显示实时状态与可恢复错误。
+- 体检安装状态：解包后执行 `node package/scripts/maintenance.mjs doctor --profile web`，只读检查标准包登记、旧包残留与环境状态，不打印凭据、不调用模型。
+- 工作台起不来、预设挂载失败这类问题多与宿主版本和 profile 状态有关，见 [dsh 0.2 客户端兼容排查](docs/INSTALL.md#dsh-02-客户端兼容排查)。
+- 反馈时请附上宿主版本、系统与架构、Release 版本、安装阶段和脱敏后的错误信息；不要提交 API Key、浏览器登录 URL 或作品全文。
 
 ## 开始使用
 
@@ -172,7 +96,7 @@ dsh web
 | 查伏笔、设定与写法记忆 | `/foreshadow`、`/canon`、`/learn` |
 | 导出成稿 | `/export-book` 或「任务 → 导入与导出」 |
 
-已有会话不会自动切换预设。详细操作与工作区规则见 [使用流程](docs/WORKFLOWS.md)。
+已有会话不会自动切换预设。详细操作与工作区规则见 [使用流程](docs/WORKFLOWS.md)，预设自带的完整技能清单见 [`presets/openwrite/skills/`](presets/openwrite/skills)。
 
 **界面语言**：面板已内置中文与英文词典，跟随 dsh 语言设置。切换方法：Settings → General → Language → English（选择后存为 `locale.preference`）。Agent 的 persona 和所有技能入口要求用作者的对话语言回复；运行环境与任务状态提供英文，Studio 报错附带英文说明和稳定错误码。已有作品内容不会自动翻译，正文按作者指定的语言生成。
 
@@ -183,8 +107,14 @@ dsh web
 - **对话模型**：在 dsh 宿主中配置，用于 OpenWrite 创作会话。
 - **小说生成、评审与测试模型**：在「任务 → 模型」添加服务商，按服务商提供的信息填写模型名、接口地址和 API Key。不要把密钥粘贴到对话、作品正文或 Git 仓库。
 - **作品目录**：选择自己的本地目录；后端端口与 Python 环境由插件管理，无需手动配置。
+- **研究检索**：托管运行时默认走宿主的搜索与抓取能力，不需要第三方 Key；也可在「OpenWrite → 设置 → 搜索」切换提供方并记住 Key，单个作品在研究页覆盖。检索质量 `quality` 只接受 `advisory` / `balanced` / `strict`，其他值会在启动子进程前被拒绝。
+- **OpenCode Go**：工作台可直接读取本机官方 CLI 的有效凭据和工作区信息，不必手工复制会过期的 Console 令牌，详见 [OpenCode Go 接入](docs/OPENCODE_GO.md)。
+
+作品、凭据和配置保存在本机；只有调用你配置的模型服务商时，请求才会离开本机。
 
 旧开发安装的全局模型配置不会自动迁入受管理环境，迁移步骤见 [安装指南](docs/INSTALL.md)。模型连通性测试可能实际调用服务商，应与不调用模型的环境健康检查区分。
+
+DeepResearch 是可选依赖，首次使用需在其 integration 目录执行 `pnpm install --frozen-lockfile`；不启用时研究能力不受影响。
 
 ## 示例：从大纲开始一部新小说
 
@@ -207,8 +137,9 @@ dsh web
 | **模型测试** | 测章节写作或指定范围的大纲设计，多模型独立生成与交叉评审，查看质量、可靠性和费用；候选保存在隔离副本。 |
 | **研究与检索** | 检索作品资料与参考库，管理研究报告、正典和写作记忆。 |
 | **导入与成书** | 旧稿导入、作品迁移、完整备份，以及 Markdown / TXT / EPUB 导出。 |
+| **联动插件** | 与 dsh-our-free-model、dsh-ops、dsh-dog 协作：切换写作与评审模型、挂载有界文件工具、交付验证。均为可选项，未安装时行为不变。 |
 
-「创作 / 资料 / 任务」是三个主要工作台。OpenWrite Studio 在本版本中作为领域后端运行，日常操作在 dsh 中完成。
+「创作 / 资料 / 任务」是三个主要工作台。OpenWrite Studio 作为领域后端运行，日常操作在 dsh 中完成。联动插件的接入方式见 [联动插件说明](docs/COMPANION_PLUGINS.md)。
 
 ## 文档与开发
 
@@ -221,6 +152,8 @@ dsh web
 | [模型测试](docs/BENCHMARK_TASKS.md) | 章节选择、大纲范围、任务 DAG 和结果解读 |
 | [审稿 DAG](docs/REVIEW_DAG_FRAMEWORK.md) | 标准评审框架与证据结构 |
 | [工程说明](docs/DEVELOPMENT.md) | 组件职责、维护命令、调研和改进记录 |
+| [发布验收](docs/RELEASE_ACCEPTANCE.md) | 各版本的平台验收结果与校验值 |
+| [DSH STORE 接入](docs/DSH_STORE.md) | 商城所需的预览版兼容性与安装限制 |
 | [维护手册](docs/PLUGIN_MAINTENANCE.md) · [架构设计](DESIGN.md) | 版本、插件契约、安装维护和跨仓库职责 |
 
 ```text
@@ -234,19 +167,29 @@ conductor/                 连续写章、评审与修订编排
 开发检查：`npm run check:plugin`；跨仓库契约检查：`npm run check`。
 小说核心位于同仓库的 [`native-core` 分支](https://github.com/LiPu-jpg/Openwrite/tree/native-core)，与本分支分别维护。工程进度与验证记录保留在 [GOAL.md](GOAL.md)。
 
+## 版本与兼容性
+
+逐版变更记录不在本文件里：
+
+- **[CHANGELOG.md](CHANGELOG.md)** —— 每个版本修了什么、根因是什么、验收怎么做的。
+- **[GitHub Releases](https://github.com/LiPu-jpg/Openwrite/releases/latest)** —— 发布产物、SHA-256 校验值与验收报告。
+- **[npm 版本列表](https://www.npmjs.com/package/dsh-openwrite?activeTab=versions)** —— 已发布的 npm 版本。
+
+精确的宿主兼容版本以 `package.json` 的 `dsh.compatibility` 为准：宿主在安装前读取的是包里的 `@deepseek-ai/dsh-*` peer 范围，`dsh.compatibility` 只是展示元数据。本 README 上方列出的宿主列表与它一致。
+
 ## 许可与来源
 
 项目采用 [Apache-2.0](LICENSE)。`oh-story-*` 技能和随包编辑器保留各自目录中的原有许可证。
 Logo 基于 OpenWrite `native-core` 分支，已调整深浅主题配色；基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，图谱验证可选装第三方 [dsh-dog](https://github.com/Fun10165/dsh-dog)（内置引擎已移除）。
 
-生态目录：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) · [社区插件市场](https://dshtui.com/plugins/)。OpenWrite 当前面向 DeepSeek Harness 的 `web` profile，使用 `dsh web` 打开创作工作台；尚未验证 dsh-TUI 界面兼容性。
+生态目录：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) · [社区插件市场](https://dshtui.com/plugins/)。OpenWrite 面向 DeepSeek Harness 的 `web` 与 `desktop` profile，使用 `dsh web` 打开创作工作台；尚未验证 dsh-TUI 界面兼容性。
 
 ## Language / 语言
 
 In dsh, choose **Settings → General → Language → English** (`locale.preference`).
 The OpenWrite panel follows the host language. The writing agent and slash-command
 help follow your conversation language; manuscripts, outlines and assets retain
-their existing language. You can say “Please write and review this novel in English.”
+their existing language. You can say "Please write and review this novel in English."
 The bundled Chinese skill files are procedural instructions, not an output-language
 restriction. Runtime setup messages use English. Backend failures include stable
 `code`, English `message`, `request_id`, and the original diagnostic text.
