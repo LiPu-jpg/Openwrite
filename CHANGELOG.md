@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.39：宿主兼容扩到 dsh 0.2.2-rc.2 与 0.2.2-rc.3
+
+修 [#170](https://github.com/LiPu-jpg/Openwrite/issues/170)（`dsh-openwrite@0.2.38` 在 `dsh 0.2.2-rc.3` 上被安装前闸门直接拒绝）。
+
+- 根包与两个内嵌子包（`@dsh-novel/openwrite-bridge`、`@dsh-novel/studio-panel`）以及三个 lock 文件的 `@deepseek-ai/dsh-*` peer 范围、`dsh.compatibility.dsh`、`dshReleases` 同步加入精确宿主 `0.2.2-rc.2` 与 `0.2.2-rc.3`。
+- 两个新宿主仍使用 `@deepseek-ai/cordis ~4.1.0`，既有 peer 匹配集合只增不改（`0.1.2-rc.1`、`0.1.5-alpha.1`、`0.1.7-rc.2`、`0.2.0-rc.2`、`0.2.1-rc.2`–`0.2.1-rc.5`、`0.2.2-rc.1` 不受影响）。
+- 发布矩阵与最终验收门禁新增 `0.2.2-rc.2` 与 `0.2.2-rc.3` 的客户端验收任务，各自带 `--before` 截止时间。
+
 ## 0.2.38：预设挂载失败不再被一句「Unknown agent preset」盖住
 
 修 [#166](https://github.com/LiPu-jpg/Openwrite/issues/166)（0.2.37 升级后仍进不去工作台）。

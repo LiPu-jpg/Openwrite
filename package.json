@@ -1,6 +1,6 @@
 {
   "name": "dsh-openwrite",
-  "version": "0.2.38",
+  "version": "0.2.39",
   "description": "OpenWrite 长篇小说领域后端接入 DeepSeek Harness：统一创作 Agent 预设 + 原生创作工作台",
   "type": "module",
   "scripts": {
@@ -54,7 +54,7 @@
     "displayName": "小说创作（OpenWrite）",
     "pluginType": "suite",
     "compatibility": {
-      "dsh": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.1.7-rc.2 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1",
+      "dsh": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.1.7-rc.2 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1 || 0.2.2-rc.2 || 0.2.2-rc.3",
       "profiles": [
         "web",
         "desktop"
@@ -70,7 +70,9 @@
         "0.2.1-rc.4": "compatible",
         "0.2.1-rc.5": "compatible",
         "0.1.7-rc.2": "compatible",
-        "0.2.2-rc.1": "compatible"
+        "0.2.2-rc.1": "compatible",
+        "0.2.2-rc.2": "compatible",
+        "0.2.2-rc.3": "compatible"
       }
     }
   },
@@ -115,9 +117,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.2 || ~4.0.4 || ~4.1.0",
-    "@deepseek-ai/dsh-home-paths": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.1.7-rc.2 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1",
-    "@deepseek-ai/dsh-settings": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.1.7-rc.2 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1",
-    "@deepseek-ai/dsh-tools": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.1.7-rc.2 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1"
+    "@deepseek-ai/dsh-home-paths": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.1.7-rc.2 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1 || 0.2.2-rc.2 || 0.2.2-rc.3",
+    "@deepseek-ai/dsh-settings": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.1.7-rc.2 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1 || 0.2.2-rc.2 || 0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1 || 0.1.5-alpha.1 || 0.1.7-rc.2 || 0.2.0-rc.2 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1 || 0.2.2-rc.2 || 0.2.2-rc.3"
   },
   "bin": {
     "openwrite-maintenance": "scripts/maintenance.mjs",

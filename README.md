@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-openwrite"><img src="https://img.shields.io/npm/v/dsh-openwrite" alt="npm dsh-openwrite"></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/host%20dsh-0.2.2--rc.1-2563eb" alt="dsh 0.2.2-rc.1"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/host%20dsh-0.2.2--rc.3-2563eb" alt="dsh 0.2.2-rc.3"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node-%E2%89%A522.19-15803d" alt="Node >= 22.19"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0f766e" alt="Apache-2.0"></a>
   <a href="https://dsh-plugin.org/plugins/lipu-jpg/openwrite"><img src="https://dsh-plugin.org/badges/listed.svg" alt="Listed on dsh-plugin.org"></a>
@@ -37,7 +37,7 @@
 
 兼容的精确 dsh 宿主版本：
 
-`0.1.2-rc.1` · `0.1.5-alpha.1` · `0.1.7-rc.2` · `0.2.0-rc.2` · `0.2.1-rc.2` · `0.2.1-rc.3` · `0.2.1-rc.4` · `0.2.1-rc.5` · `0.2.2-rc.1`
+`0.1.2-rc.1` · `0.1.5-alpha.1` · `0.1.7-rc.2` · `0.2.0-rc.2` · `0.2.1-rc.2` · `0.2.1-rc.3` · `0.2.1-rc.4` · `0.2.1-rc.5` · `0.2.2-rc.1` · `0.2.2-rc.2` · `0.2.2-rc.3`
 
 安装前先执行 `dsh --version` 核对宿主版本；安装不会自动升级 dsh。
 
