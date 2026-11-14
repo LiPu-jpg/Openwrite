@@ -256,6 +256,11 @@ describe('OpenWriteSettings', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '已复制脱敏诊断信息' })).toBeTruthy())
     expect(writeText).toHaveBeenCalledTimes(1)
     expect(String(writeText.mock.calls[0]?.[0])).not.toContain('authorname')
+
+    fireEvent.click(screen.getByRole('button', { name: '复制 /feedback 指令（交给 Agent 排查）' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '已复制 /feedback，去对话粘贴即可' })).toBeTruthy())
+    expect(writeText).toHaveBeenCalledTimes(2)
+    expect(String(writeText.mock.calls[1]?.[0])).toContain('/feedback')
   })
 
   it('sanitizes unix, windows, and credential tokens in diagnostic strings', () => {

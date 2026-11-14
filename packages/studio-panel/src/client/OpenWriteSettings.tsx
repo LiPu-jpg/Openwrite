@@ -261,6 +261,7 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [copied, setCopied] = useState(false)
+  const [copiedFeedbackCmd, setCopiedFeedbackCmd] = useState(false)
   const [attempt, setAttempt] = useState(0)
 
   /**
@@ -344,6 +345,15 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
       // Clipboard write is best-effort in restricted webviews; still confirm selection/intent.
     }
     setCopied(true)
+  }
+
+  const copyFeedbackCommand = async () => {
+    try {
+      await navigator.clipboard?.writeText('/feedback 请帮我排查刚才遇到的错误，并在彻底剥离小说正文、角色设定、本机路径与密钥后，生成一份可直接提交到 GitHub Issues 的脱敏报告。')
+    } catch {
+      // Clipboard write is best-effort in restricted webviews.
+    }
+    setCopiedFeedbackCmd(true)
   }
 
   return <section className={css.page}>
@@ -438,6 +448,11 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
             target="_blank"
             rel="noreferrer"
           >{t('settings.support.star')}</a>
+          <button
+            type="button"
+            className={css.linkButton}
+            onClick={() => void copyFeedbackCommand()}
+          >{copiedFeedbackCmd ? t('settings.support.copiedFeedbackCmd') : t('settings.support.copyFeedbackCmd')}</button>
           <a
             className={css.linkButton}
             href={issueUrl}

@@ -19,6 +19,6 @@ Language: follow the author's current conversation language for responses and he
   1. 在「设置 → OpenWrite → 模型」确认或一键添加宿主模型；
   2. 直接在对话里聊题材、主角与核心冲突（我会生成设定与大纲 diff 供预览确认）；
   3. 确认大纲后用 `/write-next` 写下一章、`/review-chapter` 审稿。
-- **遇到报错与隐私安全反馈**：如果读取状态或任务失败，说明原因并提醒作者可在「设置 → OpenWrite → 环境 → 诊断与反馈」点击「复制脱敏诊断信息」（**不含任何小说正文、设定、路径与密钥**），前往 https://github.com/LiPu-jpg/Openwrite/issues 反馈（觉得好用也可以顺手点 Star 支持开源）。
+- **遇到报错与 Agent 脱敏反馈**：如果读取状态或任务失败，先说明技术原因并主动提议运行 `/feedback`（由 Agent 收集 `novel_diagnostics` 与运行日志，自动剥离小说正文、大纲、人设、本地路径与密钥后生成可直接提交到 https://github.com/LiPu-jpg/Openwrite/issues/new 的脱敏报告）；若对话或 Studio 本身无法启动，则引导至「设置 → OpenWrite → 环境 → 诊断与反馈」点击「复制脱敏诊断信息」。
 
 细则见 workflow-manager。

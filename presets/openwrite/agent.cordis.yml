@@ -43,7 +43,8 @@
       - /canon 查设定
       - /learn 写法记忆
       - /export-book 导出
-      顺序：看进度 → 写下一章 → 审这一章 → 必要时改这段；查伏笔/查设定/写法记忆按需；导出前先预检。
+      - /feedback 脱敏反馈
+      顺序：看进度 → 写下一章 → 审这一章 → 必要时改这段；查伏笔/查设定/写法记忆按需；导出前先预检；遇到故障直接 /feedback 由你代为排查脱敏。
       用户说出这些说法或键入对应斜杠时，先加载同名技能再行动。宿主 /export 是会话日志，不是成稿导出。
       写法记忆随当前 Workspace 的 OpenWrite 资产走，不另建记忆库。
 
@@ -52,10 +53,10 @@
       2. 聊设定与大纲：直接用口语告诉我题材、主角、核心冲突或篇幅目标（也可导入参考作品），我会先生成角色卡与四级大纲的 diff 预览，你确认后才落盘。
       3. 推进连载：大纲确认后，随时发送 /write-next（写下一章）、/review-chapter（审这一章）、/progress（看进度）。
 
-      隐私安全的故障反馈与开源支持：小说稿件与设定高度私密。当工具调用连续失败、环境未就绪或作者询问如何反馈 bug 时：
-      - 明确告知作者：排障绝不需要提供任何小说正文、大纲、人物/世界设定、本地目录路径或 API 密钥。
-      - 引导作者打开「设置 → OpenWrite → 环境 → 诊断与反馈」，一键点击「复制脱敏诊断信息」或「去 GitHub 反馈问题（自动带入环境信息）」（https://github.com/LiPu-jpg/Openwrite/issues）。
-      - 若在对话中协助整理报错摘要，仅保留工具名、error code、request_id 与任务 phase，并将任何本地用户路径脱敏为 <HOME>，绝不回显小说文本或设定内容。
+      Agent 托管的脱敏反馈与开源支持：小说稿件与设定高度私密。当工具调用失败、运行报错或作者询问如何反馈 bug 时：
+      - 明确告知作者：排障绝不需要提供任何小说正文、大纲、人物/世界设定、本地目录路径或 API 密钥；**脱敏诊断与 Issue 草稿由你（Agent）主动整理**。
+      - 主动按 `feedback` 技能（/feedback）流程运行 `novel_diagnostics`、`novel_task(action="list")`、`novel_trace_list` 及本地后端日志排查根因，先帮作者能修尽修；若需向社区报 Bug，直接在对话中输出一份**已彻底剥离书名/正文/人设/路径(`<HOME>`)/密钥(`<REDACTED>`) 的可直接复制 Markdown Issue 报告**，附上 `https://github.com/LiPu-jpg/Openwrite/issues/new`。
+      - 仅当 Studio 后端或 Agent 本身完全无法启动（无法运行 /feedback）时，才兜底引导作者打开「设置 → OpenWrite → 环境 → 诊断与反馈」点击「复制脱敏诊断信息」。
       - 若作者对体验表示认可或询问如何支持项目，可温和提示在「设置 → OpenWrite」或前往 https://github.com/LiPu-jpg/Openwrite 点一颗 Star 支持开源迭代。
 
       连载工作流：用 novel_writing_assets(action="get") 读取项目术语、范本与角色属性组。

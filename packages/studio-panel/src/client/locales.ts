@@ -1249,6 +1249,8 @@ export type StudioPanelKey =
   | 'settings.support.body'
   | 'settings.support.star'
   | 'settings.support.feedback'
+  | 'settings.support.copyFeedbackCmd'
+  | 'settings.support.copiedFeedbackCmd'
   | 'settings.support.releaseNotes'
   | 'settings.releaseModal.badge'
   | 'settings.releaseModal.title'
@@ -2520,14 +2522,16 @@ export const zh: Record<StudioPanelKey, string> = {
   'settings.section.diagnostics': '诊断与反馈',
   'settings.section.diagnosticsHint': '环境准备在后台继续；关掉这个对话框不会中断它。',
   'settings.section.phaseLabel': '环境状态',
-  'settings.diagnostics.privacy': '隐私保护说明：以下诊断摘要仅包含环境状态、宿主版本与脱敏错误，绝不包含任何小说正文、大纲、角色/世界设定、本地作品路径或 API 密钥。',
+  'settings.diagnostics.privacy': '日常使用遇到报错，推荐在创作对话中直接发送 /feedback，由 OpenWrite Agent 代为排查日志并自动脱敏生成 Issue 草稿；若写作环境尚未就绪或无法进入对话，下方提供仅含环境状态的兜底脱敏诊断（不含任何正文、大纲、人设、本地路径与密钥）。',
   'settings.diagnostics.copy': '复制脱敏诊断信息',
   'settings.diagnostics.copied': '已复制脱敏诊断信息',
   'settings.diagnostics.reportIssue': '去 GitHub 反馈问题（自动带入环境信息）',
   'settings.support.title': '开源支持与社区反馈',
-  'settings.support.body': 'OpenWrite 是免费开源的长篇小说创作工作台。如果它帮到了你的连载或构思，欢迎去 GitHub 点一颗 Star 支持我们持续迭代；遇到问题也可以随时提交脱敏反馈。',
+  'settings.support.body': 'OpenWrite 是免费开源的长篇小说创作工作台。如果它帮到了你的连载或构思，欢迎去 GitHub 点一颗 Star 支持持续迭代；写作中遇到问题可在对话里直接输入 /feedback 让 Agent 帮你脱敏排查并生成反馈草稿。',
   'settings.support.star': '★ 去 GitHub 点 Star 支持 OpenWrite',
   'settings.support.feedback': '提交问题 / 建议',
+  'settings.support.copyFeedbackCmd': '复制 /feedback 指令（交给 Agent 排查）',
+  'settings.support.copiedFeedbackCmd': '已复制 /feedback，去对话粘贴即可',
   'settings.support.releaseNotes': '查看本版更新说明',
   'settings.releaseModal.badge': '版本更新说明 · 每次更新仅弹出一次',
   'settings.releaseModal.title': '说点心里话：如果你觉得 OpenWrite 好用，想请你顺手点个 Star',
@@ -2535,7 +2539,7 @@ export const zh: Record<StudioPanelKey, string> = {
   'settings.releaseModal.projectDesc': '基于 DeepSeek Harness 的开源长篇小说工作台：百万字级长篇设定与多视角大纲管理、原生三栏沉浸写作、连续性自动审校与全流程本地存储。',
   'settings.releaseModal.whatsNewTitle': '本次版本更新亮点',
   'settings.releaseModal.item1': '宿主兼容扩展：全面适配 dsh 0.2.2-rc.2 / 0.2.2-rc.3 及既有 0.1.x / 0.2.x 宿主版本。',
-  'settings.releaseModal.item2': '零剧透脱敏反馈：在「设置 → OpenWrite → 环境」新增一键复制脱敏诊断与直达 GitHub Issue，自动剥离书名、正文、设定、路径与密钥。',
+  'settings.releaseModal.item2': 'Agent 托管脱敏反馈：在任意创作对话发送 /feedback，Agent 自动检查运行状态、日志与工具报错，彻底剥离正文/人设/路径/密钥后生成可直接提交的 GitHub Issue 草稿（环境无法启动时也可在设置中复制兜底诊断）。',
   'settings.releaseModal.item3': '首次创作三步引导：Agent 新增开书三步引导（定题材立项 → 铺首卷架构 → 写首章并自动审校），上手更顺畅。',
   'settings.releaseModal.heartfelt': '目前实际使用 OpenWrite 创作的朋友远比 GitHub 上的 Star 多。一颗 Star 是开源项目唯一的「工资条」，也是支撑我持续维护和迭代的最大动力。',
   'settings.releaseModal.starCta': '★ 去 GitHub 给 OpenWrite 点 Star',
@@ -3793,14 +3797,16 @@ export const en: Record<StudioPanelKey, string> = {
   'settings.section.diagnostics': 'Diagnostics & feedback',
   'settings.section.diagnosticsHint': 'The environment keeps preparing in the background; closing this dialog does not interrupt it.',
   'settings.section.phaseLabel': 'Environment state',
-  'settings.diagnostics.privacy': 'Privacy notice: This diagnostic summary includes only environment state, host version, and path-redacted error details. It never includes novel manuscripts, outlines, character/world assets, local workspace paths, or API keys.',
+  'settings.diagnostics.privacy': 'For bugs during writing, type /feedback in any chat so the OpenWrite Agent inspects logs and drafts a spoiler-free issue report. If Studio cannot boot, use the startup-only diagnostics below (never includes manuscripts, outlines, assets, paths, or keys).',
   'settings.diagnostics.copy': 'Copy sanitized diagnostics',
   'settings.diagnostics.copied': 'Sanitized diagnostics copied',
   'settings.diagnostics.reportIssue': 'Report issue on GitHub (pre-filled)',
   'settings.support.title': 'Open-source support & feedback',
-  'settings.support.body': 'OpenWrite is a free, open-source long-form fiction workbench. If it helps with your serial or story planning, please consider starring the repository on GitHub — and feel free to open a privacy-safe issue anytime.',
+  'settings.support.body': 'OpenWrite is a free, open-source long-form fiction workbench. If it helps your writing, consider starring it on GitHub — and whenever an issue occurs, type /feedback in chat so the Agent prepares a sanitized bug report for you.',
   'settings.support.star': '★ Star OpenWrite on GitHub',
   'settings.support.feedback': 'Report issue / feedback',
+  'settings.support.copyFeedbackCmd': 'Copy /feedback prompt (for Agent)',
+  'settings.support.copiedFeedbackCmd': 'Copied /feedback prompt',
   'settings.support.releaseNotes': 'View release notes',
   'settings.releaseModal.badge': 'Release notes · Shown once per update',
   'settings.releaseModal.title': 'A quick note from OpenWrite: if it helps your writing, please give it a Star',
@@ -3808,7 +3814,7 @@ export const en: Record<StudioPanelKey, string> = {
   'settings.releaseModal.projectDesc': 'An open-source long-form fiction workbench built on DeepSeek Harness: million-word worldbuilding & multi-view outlines, native 3-pane writing, automated continuity review, and 100% local storage.',
   'settings.releaseModal.whatsNewTitle': 'What’s new in this update',
   'settings.releaseModal.item1': 'Host compatibility: full support for dsh 0.2.2-rc.2 / 0.2.2-rc.3 alongside existing 0.1.x / 0.2.x hosts.',
-  'settings.releaseModal.item2': 'Privacy-safe diagnostics: one-click sanitized diagnostic copy and pre-filled GitHub Issue link in “Settings → OpenWrite → Environment” (zero manuscript, path, or key leakage).',
+  'settings.releaseModal.item2': 'Agent-led privacy-safe feedback: type /feedback in any chat so the Agent inspects diagnostics and logs, strips manuscripts/characters/paths/keys, and drafts a ready-to-submit GitHub Issue (with startup fallback in Settings).',
   'settings.releaseModal.item3': '3-step Agent onboarding: guided new-book kickoff (Genre & Setup → First-Arc Outline → Chapter 1 Draft & Review).',
   'settings.releaseModal.heartfelt': 'Far more writers use OpenWrite every day than have starred the repository. A GitHub Star is the only payslip an open-source project gets — and the biggest motivation to keep improving it.',
   'settings.releaseModal.starCta': '★ Star OpenWrite on GitHub',

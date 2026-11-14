@@ -99,6 +99,7 @@ const authorEntries = [
   { name: 'canon', phrase: '查设定', tools: ['novel_assets'] },
   { name: 'learn', phrase: '写法记忆', tools: ['novel_source_action', 'novel_change_plan', 'novel_assets'] },
   { name: 'export-book', phrase: '导出', tools: ['novel_export'] },
+  { name: 'feedback', phrase: '脱敏反馈', tools: ['novel_diagnostics', 'novel_status', 'novel_task', 'novel_trace_list'] },
 ]
 const authorNames = new Set(authorEntries.map(entry => entry.name))
 
@@ -188,9 +189,13 @@ assert.match(composition, /\/canon/)
 assert.match(composition, /\/learn/)
 assert.match(composition, /写法记忆/)
 assert.match(composition, /\/export-book/)
+assert.match(composition, /\/feedback/)
 assert.match(composition, /初始引导/)
 assert.match(composition, /复制脱敏诊断信息/)
+assert.match(skillSources['progress'], /\/feedback/)
 assert.match(skillSources['progress'], /复制脱敏诊断信息/)
+assert.match(skillSources['feedback'], /<HOME>/)
+assert.match(skillSources['feedback'], /<REDACTED>/)
 assert.match(skillSources['learn'], /WORKSPACE_CONTEXT_MISSING/)
 
 console.log(JSON.stringify({
