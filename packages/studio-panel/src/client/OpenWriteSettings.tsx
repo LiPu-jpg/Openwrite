@@ -271,19 +271,14 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
    * became available.
    */
   const load = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
-    const [runtimeResult, backendResult, hostModelResult, companionResult, hostCatalogResult] = await Promise.all([
-      fetchRuntimeStatus(signal).catch(() => null),
-      fetchStudioBackend(signal).catch(() => null),
-      fetchHostModel(signal).catch(() => null),
-      fetchCompanions(signal).catch(() => null),
-      fetchHostModelCatalog(signal).catch(() => null),
+    const [runtimeResult, backendResult, hostModelResult, companionResult] = await Promise.all([
+      fetchRuntimeStatus(signal).catch(() => null).then(res => { if (signal?.aborted !== true) setRuntime(res); return res }),
+      fetchStudioBackend(signal).catch(() => null).then(res => { if (signal?.aborted !== true) setBackend(res); return res }),
+      fetchHostModel(signal).catch(() => null).then(res => { if (signal?.aborted !== true) setHostModel(res); return res }),
+      fetchCompanions(signal).catch(() => null).then(res => { if (signal?.aborted !== true) setCompanions(res); return res }),
+      fetchHostModelCatalog(signal).catch(() => null).then(res => { if (signal?.aborted !== true) setHostCatalog(res); return res }),
     ])
     if (signal?.aborted === true) return true
-    setRuntime(runtimeResult)
-    setBackend(backendResult)
-    setHostModel(hostModelResult)
-    setCompanions(companionResult)
-    setHostCatalog(hostCatalogResult)
     return runtimeResult !== null && backendResult !== null && hostModelResult !== null && companionResult !== null
   }, [])
 
