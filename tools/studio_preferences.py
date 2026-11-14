@@ -203,8 +203,11 @@ class StudioResearchSettingsStore:
             # a managed host's DSH web tools are the default even when an older
             # machine-global file still says bocha; that file predates this
             # provider and would otherwise pin every new project to an API key.
-            if not host_web_available():
-                payload = self._read_json(self.settings_path)
+            candidate = self._read_json(self.settings_path)
+            if candidate and (
+                not host_web_available() or candidate.get("explicit") is True
+            ):
+                payload = candidate
         provider = str(payload.get("search_provider") or "").strip().lower()
         remember = payload.get("remember_api_key")
         default = self._default_provider()
@@ -242,9 +245,15 @@ class StudioResearchSettingsStore:
             self._session_credentials.pop(provider, None)
             credentials.pop(provider, None)
         self._write_private_json(self.credentials_path, credentials)
+        settings_payload: dict[str, Any] = {
+            "search_provider": provider,
+            "remember_api_key": remember,
+        }
+        if self.workspace_path is None:
+            settings_payload["explicit"] = True
         self._write_private_json(
             self.workspace_path or self.settings_path,
-            {"search_provider": provider, "remember_api_key": remember},
+            settings_payload,
         )
         return self.surface()
 

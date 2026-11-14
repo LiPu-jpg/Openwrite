@@ -624,3 +624,41 @@ def test_research_preferences_are_global_and_need_no_project(tmp_path: Path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_global_research_preferences_persist_under_managed_host_web(tmp_path: Path, monkeypatch):
+    from tools.host_web import configure_host_web, reset_host_web
+
+    monkeypatch.setenv("OPENWRITE_STUDIO_CONFIG_DIR", str(tmp_path / "prefs"))
+    reset_host_web()
+    configure_host_web("http://127.0.0.1:45678", "relay-token")
+    try:
+        server = create_server(tmp_path, port=0)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            opener = build_opener(ProxyHandler({}))
+            base = f"http://127.0.0.1:{server.server_port}"
+            request = __import__("urllib.request", fromlist=["Request"]).Request(
+                f"{base}/api/research/preferences",
+                data=json.dumps({"search_provider": "bing"}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "X-OpenWrite-Studio": "1"},
+                method="POST",
+            )
+            with opener.open(request) as response:
+                saved = json.loads(response.read())
+            assert saved["data"]["settings"]["search_provider"] == "bing"
+
+            with opener.open(f"{base}/api/research/preferences") as response:
+                reloaded = json.loads(response.read())
+            assert reloaded["data"]["settings"]["search_provider"] == "bing"
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        scoped_base = StudioResearchSettingsStore(tmp_path / "prefs")
+        new_workspace = tmp_path / "new-novel" / "data" / "research" / "settings.json"
+        assert scoped_base.for_workspace(new_workspace).load_settings()["search_provider"] == "bing"
+    finally:
+        reset_host_web()
