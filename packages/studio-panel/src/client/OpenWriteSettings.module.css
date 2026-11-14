@@ -483,3 +483,79 @@
   border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 70%, var(--dsw-alias-border-l2));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
 }
+
+/* ── open-source support & diagnostic action links ── */
+
+.supportCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 15px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, var(--dsw-alias-border-l2));
+  background:
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--dsw-alias-state-business-primary) 8%, transparent), transparent 60%),
+    color-mix(in srgb, var(--dsw-alias-bg-layer-3) 76%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 5%),
+    0 4px 14px color-mix(in srgb, var(--dsw-alias-state-business-primary) 5%, transparent);
+}
+
+.supportHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.supportHeader h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.supportCard p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.starButton,
+.linkButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 13px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 580;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.starButton {
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 65%, var(--dsw-alias-border-l2));
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, var(--dsw-alias-bg-layer-3));
+  color: var(--dsw-alias-label-primary);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%), 0 1px 3px rgb(0 0 0 / 8%);
+}
+
+.starButton:hover {
+  transform: translateY(-1px);
+  border-color: var(--dsw-alias-state-business-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, var(--dsw-alias-bg-layer-3));
+}
+
+.linkButton {
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 84%, transparent);
+  color: var(--dsw-alias-label-primary);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%), 0 1px 2px rgb(0 0 0 / 6%);
+}
+
+.linkButton:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-border-l2));
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 7%, var(--dsw-alias-bg-layer-3));
+}

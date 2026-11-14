@@ -1241,6 +1241,14 @@ export type StudioPanelKey =
   | 'settings.section.diagnostics'
   | 'settings.section.diagnosticsHint'
   | 'settings.section.phaseLabel'
+  | 'settings.diagnostics.privacy'
+  | 'settings.diagnostics.copy'
+  | 'settings.diagnostics.copied'
+  | 'settings.diagnostics.reportIssue'
+  | 'settings.support.title'
+  | 'settings.support.body'
+  | 'settings.support.star'
+  | 'settings.support.feedback'
   | 'settings.tab.environment'
   | 'settings.tab.models'
   | 'settings.tab.search'
@@ -2496,9 +2504,17 @@ export const zh: Record<StudioPanelKey, string> = {
   'settings.section.hostModelsEmpty': '宿主没有可用的模型。',
   'settings.section.hostModelsHint': '这些模型由宿主提供：dsh 本体的模型，以及其它插件注册到同一目录的模型。在「模型」页可以一键把它们加进模型库。',
   'settings.section.hostModelHint': 'OpenWrite 目前使用自己的模型档案，在下面的「模型」里配置。',
-  'settings.section.diagnostics': '诊断',
+  'settings.section.diagnostics': '诊断与反馈',
   'settings.section.diagnosticsHint': '环境准备在后台继续；关掉这个对话框不会中断它。',
   'settings.section.phaseLabel': '环境状态',
+  'settings.diagnostics.privacy': '隐私保护说明：以下诊断摘要仅包含环境状态、宿主版本与脱敏错误，绝不包含任何小说正文、大纲、角色/世界设定、本地作品路径或 API 密钥。',
+  'settings.diagnostics.copy': '复制脱敏诊断信息',
+  'settings.diagnostics.copied': '已复制脱敏诊断信息',
+  'settings.diagnostics.reportIssue': '去 GitHub 反馈问题（自动带入环境信息）',
+  'settings.support.title': '开源支持与社区反馈',
+  'settings.support.body': 'OpenWrite 是免费开源的长篇小说创作工作台。如果它帮到了你的连载或构思，欢迎去 GitHub 点一颗 Star 支持我们持续迭代；遇到问题也可以随时提交脱敏反馈。',
+  'settings.support.star': '★ 去 GitHub 点 Star 支持 OpenWrite',
+  'settings.support.feedback': '提交问题 / 建议',
   'settings.tab.environment': '环境',
   'settings.tab.models': '模型',
   'settings.tab.search': '搜索',
@@ -3748,9 +3764,17 @@ export const en: Record<StudioPanelKey, string> = {
   'settings.section.hostModelsEmpty': 'The host has no model available.',
   'settings.section.hostModelsHint': 'These models come from the host: dsh own models and the ones other plugins register into the same directory. The Models tab adds them to the model library with one click.',
   'settings.section.hostModelHint': 'OpenWrite uses its own model profiles for now; configure them under “Model” below.',
-  'settings.section.diagnostics': 'Diagnostics',
+  'settings.section.diagnostics': 'Diagnostics & feedback',
   'settings.section.diagnosticsHint': 'The environment keeps preparing in the background; closing this dialog does not interrupt it.',
   'settings.section.phaseLabel': 'Environment state',
+  'settings.diagnostics.privacy': 'Privacy notice: This diagnostic summary includes only environment state, host version, and path-redacted error details. It never includes novel manuscripts, outlines, character/world assets, local workspace paths, or API keys.',
+  'settings.diagnostics.copy': 'Copy sanitized diagnostics',
+  'settings.diagnostics.copied': 'Sanitized diagnostics copied',
+  'settings.diagnostics.reportIssue': 'Report issue on GitHub (pre-filled)',
+  'settings.support.title': 'Open-source support & feedback',
+  'settings.support.body': 'OpenWrite is a free, open-source long-form fiction workbench. If it helps with your serial or story planning, please consider starring the repository on GitHub — and feel free to open a privacy-safe issue anytime.',
+  'settings.support.star': '★ Star OpenWrite on GitHub',
+  'settings.support.feedback': 'Report issue / feedback',
   'settings.tab.environment': 'Environment',
   'settings.tab.models': 'Model',
   'settings.tab.search': 'Search',

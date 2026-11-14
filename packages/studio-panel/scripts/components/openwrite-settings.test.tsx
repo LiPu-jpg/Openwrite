@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { OpenWriteSettings } from '../../src/client/OpenWriteSettings.tsx'
+import { OpenWriteSettings, sanitizeDiagnosticText } from '../../src/client/OpenWriteSettings.tsx'
 import { zh } from '../../src/client/locales.ts'
 
 /**
@@ -211,5 +211,49 @@ describe('OpenWriteSettings', () => {
     expect(source).toContain("name: 'settings.section'")
     expect(source).toContain("id: 'openwrite'")
     expect(source).toContain('OpenWriteSettings')
+  })
+
+  it('renders the open-source support card and privacy-safe diagnostics with path/token redaction', async () => {
+    const writeText = vi.fn(async () => undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+
+    stubRoutes({
+      ...routes,
+      '/studio-panel/runtime': {
+        phase: 'error',
+        message: 'Failed in /Users/authorname/Novels/SecretBook',
+        error: 'EACCES at C:\\Users\\authorname\\Novels\\SecretBook with key sk-1234567890abcdef and Bearer secret_token_xyz',
+      },
+    })
+    render(<OpenWriteSettings t={t} />)
+
+    const summary = await screen.findByTestId('openwrite-diagnostic-summary')
+    await waitFor(() => expect(summary.textContent).toContain('host_dsh: 0.2.1-rc.5'))
+    expect(summary.textContent).toContain('runtime_phase: error')
+    expect(summary.textContent).toContain('backend_mode: managed')
+    expect(summary.textContent).not.toContain('authorname')
+    expect(summary.textContent).not.toContain('sk-1234567890abcdef')
+    expect(summary.textContent).not.toContain('secret_token_xyz')
+    expect(summary.textContent).toContain('<HOME>/Novels/SecretBook')
+    expect(summary.textContent).toContain('<REDACTED_KEY>')
+    expect(summary.textContent).toContain('Bearer <REDACTED>')
+
+    const starLink = screen.getByRole('link', { name: '★ 去 GitHub 点 Star 支持 OpenWrite' })
+    expect(starLink.getAttribute('href')).toBe('https://github.com/LiPu-jpg/Openwrite')
+
+    const issueLink = screen.getByRole('link', { name: '去 GitHub 反馈问题（自动带入环境信息）' })
+    const href = issueLink.getAttribute('href') ?? ''
+    expect(href).toContain('https://github.com/LiPu-jpg/Openwrite/issues/new?body=')
+    expect(decodeURIComponent(href)).not.toContain('authorname')
+
+    fireEvent.click(screen.getByRole('button', { name: '复制脱敏诊断信息' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '已复制脱敏诊断信息' })).toBeTruthy())
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(String(writeText.mock.calls[0]?.[0])).not.toContain('authorname')
+  })
+
+  it('sanitizes unix, windows, and credential tokens in diagnostic strings', () => {
+    expect(sanitizeDiagnosticText('at /Users/alice/.dsh and /home/bob/.dsh and D:\\Users\\carol\\work sk-abcdefgh12345678'))
+      .toBe('at <HOME>/.dsh and <HOME>/.dsh and <HOME>\\work <REDACTED_KEY>')
   })
 })

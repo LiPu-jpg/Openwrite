@@ -1,12 +1,14 @@
 # Changelog
 
-## 0.2.39：宿主兼容扩到 dsh 0.2.2-rc.2 与 0.2.2-rc.3
+## 0.2.39：宿主兼容扩到 dsh 0.2.2-rc.2 与 0.2.2-rc.3，并新增隐私安全的诊断反馈与引导
 
-修 [#170](https://github.com/LiPu-jpg/Openwrite/issues/170)（`dsh-openwrite@0.2.38` 在 `dsh 0.2.2-rc.3` 上被安装前闸门直接拒绝）。
+修 [#170](https://github.com/LiPu-jpg/Openwrite/issues/170)（`dsh-openwrite@0.2.38` 在 `dsh 0.2.2-rc.3` 上被安装前闸门直接拒绝），并改进「设置 → OpenWrite」诊断反馈与 Agent 初始引导：
 
 - 根包与两个内嵌子包（`@dsh-novel/openwrite-bridge`、`@dsh-novel/studio-panel`）以及三个 lock 文件的 `@deepseek-ai/dsh-*` peer 范围、`dsh.compatibility.dsh`、`dshReleases` 同步加入精确宿主 `0.2.2-rc.2` 与 `0.2.2-rc.3`。
 - 两个新宿主仍使用 `@deepseek-ai/cordis ~4.1.0`，既有 peer 匹配集合只增不改（`0.1.2-rc.1`、`0.1.5-alpha.1`、`0.1.7-rc.2`、`0.2.0-rc.2`、`0.2.1-rc.2`–`0.2.1-rc.5`、`0.2.2-rc.1` 不受影响）。
 - 发布矩阵与最终验收门禁新增 `0.2.2-rc.2` 与 `0.2.2-rc.3` 的客户端验收任务，各自带 `--before` 截止时间。
+- **「设置 → OpenWrite → 环境」新增隐私安全的诊断复制与开源支持卡片**：提供一键「复制脱敏诊断信息」与「去 GitHub 反馈问题（自动带入环境信息）」，以及 GitHub Star 支持入口；诊断信息自动脱敏本地用户目录（`<HOME>`）与令牌，绝不包含任何小说正文、大纲、角色设定、本地作品路径或 API 密钥。
+- **Agent 初始引导与隐私安全排障引导**：`openwrite` 预设与 `/progress` 技能新增空项目/首次上手 3 步引导（配模型 → 聊设定与大纲预览 diff → 斜杠命令推进连载）及隐私安全的故障反馈指引。
 
 ## 0.2.38：预设挂载失败不再被一句「Unknown agent preset」盖住
 

@@ -181,6 +181,75 @@ const READ_RETRIES = 4
 /** The pause between two status reads. */
 const READ_RETRY_MS = 2_000
 
+/** The upstream open-source repository for stars and issue reports. */
+export const GITHUB_REPO_URL = 'https://github.com/LiPu-jpg/Openwrite'
+
+/**
+ * Strip user-identifying home paths and accidental credentials from a
+ * diagnostic string before showing it in the copyable bug-report block or
+ * pre-filling a GitHub issue URL.
+ */
+export function sanitizeDiagnosticText(input: string): string {
+  return input
+    .replace(/\/Users\/[^/\s"':;]+/g, '<HOME>')
+    .replace(/\/home\/[^/\s"':;]+/g, '<HOME>')
+    .replace(/[A-Za-z]:\\Users\\[^\\\s"':;]+/g, '<HOME>')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer <REDACTED>')
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '<REDACTED_KEY>')
+}
+
+/**
+ * Build a privacy-safe diagnostic summary containing only environment, host,
+ * and companion metadata — never novel manuscripts, outlines, character/world
+ * assets, workspace paths, or API keys.
+ */
+export function formatDiagnosticReport(
+  runtime: RuntimeStatus | null,
+  backend: StudioBackend | null,
+  hostModel: HostModelSelection | null,
+  companions: CompanionStatus | null,
+): string {
+  const companionLine = (name: string, entry: CompanionStatus['dog'] | undefined): string => {
+    if (entry === undefined) return `${name}: unknown`
+    if (!entry.installed) return `${name}: not-installed`
+    const ver = entry.version !== null && entry.version !== '' ? `@${entry.version}` : ''
+    return `${name}${ver}: ${entry.usable ? 'usable' : `incompatible (${sanitizeDiagnosticText(entry.reason ?? 'unknown')})`}`
+  }
+  const lines = [
+    `host_dsh: ${companions?.host ?? 'unknown'}`,
+    `runtime_phase: ${runtime?.phase ?? 'unavailable'}`,
+    `backend_mode: ${backend === null ? 'unavailable' : backend.managed ? 'managed' : 'external'}`,
+    `backend_available: ${backend?.available === undefined ? 'unknown' : String(backend.available)}`,
+    `host_model: ${hostModel === null ? 'unavailable' : hostModel.available ? `${hostModel.provider}/${hostModel.model}` : 'none'}`,
+    `companions: ${[
+      companionLine('dsh-dog', companions?.dog),
+      companionLine('dsh-ops', companions?.ops),
+      companionLine('dsh-our-free-model', companions?.freeModel),
+    ].join(', ')}`,
+  ]
+  if (runtime?.message !== undefined && runtime.message !== '') {
+    lines.push(`runtime_message: ${sanitizeDiagnosticText(runtime.message)}`)
+  }
+  if (runtime?.error !== undefined && runtime.error !== '') {
+    lines.push(`runtime_error: ${sanitizeDiagnosticText(runtime.error)}`)
+  }
+  return lines.join('\n')
+}
+
+/** Pre-fill a GitHub issue URL with the sanitized diagnostic summary. */
+export function buildGitHubIssueUrl(diagnosticReport: string): string {
+  const body = [
+    '## 问题描述 / What happened',
+    '（请简述遇到的问题或复现步骤，无需粘贴任何小说正文、大纲或人物设定）',
+    '',
+    '## 脱敏环境诊断 / Sanitized Diagnostics',
+    '```text',
+    diagnosticReport,
+    '```',
+  ].join('\n')
+  return `${GITHUB_REPO_URL}/issues/new?body=${encodeURIComponent(body)}`
+}
+
 export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element {
   const [tab, setTab] = useState<OpenWriteSettingsTab>(readStoredTab)
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null)
@@ -190,6 +259,7 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
   const [companions, setCompanions] = useState<CompanionStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [copied, setCopied] = useState(false)
   const [attempt, setAttempt] = useState(0)
 
   /**
@@ -268,6 +338,17 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
   const ready = runtime?.phase === 'ready'
   const idle = runtime?.phase === 'idle'
   const preparing = runtime !== null && BUSY_PHASES.has(runtime.phase)
+  const diagnosticReport = formatDiagnosticReport(runtime, backend, hostModel, companions)
+  const issueUrl = buildGitHubIssueUrl(diagnosticReport)
+
+  const copyDiagnostics = async () => {
+    try {
+      await navigator.clipboard?.writeText(diagnosticReport)
+    } catch {
+      // Clipboard write is best-effort in restricted webviews; still confirm selection/intent.
+    }
+    setCopied(true)
+  }
 
   return <section className={css.page}>
     <header className={css.header}>
@@ -328,12 +409,47 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
           </>}
       </div>
 
-      <details className={css.block}>
+      <details className={css.block} open={runtime?.phase === 'error'}>
         <summary>{t('settings.section.diagnostics')}</summary>
         <p>{t('settings.section.phaseLabel')}：{runtime?.phase ?? t('settings.section.unavailable')}</p>
-        {runtime?.error !== undefined && runtime.error !== '' && <pre className={css.error}>{runtime.error}</pre>}
+        {runtime?.error !== undefined && runtime.error !== '' && <pre className={css.error}>{sanitizeDiagnosticText(runtime.error)}</pre>}
+        <p className={css.hint}>{t('settings.diagnostics.privacy')}</p>
+        <pre data-testid="openwrite-diagnostic-summary">{diagnosticReport}</pre>
+        <div className={css.actions}>
+          <button type="button" onClick={() => void copyDiagnostics()}>
+            {copied ? t('settings.diagnostics.copied') : t('settings.diagnostics.copy')}
+          </button>
+          <a
+            className={css.linkButton}
+            href={issueUrl}
+            target="_blank"
+            rel="noreferrer"
+          >{t('settings.diagnostics.reportIssue')}</a>
+        </div>
         <p className={css.hint}>{t('settings.section.diagnosticsHint')}</p>
       </details>
+
+      <div className={css.supportCard}>
+        <div className={css.supportHeader}>
+          <h3>{t('settings.support.title')}</h3>
+          <span className={css.pill}>GitHub</span>
+        </div>
+        <p className={css.hint}>{t('settings.support.body')}</p>
+        <div className={css.actions}>
+          <a
+            className={css.starButton}
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+          >{t('settings.support.star')}</a>
+          <a
+            className={css.linkButton}
+            href={issueUrl}
+            target="_blank"
+            rel="noreferrer"
+          >{t('settings.support.feedback')}</a>
+        </div>
+      </div>
     </div>
 
     <div

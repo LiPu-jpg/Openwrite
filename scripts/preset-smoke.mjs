@@ -188,6 +188,9 @@ assert.match(composition, /\/canon/)
 assert.match(composition, /\/learn/)
 assert.match(composition, /写法记忆/)
 assert.match(composition, /\/export-book/)
+assert.match(composition, /初始引导/)
+assert.match(composition, /复制脱敏诊断信息/)
+assert.match(skillSources['progress'], /复制脱敏诊断信息/)
 assert.match(skillSources['learn'], /WORKSPACE_CONTEXT_MISSING/)
 
 console.log(JSON.stringify({

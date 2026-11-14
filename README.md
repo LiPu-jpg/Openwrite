@@ -10,6 +10,7 @@
 <p align="center">在 DeepSeek Harness 中规划、写作、审稿和管理长篇小说。</p>
 
 <p align="center">
+  <a href="https://github.com/LiPu-jpg/Openwrite/stargazers"><img src="https://img.shields.io/github/stars/LiPu-jpg/Openwrite?style=flat&logo=github" alt="GitHub Stars"></a>
   <a href="https://www.npmjs.com/package/dsh-openwrite"><img src="https://img.shields.io/npm/v/dsh-openwrite" alt="npm dsh-openwrite"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/host%20dsh-0.2.2--rc.3-2563eb" alt="dsh 0.2.2-rc.3"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node-%E2%89%A522.19-15803d" alt="Node >= 22.19"></a>
@@ -78,10 +79,10 @@ dsh web
 
 ## 遇到问题
 
-- 界面「OpenWrite → 诊断与帮助」显示实时状态与可恢复错误。
+- 界面「设置 → OpenWrite → 环境 → 诊断与反馈」支持一键**复制脱敏诊断信息**或**去 GitHub 反馈问题（自动带入环境信息）**，绝不包含任何小说正文、大纲、角色设定、本地作品路径或 API 密钥。
 - 体检安装状态：解包后执行 `node package/scripts/maintenance.mjs doctor --profile web`，只读检查标准包登记、旧包残留与环境状态，不打印凭据、不调用模型。
 - 工作台起不来、预设挂载失败这类问题多与宿主版本和 profile 状态有关，见 [dsh 0.2 客户端兼容排查](docs/INSTALL.md#dsh-02-客户端兼容排查)。
-- 反馈时请附上宿主版本、系统与架构、Release 版本、安装阶段和脱敏后的错误信息；不要提交 API Key、浏览器登录 URL 或作品全文。
+- 反馈时请附上宿主版本、系统与架构、Release 版本、安装阶段和脱敏后的错误信息；不要提交 API Key、浏览器登录 URL 或作品全文。如果觉得 OpenWrite 对你的创作有帮助，也欢迎在 GitHub 点一颗 Star 支持我们。
 
 ## 开始使用
 
