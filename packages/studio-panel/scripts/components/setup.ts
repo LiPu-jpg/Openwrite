@@ -38,6 +38,7 @@ if (typeof window.requestAnimationFrame !== 'function') {
 
 afterEach(() => {
   cleanup()
+  document.querySelector('[data-openwrite-release-modal]')?.remove()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   window.localStorage.clear()

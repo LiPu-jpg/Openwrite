@@ -1249,6 +1249,19 @@ export type StudioPanelKey =
   | 'settings.support.body'
   | 'settings.support.star'
   | 'settings.support.feedback'
+  | 'settings.support.releaseNotes'
+  | 'settings.releaseModal.badge'
+  | 'settings.releaseModal.title'
+  | 'settings.releaseModal.intro'
+  | 'settings.releaseModal.projectDesc'
+  | 'settings.releaseModal.whatsNewTitle'
+  | 'settings.releaseModal.item1'
+  | 'settings.releaseModal.item2'
+  | 'settings.releaseModal.item3'
+  | 'settings.releaseModal.heartfelt'
+  | 'settings.releaseModal.starCta'
+  | 'settings.releaseModal.feedbackCta'
+  | 'settings.releaseModal.dismiss'
   | 'settings.tab.environment'
   | 'settings.tab.models'
   | 'settings.tab.search'
@@ -2515,6 +2528,19 @@ export const zh: Record<StudioPanelKey, string> = {
   'settings.support.body': 'OpenWrite 是免费开源的长篇小说创作工作台。如果它帮到了你的连载或构思，欢迎去 GitHub 点一颗 Star 支持我们持续迭代；遇到问题也可以随时提交脱敏反馈。',
   'settings.support.star': '★ 去 GitHub 点 Star 支持 OpenWrite',
   'settings.support.feedback': '提交问题 / 建议',
+  'settings.support.releaseNotes': '查看本版更新说明',
+  'settings.releaseModal.badge': '版本更新说明 · 每次更新仅弹出一次',
+  'settings.releaseModal.title': '说点心里话：如果你觉得 OpenWrite 好用，想请你顺手点个 Star',
+  'settings.releaseModal.intro': '这个弹窗只在每次版本更新后出现一次。OpenWrite 是完全免费、开源、无广告的长篇小说工作台——你的大纲、人设、世界观与每一章正文都留在你自己的本地硬盘，不把心血手稿交给任何人。',
+  'settings.releaseModal.projectDesc': '基于 DeepSeek Harness 的开源长篇小说工作台：百万字级长篇设定与多视角大纲管理、原生三栏沉浸写作、连续性自动审校与全流程本地存储。',
+  'settings.releaseModal.whatsNewTitle': '本次版本更新亮点',
+  'settings.releaseModal.item1': '宿主兼容扩展：全面适配 dsh 0.2.2-rc.2 / 0.2.2-rc.3 及既有 0.1.x / 0.2.x 宿主版本。',
+  'settings.releaseModal.item2': '零剧透脱敏反馈：在「设置 → OpenWrite → 环境」新增一键复制脱敏诊断与直达 GitHub Issue，自动剥离书名、正文、设定、路径与密钥。',
+  'settings.releaseModal.item3': '首次创作三步引导：Agent 新增开书三步引导（定题材立项 → 铺首卷架构 → 写首章并自动审校），上手更顺畅。',
+  'settings.releaseModal.heartfelt': '目前实际使用 OpenWrite 创作的朋友远比 GitHub 上的 Star 多。一颗 Star 是开源项目唯一的「工资条」，也是支撑我持续维护和迭代的最大动力。',
+  'settings.releaseModal.starCta': '★ 去 GitHub 给 OpenWrite 点 Star',
+  'settings.releaseModal.feedbackCta': '遇到问题？提交脱敏反馈',
+  'settings.releaseModal.dismiss': '我知道了，开始创作',
   'settings.tab.environment': '环境',
   'settings.tab.models': '模型',
   'settings.tab.search': '搜索',
@@ -3775,6 +3801,19 @@ export const en: Record<StudioPanelKey, string> = {
   'settings.support.body': 'OpenWrite is a free, open-source long-form fiction workbench. If it helps with your serial or story planning, please consider starring the repository on GitHub — and feel free to open a privacy-safe issue anytime.',
   'settings.support.star': '★ Star OpenWrite on GitHub',
   'settings.support.feedback': 'Report issue / feedback',
+  'settings.support.releaseNotes': 'View release notes',
+  'settings.releaseModal.badge': 'Release notes · Shown once per update',
+  'settings.releaseModal.title': 'A quick note from OpenWrite: if it helps your writing, please give it a Star',
+  'settings.releaseModal.intro': 'This popup appears only once after each version update. OpenWrite is a free, open-source, ad-free long-form novel workbench — your outlines, characters, worldbuilding, and chapters stay on your own local disk.',
+  'settings.releaseModal.projectDesc': 'An open-source long-form fiction workbench built on DeepSeek Harness: million-word worldbuilding & multi-view outlines, native 3-pane writing, automated continuity review, and 100% local storage.',
+  'settings.releaseModal.whatsNewTitle': 'What’s new in this update',
+  'settings.releaseModal.item1': 'Host compatibility: full support for dsh 0.2.2-rc.2 / 0.2.2-rc.3 alongside existing 0.1.x / 0.2.x hosts.',
+  'settings.releaseModal.item2': 'Privacy-safe diagnostics: one-click sanitized diagnostic copy and pre-filled GitHub Issue link in “Settings → OpenWrite → Environment” (zero manuscript, path, or key leakage).',
+  'settings.releaseModal.item3': '3-step Agent onboarding: guided new-book kickoff (Genre & Setup → First-Arc Outline → Chapter 1 Draft & Review).',
+  'settings.releaseModal.heartfelt': 'Far more writers use OpenWrite every day than have starred the repository. A GitHub Star is the only payslip an open-source project gets — and the biggest motivation to keep improving it.',
+  'settings.releaseModal.starCta': '★ Star OpenWrite on GitHub',
+  'settings.releaseModal.feedbackCta': 'Report a privacy-safe issue',
+  'settings.releaseModal.dismiss': 'Got it, start writing',
   'settings.tab.environment': 'Environment',
   'settings.tab.models': 'Model',
   'settings.tab.search': 'Search',

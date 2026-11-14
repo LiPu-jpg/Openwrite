@@ -22,6 +22,7 @@ import { SearchSettings } from './SearchSettings.tsx'
 import { fetchGlobalStudioApi } from './api.ts'
 import { parseHostModelCatalog, type HostModelCatalogDto } from './dto.ts'
 import type { StudioPanelKey } from './locales.ts'
+import { showReleaseAnnouncementModal } from './ReleaseAnnouncement.ts'
 import css from './OpenWriteSettings.module.css'
 
 /** The host's default-model selection, as the host's own route reports it. */
@@ -443,6 +444,11 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
             target="_blank"
             rel="noreferrer"
           >{t('settings.support.feedback')}</a>
+          <button
+            type="button"
+            className={css.linkButton}
+            onClick={() => showReleaseAnnouncementModal({ t, issueUrl })}
+          >{t('settings.support.releaseNotes')}</button>
         </div>
       </div>
     </div>

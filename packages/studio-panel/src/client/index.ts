@@ -23,6 +23,7 @@ import { NovelReviewCard } from './ReviewCard.tsx'
 import { novelMutationDefinition, TurnMutationSummaryView, TurnMutationSummaryListView } from './TurnMutationSummary.tsx'
 import { sessionOpener, type StudioPanelInjected } from './workspace-context.ts'
 import { installWorkspaceChromeStyles } from './workspace-chrome.ts'
+import { maybeShowReleaseAnnouncement } from './ReleaseAnnouncement.ts'
 
 export const inject = ['slots', 'locale', 'uiConversation', 'workspaces', 'sessions', 'uiWorkspace', 'remote', 'remote.agentPresets']
 
@@ -80,6 +81,10 @@ function* install(ctx: Context): Generator<() => void> {
   // installed once per document and scoped to our own marker attribute.
   installWorkspaceChromeStyles()
   const t = ctx.locale.bind(NS)
+  yield ctx.effect(() => {
+    const modal = maybeShowReleaseAnnouncement({ t })
+    return () => modal?.remove()
+  }, 'studio-panel: release announcement')
   // These registries are optional chrome capabilities. Keep the workbench
   // available when a host no longer exposes the turn-summary extension point.
   if (typeof ctx.uiConversation.events?.register === 'function') {

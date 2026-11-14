@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { OpenWriteSettings, sanitizeDiagnosticText } from '../../src/client/OpenWriteSettings.tsx'
+import {
+  hasSeenReleaseAnnouncement,
+  maybeShowReleaseAnnouncement,
+  RELEASE_MODAL_MARKER,
+  SEEN_RELEASE_VERSION_KEY,
+} from '../../src/client/ReleaseAnnouncement.ts'
 import { zh } from '../../src/client/locales.ts'
 
 /**
@@ -255,5 +261,55 @@ describe('OpenWriteSettings', () => {
   it('sanitizes unix, windows, and credential tokens in diagnostic strings', () => {
     expect(sanitizeDiagnosticText('at /Users/alice/.dsh and /home/bob/.dsh and D:\\Users\\carol\\work sk-abcdefgh12345678'))
       .toBe('at <HOME>/.dsh and <HOME>/.dsh and <HOME>\\work <REDACTED_KEY>')
+  })
+
+  it('shows the OpenWrite release announcement modal only once per version update and allows manual reopen from settings', async () => {
+    expect(hasSeenReleaseAnnouncement('0.2.39')).toBe(false)
+
+    // First boot on v0.2.39: modal opens automatically
+    const firstModal = maybeShowReleaseAnnouncement({ t, version: '0.2.39', allowWebdriver: true })
+    expect(firstModal).not.toBeNull()
+    expect(document.querySelector(`[${RELEASE_MODAL_MARKER}="0.2.39"]`)).not.toBeNull()
+    expect(firstModal?.textContent).toContain('说点心里话：如果你觉得 OpenWrite 好用，想请你顺手点个 Star')
+    expect(firstModal?.textContent).toContain('LiPu-jpg/Openwrite')
+    expect(firstModal?.textContent).not.toContain('EAC-Desktop')
+    expect(firstModal?.textContent).not.toContain('EAC-Pack')
+    expect(firstModal?.textContent).not.toContain('EAC-design-world')
+
+    const starAnchor = firstModal?.querySelector('a[href="https://github.com/LiPu-jpg/Openwrite"]')
+    expect(starAnchor).not.toBeNull()
+
+    // Dismissing records the version in localStorage and removes the modal
+    const dismissButton = Array.from(firstModal?.querySelectorAll('button') ?? []).find(
+      button => button.textContent === '我知道了，开始创作',
+    )
+    expect(dismissButton).toBeDefined()
+    dismissButton?.click()
+
+    expect(window.localStorage.getItem(SEEN_RELEASE_VERSION_KEY)).toBe('0.2.39')
+    expect(hasSeenReleaseAnnouncement('0.2.39')).toBe(true)
+    expect(document.querySelector(`[${RELEASE_MODAL_MARKER}]`)).toBeNull()
+
+    // Subsequent boots on the same version v0.2.39 do NOT pop up again
+    expect(maybeShowReleaseAnnouncement({ t, version: '0.2.39', allowWebdriver: true })).toBeNull()
+    expect(document.querySelector(`[${RELEASE_MODAL_MARKER}]`)).toBeNull()
+
+    // Upgrading to a new version (e.g. v0.2.40) pops up once for the new version
+    const nextVersionModal = maybeShowReleaseAnnouncement({ t, version: '0.2.40', allowWebdriver: true })
+    expect(nextVersionModal).not.toBeNull()
+    expect(document.querySelector(`[${RELEASE_MODAL_MARKER}="0.2.40"]`)).not.toBeNull()
+    nextVersionModal?.querySelector('button')?.click()
+    expect(window.localStorage.getItem(SEEN_RELEASE_VERSION_KEY)).toBe('0.2.40')
+
+    // Manual reopen button inside Settings -> OpenWrite works anytime
+    stubRoutes({
+      '/studio-panel/runtime': { phase: 'ready', message: '写作环境已就绪' },
+      '/studio-panel/config.json': { studioUrl: 'http://127.0.0.1:18765', managed: true, available: true },
+      '/studio-panel/host-model': { available: false, provider: '', model: '', reasoningEffort: '' },
+      '/studio-panel/companions': { host: '0.2.2-rc.3', dog: { installed: false, usable: false }, ops: { installed: false, usable: false }, freeModel: { installed: false, usable: false } },
+    })
+    render(<OpenWriteSettings t={t} />)
+    fireEvent.click(await screen.findByRole('button', { name: '查看本版更新说明' }))
+    expect(document.querySelector(`[${RELEASE_MODAL_MARKER}]`)).not.toBeNull()
   })
 })

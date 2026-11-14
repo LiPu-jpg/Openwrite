@@ -80,6 +80,7 @@ const client: UserConfig = {
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
     '__OPENWRITE_PRESET_ID__': JSON.stringify(releasePresetId),
+    '__OPENWRITE_VERSION__': JSON.stringify(releasePackage.version),
   },
   dts: false,
   sourcemap: true,
