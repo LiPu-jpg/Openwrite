@@ -9,6 +9,7 @@
 - 发布矩阵与最终验收门禁新增 `0.2.2-rc.2` 与 `0.2.2-rc.3` 的客户端验收任务，各自带 `--before` 截止时间。
 - **「设置 → OpenWrite → 环境」新增隐私安全的诊断复制与开源支持卡片**：提供一键「复制脱敏诊断信息」与「去 GitHub 反馈问题（自动带入环境信息）」，以及 GitHub Star 支持入口；诊断信息自动脱敏本地用户目录（`<HOME>`）与令牌，绝不包含任何小说正文、大纲、角色设定、本地作品路径或 API 密钥。
 - **Agent 初始引导与隐私安全排障引导**：`openwrite` 预设与 `/progress` 技能新增空项目/首次上手 3 步引导（配模型 → 聊设定与大纲预览 diff → 斜杠命令推进连载）及隐私安全的故障反馈指引。
+- **修复「设置 → OpenWrite → 搜索」全局默认无法持久化与显示截断（Core 5.8.32 + Studio Panel）**：Core `StudioResearchSettingsStore` 在 DSH 托管模式下现在会读取带 `explicit: true` 的全局 `research-settings.json`，不再把用户保存的 Bing/博查/Jina/不联网覆盖回 `dsh`；同时放大搜索源卡片布局避免 `DSH web_search / web_fetch` 文本截断，右上角标签明确显示 `当前默认：<Provider>`，并在服务端回读未保留选择时提示报错而非误报已保存。
 
 ## 0.2.38：预设挂载失败不再被一句「Unknown agent preset」盖住
 

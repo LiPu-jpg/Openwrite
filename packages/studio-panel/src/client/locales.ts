@@ -682,6 +682,9 @@ export type StudioPanelKey =
   | 'research.settings.apiKeyRequired'
   | 'research.settings.globalHint'
   | 'research.settings.dshUnavailable'
+  | 'research.settings.apiKeySavedPlaceholder'
+  | 'research.settings.didNotPersist'
+  | 'research.settings.currentDefault'
   | 'tasks.result.toggle'
   | 'tasks.result.score'
   | 'tasks.result.issues'
@@ -1966,6 +1969,9 @@ export const zh: Record<StudioPanelKey, string> = {
   'research.settings.apiKeyRequired': '需要 API Key',
   'research.settings.globalHint': '这里的默认值用于新作品；单个作品可在「研究」页覆盖。',
   'research.settings.dshUnavailable': 'DSH 搜索只在托管运行时可用；当前请选择其他提供方。',
+  'research.settings.apiKeySavedPlaceholder': '已保存 API Key，留空则保持不变',
+  'research.settings.didNotPersist': '后端返回的提供方未变更，请更新并重启 OpenWrite 写作环境后重试。',
+  'research.settings.currentDefault': '当前默认',
   'tasks.result.toggle': '展开或收起评审问题',
   'tasks.result.score': '评分',
   'tasks.result.issues': '问题',
@@ -3241,6 +3247,9 @@ export const en: Record<StudioPanelKey, string> = {
   'research.settings.apiKeyRequired': 'API key required',
   'research.settings.globalHint': 'These defaults apply to new works; a single work can override them in Research.',
   'research.settings.dshUnavailable': 'DSH search is only available in the managed runtime; choose another provider for now.',
+  'research.settings.apiKeySavedPlaceholder': 'API key saved; leave blank to keep',
+  'research.settings.didNotPersist': 'Backend returned a different provider; restart or update the writing runtime.',
+  'research.settings.currentDefault': 'Default',
   'tasks.result.toggle': 'Expand or collapse review issues',
   'tasks.result.score': 'Score',
   'tasks.result.issues': 'Issues',

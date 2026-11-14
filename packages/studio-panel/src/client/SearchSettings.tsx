@@ -15,6 +15,7 @@ interface SearchProvider {
   label: string
   requiresApiKey: boolean
   configured: boolean
+  credentialConfigured: boolean
 }
 
 interface ViewState {
@@ -36,6 +37,7 @@ function parsePreferences(value: unknown): ViewState {
       label: typeof row['label'] === 'string' && row['label'] !== '' ? row['label'] : id,
       requiresApiKey: row['requires_api_key'] === true,
       configured: row['configured'] === true,
+      credentialConfigured: row['credential_configured'] === true,
     }
   }).filter(item => item.id !== '')
   const current = typeof settings['search_provider'] === 'string' ? settings['search_provider'] : ''
@@ -80,7 +82,11 @@ export function SearchSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element 
       setState(next)
       setProvider(next.provider)
       setApiKey('')
-      setNotice({ text: t('research.settings.saved'), bad: false })
+      if (next.provider !== provider) {
+        setNotice({ text: `${t('research.settings.failed')}: ${t('research.settings.didNotPersist')}`, bad: true })
+      } else {
+        setNotice({ text: t('research.settings.saved'), bad: false })
+      }
     } catch (cause) {
       setNotice({ text: `${t('research.settings.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, bad: true })
     } finally { setBusy(false) }
@@ -88,6 +94,7 @@ export function SearchSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element 
 
   if (state === null) return <p>{t('loading')}</p>
   const selected = state.providers.find(item => item.id === provider)
+  const savedProvider = state.providers.find(item => item.id === state.provider)
   const dshUnavailable = provider === 'dsh' && !state.hostWeb
   const mark = (id: string): string => id === 'dsh' ? 'DSH' : id === 'bocha' ? '博' : id === 'bing' ? 'B' : id === 'jina' ? 'J' : id === 'none' ? '—' : id.slice(0, 2).toUpperCase()
   return <div className={css.searchSurface}>
@@ -97,7 +104,11 @@ export function SearchSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element 
         <h4 className={css.searchTitle}>{t('research.settings')}</h4>
         <p>{t('research.settings.globalHint')}</p>
       </div>
-      <span className={css.pill}>{state.hostWeb ? 'DSH' : t('research.settings.unavailable')}</span>
+      <span className={css.pill}>
+        {savedProvider !== undefined
+          ? `${t('research.settings.currentDefault')}：${savedProvider.id === 'dsh' ? 'DSH' : savedProvider.label}`
+          : state.hostWeb ? 'DSH' : t('research.settings.unavailable')}
+      </span>
     </div>
 
     <div className={css.providerGrid} role="radiogroup" aria-label={t('research.settings.provider')}>
@@ -113,7 +124,7 @@ export function SearchSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element 
           name="research-search-provider"
           value={item.id}
           checked={item.id === provider}
-          onChange={() => setProvider(item.id)}
+          onChange={() => { setProvider(item.id); setNotice(null) }}
         />
         <span className={css.providerMark} aria-hidden="true">{mark(item.id)}</span>
         <span className={css.providerBody}>
@@ -128,7 +139,14 @@ export function SearchSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element 
 
     {selected?.requiresApiKey === true && <label className={css.field}>
       <span className={css.fieldLabel}>{t('research.settings.apiKey')}</span>
-      <input className={css.textInput} type="password" value={apiKey} autoComplete="off" onChange={event => setApiKey(event.target.value)} />
+      <input
+        className={css.textInput}
+        type="password"
+        value={apiKey}
+        autoComplete="off"
+        placeholder={selected.credentialConfigured ? t('research.settings.apiKeySavedPlaceholder') : undefined}
+        onChange={event => setApiKey(event.target.value)}
+      />
     </label>}
     {provider === 'dsh' && <div className={css.callout}><span aria-hidden="true">✦</span><span>{t('research.settings.dshHint')}</span></div>}
     {dshUnavailable && <div className={css.callout}><span aria-hidden="true">!</span><span>{t('research.settings.dshUnavailable')}</span></div>}

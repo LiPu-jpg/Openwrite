@@ -113,12 +113,26 @@ describe('OpenWriteSettings', () => {
   })
 
   it('configures the global search default in the search group', async () => {
+    const base = routes['/studio-panel/api/research/preferences']
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.includes('/studio-panel/api/model/profiles')) return new Response(JSON.stringify({ data: { profiles: [], routes: {} } }), { status: 200, headers: { 'content-type': 'application/json' } })
       if (url.includes('/studio-panel/api/model/host-models')) return new Response(JSON.stringify({ data: { available: false, models: [] } }), { status: 200, headers: { 'content-type': 'application/json' } })
       if (url.endsWith('/studio-panel/api/research/preferences')) {
-        return new Response(JSON.stringify(routes['/studio-panel/api/research/preferences']), { status: 200, headers: { 'content-type': 'application/json' } })
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as { search_provider?: string }
+          return new Response(
+            JSON.stringify({
+              ...base,
+              settings: {
+                ...base.settings,
+                search_provider: body.search_provider ?? base.settings.search_provider,
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          )
+        }
+        return new Response(JSON.stringify(base), { status: 200, headers: { 'content-type': 'application/json' } })
       }
       const key = Object.keys(routes).find(candidate => url.endsWith(candidate))
       if (key === undefined) throw new Error(`unexpected fetch ${url}`)
@@ -132,8 +146,75 @@ describe('OpenWriteSettings', () => {
     fireEvent.click(screen.getByRole('radio', { name: /博查/ }))
     fireEvent.click(screen.getByRole('button', { name: '保存搜索设置' }))
     await waitFor(() => expect(screen.getByText('搜索设置已保存')).toBeTruthy())
+    expect((screen.getByRole('radio', { name: /博查/ }) as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByText('当前默认：博查')).toBeTruthy()
     const call = fetchMock.mock.calls.find(([input, init]) => String(input).includes('/research/preferences') && (init as RequestInit | undefined)?.method === 'POST')
     expect(JSON.parse(String((call?.[1] as RequestInit).body))).toMatchObject({ search_provider: 'bocha' })
+  })
+
+  it('reports an error instead of saved notice when backend keeps a different provider', async () => {
+    const base = routes['/studio-panel/api/research/preferences']
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/studio-panel/api/model/profiles')) return new Response(JSON.stringify({ data: { profiles: [], routes: {} } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/studio-panel/api/model/host-models')) return new Response(JSON.stringify({ data: { available: false, models: [] } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.endsWith('/studio-panel/api/research/preferences')) {
+        return new Response(
+          JSON.stringify({
+            ...base,
+            settings: {
+              ...base.settings,
+              search_provider: init?.method === 'POST' ? 'dsh' : base.settings.search_provider,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      const key = Object.keys(routes).find(candidate => url.endsWith(candidate))
+      if (key === undefined) throw new Error(`unexpected fetch ${url}`)
+      return new Response(JSON.stringify(routes[key]), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<OpenWriteSettings t={t} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '搜索' }))
+    expect(await screen.findByText(/这里的默认值用于新作品/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('radio', { name: /博查/ }))
+    fireEvent.click(screen.getByRole('button', { name: '保存搜索设置' }))
+    await waitFor(() => expect(screen.getByText(/未能保留选择|保存失败|当前默认/)).toBeTruthy())
+    expect(screen.queryByText('搜索设置已保存')).toBeNull()
+  })
+
+  it('shows saved API key placeholder when credential_configured is true', async () => {
+    const base = routes['/studio-panel/api/research/preferences']
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/studio-panel/api/model/profiles')) return new Response(JSON.stringify({ data: { profiles: [], routes: {} } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/studio-panel/api/model/host-models')) return new Response(JSON.stringify({ data: { available: false, models: [] } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.endsWith('/studio-panel/api/research/preferences')) {
+        return new Response(
+          JSON.stringify({
+            ...base,
+            settings: {
+              ...base.settings,
+              search_provider: 'bocha',
+              search_providers: base.settings.search_providers.map(provider =>
+                provider.id === 'bocha' ? { ...provider, configured: true, credential_configured: true } : provider
+              ),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      const key = Object.keys(routes).find(candidate => url.endsWith(candidate))
+      if (key === undefined) throw new Error(`unexpected fetch ${url}`)
+      return new Response(JSON.stringify(routes[key]), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<OpenWriteSettings t={t} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '搜索' }))
+    expect(await screen.findByPlaceholderText('已保存 API Key，留空则保持不变')).toBeTruthy()
   })
 
   it('hosts the model profile library in the model group', async () => {
