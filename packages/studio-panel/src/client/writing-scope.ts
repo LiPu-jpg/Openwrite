@@ -15,9 +15,13 @@ type LegacyList = { current?: SessionId }
  * own main-view retention, the same criterion `dsh-client-ui-agent-preset`
  * uses. Hosts that still publish `current` keep their previous behaviour.
  */
-export function isWritingSession(state: SessionListState): boolean {
+export function displayedSessionId(state: SessionListState): SessionId | undefined {
   const retained = state.ids.find(id => (((state.byId[id] as RetainedRow | undefined)?.retainedBy?.mainView) ?? 0) > 0)
-  const displayed = retained ?? (state as SessionListState & LegacyList).current
+  return retained ?? (state as SessionListState & LegacyList).current
+}
+
+export function isWritingSession(state: SessionListState): boolean {
+  const displayed = displayedSessionId(state)
   const preset = displayed === undefined ? null : state.byId[displayed]?.projectionValues?.agentPreset
   return typeof preset === 'string' && (preset === 'openwrite' || preset.startsWith('openwrite-'))
 }

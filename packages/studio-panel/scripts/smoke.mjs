@@ -114,13 +114,18 @@ function effect(run) {
     return dispose
   } catch (error) { dispose(); throw error }
 }
+const sessionListeners = new Set()
+let sessionSnapshot = { ids: ['writing'], byId: { writing: { retainedBy: { mainView: 1 }, blank: false, projectionValues: { agentPreset: 'openwrite-0.2.0' } } }, phase: 'ready', projectionsBySession: {} }
 const fakeClientCtx = {
   effect,
   uiConversation: { views: { register: () => () => {} }, events: { register(value) { definition = value; return () => {} } } },
   uiWorkspace: {},
   remote: { agentPresets: {} },
   workspaces: { marker: 'workspaces' },
-  sessions: { marker: 'sessions', list: { subscribe: () => () => {}, getSnapshot: () => ({ ids: ['writing'], byId: { writing: { retainedBy: { mainView: 1 }, blank: false, projectionValues: { agentPreset: 'openwrite-0.2.0' } } }, phase: 'ready', projectionsBySession: {} }) } },
+  sessions: { marker: 'sessions', list: {
+    subscribe: listener => { sessionListeners.add(listener); return () => sessionListeners.delete(listener) },
+    getSnapshot: () => sessionSnapshot,
+  } },
   locale: {
     register(ns, dicts) { dictionaries.push({ ns, dicts }); return () => {} },
     bind: () => key => key,
@@ -137,6 +142,7 @@ const fakeClientCtx = {
   },
 }
 exports_.apply(fakeClientCtx)
+const primaryListeners = [...sessionListeners]
 assert.equal(dictionaries.length, 1)
 assert.equal(dictionaries[0].dicts.zh['view.creation'], '创作')
 assert.equal(dictionaries[0].dicts.zh['view.library'], '资料')
@@ -214,21 +220,18 @@ try {
   assert.equal(activeTools.size, 0)
 } finally { console.error = previousError }
 
-// Exercise the built launcher against the preset actually installed by the root
-// package. A hardcoded older ID must fail here before a version can be released.
+// Exercise the workspace connection helper against the preset actually installed
+// by the root package, and verify the bottom-left sidebar launcher is gone.
 const presetHome = await mkdtemp(join(tmpdir(), 'openwrite-launch-smoke-'))
 const previousHome = process.env.DSH_HOME
 const presetDisposers = []
 process.env.DSH_HOME = presetHome
 try {
   await installReleasePreset({ inject() {}, effect: factory => presetDisposers.push(factory()) })
+  assert.equal(registrations.some(entry => entry.options.id === 'openwrite.launch' || entry.options.name === 'sidebar.footer.action'), false, 'bottom-left launcher must be removed')
   const calls = []
-  fakeClientCtx.workspaces.create = async input => {
-    calls.push(['workspace', input.path])
-    return { workspaceId: 'launch-workspace' }
-  }
-  fakeClientCtx.sessions.create = async input => {
-    assert.equal(input.workspaceId, 'launch-workspace')
+  fakeClientCtx.uiWorkspace.connectWorkspace = async workspaceId => {
+    calls.push(['connect', workspaceId])
     return 'launch-session'
   }
   // The panel prefers the stable id and falls back to the release identity;
@@ -245,22 +248,32 @@ try {
   }
   fakeClientCtx.uiWorkspace.openSession = target => {
     calls.push(['open', target])
-    fakeClientCtx.sessions.list.getSnapshot = () => ({ ids: [target], byId: {
+    sessionSnapshot = { ids: [target], byId: {
       [target]: { retainedBy: { mainView: 1 }, projectionValues: { agentPreset: 'openwrite' } },
-    } })
+    } }
   }
   fakeClientCtx.uiConversation.binding = id => ({ activate: target => calls.push(['activate', id, target]) })
-  const launcher = registrations.find(entry => entry.options.id === 'openwrite.launch')
-  assert.ok(launcher)
-  assert.equal(await launcher.options.inject().openWorkspace('  /isolated-writing-workspace  '), true)
-  assert.deepEqual(calls.map(call => call[0]), ['workspace', 'preset', 'open', 'activate'])
-  assert.deepEqual(calls[0], ['workspace', '/isolated-writing-workspace'])
+  const workspaceServices = views[0].options.inject().workspaces
+  assert.equal(await workspaceServices.connectWorkspace('launch-workspace'), 'launch-session')
+  workspaceServices.openSession('launch-session')
+  assert.deepEqual(calls.map(call => call[0]), ['connect', 'preset', 'open', 'activate'])
+  assert.deepEqual(calls[0], ['connect', 'launch-workspace'])
   assert.deepEqual(calls[3], ['activate', 'launch-session', 'openwrite.creation'])
 
-  // Issue #79: exercise the shipped client, including the empty launcher and
-  // the shared picker injected into every workbench/workspace-binding flow.
-  const openWorkspace = launcher.options.inject().openWorkspace
-  const picker = views[0].options.inject().workspaces.pickDirectory
+  // Native workspace + preset selection updates the blank session's preset without
+  // openSession(); activate the workbench once so tabs appear before a first turn.
+  const blankCalls = []
+  fakeClientCtx.uiConversation.binding = id => ({ activate: target => blankCalls.push([id, target]) })
+  sessionSnapshot = { ids: ['native-blank'], byId: {
+    'native-blank': { retainedBy: { mainView: 1 }, blank: true, projectionValues: { agentPreset: 'openwrite' } },
+  }, phase: 'ready', projectionsBySession: {} }
+  for (const listener of primaryListeners) listener()
+  for (const listener of primaryListeners) listener()
+  assert.deepEqual(blankCalls, [['native-blank', 'openwrite.creation']])
+
+  // Issue #79: exercise the shipped shared picker injected into every workbench
+  // and workspace-binding flow.
+  const picker = workspaceServices.pickDirectory
   for (const view of views) assert.equal(view.options.inject().workspaces.pickDirectory, picker)
   const newWork = registrations.find(entry => entry.options.name === 'conversation.input.left')
   assert.equal(newWork.options.inject().workspaces.pickDirectory, picker)
@@ -288,37 +301,23 @@ try {
     assert.equal(await picker(), '/native/workspace')
     assert.equal(desktopCalls, 0, 'working native picker is preferred')
     nativeResult = null
-    const beforeCancel = calls.length
-    assert.equal(await openWorkspace(), false)
+    assert.equal(await picker(), null)
     assert.equal(desktopCalls, 0, 'native cancellation must not open another dialog')
-    assert.equal(calls.length, beforeCancel, 'cancellation creates no workspace or session')
 
     nativeFailure = unavailable
-    const beforeFallback = calls.length
-    assert.equal(await openWorkspace('   '), true)
-    assert.deepEqual(calls[beforeFallback], ['workspace', windowsPath])
-    assert.equal(desktopCalls, 1, 'the blank launcher uses the desktop fallback once')
-    assert.equal(await picker(), windowsPath, 'workbench flows share the same fallback')
-    assert.equal(desktopCalls, 2)
+    assert.equal(await picker(), windowsPath, 'workbench flows fall back to desktop picker when native picker is unavailable')
+    assert.equal(desktopCalls, 1)
 
     desktopResult = null
-    const beforeDesktopCancel = calls.length
     assert.equal(await picker(), null)
-    assert.equal(await openWorkspace(), false)
-    assert.equal(calls.length, beforeDesktopCancel, 'desktop cancellation creates no workspace or session')
 
     delete globalThis.__DSH_DESKTOP_PICK_DIRECTORY__
     await assert.rejects(picker(), error => error === unavailable)
-    await assert.rejects(openWorkspace(), error => error === unavailable)
     globalThis.__DSH_DESKTOP_PICK_DIRECTORY__ = 'not a capability'
     await assert.rejects(picker(), error => error === unavailable)
     globalThis.__DSH_DESKTOP_PICK_DIRECTORY__ = desktopPick
     desktopFailure = new Error('desktop dialog failed')
     await assert.rejects(picker(), error => error === desktopFailure)
-
-    const beforeManual = [nativeCalls, desktopCalls]
-    assert.equal(await openWorkspace('  A:\\AI\\explicit-workspace  '), true)
-    assert.deepEqual([nativeCalls, desktopCalls], beforeManual, 'an explicit path skips both pickers')
   } finally {
     if (previousDesktopPicker) Object.defineProperty(globalThis, '__DSH_DESKTOP_PICK_DIRECTORY__', previousDesktopPicker)
     else delete globalThis.__DSH_DESKTOP_PICK_DIRECTORY__

@@ -70,7 +70,7 @@ try {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
     !/(?:API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)/i.test(key) && !key.startsWith('DSH_')
     && !['NODE_OPTIONS', 'NODE_PATH'].includes(key)))
-  Object.assign(env, { DSH_HOME: home, CI: '1' })
+  Object.assign(env, { DSH_HOME: home, CI: '1', SSH_CONNECTION: '1' })
   host = spawn(process.execPath, [cli, 'web', '--no-open', '--port', String(port)], {
     cwd: temporary, env, stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -109,8 +109,7 @@ try {
     await page.waitForTimeout(300)
     if (await getStarted.first().isVisible().catch(() => false)) await getStarted.first().locator('button').first().click()
   }
-  const launcher = page.getByRole('button', { name: /^(?:Open OpenWrite|OpenWrite|打开 OpenWrite)$/ }).first()
-  await launcher.waitFor()
+  assert.equal(await page.getByRole('button', { name: /^(?:Open OpenWrite|OpenWrite|打开 OpenWrite)$/ }).count(), 0, 'bottom-left launcher must be removed')
   const entries = await page.evaluate(() => window.__DSH_BOOT__.entries.map(entry => entry.id))
   for (const id of expected) assert.ok(entries.includes(id), `${id}: missing client boot entry`)
   const hostServices = await page.evaluate(async () => (await fetch('/openwrite-coexist-fixture')).json())
@@ -137,27 +136,22 @@ try {
     status: 428, contentType: 'application/json',
     body: JSON.stringify({ code: 'WORKSPACE_NOT_INITIALIZED', error: 'Project not initialized' }),
   }))
-  const launch = page.getByRole('dialog').filter({ has: page.getByLabel('作品目录', { exact: true }) })
-  const entry = page.getByRole('button', { name: /^(?:Open OpenWrite|OpenWrite|打开 OpenWrite)$/ }).first()
-  try { await entry.click({ timeout: 5000 }) }
-  catch (error) { console.error('UI before launcher:', await page.locator('body').innerText()); throw error }
-
   await mkdir(join(temporary, 'novel'))
-  // This host build re-renders the launcher, detaching the path input mid-fill;
-  // resolve the field again rather than failing the whole acceptance run.
   const novelPath = join(temporary, 'novel')
-  // The path field is an aria-labelled input; fall back to the dialog's only
-  // textbox when a host build drops the label.
-  const field = launch.getByLabel('作品目录', { exact: true })
-    .or(launch.getByRole('textbox').first())
-  await field.waitFor({ timeout: 10000 })
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try { await field.fill(novelPath); break }
-    catch (error) { if (attempt === 2) throw error; await delay(500) }
-  }
-  await launch.getByRole('button', { name: '进入作品', exact: true }).click()
-  try { await launch.waitFor({ state: 'hidden', timeout: 10000 }) }
-  catch (error) { console.error('Launcher failure:', await launch.innerText()); throw error }
+  await page.getByRole('button', { name: /^(Add workspace|添加工作区)$/ }).click()
+  const directoryDialog = page.getByRole('dialog').last()
+  await directoryDialog.waitFor({ state: 'visible', timeout: 10000 })
+  await directoryDialog.getByRole('button', { name: /^(Edit path|编辑路径)$/ }).click()
+  const pathField = directoryDialog.locator('input').first()
+  await pathField.fill(novelPath)
+  await pathField.press('Enter')
+  await directoryDialog.getByRole('button', { name: /^(Open|打开)$/ }).click()
+  await directoryDialog.waitFor({ state: 'hidden', timeout: 10000 })
+
+  const presetButton = page.locator('[data-slot="conversation.hero.agentPreset"] button').first()
+  await presetButton.waitFor({ state: 'visible', timeout: 10000 })
+  await presetButton.click()
+  await page.getByText('OpenWrite 创作', { exact: true }).first().click()
   for (const name of [/^(创作|Create|Creation)$/, /^(资料|Library)$/, /^(任务|Tasks)$/]) {
     try { await page.getByRole('tab', { name }).waitFor({ timeout: 5000 }) }
     catch (error) { console.error('Workbench UI:', await page.locator('body').innerText()); console.error('Errors:', errors); throw error }
@@ -223,7 +217,7 @@ try {
   const result = { status: 'passed', host: hostVersion,
     artifactSha256: artifact ? createHash('sha256').update(await readFile(resolve(artifact))).digest('hex') : null,
     clients: expected, checks: [
-      'version-gates-without-exemptions', 'client-activation', 'launcher', 'preset-selection', 'preset-selector-single-entry', 'workspace-navigation', 'workbench-tabs', 'workbench-render', 'other-plugin-preserved',
+      'version-gates-without-exemptions', 'client-activation', 'no-sidebar-launcher', 'native-workspace-entry', 'preset-selection', 'preset-selector-single-entry', 'workspace-navigation', 'workbench-tabs', 'workbench-render', 'other-plugin-preserved',
     ], backend: 'readiness-and-uninitialized-workspace-fixture', modelCalls: 0 }
   const report = process.argv.find(arg => arg.startsWith('--report='))?.slice(9)
   if (report) await writeFile(resolve(report), JSON.stringify(result, null, 2) + '\n')

@@ -4,9 +4,9 @@
 
 ## Windows Desktop 目录选择
 
-若留空作品目录并点击“选择目录并进入”时出现 `directoryPicker.pick needs the native capability; the composed picker serves "browse"`，这是桌面宿主组合的目录选择能力与其接口要求不一致。OpenWrite 0.2.21 在宿主接口失败后调用桌面公开的 `__DSH_DESKTOP_PICK_DIRECTORY__`，覆盖侧栏进入、作品绑定、新建与恢复目录选择。取消目录对话框不会创建作品或会话；手填绝对路径仍可直接进入。
+若在工作台或会话中选择文件夹出现 `directoryPicker.pick needs the native capability; the composed picker serves "browse"`，这是桌面宿主组合的目录选择能力与其接口要求不一致。OpenWrite 0.2.21 起在宿主接口失败后调用桌面公开的 `__DSH_DESKTOP_PICK_DIRECTORY__`，覆盖作品绑定、新建与恢复目录选择。取消目录对话框不会创建作品或会话；手填绝对路径仍可直接绑定。
 
-没有桌面选择通道的宿主会保留原始错误。此时可在同一个输入框填写作品的完整绝对路径，例如 `A:\AI\我的小说`，点击“进入作品”。升级插件后需要关闭并重新打开 DSH Desktop，使客户端重新加载。
+没有桌面选择通道的宿主会保留原始错误。此时可在工作台提示或新作品输入框中填写作品的完整绝对路径，例如 `A:\AI\我的小说` 完成绑定。升级插件后需要关闭并重新打开 DSH Desktop，使客户端重新加载。
 
 ## 标准安装
 
@@ -29,7 +29,7 @@ dsh plugin --profile web add -w https://github.com/LiPu-jpg/Openwrite/releases/d
 
 `-w` 是 pnpm profile workspace 的安装参数。只输入 `dsh` 会要求 `--profile`；启动浏览器使用 `dsh web`。浏览器地址由宿主输出，不固定为 3080。
 
-点击侧栏 OpenWrite，等待环境准备完成。下载和安装进度来自同一个运行时状态，支持取消与重试。选择已有作品目录，或选择空目录后在创作工作台初始化。入口创建新创作会话，已有会话、作品和预设不被改写。点击「创作」进入编辑器；无需发送第一条消息。
+在左侧「工作区」中添加已有作品目录或新建空白工作区并打开会话，将 Agent 预设切换为 **OpenWrite**（**OpenWrite 创作**）。写作环境会在需要时自动准备，也可在「设置 → OpenWrite → 环境」查看下载与安装进度、重试或取消。已有会话、作品和预设不被改写。点击「创作」进入编辑器；无需发送第一条消息。
 
 Git 是可选的作品归档能力。未安装 Git 或 Git 初始化失败时，小说文件仍会保留，工作台显示自动 checkpoint 不可用；正常编辑和模型创作可以继续。
 

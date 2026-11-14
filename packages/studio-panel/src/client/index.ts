@@ -1,7 +1,5 @@
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import { isWritingSession, watchWritingScope } from './writing-scope.ts'
-import { LaunchOpenWrite } from './LaunchOpenWrite.tsx'
+import { displayedSessionId, isWritingSession, watchWritingScope } from './writing-scope.ts'
 import { OpenWriteSettings } from './OpenWriteSettings.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
@@ -106,20 +104,35 @@ function* install(ctx: Context): Generator<() => void> {
     })
 
   const pendingActivation = new Set<Parameters<StudioPanelInjected['workspaces']['openSession']>[0]>()
+  const activatedBlankSessions = new Set<Parameters<StudioPanelInjected['workspaces']['openSession']>[0]>()
   const activatePending = () => {
     const state = ctx.sessions.list.getSnapshot()
     if (!isWritingSession(state) || typeof ctx.uiConversation.binding !== 'function' ||
       typeof ctx.uiConversation.views?.register !== 'function') return
-    for (const id of pendingActivation) {
+    const displayed = displayedSessionId(state)
+    const targets = [...pendingActivation]
+    if (displayed !== undefined) {
+      const row = state.byId[displayed] as { blank?: boolean } | undefined
+      // Native workspace/preset selection leaves activeTargets empty on blank
+      // sessions; activate the workbench once so tabs appear without a first turn.
+      if (row?.blank === true && !activatedBlankSessions.has(displayed) && !pendingActivation.has(displayed)) {
+        targets.push(displayed)
+      }
+    }
+    for (const id of targets) {
       const row = state.byId[id] as { retainedBy?: { mainView?: number } } | undefined
-      if (state.current !== id && (row?.retainedBy?.mainView ?? 0) === 0) continue
+      if (id !== displayed && (row?.retainedBy?.mainView ?? 0) === 0) continue
       const binding = ctx.uiConversation.binding(id)
       if (!binding) continue
       binding.activate('openwrite.creation')
       pendingActivation.delete(id)
+      activatedBlankSessions.add(id)
     }
   }
-  yield ctx.effect(() => ctx.sessions.list.subscribe(activatePending), 'openwrite: activate opened workbench')
+  yield ctx.effect(() => {
+    activatePending()
+    return ctx.sessions.list.subscribe(activatePending)
+  }, 'openwrite: activate opened workbench')
 
   const pickDirectoryCompat = async (): Promise<string | null> => {
     try {
@@ -208,19 +221,6 @@ function* install(ctx: Context): Generator<() => void> {
     fetchStudioApi, postStudioApi, putStudioApi,
     workspaces: workspaceServices, sessions: ctx.sessions,
   }
-
-  yield injectSlot('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action', id: 'openwrite.launch', order: 10,
-    inject: () => ({ openWorkspace: async (path?: string) => {
-      const selected = path?.trim() || await workspaceServices.pickDirectory()
-      if (selected === null) return false
-      const workspace = await ctx.workspaces.create({ path: selected })
-      const sessionId = await ctx.sessions.create({ workspaceId: workspace.workspaceId })
-      await selectOpenWritePreset(sessionId)
-      workspaceServices.openSession(sessionId)
-      return true
-    } }),
-  }, LaunchOpenWrite))
 
   // OpenWrite's own page in the host's settings dialog.
   //

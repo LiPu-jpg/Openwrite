@@ -68,7 +68,7 @@ const cli = resolve(process.argv.find(arg => arg.startsWith('--host-cli='))?.sli
   ?? join(root, 'node_modules/@deepseek-ai/dsh/lib/bin.js'))
 const hostVersion = JSON.parse(await readFile(join(cli, '../../package.json'))).version
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/(?:API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)/i.test(key) && !key.startsWith('DSH_') && !['NODE_OPTIONS', 'NODE_PATH'].includes(key)))
-Object.assign(env, { DSH_HOME: join(temporary, 'dsh'), XDG_CONFIG_HOME: join(temporary, 'config'), XDG_DATA_HOME: join(temporary, 'data'), CI: '1' })
+Object.assign(env, { DSH_HOME: join(temporary, 'dsh'), XDG_CONFIG_HOME: join(temporary, 'config'), XDG_DATA_HOME: join(temporary, 'data'), CI: '1', ...(process.argv.includes('--browser') ? { SSH_CONNECTION: '1' } : {}) })
 await mkdir(env.DSH_HOME, { recursive: true })
 function run(args) {
   const result = spawnSync(process.execPath, [cli, ...args], { cwd: temporary, env, encoding: 'utf8', timeout: sourceSpec ? 300_000 : 120_000, maxBuffer: 8 * 1024 ** 2 })
