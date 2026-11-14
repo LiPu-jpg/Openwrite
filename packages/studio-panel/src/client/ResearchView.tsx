@@ -48,6 +48,7 @@ interface ResearchSearchProvider {
   label: string
   requiresApiKey: boolean
   configured: boolean
+  credentialConfigured: boolean
 }
 
 interface ResearchSurface {
@@ -160,6 +161,7 @@ function parseSurface(value: unknown): ResearchSurface {
             label: text(item['label']) || text(item['id']),
             requiresApiKey: item['requires_api_key'] === true,
             configured: item['configured'] === true,
+            credentialConfigured: item['credential_configured'] === true,
           }
         }).filter(item => item.id !== '')
       : [],
@@ -301,14 +303,18 @@ export function ResearchView({ fetchStudioApi, postStudioApi, t, initialReportId
     setSettingsBusy(true)
     setSettingsNote(null)
     try {
-      await postStudioApi('/research/settings', {
+      const saved = parseSurface(await postStudioApi('/research/settings', {
         search_provider: provider,
         search_api_key: apiKey,
         remember_api_key: remember,
-      })
-      setSettingsNote({ text: t('research.settings.saved'), bad: false })
+      }))
       setApiKey('')
       await load()
+      if (saved.searchProvider !== null && saved.searchProvider !== provider) {
+        setSettingsNote({ text: `${t('research.settings.failed')}: ${t('research.settings.didNotPersist')}`, bad: true })
+      } else {
+        setSettingsNote({ text: t('research.settings.saved'), bad: false })
+      }
     } catch (cause: unknown) {
       setSettingsNote({ text: `${t('research.settings.failed')}: ${cause instanceof Error ? cause.message : String(cause)}`, bad: true })
     } finally {
@@ -365,7 +371,10 @@ export function ResearchView({ fetchStudioApi, postStudioApi, t, initialReportId
       <label>{t('research.settings.provider')}<select aria-label={t('research.settings.provider')} value={provider} onChange={event => setProvider(event.target.value)}>
         {(surface?.searchProviders ?? []).map(item => <option key={item.id} value={item.id}>{item.label}{item.configured ? '' : ` (${t('research.settings.unavailable')})`}</option>)}
       </select></label>
-      {surface?.searchProviders.find(item => item.id === provider)?.requiresApiKey === true && <label>{t('research.settings.apiKey')}<input type="password" value={apiKey} autoComplete="off" onChange={event => setApiKey(event.target.value)} /></label>}
+      {(() => {
+        const selectedSearchProvider = surface?.searchProviders.find(item => item.id === provider)
+        return selectedSearchProvider?.requiresApiKey === true && <label>{t('research.settings.apiKey')}<input type="password" value={apiKey} placeholder={selectedSearchProvider.credentialConfigured ? t('research.settings.apiKeySavedPlaceholder') : undefined} autoComplete="off" onChange={event => setApiKey(event.target.value)} /></label>
+      })()}
       {provider === 'dsh' && <p className={css.toolbarMeta}>{t('research.settings.dshHint')}</p>}
       <label><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} /> {t('research.settings.remember')}</label>
       <div className={css.inlineActions}>

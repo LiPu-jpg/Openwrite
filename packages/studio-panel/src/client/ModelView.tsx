@@ -49,6 +49,7 @@ export type ModelNavigationGuard = (navigate: () => void) => void;
 export type ModelViewProps = {
   fetchStudioApi?: StudioApiInjected["fetchStudioApi"];
   postStudioApi?: StudioApiInjected["postStudioApi"];
+  refreshNonce?: number;
 } & PropsLocale<"studio-panel"> & {
   onNavigationGuardChange?: (guard: ModelNavigationGuard | null) => void;
 };
@@ -240,7 +241,7 @@ const routeOrder = [
   "research",
 ] as const;
 
-export function ModelView({ fetchStudioApi: injectedFetch, postStudioApi: injectedPost, t, onNavigationGuardChange }: Props) {
+export function ModelView({ fetchStudioApi: injectedFetch, postStudioApi: injectedPost, refreshNonce = 0, t, onNavigationGuardChange }: Props) {
   // The host's settings dialog injects nothing: the model library is global,
   // so it is reached without a Workspace context. Both wrappers stay
   // referentially stable — `load` depends on them, and a fresh identity on
@@ -420,11 +421,11 @@ export function ModelView({ fetchStudioApi: injectedFetch, postStudioApi: inject
     void load({ preserveChat: current.formDirty, preserveEmbedding: current.embeddingDirty, preserveRoutes: current.routesDirty });
   }, [load]);
   useEffect(() => {
-    if (workbench.epochs.models > 0) {
+    if (workbench.epochs.models > 0 || refreshNonce > 0) {
       const current = drafts.current;
       void load({ preserveChat: current.formDirty, preserveEmbedding: current.embeddingDirty, preserveRoutes: current.routesDirty });
     }
-  }, [load, workbench.epochs.models]);
+  }, [load, workbench.epochs.models, refreshNonce]);
   const guarded = (dirty: boolean, action: () => void) => {
     if (busy) return;
     if (dirty) setPendingAction(() => action);

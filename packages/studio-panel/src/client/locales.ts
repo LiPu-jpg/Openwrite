@@ -1263,6 +1263,9 @@ export type StudioPanelKey =
   | 'settings.releaseModal.item1'
   | 'settings.releaseModal.item2'
   | 'settings.releaseModal.item3'
+  | 'settings.releaseModal.companionsTitle'
+  | 'settings.releaseModal.companionsHint'
+  | 'settings.releaseModal.starPlugin'
   | 'settings.releaseModal.heartfelt'
   | 'settings.releaseModal.starCta'
   | 'settings.releaseModal.feedbackCta'
@@ -2544,10 +2547,13 @@ export const zh: Record<StudioPanelKey, string> = {
   'settings.releaseModal.intro': '这个弹窗只在每次版本更新后出现一次。OpenWrite 是完全免费、开源、无广告的长篇小说工作台——你的大纲、人设、世界观与每一章正文都留在你自己的本地硬盘，不把心血手稿交给任何人。',
   'settings.releaseModal.projectDesc': '基于 DeepSeek Harness 的开源长篇小说工作台：百万字级长篇设定与多视角大纲管理、原生三栏沉浸写作、连续性自动审校与全流程本地存储。',
   'settings.releaseModal.whatsNewTitle': '本次版本更新亮点',
-  'settings.releaseModal.item1': '宿主兼容扩展：全面适配 dsh 0.2.2-rc.2 / 0.2.2-rc.3 及既有 0.1.x / 0.2.x 宿主版本。',
+  'settings.releaseModal.item1': '三大联动插件直达与全局设置修复：支持 dsh-our-free-model / dsh-ops / dsh-dog 并附 GitHub 仓库入口；同时修复全局搜索设置保存、文字截断与「准备写作环境」状态实时刷新，兼容 dsh 0.2.2-rc.2 / 0.2.2-rc.3。',
   'settings.releaseModal.item2': 'Agent 托管脱敏反馈：在任意创作对话发送 /feedback，Agent 自动检查运行状态、日志与工具报错，彻底剥离正文/人设/路径/密钥后生成可直接提交的 GitHub Issue 草稿（环境无法启动时也可在设置中复制兜底诊断）。',
-  'settings.releaseModal.item3': '首次创作三步引导：Agent 新增开书三步引导（定题材立项 → 铺首卷架构 → 写首章并自动审校），上手更顺畅。',
-  'settings.releaseModal.heartfelt': '目前实际使用 OpenWrite 创作的朋友远比 GitHub 上的 Star 多。一颗 Star 是开源项目唯一的「工资条」，也是支撑我持续维护和迭代的最大动力。',
+  'settings.releaseModal.item3': '首次创作三步引导与精简侧栏：移除左下角多余入口，新建空白会话自动启用 OpenWrite 创作助手，配合开书三步引导顺畅起笔。',
+  'settings.releaseModal.companionsTitle': '支持的三大联动插件（可选安装 · 欢迎点 Star）',
+  'settings.releaseModal.companionsHint': '以下开源插件均为可选增强，未安装不影响基础创作；搭配安装即可在「设置 → OpenWrite → 宿主」查看接入状态：',
+  'settings.releaseModal.starPlugin': '★ GitHub / 点 Star',
+  'settings.releaseModal.heartfelt': '目前实际使用 OpenWrite 创作的朋友远比 GitHub 上的 Star 多。一颗 Star 是开源项目唯一的「工资条」——如果好用，请顺手给 OpenWrite 和这几个联动插件项目都点一颗 ★ Star，这是我们持续迭代的最大动力！',
   'settings.releaseModal.starCta': '★ 去 GitHub 给 OpenWrite 点 Star',
   'settings.releaseModal.feedbackCta': '遇到问题？提交脱敏反馈',
   'settings.releaseModal.dismiss': '我知道了，开始创作',
@@ -3822,10 +3828,13 @@ export const en: Record<StudioPanelKey, string> = {
   'settings.releaseModal.intro': 'This popup appears only once after each version update. OpenWrite is a free, open-source, ad-free long-form novel workbench — your outlines, characters, worldbuilding, and chapters stay on your own local disk.',
   'settings.releaseModal.projectDesc': 'An open-source long-form fiction workbench built on DeepSeek Harness: million-word worldbuilding & multi-view outlines, native 3-pane writing, automated continuity review, and 100% local storage.',
   'settings.releaseModal.whatsNewTitle': 'What’s new in this update',
-  'settings.releaseModal.item1': 'Host compatibility: full support for dsh 0.2.2-rc.2 / 0.2.2-rc.3 alongside existing 0.1.x / 0.2.x hosts.',
+  'settings.releaseModal.item1': 'Companion ecosystem & settings fixes: highlights dsh-our-free-model, dsh-ops, and dsh-dog with direct GitHub links; fixes global search defaults persistence, text clipping, and live runtime status refresh alongside dsh 0.2.2-rc.2 / 0.2.2-rc.3 support.',
   'settings.releaseModal.item2': 'Agent-led privacy-safe feedback: type /feedback in any chat so the Agent inspects diagnostics and logs, strips manuscripts/characters/paths/keys, and drafts a ready-to-submit GitHub Issue (with startup fallback in Settings).',
-  'settings.releaseModal.item3': '3-step Agent onboarding: guided new-book kickoff (Genre & Setup → First-Arc Outline → Chapter 1 Draft & Review).',
-  'settings.releaseModal.heartfelt': 'Far more writers use OpenWrite every day than have starred the repository. A GitHub Star is the only payslip an open-source project gets — and the biggest motivation to keep improving it.',
+  'settings.releaseModal.item3': '3-step Agent onboarding & cleaner sidebar: removes the redundant bottom-left launcher and auto-activates OpenWrite in blank writing sessions.',
+  'settings.releaseModal.companionsTitle': '3 supported companion plugins (optional · please Star)',
+  'settings.releaseModal.companionsHint': 'All three open-source plugins are optional and work alongside OpenWrite; inspect live integration status anytime in Settings → OpenWrite → Host:',
+  'settings.releaseModal.starPlugin': '★ GitHub / Star',
+  'settings.releaseModal.heartfelt': 'Far more writers use OpenWrite every day than have starred the repository. A GitHub Star is the only payslip an open-source project gets — if OpenWrite or these companion plugins help your writing, please give them a ★ Star!',
   'settings.releaseModal.starCta': '★ Star OpenWrite on GitHub',
   'settings.releaseModal.feedbackCta': 'Report a privacy-safe issue',
   'settings.releaseModal.dismiss': 'Got it, start writing',

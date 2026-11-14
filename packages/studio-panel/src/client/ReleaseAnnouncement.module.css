@@ -14,8 +14,8 @@
 }
 
 .modal {
-  width: min(600px, 100%);
-  max-height: min(86vh, 680px);
+  width: min(640px, 100%);
+  max-height: min(88vh, 760px);
   display: flex;
   flex-direction: column;
   border-radius: 18px;
@@ -128,6 +128,80 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.companionsIntro {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-secondary, #475569);
+}
+
+.companionGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.companionCard {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--dsw-alias-border-l2, #cbd5e1);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, #f8fafc) 90%, transparent);
+}
+
+.companionTop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.companionIdentity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.companionIdentity strong {
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary, #0f172a);
+}
+
+.companionPkg {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--dsw-alias-interactive-bg-hover, rgb(148 163 184 / 15%));
+  color: var(--dsw-alias-label-tertiary, #64748b);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.companionLink {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7cff) 45%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7cff) 10%, transparent);
+  color: var(--dsw-alias-state-business-primary, #4f7cff);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.companionLink:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7cff) 18%, transparent);
+}
+
+.companionDesc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary, #475569);
 }
 
 .heartfelt {

@@ -14,7 +14,7 @@
  * project — so it is reached through the context-free global API.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { CompanionSection, fetchCompanions, type CompanionStatus } from './companions.tsx'
 import { ModelView } from './ModelView.tsx'
@@ -177,6 +177,9 @@ const PHASE_KEYS: Readonly<Record<string, StudioPanelKey>> = {
 /** Phases in which the environment is still working on something. */
 const BUSY_PHASES = new Set(['waiting', 'downloading', 'installing', 'starting', 'recovering'])
 
+/** Phases where runtime preparation is no longer advancing in the background. */
+const TERMINAL_PHASES = new Set(['ready', 'error', 'cancelled', 'stopped', 'uninstalled'])
+
 /** How many times an unreadable status is re-read before the page gives up. */
 const READ_RETRIES = 4
 /** The pause between two status reads. */
@@ -263,6 +266,9 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
   const [copied, setCopied] = useState(false)
   const [copiedFeedbackCmd, setCopiedFeedbackCmd] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const [preparePending, setPreparePending] = useState(false)
+  const [readyEpoch, setReadyEpoch] = useState(0)
+  const prevPhaseRef = useRef<string | undefined>(undefined)
 
   /**
    * Read the four statuses this page shows.
@@ -295,11 +301,23 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
     return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer) }
   }, [load, attempt])
 
-  // The environment reports its progress through the runtime route. While it
-  // is working, poll it — otherwise the page would show a stale phase until
-  // the author reopens the dialog.
+  // Detect when runtime transitions to ready so sibling tabs (Models / Search)
+  // refresh automatically without forcing the user to close and reopen Settings.
   useEffect(() => {
-    if (runtime === null || !BUSY_PHASES.has(runtime.phase)) return
+    const phase = runtime?.phase
+    if (phase === undefined) return
+    if (TERMINAL_PHASES.has(phase)) setPreparePending(false)
+    if (phase === 'ready' && prevPhaseRef.current !== undefined && prevPhaseRef.current !== 'ready') {
+      setReadyEpoch(value => value + 1)
+    }
+    prevPhaseRef.current = phase
+  }, [runtime?.phase])
+
+  // The environment reports its progress through the runtime route. While it
+  // is working — or right after the author clicked prepare/retry before the
+  // bridge switches out of idle — poll it so the dialog turns ready live.
+  useEffect(() => {
+    if (runtime === null || (!BUSY_PHASES.has(runtime.phase) && !preparePending)) return
     const controller = new AbortController()
     const timer = window.setInterval(() => {
       void fetchRuntimeStatus(controller.signal).then(next => {
@@ -308,7 +326,7 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
       }).catch(() => undefined)
     }, 1_000)
     return () => { controller.abort(); window.clearInterval(timer) }
-  }, [runtime])
+  }, [runtime, preparePending])
 
   const act = async (action: 'prepare' | 'retry' | 'cancel') => {
     setBusy(true)
@@ -316,8 +334,14 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
     try {
       const next = await postRuntimeAction(action)
       setRuntime(next)
+      if (action === 'cancel' || (next !== null && TERMINAL_PHASES.has(next.phase))) {
+        setPreparePending(false)
+      } else if (next !== null) {
+        setPreparePending(true)
+      }
       setNotice(next === null ? t('settings.section.unavailable') : '')
     } catch (cause) {
+      setPreparePending(false)
       setNotice(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(false)
@@ -476,7 +500,7 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
       className={css.panel}
     >
       <p className={css.hint}>{t('settings.tab.modelsHint')}</p>
-      <ModelView t={t} />
+      <ModelView t={t} refreshNonce={readyEpoch} />
     </div>
 
     <div
@@ -486,7 +510,7 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
       hidden={tab !== 'search'}
       className={css.panel}
     >
-      <SearchSettings t={t} />
+      <SearchSettings t={t} refreshNonce={readyEpoch} />
     </div>
 
     <div

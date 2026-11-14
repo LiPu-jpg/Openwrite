@@ -48,7 +48,7 @@ function parsePreferences(value: unknown): ViewState {
   }
 }
 
-export function SearchSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element {
+export function SearchSettings({ t, refreshNonce = 0 }: PropsLocale<'studio-panel'> & { refreshNonce?: number }): JSX.Element {
   const [state, setState] = useState<ViewState | null>(null)
   const [provider, setProvider] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -67,7 +67,7 @@ export function SearchSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element 
       })
       .catch(() => { if (!controller.signal.aborted) setState({ provider: '', providers: [], hostWeb: false }) })
     return () => controller.abort()
-  }, [])
+  }, [refreshNonce])
 
   const save = async () => {
     if (provider === '') return

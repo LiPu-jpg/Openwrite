@@ -263,6 +263,7 @@ export class ManagedRuntime {
       this.restartAttempts = 0
       this.recovered = false
     }
+    this.update('starting', 'Preparing the writing environment')
     const controller = new AbortController()
     this.controller = controller
     this.pending = this.prepare(controller.signal).catch(error => {

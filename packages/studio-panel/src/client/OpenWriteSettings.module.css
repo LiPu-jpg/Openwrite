@@ -136,18 +136,16 @@
 }
 
 .modelHostItem strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .modelHostItem small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .block summary {
@@ -557,4 +555,39 @@
   transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-border-l2));
   background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 7%, var(--dsw-alias-bg-layer-3));
+}
+
+.companionList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.companionItem {
+  display: grid;
+  gap: 4px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 84%, transparent);
+}
+
+.companionLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.companionLinks a {
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 560;
+  text-decoration: none;
+}
+
+.companionLinks a:hover {
+  text-decoration: underline;
 }

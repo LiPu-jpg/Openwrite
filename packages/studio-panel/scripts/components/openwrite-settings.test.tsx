@@ -364,6 +364,12 @@ describe('OpenWriteSettings', () => {
 
     const starAnchor = firstModal?.querySelector('a[href="https://github.com/LiPu-jpg/Openwrite"]')
     expect(starAnchor).not.toBeNull()
+    expect(firstModal?.querySelector('a[href="https://github.com/Ebony-Vinyl/dsh-our-free-model"]')).not.toBeNull()
+    expect(firstModal?.querySelector('a[href="https://github.com/T-Auto/dsh-ops"]')).not.toBeNull()
+    expect(firstModal?.querySelector('a[href="https://github.com/Fun10165/dsh-dog"]')).not.toBeNull()
+    expect(firstModal?.textContent).toContain('dsh-our-free-model')
+    expect(firstModal?.textContent).toContain('dsh-ops')
+    expect(firstModal?.textContent).toContain('dsh-dog')
 
     // Dismissing records the version in localStorage and removes the modal
     const dismissButton = Array.from(firstModal?.querySelectorAll('button') ?? []).find(
@@ -397,5 +403,46 @@ describe('OpenWriteSettings', () => {
     render(<OpenWriteSettings t={t} />)
     fireEvent.click(await screen.findByRole('button', { name: '查看本版更新说明' }))
     expect(document.querySelector(`[${RELEASE_MODAL_MARKER}]`)).not.toBeNull()
+  })
+
+  it('keeps polling to ready after prepare even if POST initially reports idle and reloads sibling tabs', async () => {
+    let runtimePhase: 'idle' | 'ready' = 'idle'
+    let prefCalls = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/studio-panel/runtime') && init?.method === 'POST') {
+        setTimeout(() => { runtimePhase = 'ready' }, 50)
+        return new Response(JSON.stringify({ phase: 'idle', message: 'The writing environment will be prepared on first use' }), { status: 202, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.endsWith('/studio-panel/runtime')) {
+        return new Response(JSON.stringify({
+          phase: runtimePhase,
+          message: runtimePhase === 'ready' ? 'The writing environment is ready' : 'The writing environment will be prepared on first use',
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/studio-panel/api/model/profiles')) {
+        if (runtimePhase !== 'ready') return new Response('not ready', { status: 503 })
+        return new Response(JSON.stringify({ ok: true, data: { profiles: [], embedding_profiles: [], active_embedding_profile_id: '', routes: {} } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/studio-panel/api/model/host-models')) {
+        return new Response(JSON.stringify({ ok: true, data: { available: false, models: [] } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.endsWith('/studio-panel/api/research/preferences')) {
+        prefCalls += 1
+        if (runtimePhase !== 'ready') return new Response('not ready', { status: 503 })
+        return new Response(JSON.stringify(routes['/studio-panel/api/research/preferences']), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      const key = Object.keys(routes).find(candidate => url.endsWith(candidate))
+      if (key === undefined) throw new Error(`unexpected fetch ${url}`)
+      return new Response(JSON.stringify(routes[key]), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<OpenWriteSettings t={t} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '准备写作环境' }))
+    await waitFor(() => expect(screen.getByText('已就绪')).toBeTruthy(), { timeout: 5_000 })
+    await waitFor(() => expect(prefCalls).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
+    fireEvent.click(screen.getByRole('tab', { name: '搜索' }))
+    expect(await screen.findByText('当前默认：DSH')).toBeTruthy()
   })
 })

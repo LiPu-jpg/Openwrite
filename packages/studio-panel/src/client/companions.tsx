@@ -13,6 +13,51 @@
 
 import { useEffect, useState } from 'react'
 import { fetchGlobalStudioApi, postGlobalStudioApi } from './api.ts'
+import css from './OpenWriteSettings.module.css'
+
+export interface CompanionPluginInfo {
+  key: 'dog' | 'ops' | 'freeModel'
+  name: string
+  npmPackage: string
+  repo: string
+  url: string
+  roleZh: string
+  roleEn: string
+}
+
+/**
+ * The three DSH ecosystem companion plugins OpenWrite natively integrates with.
+ * Used in both Settings → Host and the once-per-version release modal.
+ */
+export const COMPANION_PLUGINS: readonly CompanionPluginInfo[] = [
+  {
+    key: 'freeModel',
+    name: 'dsh-our-free-model',
+    npmPackage: '@ebony-vinyl/dsh-our-free-model',
+    repo: 'Ebony-Vinyl/dsh-our-free-model',
+    url: 'https://github.com/Ebony-Vinyl/dsh-our-free-model',
+    roleZh: '免密钥本地转发网关，一键写入写作/评审模型配置，零配置上手创作',
+    roleEn: 'Zero-key local model gateway with one-click writing & review routing',
+  },
+  {
+    key: 'ops',
+    name: 'dsh-ops',
+    npmPackage: 'dsh-ops',
+    repo: 'T-Auto/dsh-ops',
+    url: 'https://github.com/T-Auto/dsh-ops',
+    roleZh: '有界文件工具与渐进式检索，显著降低长篇设定检索 Token 消耗',
+    roleEn: 'Bounded file tools & progressive discovery to cut retrieval token cost',
+  },
+  {
+    key: 'dog',
+    name: 'dsh-dog',
+    npmPackage: '@dsh-external/dsh-dog',
+    repo: 'Fun10165/dsh-dog',
+    url: 'https://github.com/Fun10165/dsh-dog',
+    roleZh: 'DoG 独立交付验证图谱与 dog_* 工具，交付前生成防偏离校验图',
+    roleEn: 'Independent DoG delivery verification graph & dog_* tools before handoff',
+  },
+] as const
 
 export interface OpsPlan {
   files: boolean
@@ -229,11 +274,12 @@ export function CompanionSection({ status }: { status: CompanionStatus | null })
   const opsDetail = opsPlan
     ? `已接入：${opsPlan.files ? `有界文件工具${opsPlan.residentTools ? `（${opsPlan.residentNames} 个常驻）` : ''}` : '不挂文件工具'}${opsPlan.discovery ? ' + 渐进发现' : ''}${opsPlan.shell ? ' + shell' : ''}；${opsPlan.replaceOfficial ? '替换官方文件工具' : '不替换官方文件工具'}`
     : '已接入，提供有界文件工具与渐进发现'
-  const lines = [
-    describe('dsh-dog', status.dog, '已安装且宿主放行；会话中可用 dog_* 工具，交付前可按 dog-delivery-verification 技能生成独立校验图', '安装 @dsh-external/dsh-dog 可获得 dog_* 工具与独立校验图。'),
-    describe('dsh-ops', status.ops, opsDetail, '安装 dsh-ops 可减少文件检索的 token 消耗。'),
-    describe('dsh-our-free-model', status.freeModel, '已安装，可一键写入写作/评审模型配置', '安装 dsh-our-free-model 可免密钥使用免费模型。'),
-  ]
+  const descriptions: Record<CompanionPluginInfo['key'], string> = {
+    dog: describe('dsh-dog', status.dog, '已安装且宿主放行；会话中可用 dog_* 工具，交付前可按 dog-delivery-verification 技能生成独立校验图', '安装 @dsh-external/dsh-dog 可获得 dog_* 工具与独立校验图。'),
+    ops: describe('dsh-ops', status.ops, opsDetail, '安装 dsh-ops 可减少文件检索的 token 消耗。'),
+    freeModel: describe('dsh-our-free-model', status.freeModel, '已安装，可一键写入写作/评审模型配置', '安装 @ebony-vinyl/dsh-our-free-model 可免密钥使用免费模型。'),
+  }
+  const items = COMPANION_PLUGINS.map(plugin => ({ plugin, text: descriptions[plugin.key] }))
   const write = async () => {
     if (gateway === null || model === '' || gateway.baseUrl.trim() === '') return
     setBusy(true); setNotice(''); setConfirming(false)
@@ -276,7 +322,14 @@ export function CompanionSection({ status }: { status: CompanionStatus | null })
   }
   return <section><strong>联动插件</strong>
     <p>{`宿主 dsh ${status.host ?? '（版本未知）'}。联动插件均为可选项，未安装时功能不受影响。`}</p>
-    <ul>{lines.map(line => <li key={line}>{line}</li>)}</ul>
+    <ul className={css.companionList}>{items.map(({ plugin, text }) => <li key={plugin.key} className={css.companionItem}>
+      <span>{text}</span>
+      <span className={css.companionLinks}>
+        <a href={plugin.url} target="_blank" rel="noreferrer">{`GitHub: ${plugin.repo}`}</a>
+        <code>{plugin.npmPackage}</code>
+      </span>
+    </li>)}</ul>
+    <p className={css.hint}>如果这些开源联动插件帮到了你的创作，欢迎点开仓库顺手给项目和 OpenWrite 点一颗 ★ Star 支持作者持续维护。</p>
     {usable && <div>
       {read.kind === 'absent' && gateway === null && <p>正在读取免费模型网关…</p>}
       {read.kind === 'absent' && <p>免费模型插件没有提供本地转发：请到「设置 → Our Free Model → 本地转发」打开后再接入。</p>}

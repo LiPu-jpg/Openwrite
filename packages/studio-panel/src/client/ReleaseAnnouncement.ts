@@ -10,6 +10,7 @@
  * paths, or API keys).
  */
 
+import { COMPANION_PLUGINS } from './companions.tsx'
 import { en, zh, type StudioPanelKey } from './locales.ts'
 import css from './ReleaseAnnouncement.module.css'
 
@@ -206,6 +207,61 @@ export function showReleaseAnnouncementModal(options: ReleaseAnnouncementOptions
     list.appendChild(li)
   }
   body.appendChild(list)
+
+  // Supported companion plugins section
+  const isEnglish = translate('settings.tab.host') === 'Host'
+  const companionsTitle = document.createElement('h3')
+  companionsTitle.className = css.sectionTitle ?? 'openwrite-release-section-title'
+  companionsTitle.textContent = translate('settings.releaseModal.companionsTitle')
+  body.appendChild(companionsTitle)
+
+  const companionsIntro = document.createElement('p')
+  companionsIntro.className = css.companionsIntro ?? 'openwrite-release-companions-intro'
+  companionsIntro.textContent = translate('settings.releaseModal.companionsHint')
+  body.appendChild(companionsIntro)
+
+  const companionGrid = document.createElement('div')
+  companionGrid.className = css.companionGrid ?? 'openwrite-release-companion-grid'
+  for (const plugin of COMPANION_PLUGINS) {
+    const card = document.createElement('div')
+    card.className = css.companionCard ?? 'openwrite-release-companion-card'
+
+    const cardTop = document.createElement('div')
+    cardTop.className = css.companionTop ?? 'openwrite-release-companion-top'
+
+    const nameGroup = document.createElement('div')
+    nameGroup.className = css.companionIdentity ?? 'openwrite-release-companion-identity'
+
+    const nameEl = document.createElement('strong')
+    nameEl.textContent = plugin.name
+
+    const pkgEl = document.createElement('code')
+    pkgEl.className = css.companionPkg ?? 'openwrite-release-companion-pkg'
+    pkgEl.textContent = plugin.npmPackage
+
+    nameGroup.appendChild(nameEl)
+    nameGroup.appendChild(pkgEl)
+
+    const link = document.createElement('a')
+    link.className = css.companionLink ?? 'openwrite-release-companion-link'
+    link.href = plugin.url
+    link.target = '_blank'
+    link.rel = 'noreferrer'
+    link.textContent = translate('settings.releaseModal.starPlugin')
+    link.addEventListener('click', () => markReleaseAnnouncementSeen(version))
+
+    cardTop.appendChild(nameGroup)
+    cardTop.appendChild(link)
+
+    const desc = document.createElement('p')
+    desc.className = css.companionDesc ?? 'openwrite-release-companion-desc'
+    desc.textContent = isEnglish ? plugin.roleEn : plugin.roleZh
+
+    card.appendChild(cardTop)
+    card.appendChild(desc)
+    companionGrid.appendChild(card)
+  }
+  body.appendChild(companionGrid)
 
   // Heartfelt note
   const heartfelt = document.createElement('div')
