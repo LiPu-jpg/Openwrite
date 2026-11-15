@@ -96,11 +96,44 @@ class ModelProfileStore:
         self._session_credentials: dict[str, str] = {}
         self._mutation_lock = Lock()
 
+    @staticmethod
+    def _default_embedding_profile() -> dict[str, Any]:
+        return {
+            "id": "default-embedding",
+            "label": "本地向量模型（默认）",
+            "provider": "local",
+            "base_url": "",
+            "model": DEFAULT_LOCAL_MODEL,
+            "dimension": DEFAULT_LOCAL_DIMENSION,
+            "max_tokens": DEFAULT_LOCAL_MAX_TOKENS,
+            "credential_ref": "embedding_key_default-embedding",
+        }
+
     def load(self) -> dict[str, Any]:
         payload = self._read_json(self.profiles_path)
         if payload:
             profiles = payload.get("profiles")
             routes = payload.get("routes")
+            embedding_profiles = [
+                self._embedding_metadata(item)
+                for item in payload.get("embedding_profiles", [])
+                if isinstance(item, dict)
+            ]
+            active_embedding_profile_id = str(
+                payload.get("active_embedding_profile_id") or ""
+            )
+            if not embedding_profiles:
+                default_embedding = self._embedding_metadata(
+                    self._default_embedding_profile()
+                )
+                embedding_profiles = [default_embedding]
+                active_embedding_profile_id = default_embedding["id"]
+            elif (
+                not active_embedding_profile_id
+                or active_embedding_profile_id
+                not in {item["id"] for item in embedding_profiles}
+            ):
+                active_embedding_profile_id = embedding_profiles[0]["id"]
             return {
                 "version": PROFILE_VERSION,
                 "default_profile_id": str(payload.get("default_profile_id") or "default"),
@@ -110,14 +143,8 @@ class ModelProfileStore:
                 if isinstance(profiles, list)
                 else [],
                 "routes": self._routes(routes),
-                "embedding_profiles": [
-                    self._embedding_metadata(item)
-                    for item in payload.get("embedding_profiles", [])
-                    if isinstance(item, dict)
-                ],
-                "active_embedding_profile_id": str(
-                    payload.get("active_embedding_profile_id") or ""
-                ),
+                "embedding_profiles": embedding_profiles,
+                "active_embedding_profile_id": active_embedding_profile_id,
             }
         legacy = self.legacy.load_settings()
         if (
@@ -125,13 +152,14 @@ class ModelProfileStore:
             and not os.environ.get("LLM_MODEL", "").strip()
             and not os.environ.get("LLM_API_KEY", "").strip()
         ):
+            default_embedding = self._embedding_metadata(self._default_embedding_profile())
             return {
                 "version": PROFILE_VERSION,
                 "default_profile_id": "default",
                 "profiles": [],
                 "routes": {},
-                "embedding_profiles": [],
-                "active_embedding_profile_id": "",
+                "embedding_profiles": [default_embedding],
+                "active_embedding_profile_id": default_embedding["id"],
             }
         profile = {
             "id": "default",
@@ -156,30 +184,42 @@ class ModelProfileStore:
         credential = self.legacy.load_credential()
         if credential:
             self._session_credentials["key_default"] = credential
+        has_env_embedding = any(
+            os.environ.get(name, "").strip()
+            for name in (
+                "OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER",
+                "OPENWRITE_LIGHTRAG_EMBEDDING_MODEL",
+                "OPENWRITE_LIGHTRAG_EMBEDDING_BASE_URL",
+            )
+        )
+        if has_env_embedding:
+            env_provider = normalize_embedding_provider(
+                os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER", "openai")
+            )
+            legacy_embedding = self._embedding_metadata(
+                {
+                    "id": "default-embedding",
+                    "label": "默认 Embedding",
+                    "provider": env_provider,
+                    "base_url": os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_BASE_URL", ""),
+                    "model": os.environ.get(
+                        "OPENWRITE_LIGHTRAG_EMBEDDING_MODEL",
+                        DEFAULT_LOCAL_MODEL if env_provider == "local" else DEFAULT_CLOUD_MODEL,
+                    ),
+                    "dimension": DEFAULT_LOCAL_DIMENSION if env_provider == "local" else 1536,
+                    "max_tokens": DEFAULT_LOCAL_MAX_TOKENS if env_provider == "local" else 8192,
+                    "credential_ref": "embedding_key_default",
+                }
+            )
+        else:
+            legacy_embedding = self._embedding_metadata(self._default_embedding_profile())
         return {
             "version": PROFILE_VERSION,
             "default_profile_id": "default",
             "profiles": [profile],
             "routes": {key: "default" for key in ROUTE_KEYS},
-            "embedding_profiles": [
-                self._embedding_metadata(
-                    {
-                        "id": "default-embedding",
-                        "label": "默认 Embedding",
-                        "provider": os.environ.get(
-                            "OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER", "openai"
-                        ),
-                        "base_url": os.environ.get("OPENWRITE_LIGHTRAG_EMBEDDING_BASE_URL", ""),
-                        "model": os.environ.get(
-                            "OPENWRITE_LIGHTRAG_EMBEDDING_MODEL", DEFAULT_CLOUD_MODEL
-                        ),
-                        "dimension": 1536,
-                        "max_tokens": 8192,
-                        "credential_ref": "embedding_key_default",
-                    }
-                )
-            ],
-            "active_embedding_profile_id": "default-embedding",
+            "embedding_profiles": [legacy_embedding],
+            "active_embedding_profile_id": legacy_embedding["id"],
         }
 
     def surface(self, project_routes: dict[str, Any] | None = None) -> dict[str, Any]:

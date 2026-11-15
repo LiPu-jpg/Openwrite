@@ -372,7 +372,9 @@ def test_untested_profile_reads_back_as_null(tmp_path: Path, monkeypatch):
 
     surface = profiles.surface()
     entry = surface["profiles"][0]
-    embedding_entry = surface["embedding_profiles"][0]
+    embedding_entry = next(
+        item for item in surface["embedding_profiles"] if item["id"] == "writer-vector"
+    )
 
     assert entry["last_test"] is None
     assert embedding_entry["last_test"] is None
@@ -417,7 +419,11 @@ def test_embedding_test_success_payload_and_persistence(
     validate_model_connection_test_v1(result)
     assert "test-credential-xyz" not in json.dumps(result, ensure_ascii=False)
 
-    entry = profiles.surface()["embedding_profiles"][0]
+    entry = next(
+        item
+        for item in profiles.surface()["embedding_profiles"]
+        if item["id"] == "writer-vector"
+    )
     assert entry["last_test"]["status"] == "ok"
     assert entry["last_test"]["resolved_model"] == "text-embedding-3-small"
 
@@ -445,7 +451,11 @@ def test_embedding_test_failure_uses_same_taxonomy(tmp_path: Path, monkeypatch: 
     assert captured.value.status == 401
     assert captured.value.recoverable is False
     assert "test-credential-xyz" not in str(captured.value)
-    entry = profiles.surface()["embedding_profiles"][0]
+    entry = next(
+        item
+        for item in profiles.surface()["embedding_profiles"]
+        if item["id"] == "writer-vector"
+    )
     assert entry["last_test"]["status"] == "failed"
     assert entry["last_test"]["error_code"] == "MODEL_TEST_AUTHENTICATION_FAILED"
 

@@ -164,8 +164,11 @@ def test_local_embedding_profile_is_ready_without_embedding_credentials(
     store = ModelProfileStore(tmp_path)
     local_profile = embedding_profile("local-search", "BAAI/bge-small-zh-v1.5", provider="local")
     store.save_embedding_profile(local_profile)
+    store.select_embedding_profile("local-search")
 
-    surface = store.surface()["embedding_profiles"][0]
+    surface = next(
+        item for item in store.surface()["embedding_profiles"] if item["id"] == "local-search"
+    )
     candidate = store.test_embedding_candidate(local_profile)
 
     assert surface["configured"] is True
@@ -544,9 +547,12 @@ def test_surface_keeps_chat_and_embedding_capabilities_independent(
     embedding = store.save_embedding_profile(
         embedding_profile("vector", "BAAI/bge-small-zh-v1.5", provider="local")
     )
+    store.select_embedding_profile("vector")
     surface = store.surface()
     entry = surface["profiles"][0]
-    embedding_entry = surface["embedding_profiles"][0]
+    embedding_entry = next(
+        item for item in surface["embedding_profiles"] if item["id"] == "vector"
+    )
     assert "embedding_model" not in saved
     assert entry["capabilities"] == {"chat": True}
     assert embedding["model"] == "BAAI/bge-small-zh-v1.5"
@@ -777,3 +783,77 @@ def test_save_routes_concurrent_swaps_never_mix(tmp_path: Path, monkeypatch: pyt
             second.result()
         final = store.load()["routes"]
         assert final == map_alpha or final == map_beta
+
+
+def test_fresh_store_preseeds_default_local_embedding_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+
+    surface = store.surface()
+    assert surface["active_embedding_profile_id"] == "default-embedding"
+    assert len(surface["embedding_profiles"]) == 1
+    entry = surface["embedding_profiles"][0]
+    assert entry["id"] == "default-embedding"
+    assert entry["provider"] == "local"
+    assert entry["model"] == "BAAI/bge-small-zh-v1.5"
+    assert entry["dimension"] == 512
+    assert entry["max_tokens"] == 512
+    assert entry["configured"] is True
+    assert entry["active"] is True
+
+    resolved = store.resolve_embedding()
+    assert resolved["id"] == "default-embedding"
+    assert resolved["provider"] == "local"
+    assert resolved["api_key"] == ""
+
+
+def test_existing_store_with_empty_embedding_profiles_backfills_default_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    store = ModelProfileStore(tmp_path)
+    store.profiles_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "default_profile_id": "writer",
+                "profiles": [profile("writer", "deepseek-chat")],
+                "routes": {"chapter_write": "writer"},
+                "embedding_profiles": [],
+                "active_embedding_profile_id": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    surface = store.surface()
+    assert surface["profiles"][0]["id"] == "writer"
+    assert surface["active_embedding_profile_id"] == "default-embedding"
+    assert [item["id"] for item in surface["embedding_profiles"]] == ["default-embedding"]
+    assert surface["embedding_profiles"][0]["provider"] == "local"
+    assert surface["embedding_profiles"][0]["configured"] is True
+    assert surface["embedding_profiles"][0]["active"] is True
+
+
+def test_legacy_env_without_embedding_override_also_uses_default_local_embedding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("LLM_MODEL", "deepseek-chat")
+    monkeypatch.setenv("LLM_API_KEY", "legacy-key")
+    for env_key in (
+        "OPENWRITE_LIGHTRAG_EMBEDDING_PROVIDER",
+        "OPENWRITE_LIGHTRAG_EMBEDDING_MODEL",
+        "OPENWRITE_LIGHTRAG_EMBEDDING_BASE_URL",
+    ):
+        monkeypatch.delenv(env_key, raising=False)
+
+    store = ModelProfileStore(tmp_path)
+    surface = store.surface()
+    assert surface["active_embedding_profile_id"] == "default-embedding"
+    assert surface["embedding_profiles"][0]["provider"] == "local"
+    assert surface["embedding_profiles"][0]["model"] == "BAAI/bge-small-zh-v1.5"
+    assert surface["embedding_profiles"][0]["configured"] is True
