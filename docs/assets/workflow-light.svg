@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="200" viewBox="0 0 960 200" fill="none" role="img" aria-label="OpenWrite 创作闭环架构">
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="960" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2464C6"/>
+      <stop offset="50%" stop-color="#0F766E"/>
+      <stop offset="100%" stop-color="#244FA8"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-4%" y="-8%" width="108%" height="124%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+
+  <rect x="4" y="4" width="952" height="192" rx="18" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+  <text x="28" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#475569" letter-spacing="0.5">OPENWRITE 创作与验证闭环 · LOCAL WORKSPACE ENGINE</text>
+  <rect x="28" y="44" width="904" height="2" rx="1" fill="url(#accent)" opacity="0.22"/>
+
+  <!-- Step 1 -->
+  <g filter="url(#cardShadow)">
+    <rect x="24" y="62" width="164" height="114" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+    <rect x="24" y="62" width="164" height="5" rx="2.5" fill="#2464C6"/>
+    <text x="38" y="88" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#2464C6">01 · 资料页 / 正典</text>
+    <text x="38" y="112" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" font-weight="700" fill="#0F172A">规划与设定库</text>
+    <text x="38" y="135" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">分卷大纲 · 人物档案</text>
+    <text x="38" y="155" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">世界观 · 伏笔账本</text>
+  </g>
+  <path d="M192 119 H206 M201 114 L207 119 L201 124" stroke="#64748B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Step 2 -->
+  <g filter="url(#cardShadow)">
+    <rect x="211" y="62" width="164" height="114" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+    <rect x="211" y="62" width="164" height="5" rx="2.5" fill="#0284C7"/>
+    <text x="225" y="88" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#0284C7">02 · CONTEXT ENGINE</text>
+    <text x="225" y="112" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" font-weight="700" fill="#0F172A">动态上下文装配</text>
+    <text x="225" y="135" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">硬约束保护 · 按份额配额</text>
+    <text x="225" y="155" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">FastEmbed 语义召回</text>
+  </g>
+  <path d="M379 119 H393 M388 114 L394 119 L388 124" stroke="#64748B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Step 3 -->
+  <g filter="url(#cardShadow)">
+    <rect x="398" y="62" width="164" height="114" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+    <rect x="398" y="62" width="164" height="5" rx="2.5" fill="#0F766E"/>
+    <text x="412" y="88" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#0F766E">03 · 创作页 / WRITE</text>
+    <text x="412" y="112" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" font-weight="700" fill="#0F172A">连续写章与编辑</text>
+    <text x="412" y="135" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">Vditor 沉浸编辑 · 版本锁</text>
+    <text x="412" y="155" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">选区批注与行内状态</text>
+  </g>
+  <path d="M566 119 H580 M575 114 L581 119 L575 124" stroke="#64748B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Step 4 -->
+  <g filter="url(#cardShadow)">
+    <rect x="585" y="62" width="164" height="114" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+    <rect x="585" y="62" width="164" height="5" rx="2.5" fill="#7C3AED"/>
+    <text x="599" y="88" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#7C3AED">04 · REVIEW DAG</text>
+    <text x="599" y="112" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" font-weight="700" fill="#0F172A">六域审稿与修订</text>
+    <text x="599" y="135" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">问题定位 · 选区 Diff 预览</text>
+    <text x="599" y="155" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">节点依赖与证据回溯</text>
+  </g>
+  <path d="M753 119 H767 M762 114 L768 119 L762 124" stroke="#64748B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Step 5 -->
+  <g filter="url(#cardShadow)">
+    <rect x="772" y="62" width="164" height="114" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+    <rect x="772" y="62" width="164" height="5" rx="2.5" fill="#D97706"/>
+    <text x="786" y="88" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#D97706">05 · 任务页 / EXPORT</text>
+    <text x="786" y="112" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" font-weight="700" fill="#0F172A">评测与成书导出</text>
+    <text x="786" y="135" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">多模型盲测质量与费用</text>
+    <text x="786" y="155" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#475569">MD / TXT / EPUB 一键成书</text>
+  </g>
+</svg>
