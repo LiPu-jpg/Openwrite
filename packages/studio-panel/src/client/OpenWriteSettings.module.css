@@ -591,3 +591,110 @@
 .companionLinks a:hover {
   text-decoration: underline;
 }
+
+.feedbackAssistant {
+  display: grid;
+  gap: 12px;
+  margin-top: 6px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 34%, var(--dsw-alias-border-l2));
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 92%, transparent);
+}
+
+.feedbackHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.feedbackHeader h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.feedbackHealth {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 76%, transparent);
+}
+
+.feedbackHealthTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.feedbackHealthList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.feedbackCategories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.feedbackCategory {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 75%, transparent);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.feedbackCategory[data-active='true'] {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, var(--dsw-alias-bg-layer-3));
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.feedbackField {
+  display: grid;
+  gap: 5px;
+}
+
+.feedbackField label {
+  font-size: 12px;
+  font-weight: 580;
+  color: var(--dsw-alias-label-primary);
+}
+
+.feedbackField input,
+.feedbackField textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.feedbackField textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.linkButtonDisabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  pointer-events: none;
+}

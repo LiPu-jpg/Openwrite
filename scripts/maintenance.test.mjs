@@ -252,7 +252,7 @@ test('real dsh plugin remove/add does not revive leftover deps as duplicate open
   assert.ok(revived.dsh.profile.bundles.includes('dsh-openwrite'))
   must('remove colliding new package before real migrate', run(['plugin', '--profile', 'web', 'remove', '-w', 'dsh-openwrite']))
   const migrated = await migrate(home, 'web', true, {
-    runPlugin: (dshHome, profile, args) => defaultRunPlugin(dshHome, profile, args),
+    runPlugin: (dshHome, profile, args) => defaultRunPlugin(dshHome, profile, args, env),
   })
   assert.equal(migrated.changed, true)
   const cleaned = JSON.parse(await readFile(profileFile, 'utf8'))

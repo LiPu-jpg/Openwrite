@@ -93,7 +93,7 @@ export function auditBundle(manifest, files, patch) {
 }
 
 async function checkProfiles(report) {
-  const home = process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh')
+  const home = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
   for (const profile of ['web', 'headless']) {
     const dir = join(home, 'profiles', profile)
     await report(`profile ${profile}`, async () => {

@@ -402,4 +402,59 @@ describe('WorkbenchStore context barrier', () => {
     expect(source.closed).toBe(true)
     stop()
   })
+
+  it('starts a fresh refresh when resubscribed immediately after stop() aborts an in-flight refresh', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', undefined)
+    const fetchMock = stubFetch([{ revision: 1 }])
+    vi.stubGlobal('fetch', fetchMock)
+    const store = await freshStore()
+
+    store.setContext(CONTEXT_A)
+    const stop1 = store.subscribe(() => undefined)
+    stop1() // aborts initial refresh before microtasks flush
+    const stop2 = store.subscribe(() => undefined)
+    await flush()
+
+    const workspaceCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes('/studio-panel/api/workspace'))
+    expect(workspaceCalls.length).toBeGreaterThanOrEqual(2)
+    expect(store.getSnapshot().chapters.length).toBe(1)
+    stop2()
+  })
+
+  it('does not flip connection to online from invalidation.json while backend workspace is offline', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', undefined)
+    let workspaceFails = true
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/studio-panel/invalidation.json')) {
+        return new Response(JSON.stringify({ revision: 1 }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (workspaceFails) {
+        return new Response(JSON.stringify({ ok: false, error: { code: 'ECONNREFUSED', message: 'down' } }), { status: 503, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/studio-panel/api/workspace')) {
+        return new Response(JSON.stringify({ ok: true, data: { novel_id: 'n1', title: '测试', active_chapter_path: 'chapters/ch_001.md', chapters: [] } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ ok: true, data: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const store = await freshStore()
+
+    const stop = store.subscribe(() => undefined)
+    store.setContext(CONTEXT_A)
+    await flush()
+    expect(store.getSnapshot().connection).toBe('offline')
+
+    // Even when invalidation.json returns 200, connection stays offline while /workspace fails
+    await flush(5_000)
+    expect(store.getSnapshot().connection).toBe('offline')
+
+    // Once backend recovers, the triggered refresh restores online
+    workspaceFails = false
+    await flush(5_000)
+    expect(store.getSnapshot().connection).toBe('online')
+    stop()
+  })
 })

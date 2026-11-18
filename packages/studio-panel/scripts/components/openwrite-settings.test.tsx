@@ -2,7 +2,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { OpenWriteSettings, sanitizeDiagnosticText } from '../../src/client/OpenWriteSettings.tsx'
+import {
+  analyzeFeedbackHealth,
+  OpenWriteSettings,
+  sanitizeDiagnosticText,
+  validateFeedbackDraft,
+} from '../../src/client/OpenWriteSettings.tsx'
+import { dispatchFeedbackToHostAgent } from '../../src/client/feedback-agent.ts'
 import {
   hasSeenReleaseAnnouncement,
   maybeShowReleaseAnnouncement,
@@ -345,8 +351,8 @@ describe('OpenWriteSettings', () => {
   })
 
   it('sanitizes unix, windows, and credential tokens in diagnostic strings', () => {
-    expect(sanitizeDiagnosticText('at /Users/alice/.dsh and /home/bob/.dsh and D:\\Users\\carol\\work sk-abcdefgh12345678'))
-      .toBe('at <HOME>/.dsh and <HOME>/.dsh and <HOME>\\work <REDACTED_KEY>')
+    expect(sanitizeDiagnosticText('at /Users/alice/.dsh and /home/bob/.dsh and D:\\Users\\carol\\work and C:/Users/dave/doc sk-abcdefgh12345678 https://example.com?api_key=secret123'))
+      .toBe('at <HOME>/.dsh and <HOME>/.dsh and <HOME>\\work and <HOME>/doc <REDACTED_KEY> https://example.com?api_key=<REDACTED>')
   })
 
   it('shows the OpenWrite release announcement modal only once per version update and allows manual reopen from settings', async () => {
@@ -444,5 +450,140 @@ describe('OpenWriteSettings', () => {
     await waitFor(() => expect(prefCalls).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
     fireEvent.click(screen.getByRole('tab', { name: '搜索' }))
     expect(await screen.findByText('当前默认：DSH')).toBeTruthy()
+  })
+
+  it('guides feedback through health pre-check, placeholder validation, and sanitized GitHub pre-fill', async () => {
+    expect(validateFeedbackDraft({ category: 'bug', title: '1111', description: 'some description here' })).toEqual({
+      valid: false,
+      errorKey: 'settings.feedback.validationMissingTitle',
+    })
+    expect(validateFeedbackDraft({ category: 'bug', title: '生成大纲超时', description: '太短' })).toEqual({
+      valid: false,
+      errorKey: 'settings.feedback.validationMissingDesc',
+    })
+    expect(analyzeFeedbackHealth(
+      { phase: 'error', message: 'boom' },
+      { studioUrl: 'http://127.0.0.1:18765', managed: true, available: false },
+      { available: false, provider: '', model: '', reasoningEffort: '' },
+      { host: '0.2.2-rc.3', dog: { installed: true, usable: false, version: '1.0.0', reason: 'mismatch' }, ops: { installed: false, usable: false }, freeModel: { installed: false, usable: false } },
+    ).map(item => item.key)).toEqual([
+      'settings.feedback.healthError',
+      'settings.feedback.healthBackendDown',
+      'settings.feedback.healthHostModelNone',
+      'settings.feedback.healthCompanionIncompatible',
+    ])
+
+    stubRoutes({
+      '/studio-panel/runtime': { phase: 'ready', message: '写作环境已就绪' },
+      '/studio-panel/config.json': { studioUrl: 'http://127.0.0.1:18765', managed: true, available: true },
+      '/studio-panel/host-model': { available: true, provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: '' },
+      '/studio-panel/companions': { host: '0.2.2-rc.3', dog: { installed: true, usable: true, version: '2.0.0-alpha.2' }, ops: { installed: false, usable: false }, freeModel: { installed: false, usable: false } },
+      '/studio-panel/api/research/preferences': { ok: true, data: { search_engine: 'dsh', fetch_engine: 'dsh', search_engines: [], fetch_engines: [] } },
+    })
+    render(<OpenWriteSettings t={t} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '提交问题 / 建议' }))
+    const assistant = await screen.findByTestId('openwrite-feedback-assistant')
+    expect(assistant.textContent).toContain('当前运行环境与模型状态正常')
+    expect(within(assistant).getByRole('button', { name: '前往 GitHub 提交（已预填标题与脱敏报告）' }).hasAttribute('disabled')).toBe(true)
+
+    fireEvent.change(within(assistant).getByLabelText('一句话标题（必填）'), {
+      target: { value: '1111' },
+    })
+    fireEvent.change(within(assistant).getByLabelText('现象与复现步骤（必填，自动脱敏路径与密钥）'), {
+      target: { value: '在 /Users/alice/Novels/Book 执行生成时携带 sk-1234567890abcdef 报错' },
+    })
+    expect(within(assistant).getByRole('button', { name: '前往 GitHub 提交（已预填标题与脱敏报告）' }).hasAttribute('disabled')).toBe(true)
+
+    fireEvent.change(within(assistant).getByLabelText('一句话标题（必填）'), {
+      target: { value: '生成章节大纲返回 502 超时' },
+    })
+    const submitLink = within(assistant).getByRole('link', { name: '前往 GitHub 提交（已预填标题与脱敏报告）' })
+    const href = submitLink.getAttribute('href') ?? ''
+    const parsed = new URL(href)
+    const bodyParam = parsed.searchParams.get('body') ?? ''
+    expect(href).toContain('https://github.com/LiPu-jpg/Openwrite/issues/new?')
+    expect(parsed.searchParams.get('title')).toBe('[Bug]: 生成章节大纲返回 502 超时')
+    expect(parsed.searchParams.get('labels')).toBe('bug')
+    expect(bodyParam).toContain('openwrite_version: v')
+    expect(bodyParam).toContain('<HOME>/Novels/Book')
+    expect(bodyParam).toContain('<REDACTED_KEY>')
+    expect(bodyParam).not.toContain('alice')
+    expect(bodyParam).not.toContain('sk-1234567890abcdef')
+  })
+
+  it('dispatches /feedback directly into the host Agent Loop and falls back to clipboard when unavailable', async () => {
+    const writeText = vi.fn(async () => undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+
+    stubRoutes({
+      '/studio-panel/runtime': { phase: 'ready', message: '写作环境已就绪' },
+      '/studio-panel/config.json': { studioUrl: 'http://127.0.0.1:18765', managed: true, available: true },
+      '/studio-panel/host-model': { available: true, provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: '' },
+      '/studio-panel/companions': { host: '0.2.2-rc.3', dog: { installed: true, usable: true, version: '2.0.0-alpha.2' }, ops: { installed: false, usable: false }, freeModel: { installed: false, usable: false } },
+      '/studio-panel/api/research/preferences': { ok: true, data: { search_engine: 'dsh', fetch_engine: 'dsh', search_engines: [], fetch_engines: [] } },
+    })
+
+    const onDispatch = vi.fn(async () => ({ status: 'dispatched' as const, sessionId: 'sess-ow-1' }))
+    render(<OpenWriteSettings t={t} onDispatchFeedbackToAgent={onDispatch} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '提交问题 / 建议' }))
+    const assistant = await screen.findByTestId('openwrite-feedback-assistant')
+    fireEvent.click(within(assistant).getByRole('button', { name: '让 Agent 自动排查（直连对话）' }))
+
+    await waitFor(() => expect(onDispatch).toHaveBeenCalledTimes(1))
+    expect(String(onDispatch.mock.calls[0]?.[0])).toContain('/feedback')
+    expect(String(onDispatch.mock.calls[0]?.[0])).toContain('openwrite_version: v')
+    expect(await within(assistant).findByText('已接入 OpenWrite 对话并发送排查指令，关闭设置窗口即可查看 Agent 自动排查与脱敏报告。')).toBeTruthy()
+
+    // Fallback path when host dispatch returns fallback
+    const onFallback = vi.fn(async () => ({ status: 'fallback' as const, reason: 'unavailable' }))
+    render(<OpenWriteSettings t={t} onDispatchFeedbackToAgent={onFallback} />)
+    const buttons = screen.getAllByRole('button', { name: '提交问题 / 建议' })
+    fireEvent.click(buttons[1]!)
+    const assistants = await screen.findAllByTestId('openwrite-feedback-assistant')
+    fireEvent.click(within(assistants[1]!).getByRole('button', { name: '让 Agent 自动排查（直连对话）' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalled())
+    expect(await within(assistants[1]!).findByText('当前无法直连对话，已为您复制 /feedback 指令，请粘贴到任意创作对话发送。')).toBeTruthy()
+  })
+
+  it('dispatchFeedbackToHostAgent reuses an active OpenWrite session or creates one on demand', async () => {
+    const promptFn = vi.fn(async () => ({ ok: true, value: { accepted: true } }))
+    const openSessionFn = vi.fn()
+    const createFn = vi.fn(async () => 'sess-created')
+
+    const resExisting = await dispatchFeedbackToHostAgent({
+      sessions: {
+        list: {
+          getSnapshot: () => ({
+            ids: ['sess-1'],
+            byId: { 'sess-1': { retainedBy: { mainView: 1 }, projectionValues: { agentPreset: 'openwrite' } } },
+          }),
+        },
+        create: createFn,
+        scope: () => ({}),
+        sessionOf: () => ({ prompt: promptFn }),
+      } as never,
+      uiWorkspace: { openSession: openSessionFn },
+    }, '/feedback test')
+    expect(resExisting).toEqual({ status: 'dispatched', sessionId: 'sess-1' })
+    expect(createFn).not.toHaveBeenCalled()
+    expect(promptFn).toHaveBeenCalledWith([{ type: 'text', text: '/feedback test' }], 'queue')
+    expect(openSessionFn).toHaveBeenCalledWith('sess-1')
+
+    const resCreated = await dispatchFeedbackToHostAgent({
+      sessions: {
+        list: {
+          getSnapshot: () => ({ ids: [], byId: {} }),
+        },
+        create: createFn,
+        scope: () => ({}),
+        sessionOf: () => ({ prompt: promptFn }),
+      } as never,
+      uiWorkspace: { openSession: openSessionFn },
+    }, '/feedback new-session')
+    expect(resCreated).toEqual({ status: 'dispatched', sessionId: 'sess-created' })
+    expect(createFn).toHaveBeenCalledWith({ agentPreset: 'openwrite' })
+    expect(openSessionFn).toHaveBeenCalledWith('sess-created')
   })
 })

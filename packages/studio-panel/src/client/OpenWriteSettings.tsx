@@ -22,7 +22,7 @@ import { SearchSettings } from './SearchSettings.tsx'
 import { fetchGlobalStudioApi } from './api.ts'
 import { parseHostModelCatalog, type HostModelCatalogDto } from './dto.ts'
 import type { StudioPanelKey } from './locales.ts'
-import { showReleaseAnnouncementModal } from './ReleaseAnnouncement.ts'
+import { resolveOpenWriteVersion, showReleaseAnnouncementModal } from './ReleaseAnnouncement.ts'
 import css from './OpenWriteSettings.module.css'
 
 /** The host's default-model selection, as the host's own route reports it. */
@@ -195,11 +195,12 @@ export const GITHUB_REPO_URL = 'https://github.com/LiPu-jpg/Openwrite'
  */
 export function sanitizeDiagnosticText(input: string): string {
   return input
+    .replace(/[A-Za-z]:[\\/]Users[\\/][^\\/\s"':;]+/g, '<HOME>')
     .replace(/\/Users\/[^/\s"':;]+/g, '<HOME>')
     .replace(/\/home\/[^/\s"':;]+/g, '<HOME>')
-    .replace(/[A-Za-z]:\\Users\\[^\\\s"':;]+/g, '<HOME>')
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer <REDACTED>')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '<REDACTED_KEY>')
+    .replace(/([?&](?:api_?key|token|secret|auth)=)[^&\s"'`]+/gi, '$1<REDACTED>')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[po]_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{20,})\b/g, '<REDACTED_KEY>')
 }
 
 /**
@@ -219,11 +220,16 @@ export function formatDiagnosticReport(
     const ver = entry.version !== null && entry.version !== '' ? `@${entry.version}` : ''
     return `${name}${ver}: ${entry.usable ? 'usable' : `incompatible (${sanitizeDiagnosticText(entry.reason ?? 'unknown')})`}`
   }
+  const platform = typeof navigator !== 'undefined' && typeof navigator.platform === 'string' && navigator.platform !== ''
+    ? sanitizeDiagnosticText(navigator.platform)
+    : 'unknown'
   const lines = [
+    `openwrite_version: v${resolveOpenWriteVersion()}`,
     `host_dsh: ${companions?.host ?? 'unknown'}`,
+    `platform: ${platform}`,
     `runtime_phase: ${runtime?.phase ?? 'unavailable'}`,
     `backend_mode: ${backend === null ? 'unavailable' : backend.managed ? 'managed' : 'external'}`,
-    `backend_available: ${backend?.available === undefined ? 'unknown' : String(backend.available)}`,
+    `backend_available: ${backend === null ? 'unknown' : String(backend.available !== false)}`,
     `host_model: ${hostModel === null ? 'unavailable' : hostModel.available ? `${hostModel.provider}/${hostModel.model}` : 'none'}`,
     `companions: ${[
       companionLine('dsh-dog', companions?.dog),
@@ -240,8 +246,152 @@ export function formatDiagnosticReport(
   return lines.join('\n')
 }
 
-/** Pre-fill a GitHub issue URL with the sanitized diagnostic summary. */
-export function buildGitHubIssueUrl(diagnosticReport: string): string {
+export type FeedbackCategory = 'bug' | 'install' | 'model' | 'feature'
+
+export interface FeedbackDraft {
+  category: FeedbackCategory
+  title: string
+  description: string
+}
+
+export interface FeedbackFinding {
+  key: StudioPanelKey
+  list?: string
+  severity: 'info' | 'warn'
+}
+
+const CATEGORY_TITLE_PREFIX: Readonly<Record<FeedbackCategory, string>> = {
+  bug: '[Bug]: ',
+  install: '[Install]: ',
+  model: '[Model]: ',
+  feature: '[Feature]: ',
+}
+
+const CATEGORY_LABEL_KEYS: Readonly<Record<FeedbackCategory, StudioPanelKey>> = {
+  bug: 'settings.feedback.category.bug',
+  install: 'settings.feedback.category.install',
+  model: 'settings.feedback.category.model',
+  feature: 'settings.feedback.category.feature',
+}
+
+const FEEDBACK_CATEGORIES: readonly FeedbackCategory[] = ['bug', 'install', 'model', 'feature'] as const
+
+/**
+ * Inspect current runtime/backend/model/companion states and surface actionable
+ * local self-checks before the author files an upstream GitHub issue.
+ */
+export function analyzeFeedbackHealth(
+  runtime: RuntimeStatus | null,
+  backend: StudioBackend | null,
+  hostModel: HostModelSelection | null,
+  companions: CompanionStatus | null,
+): FeedbackFinding[] {
+  const findings: FeedbackFinding[] = []
+  if (runtime?.phase === 'idle') {
+    findings.push({ key: 'settings.feedback.healthIdle', severity: 'warn' })
+  } else if (runtime?.phase === 'error') {
+    findings.push({ key: 'settings.feedback.healthError', severity: 'warn' })
+  }
+  if (backend?.available === false) {
+    findings.push({ key: 'settings.feedback.healthBackendDown', severity: 'warn' })
+  }
+  if (hostModel !== null && hostModel.available !== true) {
+    findings.push({ key: 'settings.feedback.healthHostModelNone', severity: 'warn' })
+  }
+  const incompatible: string[] = []
+  if (companions?.dog?.installed && !companions.dog.usable) incompatible.push('dsh-dog')
+  if (companions?.ops?.installed && !companions.ops.usable) incompatible.push('dsh-ops')
+  if (companions?.freeModel?.installed && !companions.freeModel.usable) incompatible.push('dsh-our-free-model')
+  if (incompatible.length > 0) {
+    findings.push({
+      key: 'settings.feedback.healthCompanionIncompatible',
+      list: incompatible.join(', '),
+      severity: 'warn',
+    })
+  }
+  if (findings.length === 0) {
+    findings.push({ key: 'settings.feedback.healthOk', severity: 'info' })
+  }
+  return findings
+}
+
+function isMeaningfulText(value: string, minLength: number): boolean {
+  const compact = value.replace(/\s+/g, '')
+  if (compact.length < minLength) return false
+  // Reject repeated single-character placeholders like "1111" or "aaaa".
+  if (/^(.)\1+$/u.test(compact)) return false
+  // Require at least one letter/CJK character so pure digits/punctuation don't pass as a title.
+  return /[\p{L}]/u.test(compact)
+}
+
+/** Validate that a feedback draft has a real title and description before opening GitHub. */
+export function validateFeedbackDraft(draft: FeedbackDraft): { valid: boolean; errorKey: StudioPanelKey | null } {
+  if (!isMeaningfulText(draft.title, 4)) {
+    return { valid: false, errorKey: 'settings.feedback.validationMissingTitle' }
+  }
+  if (!isMeaningfulText(draft.description, 10)) {
+    return { valid: false, errorKey: 'settings.feedback.validationMissingDesc' }
+  }
+  return { valid: true, errorKey: null }
+}
+
+/** Build a sanitized title and Markdown body from a guided feedback draft. */
+export function formatFeedbackMarkdown(diagnosticReport: string, draft: FeedbackDraft): { title: string; body: string } {
+  const cleanTitle = sanitizeDiagnosticText(draft.title.trim())
+  const cleanDesc = sanitizeDiagnosticText(draft.description.trim())
+  const title = `${CATEGORY_TITLE_PREFIX[draft.category]}${cleanTitle}`
+  const body = [
+    '## 问题描述 / What happened',
+    cleanDesc,
+    '',
+    '## 脱敏环境诊断 / Sanitized Diagnostics',
+    '```text',
+    diagnosticReport,
+    '```',
+  ].join('\n')
+  return { title, body }
+}
+
+/** Result of dispatching a `/feedback` prompt directly into the host's Agent Loop. */
+export type FeedbackAgentDispatchResult =
+  | { status: 'dispatched'; sessionId: string }
+  | { status: 'fallback'; reason?: string }
+
+export interface OpenWriteSettingsProps extends PropsLocale<'studio-panel'> {
+  onDispatchFeedbackToAgent?: (prompt: string) => Promise<FeedbackAgentDispatchResult>
+}
+
+/** Build a sanitized `/feedback` prompt for the host Agent Loop. */
+export function buildAgentFeedbackPrompt(diagnosticReport: string, draft?: Partial<FeedbackDraft>): string {
+  const cleanTitle = draft?.title !== undefined ? sanitizeDiagnosticText(draft.title.trim()) : ''
+  const cleanDesc = draft?.description !== undefined ? sanitizeDiagnosticText(draft.description.trim()) : ''
+  const lines = [
+    '/feedback 请帮我排查以下问题，先尝试在本机自检或修复；若确需提交社区 Issue，请在彻底剥离小说正文、大纲、人设、本机路径与密钥后输出脱敏报告与一键提交链接。',
+  ]
+  if (draft?.category !== undefined) {
+    lines.push(`- 问题类型：${draft.category}`)
+  }
+  if (cleanTitle !== '') {
+    lines.push(`- 症状摘要：${cleanTitle}`)
+  }
+  if (cleanDesc !== '') {
+    lines.push(`- 现象描述：${cleanDesc}`)
+  }
+  lines.push('', '当前脱敏环境诊断：', '```text', diagnosticReport, '```')
+  return lines.join('\n')
+}
+
+/** Pre-fill a GitHub issue URL with the sanitized diagnostic summary (and optional guided draft). */
+export function buildGitHubIssueUrl(diagnosticReport: string, draft?: FeedbackDraft): string {
+  if (draft !== undefined) {
+    const { title, body } = formatFeedbackMarkdown(diagnosticReport, draft)
+    const params = new URLSearchParams({
+      title,
+      body,
+      labels: draft.category === 'feature' ? 'enhancement' : 'bug',
+    })
+    return `${GITHUB_REPO_URL}/issues/new?${params.toString()}`
+  }
   const body = [
     '## 问题描述 / What happened',
     '（请简述遇到的问题或复现步骤，无需粘贴任何小说正文、大纲或人物设定）',
@@ -254,7 +404,7 @@ export function buildGitHubIssueUrl(diagnosticReport: string): string {
   return `${GITHUB_REPO_URL}/issues/new?body=${encodeURIComponent(body)}`
 }
 
-export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Element {
+export function OpenWriteSettings({ t, onDispatchFeedbackToAgent }: OpenWriteSettingsProps): JSX.Element {
   const [tab, setTab] = useState<OpenWriteSettingsTab>(readStoredTab)
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null)
   const [backend, setBackend] = useState<StudioBackend | null>(null)
@@ -265,6 +415,13 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
   const [notice, setNotice] = useState('')
   const [copied, setCopied] = useState(false)
   const [copiedFeedbackCmd, setCopiedFeedbackCmd] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackCategory, setFeedbackCategory] = useState<FeedbackCategory>('bug')
+  const [feedbackTitle, setFeedbackTitle] = useState('')
+  const [feedbackDescription, setFeedbackDescription] = useState('')
+  const [feedbackCategoryTouched, setFeedbackCategoryTouched] = useState(false)
+  const [copiedFullReport, setCopiedFullReport] = useState(false)
+  const [agentDispatchState, setAgentDispatchState] = useState<'idle' | 'sending' | 'dispatched' | 'fallback'>('idle')
   const [attempt, setAttempt] = useState(0)
   const [preparePending, setPreparePending] = useState(false)
   const [readyEpoch, setReadyEpoch] = useState(0)
@@ -361,6 +518,21 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
   const preparing = runtime !== null && BUSY_PHASES.has(runtime.phase)
   const diagnosticReport = formatDiagnosticReport(runtime, backend, hostModel, companions)
   const issueUrl = buildGitHubIssueUrl(diagnosticReport)
+  const healthFindings = analyzeFeedbackHealth(runtime, backend, hostModel, companions)
+  const inferredCategory: FeedbackCategory =
+    runtime?.phase === 'error' || runtime?.phase === 'idle' || backend?.available === false
+      ? 'install'
+      : hostModel !== null && hostModel.available !== true
+        ? 'model'
+        : 'bug'
+  const activeCategory = feedbackCategoryTouched ? feedbackCategory : inferredCategory
+  const feedbackDraft: FeedbackDraft = {
+    category: activeCategory,
+    title: feedbackTitle,
+    description: feedbackDescription,
+  }
+  const draftValidation = validateFeedbackDraft(feedbackDraft)
+  const guidedIssueUrl = draftValidation.valid ? buildGitHubIssueUrl(diagnosticReport, feedbackDraft) : ''
 
   const copyDiagnostics = async () => {
     try {
@@ -378,6 +550,38 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
       // Clipboard write is best-effort in restricted webviews.
     }
     setCopiedFeedbackCmd(true)
+  }
+
+  const copyFullFeedbackReport = async () => {
+    const { title, body } = formatFeedbackMarkdown(diagnosticReport, feedbackDraft)
+    try {
+      await navigator.clipboard?.writeText(`# ${title}\n\n${body}`)
+    } catch {
+      // Clipboard write is best-effort in restricted webviews.
+    }
+    setCopiedFullReport(true)
+  }
+
+  const dispatchToAgent = async () => {
+    const prompt = buildAgentFeedbackPrompt(diagnosticReport, feedbackDraft)
+    setAgentDispatchState('sending')
+    try {
+      if (onDispatchFeedbackToAgent !== undefined) {
+        const result = await onDispatchFeedbackToAgent(prompt)
+        if (result.status === 'dispatched') {
+          setAgentDispatchState('dispatched')
+          return
+        }
+      }
+    } catch {
+      // Fall back to clipboard copy below.
+    }
+    try {
+      await navigator.clipboard?.writeText(prompt)
+    } catch {
+      // Clipboard write is best-effort in restricted webviews.
+    }
+    setAgentDispatchState('fallback')
   }
 
   return <section className={css.page}>
@@ -477,18 +681,123 @@ export function OpenWriteSettings({ t }: PropsLocale<'studio-panel'>): JSX.Eleme
             className={css.linkButton}
             onClick={() => void copyFeedbackCommand()}
           >{copiedFeedbackCmd ? t('settings.support.copiedFeedbackCmd') : t('settings.support.copyFeedbackCmd')}</button>
-          <a
+          <button
+            type="button"
             className={css.linkButton}
-            href={issueUrl}
-            target="_blank"
-            rel="noreferrer"
-          >{t('settings.support.feedback')}</a>
+            aria-expanded={feedbackOpen}
+            onClick={() => setFeedbackOpen(open => !open)}
+          >{t('settings.support.feedback')}</button>
           <button
             type="button"
             className={css.linkButton}
             onClick={() => showReleaseAnnouncementModal({ t, issueUrl })}
           >{t('settings.support.releaseNotes')}</button>
         </div>
+        {feedbackOpen && (
+          <div className={css.feedbackAssistant} data-testid="openwrite-feedback-assistant">
+            <div className={css.feedbackHeader}>
+              <h4>{t('settings.feedback.title')}</h4>
+              <button
+                type="button"
+                className={css.linkButton}
+                onClick={() => setFeedbackOpen(false)}
+              >{t('settings.feedback.close')}</button>
+            </div>
+            <p className={css.hint}>{t('settings.feedback.subtitle')}</p>
+            <div className={css.feedbackHealth}>
+              <p className={css.feedbackHealthTitle}>{t('settings.feedback.healthTitle')}</p>
+              <ul className={css.feedbackHealthList}>
+                {healthFindings.map(finding => {
+                  const text = finding.list !== undefined
+                    ? t(finding.key).replace('{list}', finding.list)
+                    : t(finding.key)
+                  return <li key={`${finding.key}:${finding.list ?? ''}`}>{text}</li>
+                })}
+              </ul>
+            </div>
+            <div className={css.feedbackField}>
+              <label>{t('settings.feedback.categoryLabel')}</label>
+              <div className={css.feedbackCategories}>
+                {FEEDBACK_CATEGORIES.map(category => (
+                  <button
+                    key={category}
+                    type="button"
+                    className={css.feedbackCategory}
+                    data-active={activeCategory === category}
+                    onClick={() => {
+                      setFeedbackCategory(category)
+                      setFeedbackCategoryTouched(true)
+                    }}
+                  >{t(CATEGORY_LABEL_KEYS[category])}</button>
+                ))}
+              </div>
+            </div>
+            <div className={css.feedbackField}>
+              <label htmlFor="openwrite-feedback-title">{t('settings.feedback.summaryLabel')}</label>
+              <input
+                id="openwrite-feedback-title"
+                type="text"
+                value={feedbackTitle}
+                placeholder={t('settings.feedback.summaryPlaceholder')}
+                onChange={event => {
+                  setFeedbackTitle(event.target.value)
+                  setCopiedFullReport(false)
+                  setAgentDispatchState('idle')
+                }}
+              />
+            </div>
+            <div className={css.feedbackField}>
+              <label htmlFor="openwrite-feedback-description">{t('settings.feedback.descriptionLabel')}</label>
+              <textarea
+                id="openwrite-feedback-description"
+                value={feedbackDescription}
+                placeholder={t('settings.feedback.descriptionPlaceholder')}
+                onChange={event => {
+                  setFeedbackDescription(event.target.value)
+                  setCopiedFullReport(false)
+                  setAgentDispatchState('idle')
+                }}
+              />
+            </div>
+            {!draftValidation.valid && draftValidation.errorKey !== null && (
+              <p className={css.hint} role="status">{t(draftValidation.errorKey)}</p>
+            )}
+            <div className={css.actions}>
+              <button
+                type="button"
+                className={css.starButton}
+                disabled={agentDispatchState === 'sending'}
+                onClick={() => void dispatchToAgent()}
+              >{agentDispatchState === 'sending' ? t('settings.feedback.askingAgent') : t('settings.feedback.askAgent')}</button>
+              {draftValidation.valid ? (
+                <a
+                  className={css.starButton}
+                  href={guidedIssueUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >{t('settings.feedback.submitGithub')}</a>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className={`${css.starButton} ${css.linkButtonDisabled}`}
+                >{t('settings.feedback.submitGithub')}</button>
+              )}
+              <button
+                type="button"
+                disabled={!draftValidation.valid}
+                className={css.linkButton}
+                onClick={() => void copyFullFeedbackReport()}
+              >{copiedFullReport ? t('settings.feedback.copiedMarkdown') : t('settings.feedback.copyMarkdown')}</button>
+            </div>
+            {agentDispatchState === 'dispatched' && (
+              <p className={css.hint} role="status">{t('settings.feedback.agentDispatched')}</p>
+            )}
+            {agentDispatchState === 'fallback' && (
+              <p className={css.hint} role="status">{t('settings.feedback.agentFallback')}</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
 

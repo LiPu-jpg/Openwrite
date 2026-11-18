@@ -1255,6 +1255,34 @@ export type StudioPanelKey =
   | 'settings.support.copyFeedbackCmd'
   | 'settings.support.copiedFeedbackCmd'
   | 'settings.support.releaseNotes'
+  | 'settings.feedback.title'
+  | 'settings.feedback.subtitle'
+  | 'settings.feedback.healthTitle'
+  | 'settings.feedback.healthOk'
+  | 'settings.feedback.healthIdle'
+  | 'settings.feedback.healthError'
+  | 'settings.feedback.healthBackendDown'
+  | 'settings.feedback.healthHostModelNone'
+  | 'settings.feedback.healthCompanionIncompatible'
+  | 'settings.feedback.categoryLabel'
+  | 'settings.feedback.category.bug'
+  | 'settings.feedback.category.install'
+  | 'settings.feedback.category.model'
+  | 'settings.feedback.category.feature'
+  | 'settings.feedback.summaryLabel'
+  | 'settings.feedback.summaryPlaceholder'
+  | 'settings.feedback.descriptionLabel'
+  | 'settings.feedback.descriptionPlaceholder'
+  | 'settings.feedback.validationMissingTitle'
+  | 'settings.feedback.validationMissingDesc'
+  | 'settings.feedback.submitGithub'
+  | 'settings.feedback.copyMarkdown'
+  | 'settings.feedback.copiedMarkdown'
+  | 'settings.feedback.askAgent'
+  | 'settings.feedback.askingAgent'
+  | 'settings.feedback.agentDispatched'
+  | 'settings.feedback.agentFallback'
+  | 'settings.feedback.close'
   | 'settings.releaseModal.badge'
   | 'settings.releaseModal.title'
   | 'settings.releaseModal.intro'
@@ -2542,6 +2570,34 @@ export const zh: Record<StudioPanelKey, string> = {
   'settings.support.copyFeedbackCmd': '复制 /feedback 指令（交给 Agent 排查）',
   'settings.support.copiedFeedbackCmd': '已复制 /feedback，去对话粘贴即可',
   'settings.support.releaseNotes': '查看本版更新说明',
+  'settings.feedback.title': '智能问题反馈助手',
+  'settings.feedback.subtitle': '先做环境自检与结构化脱敏，避免提交空白或泄露隐私的 Issue。',
+  'settings.feedback.healthTitle': '环境自动预检',
+  'settings.feedback.healthOk': '当前运行环境与模型状态正常。推荐直接在创作对话中输入 /feedback 让 Agent 自动排查上下文日志；若需直接提交到 GitHub，请填写下方摘要。',
+  'settings.feedback.healthIdle': '写作环境尚未准备就绪，建议先点击上方「准备写作环境」初始化后再试。',
+  'settings.feedback.healthError': '检测到写作环境异常，建议先尝试「重试准备环境」；若重试仍失败，可在下方补充操作步骤后提交。',
+  'settings.feedback.healthBackendDown': 'Studio 后端当前不可达，请检查后端状态或重试启动。',
+  'settings.feedback.healthHostModelNone': '尚未检测到可用的宿主默认模型，可先前往「宿主与模型」页签确认配置。',
+  'settings.feedback.healthCompanionIncompatible': '检测到不兼容的伴生插件（{list}），建议在 DSH 中升级对应插件。',
+  'settings.feedback.categoryLabel': '问题类型',
+  'settings.feedback.category.bug': '功能报错 / 异常',
+  'settings.feedback.category.install': '安装 / 启动失败',
+  'settings.feedback.category.model': '模型 / 检索配置',
+  'settings.feedback.category.feature': '功能建议 / 优化',
+  'settings.feedback.summaryLabel': '一句话标题（必填）',
+  'settings.feedback.summaryPlaceholder': '例如：生成章节大纲时提示网关超时 / 工作台无法挂载',
+  'settings.feedback.descriptionLabel': '现象与复现步骤（必填，自动脱敏路径与密钥）',
+  'settings.feedback.descriptionPlaceholder': '请简述操作步骤、预期结果与实际报错（无需粘贴小说正文或人设）',
+  'settings.feedback.validationMissingTitle': '请填写至少 4 个字的有效问题标题（避免纯数字或无意义占位符）。',
+  'settings.feedback.validationMissingDesc': '请填写至少 10 个字的现象或复现步骤，方便定位问题。',
+  'settings.feedback.submitGithub': '前往 GitHub 提交（已预填标题与脱敏报告）',
+  'settings.feedback.copyMarkdown': '复制完整脱敏报告',
+  'settings.feedback.copiedMarkdown': '已复制完整脱敏报告',
+  'settings.feedback.askAgent': '让 Agent 自动排查（直连对话）',
+  'settings.feedback.askingAgent': '正在接入 OpenWrite 对话…',
+  'settings.feedback.agentDispatched': '已接入 OpenWrite 对话并发送排查指令，关闭设置窗口即可查看 Agent 自动排查与脱敏报告。',
+  'settings.feedback.agentFallback': '当前无法直连对话，已为您复制 /feedback 指令，请粘贴到任意创作对话发送。',
+  'settings.feedback.close': '收起',
   'settings.releaseModal.badge': '版本更新说明 · 每次更新仅弹出一次',
   'settings.releaseModal.title': '说点心里话：如果你觉得 OpenWrite 好用，想请你顺手点个 Star',
   'settings.releaseModal.intro': '这个弹窗只在每次版本更新后出现一次。OpenWrite 是完全免费、开源、无广告的长篇小说工作台——你的大纲、人设、世界观与每一章正文都留在你自己的本地硬盘，不把心血手稿交给任何人。',
@@ -3823,6 +3879,34 @@ export const en: Record<StudioPanelKey, string> = {
   'settings.support.copyFeedbackCmd': 'Copy /feedback prompt (for Agent)',
   'settings.support.copiedFeedbackCmd': 'Copied /feedback prompt',
   'settings.support.releaseNotes': 'View release notes',
+  'settings.feedback.title': 'Smart Feedback Assistant',
+  'settings.feedback.subtitle': 'Runs a quick environment pre-check and sanitizes your report before opening GitHub.',
+  'settings.feedback.healthTitle': 'Environment pre-check',
+  'settings.feedback.healthOk': 'Runtime and model status look healthy. For in-chat errors, typing /feedback in chat is recommended so the Agent inspects logs automatically; or fill in the summary below to open GitHub.',
+  'settings.feedback.healthIdle': 'Writing environment is not prepared yet — try clicking "Prepare writing environment" above first.',
+  'settings.feedback.healthError': 'Runtime error detected — try "Retry preparation" first; if it persists, describe the steps below and submit.',
+  'settings.feedback.healthBackendDown': 'Studio backend is unreachable; check backend status or retry startup.',
+  'settings.feedback.healthHostModelNone': 'No usable host default model detected — check the "Host & Models" tab first.',
+  'settings.feedback.healthCompanionIncompatible': 'Incompatible companion plugin(s) detected ({list}) — consider updating them in DSH.',
+  'settings.feedback.categoryLabel': 'Category',
+  'settings.feedback.category.bug': 'Bug / Unexpected error',
+  'settings.feedback.category.install': 'Install / Boot failure',
+  'settings.feedback.category.model': 'Model / Search config',
+  'settings.feedback.category.feature': 'Feature request',
+  'settings.feedback.summaryLabel': 'Short title (required)',
+  'settings.feedback.summaryPlaceholder': 'e.g. Gateway timeout when generating outline / Workbench failed to mount',
+  'settings.feedback.descriptionLabel': 'What happened & steps to reproduce (required, auto-sanitized)',
+  'settings.feedback.descriptionPlaceholder': 'Describe steps, expected behavior, and actual error (do not paste novel text or character sheets)',
+  'settings.feedback.validationMissingTitle': 'Please enter a meaningful title of at least 4 characters (avoid repeated placeholders).',
+  'settings.feedback.validationMissingDesc': 'Please describe the issue or steps in at least 10 characters.',
+  'settings.feedback.submitGithub': 'Open GitHub with pre-filled report',
+  'settings.feedback.copyMarkdown': 'Copy full sanitized report',
+  'settings.feedback.copiedMarkdown': 'Full report copied',
+  'settings.feedback.askAgent': 'Ask Agent to diagnose (auto-send to chat)',
+  'settings.feedback.askingAgent': 'Sending to OpenWrite chat…',
+  'settings.feedback.agentDispatched': 'Sent to OpenWrite chat — close Settings to watch the Agent diagnose and draft a sanitized report.',
+  'settings.feedback.agentFallback': 'Could not attach to a chat directly — copied /feedback prompt so you can paste it in any chat.',
+  'settings.feedback.close': 'Collapse',
   'settings.releaseModal.badge': 'Release notes · Shown once per update',
   'settings.releaseModal.title': 'A quick note from OpenWrite: if it helps your writing, please give it a Star',
   'settings.releaseModal.intro': 'This popup appears only once after each version update. OpenWrite is a free, open-source, ad-free long-form novel workbench — your outlines, characters, worldbuilding, and chapters stay on your own local disk.',

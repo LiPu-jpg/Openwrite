@@ -719,7 +719,7 @@ export function CreationView(props: CreationViewProps) {
   const moveTargetMax = readingOrder === null ? 0 : Math.max(0,
     readingOrder.documents.filter(document => document.volume_id === moveVolumeId).length -
       (activeChapter?.volumeId === moveVolumeId ? 1 : 0))
-  const documentIdentity = `${String(workbench.contextEpoch)}:${workspaceId ?? ''}:${activeChapter?.occurrenceId ?? ''}:${activeDocumentId}:${path}`
+  const documentIdentity = `${String(workbench.contextEpoch)}:${workspaceId ?? ''}:${path}`
   const documentIdentityRef = useRef(documentIdentity)
   documentIdentityRef.current = documentIdentity
   const editorSessionKey = `${documentIdentity}:${editorEpoch}`
@@ -1326,7 +1326,7 @@ export function CreationView(props: CreationViewProps) {
       queuedManualRef.current = false
       if (!mountedRef.current) return
       const requestStillCurrent = documentIdentityRef.current === request.identity
-      if ((succeeded || !requestStillCurrent) && (queued || dirtyRef.current)) {
+      if ((succeeded || !requestStillCurrent || (queued && queuedForce)) && (queued || dirtyRef.current)) {
         void saveRef.current(queuedForce, queuedManual ? 'manual' : 'autosave')
       }
     }

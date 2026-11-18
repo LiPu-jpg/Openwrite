@@ -129,35 +129,57 @@ export function apply(ctx: Context, config: Config) {
       return { provider, model, ...(effort === '' ? {} : { reasoningEffort: effort }) }
     } catch { return undefined }
   }
+  let relayDisposed = false
+  let relayPending: Promise<HostLlmRelay | undefined> | undefined
   const ensureRelay = async (): Promise<HostLlmRelay | undefined> => {
+    if (relayDisposed) return undefined
     if (relay !== undefined) return relay
+    if (relayPending !== undefined) return relayPending
     let llm
     try { llm = ctx.get('llm') } catch { return undefined }
     if (llm === undefined || llm === null) return undefined
-    const created = new HostLlmRelay({
-      llm: llm as unknown as HostLlmService,
-      token: newRelayToken(),
-      defaultSelection,
-    })
-    await created.listen()
-    relay = created
-    return relay
+    relayPending = (async () => {
+      const created = new HostLlmRelay({
+        llm: llm as unknown as HostLlmService,
+        token: newRelayToken(),
+        defaultSelection,
+      })
+      await created.listen()
+      if (relayDisposed) {
+        void created.close()
+        return undefined
+      }
+      relay = created
+      return relay
+    })().finally(() => { relayPending = undefined })
+    return relayPending
   }
-  ctx.effect(() => () => { void relay?.close(); relay = undefined }, 'openwrite: host llm relay cleanup')
+  ctx.effect(() => () => { relayDisposed = true; void relay?.close(); relay = undefined }, 'openwrite: host llm relay cleanup')
   // The relay onto the host's own web search/fetch. Only the managed runtime
   // needs it; an external Studio keeps its own search providers.
   let webRelay: HostWebRelay | undefined
+  let webRelayDisposed = false
+  let webRelayPending: Promise<HostWebRelay | undefined> | undefined
   const ensureWebRelay = async (): Promise<HostWebRelay | undefined> => {
+    if (webRelayDisposed) return undefined
     if (webRelay !== undefined) return webRelay
+    if (webRelayPending !== undefined) return webRelayPending
     let web
     try { web = ctx.get('web') } catch { return undefined }
     if (web === undefined || web === null) return undefined
-    const created = new HostWebRelay({ web: web as unknown as HostWebService, token: newRelayToken() })
-    await created.listen()
-    webRelay = created
-    return created
+    webRelayPending = (async () => {
+      const created = new HostWebRelay({ web: web as unknown as HostWebService, token: newRelayToken() })
+      await created.listen()
+      if (webRelayDisposed) {
+        void created.close()
+        return undefined
+      }
+      webRelay = created
+      return webRelay
+    })().finally(() => { webRelayPending = undefined })
+    return webRelayPending
   }
-  ctx.effect(() => () => { void webRelay?.close(); webRelay = undefined }, 'openwrite: host web relay cleanup')
+  ctx.effect(() => () => { webRelayDisposed = true; void webRelay?.close(); webRelay = undefined }, 'openwrite: host web relay cleanup')
   // A supplied legacy baseUrl remains external; the standard bundle selects managed explicitly.
   const runtime = config.mode === 'managed' ? new ManagedRuntime(
     config.runtimeRoot ?? join(process.env['DSH_HOME']?.trim() || join(homedir(), '.dsh'), 'openwrite'),

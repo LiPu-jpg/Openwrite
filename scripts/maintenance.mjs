@@ -58,13 +58,13 @@ export async function inspectPresets(home) {
   return presets
 }
 
-export function defaultRunPlugin(home, _profile, args) {
-  const bin = process.env.DSH_BIN
+export function defaultRunPlugin(home, _profile, args, baseEnv = process.env) {
+  const bin = baseEnv.DSH_BIN ?? process.env.DSH_BIN
   const command = bin && /\.[cm]?js$/.test(bin) ? process.execPath : (bin || 'dsh')
   const argv = bin && /\.[cm]?js$/.test(bin) ? [bin, ...args] : args
   const result = spawnSync(command, argv, {
     cwd: home,
-    env: { ...process.env, DSH_HOME: home },
+    env: { ...baseEnv, DSH_HOME: home },
     encoding: 'utf8',
     timeout: 120_000,
     maxBuffer: 8 * 1024 ** 2,

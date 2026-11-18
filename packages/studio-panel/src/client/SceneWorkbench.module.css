@@ -31,6 +31,19 @@
 .sceneHeading,
 .rollbackRow {
   justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.migrationHeading > div {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.migrationHeading code,
+.statusRow code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .header h2,

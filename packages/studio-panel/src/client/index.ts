@@ -1,6 +1,7 @@
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { displayedSessionId, isWritingSession, watchWritingScope } from './writing-scope.ts'
-import { OpenWriteSettings } from './OpenWriteSettings.tsx'
+import { OpenWriteSettings, type OpenWriteSettingsProps } from './OpenWriteSettings.tsx'
+import { dispatchFeedbackToHostAgent } from './feedback-agent.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
@@ -231,12 +232,25 @@ function* install(ctx: Context): Generator<() => void> {
   // second SDK copy into the build — the same trade the turn-tail slot makes.
   yield injectSlot('settings.section' as unknown as Parameters<typeof ctx.slots.inject>[0], () => {
     const register = ctx.slots.register.bind(ctx.slots) as unknown as (
-      options: { name: 'settings.section'; id: string; order: number; label: () => string; locale: typeof NS },
+      options: {
+        name: 'settings.section'
+        id: string
+        order: number
+        label: () => string
+        locale: typeof NS
+        inject?: () => Pick<OpenWriteSettingsProps, 'onDispatchFeedbackToAgent'>
+      },
       component: typeof OpenWriteSettings,
     ) => () => void
     return register({
       name: 'settings.section', id: 'openwrite', order: 30,
       label: () => t('settings.section.label'), locale: NS,
+      inject: () => ({
+        onDispatchFeedbackToAgent: prompt => dispatchFeedbackToHostAgent(
+          { sessions: ctx.sessions, uiWorkspace: ctx.uiWorkspace },
+          prompt,
+        ),
+      }),
     }, OpenWriteSettings)
   })
 

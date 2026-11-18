@@ -117,6 +117,8 @@ interface ProxyResponse {
   write: (body: string | Buffer) => boolean | void
   end: (body?: string | Buffer) => void
   on?: (event: string, listener: () => void) => void
+  off?: (event: string, listener: () => void) => void
+  removeListener?: (event: string, listener: () => void) => void
   /** Present on the host's ServerResponse; used to avoid writing into a dead socket. */
   headersSent?: boolean
   writableEnded?: boolean
@@ -376,7 +378,8 @@ export class NovelDomainService extends Service {
       if (drained === false) {
         this.streamPending.set(stream, pending)
         const onDrain = () => {
-          stream.on?.('drain', onDrain)
+          if (typeof stream.off === 'function') stream.off('drain', onDrain)
+          else stream.removeListener?.('drain', onDrain)
           const left = Math.max(0, (this.streamPending.get(stream) ?? 0) - Buffer.byteLength(payload))
           if (left === 0) this.streamPending.delete(stream)
           else this.streamPending.set(stream, left)

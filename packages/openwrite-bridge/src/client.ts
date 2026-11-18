@@ -280,15 +280,15 @@ export class StudioClient {
 
   /** One fetch honoring both the caller's abort signal and the configured timeout. */
   private async request(url: URL, init: RequestInit, signal: AbortSignal | undefined): Promise<Response> {
-    // Arm the deadline only once the connection is known. The runtime bootstrap
-    // (`connect()`) is deliberately uncapped — a 23 MB archive over a slow link
-    // needs minutes — so a timeout started before it turns every cold-start
-    // first call into a spurious network error carrying a misleading "the
-    // server may have accepted the request" hint.
-    const connection = await this.connect?.()
-    const signals = [AbortSignal.timeout(this.timeoutMs)]
-    if (signal !== undefined) signals.push(signal)
     try {
+      // Arm the deadline only once the connection is known. The runtime bootstrap
+      // (`connect()`) is deliberately uncapped — a 23 MB archive over a slow link
+      // needs minutes — so a timeout started before it turns every cold-start
+      // first call into a spurious network error carrying a misleading "the
+      // server may have accepted the request" hint.
+      const connection = await this.connect?.()
+      const signals = [AbortSignal.timeout(this.timeoutMs)]
+      if (signal !== undefined) signals.push(signal)
       const target = connection ? new URL(url.pathname + url.search, connection.baseUrl) : url
       const headers = connection?.token ? { ...(init.headers as Record<string, string>), Authorization: `Bearer ${connection.token}` } : init.headers
       const response = await fetch(target, { ...init, headers, signal: AbortSignal.any(signals) })

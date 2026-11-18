@@ -243,7 +243,7 @@ export class ManagedRuntime {
     if (this.closed) return Promise.reject(new Error('OpenWrite was removed'))
     if (this.connection) return this.verifyConnection(this.connection)
     if (this.pending) {
-      if (['error', 'cancelled', 'stopped'].includes(this.state.phase)) {
+      if (['error', 'cancelled', 'stopped'].includes(this.state.phase) || this.controller?.signal.aborted === true) {
         // A ready child can exit while prepare is still saving active.json.
         // The terminal state is visible before that promise settles; returning
         // it would hand a manual retry the dead connection or its old error.

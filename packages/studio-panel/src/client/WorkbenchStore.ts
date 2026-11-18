@@ -373,12 +373,14 @@ class NovelWorkbenchStore {
   }
 
   private stop(): void {
+    this.generation += 1
     if (this.pollTimer !== null) window.clearInterval(this.pollTimer)
     this.pollTimer = null
     this.eventSource?.close()
     this.eventSource = null
     this.refreshController?.abort()
     this.refreshController = null
+    this.refreshPromise = null
   }
 
   private async pollInvalidation(generation: number, workspaceId: string): Promise<void> {
@@ -389,8 +391,8 @@ class NovelWorkbenchStore {
       if (generation !== this.generation) return
       this.consumeMutation(payload)
       this.pollTicks += 1
-      if (this.pollTicks % 4 === 0) void this.refresh()
-      this.patch({ connection: 'online' })
+      if (this.pollTicks % 4 === 0 || this.snapshot.connection === 'offline') void this.refresh()
+      if (this.snapshot.connection !== 'offline') this.patch({ connection: 'online' })
     } catch {
       if (generation !== this.generation) return
       this.patch({ connection: 'offline' })
