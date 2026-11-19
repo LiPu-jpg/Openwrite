@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.40：修复 @fuxi-ailabs/dsh-dog 伴生识别与 DoG 协作规范、智能问题反馈助手及稳定性修复
+
+修 [#174](https://github.com/LiPu-jpg/Openwrite/issues/174) 并完成全功能与多插件联动实机审计与修复：
+
+- **修复 `dsh-dog` 新包名识别与指引（[#174](https://github.com/LiPu-jpg/Openwrite/issues/174)）**：`companions.mjs` 与联动插件面板优先识别 `@fuxi-ailabs/dsh-dog`（`2.0.0-alpha.2`，同时保留 `@dsh-external/dsh-dog` 兼容），并将安装命令更新为 `dsh plugin --profile web add -w @fuxi-ailabs/dsh-dog@alpha`。
+- **修复 `dsh-dog` 技能与增量验证规范**：更新 `dog-delivery-verification`、`export-book` 与主预设提示，改为同作用域复用 `graph.id` 触发 `inherited` 增量继承、使用 `dependsOn` 门控、正确使用 `dog_wait` 后台任务唤醒（禁止循环轮询与 `job_output(wait: true)`），并补充 `dog_cancel` 与 `ddog_*` 动态质量演进说明。
+- **智能问题反馈助手与直连 Agent 排查**：设置页「环境 → 支持与反馈」新增环境自动预检、分类校验与一键脱敏反馈助手，支持直接将 `/feedback` 诊断派发至宿主 OpenWrite 会话。
+- **桥接与工作台稳定性修复**：修复 SSE `drain` 监听器卸载、LLM/Web relay 并发初始化与释放竞态、`WorkbenchStore` 停止代际与离线恢复刷新、`Diagnostics` 中 `backend_available` 误报 `unknown`，以及 `Library -> Outline` 迁移预览头部在 1280px 下的换行溢出问题。
+
 ## 0.2.39：宿主兼容扩到 dsh 0.2.2-rc.2 与 0.2.2-rc.3，并新增隐私安全的诊断反馈与引导
 
 修 [#170](https://github.com/LiPu-jpg/Openwrite/issues/170)（`dsh-openwrite@0.2.38` 在 `dsh 0.2.2-rc.3` 上被安装前闸门直接拒绝），并改进「设置 → OpenWrite」诊断反馈与 Agent 初始引导：

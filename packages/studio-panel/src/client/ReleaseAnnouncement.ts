@@ -41,7 +41,7 @@ export function resolveOpenWriteVersion(): string {
   if (typeof __OPENWRITE_PRESET_ID__ === 'string' && __OPENWRITE_PRESET_ID__.startsWith('openwrite-')) {
     return __OPENWRITE_PRESET_ID__.slice('openwrite-'.length).replaceAll('-', '.')
   }
-  return '0.2.39'
+  return '0.2.40'
 }
 
 /**
