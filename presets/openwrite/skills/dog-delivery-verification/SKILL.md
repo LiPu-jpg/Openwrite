@@ -8,7 +8,7 @@ Language: follow the author's current conversation language for responses and he
 
 # DoG 独立验收（OpenWrite → dsh-dog）
 
-这条技能把 OpenWrite 的正文与评审证据交给宿主已安装的 `@dsh-external/dsh-dog`，
+这条技能把 OpenWrite 的正文与评审证据交给宿主已安装的 `@fuxi-ailabs/dsh-dog`，
 由它用独立 verifier 再判断一次。它不是 OpenWrite 六域评审的替代品，也不修改正文。
 
 先确认工具面真的有 `dog_validate` / `dog_create` / `dog_run`。没有时不要假装跑过：

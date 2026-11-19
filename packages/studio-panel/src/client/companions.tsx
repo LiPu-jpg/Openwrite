@@ -51,7 +51,7 @@ export const COMPANION_PLUGINS: readonly CompanionPluginInfo[] = [
   {
     key: 'dog',
     name: 'dsh-dog',
-    npmPackage: '@dsh-external/dsh-dog',
+    npmPackage: '@fuxi-ailabs/dsh-dog',
     repo: 'Fun10165/dsh-dog',
     url: 'https://github.com/Fun10165/dsh-dog',
     roleZh: 'DoG 独立交付验证图谱（dog_* 增量继承）与 DDoG 动态验收演进（ddog_*）',
@@ -275,7 +275,7 @@ export function CompanionSection({ status }: { status: CompanionStatus | null })
     ? `已接入：${opsPlan.files ? `有界文件工具${opsPlan.residentTools ? `（${opsPlan.residentNames} 个常驻）` : ''}` : '不挂文件工具'}${opsPlan.discovery ? ' + 渐进发现' : ''}${opsPlan.shell ? ' + shell' : ''}；${opsPlan.replaceOfficial ? '替换官方文件工具' : '不替换官方文件工具'}`
     : '已接入，提供有界文件工具与渐进发现'
   const descriptions: Record<CompanionPluginInfo['key'], string> = {
-    dog: describe('dsh-dog', status.dog, '已安装且宿主放行；会话中可用 dog_* / ddog_* 工具，交付前可按 dog-delivery-verification 技能生成带门控与增量继承的独立校验图', '安装 @dsh-external/dsh-dog 可获得 dog_* / ddog_* 工具与独立校验图。'),
+    dog: describe('dsh-dog', status.dog, '已安装且宿主放行；会话中可用 dog_* / ddog_* 工具，交付前可按 dog-delivery-verification 技能生成带门控与增量继承的独立校验图', '安装 @fuxi-ailabs/dsh-dog@alpha 可获得 dog_* / ddog_* 工具与独立校验图。'),
     ops: describe('dsh-ops', status.ops, opsDetail, '安装 dsh-ops 可减少文件检索的 token 消耗。'),
     freeModel: describe('dsh-our-free-model', status.freeModel, '已安装，可一键写入写作/评审模型配置', '安装 @ebony-vinyl/dsh-our-free-model 可免密钥使用免费模型。'),
   }

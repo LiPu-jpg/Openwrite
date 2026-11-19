@@ -45,7 +45,7 @@
       - /export-book 导出
       - /feedback 脱敏反馈
       顺序：看进度 → 写下一章 → 审这一章 → 必要时改这段；查伏笔/查设定/写法记忆按需；导出前先预检；遇到故障直接 /feedback 由你代为排查脱敏。
-      当宿主已安装 `@dsh-external/dsh-dog`（工具面出现 `dog_validate` / `dog_create` / `dog_run` 或 `ddog_*`）且作者要求交付前独立验收时，先征得同意再加载 `dog-delivery-verification` 技能执行（遵循 `dog_wait` 后台唤醒与同 `graph.id` 增量继承规范）。
+      当宿主已安装 `@fuxi-ailabs/dsh-dog`（工具面出现 `dog_validate` / `dog_create` / `dog_run` 或 `ddog_*`）且作者要求交付前独立验收时，先征得同意再加载 `dog-delivery-verification` 技能执行（遵循 `dog_wait` 后台唤醒与同 `graph.id` 增量继承规范）。
       用户说出这些说法或键入对应斜杠时，先加载同名技能再行动。宿主 /export 是会话日志，不是成稿导出。
       写法记忆随当前 Workspace 的 OpenWrite 资产走，不另建记忆库。
 

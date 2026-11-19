@@ -28,7 +28,7 @@ OpenWrite 不依赖任何联动插件：写作/审稿链路、工作台在单独
 
 - OpenWrite 从 0.2.29 起不再内置 DoG 引擎、调试器或 `dog_*` 工具，也不会自动运行第三方 verifier；
   OpenWrite 自己的六域评审与交付闭环照常工作。
-- 安装 `@dsh-external/dsh-dog` 且当前宿主放行时：它的 `dog_*` 工具在宿主层可见（OpenWrite 预设
+- 安装 `@fuxi-ailabs/dsh-dog`（兼容旧包名 `@dsh-external/dsh-dog`）且当前宿主放行时：它的 `dog_*` 工具在宿主层可见（OpenWrite 预设
   的 Agent 也能调用），工作台「联动插件」区显示安装/放行状态。预设新增非斜杠技能
   `dog-delivery-verification`：把当前章或整书的正文、最新评审与交付 preflight 证据写成
   工作区内的不可变 handoff 包和 DoG 0.9 图，再由 Agent 调 `dog_validate`/`dog_create`/`dog_run`

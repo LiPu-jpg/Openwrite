@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path'
 
 /** Bundle names that identify each companion, with and without scope. */
 const companionNames = {
-  dog: ['@dsh-external/dsh-dog'],
+  dog: ['@fuxi-ailabs/dsh-dog', '@dsh-external/dsh-dog'],
   ops: ['dsh-ops'],
   freeModel: ['dsh-our-free-model', '@ebony-vinyl/dsh-our-free-model'],
 }

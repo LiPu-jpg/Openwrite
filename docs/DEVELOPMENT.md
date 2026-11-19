@@ -57,4 +57,4 @@ npm run doctor -- --profiles    # 只读核对本机 web/headless 是否链接�
 `novel_review_chapter` 和后台章节评审完成时会自动实例化标准章节审稿记录，
 查询技能（`review-artifact-query` / `delivery-artifact-query` / `import-artifact-query`）
 只读这些已物化产物，不会重复调用模型。0.2.29 起不再内置第三方 DoG 引擎，
-需要图形化验证可自行安装 `@dsh-external/dsh-dog`。
+需要图形化验证可自行安装 `@fuxi-ailabs/dsh-dog@alpha`。

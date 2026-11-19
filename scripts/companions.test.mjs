@@ -409,6 +409,34 @@ test('an unknown host version keeps every companion fail-closed', async t => {
   assert.match(companions.dog.reason, /unknown/)
 })
 
+test('renamed @fuxi-ailabs/dsh-dog companion is detected and usable on dsh 0.2.2-rc.3', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'openwrite-companions-fuxi-dog-'))
+  t.after(async () => await rm(home, { recursive: true, force: true }))
+  await writeProfile(home, 'web', {
+    bundles: ['@deepseek-ai/dsh-base', 'dsh-openwrite', '@fuxi-ailabs/dsh-dog'],
+    packages: { '@fuxi-ailabs/dsh-dog': { version: '2.0.0-alpha.2' } },
+  })
+  const directory = join(home, 'profiles', 'web', 'node_modules', '@fuxi-ailabs', 'dsh-dog')
+  await writeFile(join(directory, 'package.json'), JSON.stringify({
+    name: '@fuxi-ailabs/dsh-dog', version: '2.0.0-alpha.2',
+    exports: { '.': './index.js' },
+    peerDependencies: {
+      '@deepseek-ai/cordis': '>=4.0.5-0 <4.2.0-0',
+      '@deepseek-ai/dsh-agent': '>=0.2.1-0 <0.3.0-0 || >=0.2.2-0 <0.3.0-0',
+      '@deepseek-ai/dsh-session': '>=0.2.1-0 <0.3.0-0 || >=0.2.2-0 <0.3.0-0',
+    },
+    dsh: { bundle: { patch: './cordis.patch.yml' } },
+  }) + '\n')
+  await writeFile(join(directory, 'index.js'), 'export function apply() {}\n')
+  await writeFile(join(directory, 'cordis.patch.yml'),
+    "- insert:\n    - id: dsh-dog\n      name: '@fuxi-ailabs/dsh-dog'\n      config: {}\n")
+
+  const companions = await detectCompanions(home, { hostVersion: '0.2.2-rc.3' })
+  assert.equal(companions.dog.installed, true)
+  assert.equal(companions.dog.usable, true)
+  assert.equal(companions.dog.version, '2.0.0-alpha.2')
+})
+
 // The cache used to be keyed on the profile manifests and the host only. An
 // upgrade that changes the detection logic (a new companion, corrected range
 // semantics) therefore kept serving the previous answer: a real 0.2.1-rc.5 host

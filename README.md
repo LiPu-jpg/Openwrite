@@ -161,7 +161,7 @@ OpenWrite 可与以下三个可选开源 dsh 插件无缝协同（均可在 **�
 | :--- | :--- | :--- |
 | **[`dsh-our-free-model`](https://github.com/Ebony-Vinyl/dsh-our-free-model)** | 零注册、免 API Key 接入免费前沿模型，可在「模型」页一键导入作为 OpenWrite 写作与审稿档案 | [`Ebony-Vinyl/dsh-our-free-model`](https://github.com/Ebony-Vinyl/dsh-our-free-model)<br />`dsh plugin --profile web add -w @ebony-vinyl/dsh-our-free-model` |
 | **[`dsh-ops`](https://github.com/T-Auto/dsh-ops)** | 提供高效结构化文件检索与目录工具支持，显著降低长篇作品多轮读写与检索的 token 消耗 | [`T-Auto/dsh-ops`](https://github.com/T-Auto/dsh-ops)<br />`dsh plugin --profile web add -w dsh-ops` |
-| **[`dsh-dog`](https://github.com/Fun10165/dsh-dog)** | 协同开展图谱化交付核查与实体验证，强化超长篇连续性与成品交付前体检 | [`Fun10165/dsh-dog`](https://github.com/Fun10165/dsh-dog)<br />`dsh plugin --profile web add -w @dsh-external/dsh-dog` |
+| **[`dsh-dog`](https://github.com/Fun10165/dsh-dog)** | 协同开展图谱化交付核查与实体验证，强化超长篇连续性与成品交付前体检 | [`Fun10165/dsh-dog`](https://github.com/Fun10165/dsh-dog)<br />`dsh plugin --profile web add -w @fuxi-ailabs/dsh-dog@alpha` |
 
 > 联动细节见 [联动插件说明](docs/COMPANION_PLUGINS.md)。生态周边目录：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) · [社区插件市场](https://dshtui.com/plugins/)（OpenWrite 面向 `web` 与 `desktop` profile，尚未验证 dsh-TUI 兼容性）。
 
