@@ -33,3 +33,7 @@ client-report-*.json
 
 # Stray zero-byte files left by a mistyped command such as `npm run build =`.
 /=
+
+# DSH STORE 固定源契约要求 Bundle Patch 指向的构建产物存在于仓库
+!packages/openwrite-bridge/lib/
+!packages/studio-panel/lib/

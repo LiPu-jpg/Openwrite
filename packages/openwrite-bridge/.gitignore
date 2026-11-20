@@ -1,2 +1,3 @@
 node_modules/
-lib/
+# lib/ 由仓库根 .gitignore 的反向规则纳入版本控制：
+# DSH STORE 固定源契约要求 Bundle Patch 指向的构建产物真实存在于固定 Commit。

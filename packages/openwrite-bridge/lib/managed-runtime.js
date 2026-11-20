@@ -1,0 +1,867 @@
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { chmod, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
+import { createInterface } from 'node:readline';
+import { x as untar } from 'tar';
+import { unzipSync } from 'fflate';
+import { lock as acquireLock } from 'proper-lockfile';
+export class UnsupportedRuntimePlatformError extends Error {
+    platform;
+    code = 'RUNTIME_PLATFORM_UNSUPPORTED';
+    status = 503;
+    constructor(platform) {
+        super(`OpenWrite Studio managed runtime is unavailable on ${platform}. Set pythonPath or OPENWRITE_PYTHON to a prepared Python interpreter, or configure the bridge with mode: external and baseUrl pointing to a supported Studio server; see docs/INSTALL.md#external-studio. File tools that do not require Studio remain available.`);
+        this.platform = platform;
+        this.name = 'UnsupportedRuntimePlatformError';
+    }
+}
+export const DEFAULT_RESTART_LIMIT = 5;
+export const DEFAULT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
+/** Budget for the per-request liveness probe of a previously-ready backend. */
+const HEALTH_PROBE_TIMEOUT_MS = 1_500;
+/** Second, longer budget for an ambiguous probe before calling it `unknown`. */
+const HEALTH_PROBE_RETRY_MS = 8_000;
+/** A download with no progress for this long is cut and retried on the next source. */
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
+/** The backend stderr log on disk keeps only the newest chunk. */
+const STDERR_LOG_LIMIT = 64 * 1024;
+/**
+ * Keep the managed backend's stderr on disk (last 64 KiB) so a hung or zombie
+ * process can be diagnosed after the fact; the in-memory tail alone is lost
+ * with the host. Writes are debounced and serialized, and never throw —
+ * diagnostics must not break the backend lifecycle.
+ */
+class BackendStderrLog {
+    path;
+    tail = '';
+    timer;
+    pending = Promise.resolve();
+    constructor(path) {
+        this.path = path;
+    }
+    write(text) {
+        this.tail = (this.tail + text).slice(-STDERR_LOG_LIMIT);
+        if (this.timer !== undefined)
+            return;
+        this.timer = setTimeout(() => { this.timer = undefined; void this.flush(); }, 200);
+    }
+    tailText() { return this.tail; }
+    flush() {
+        if (this.timer !== undefined) {
+            clearTimeout(this.timer);
+            this.timer = undefined;
+        }
+        const tail = this.tail;
+        this.pending = this.pending.then(async () => {
+            try {
+                await mkdir(dirname(this.path), { recursive: true });
+                await writeFile(this.path, tail);
+            }
+            catch { /* best-effort diagnostics */ }
+        });
+        return this.pending;
+    }
+}
+const CREDENTIAL_ENV = /(?:API[_-]?KEY|ACCESS[_-]?TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION)/i;
+const ALLOWED_ENV = new Set([
+    'PATH', 'Path', 'PATHEXT',
+    'HOME', 'USER', 'USERNAME', 'LOGNAME',
+    'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
+    'TEMP', 'TMP', 'TMPDIR',
+    'SYSTEMROOT', 'SystemRoot', 'WINDIR', 'windir', 'COMSPEC', 'ComSpec',
+    'SystemDrive', 'PROGRAMDATA', 'ProgramData', 'ProgramFiles', 'PROGRAMFILES', 'ProgramFiles(x86)',
+    'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'OS',
+    'LANG', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES', 'LANGUAGE', 'TZ',
+    'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
+    'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
+    // Package-index overrides let authors on restricted networks point the
+    // installer at a mirror (OpenWrite issue #82). uv reads UV_* variables only;
+    // PIP_* covers pip itself. UV_NO_CONFIG stays set so stray config files
+    // cannot change the locked dependency set — environment variables still
+    // apply, which is exactly the supported escape hatch.
+    'UV_DEFAULT_INDEX', 'UV_INDEX_URL', 'UV_INDEX', 'UV_HTTP_TIMEOUT',
+    'PIP_INDEX_URL', 'PIP_EXTRA_INDEX_URL', 'PIP_TRUSTED_HOST', 'PIP_DEFAULT_TIMEOUT',
+]);
+export async function sha256(file) {
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(file))
+        hash.update(chunk);
+    return hash.digest('hex');
+}
+/** Diagnostics must not echo provider credentials or authenticated download URLs. */
+export function sanitizeDiagnostic(message) {
+    return message.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@')
+        .replace(/([?&](?:token|key|signature|credential|password|secret)=)[^&\s]+/gi, '$1[redacted]')
+        .replace(/((?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
+        .replace(/\b[a-f0-9]{32,}\b/gi, '[redacted]');
+}
+/**
+ * Drop bracketed IPv6 literals (e.g. `[::1]`) from a no_proxy value. DSH's
+ * loopback bypass list is written for undici as well as generic consumers, but
+ * httpx parses each entry as host:port and fails at client construction with
+ * `Invalid port: ':1]'`, so the request never leaves the process. Plain
+ * entries such as `::1` stay — httpx handles them fine.
+ */
+export function sanitizeNoProxy(value) {
+    return value.split(',').map(entry => entry.trim())
+        .filter(entry => entry !== '' && !/^\[.*\]$/.test(entry)).join(',');
+}
+/** Windows needs SystemRoot/PATH to start; proxy and CA vars stay when set. Credential names never copy. */
+export function buildChildEnv(source, extra = {}) {
+    const env = {};
+    for (const [key, value] of Object.entries(source)) {
+        if (value === undefined || CREDENTIAL_ENV.test(key))
+            continue;
+        const allowed = ALLOWED_ENV.has(key)
+            || (process.platform === 'win32' && [...ALLOWED_ENV].some(name => name.toLowerCase() === key.toLowerCase()));
+        if (allowed)
+            env[key] = value;
+    }
+    for (const [key, value] of Object.entries(extra)) {
+        if (value === undefined || CREDENTIAL_ENV.test(key))
+            continue;
+        env[key] = value;
+    }
+    // The Python backend reads NO_PROXY through httpx; bracketed IPv6 literals
+    // break client construction there even though Node's undici accepts them.
+    for (const key of Object.keys(env)) {
+        if (key.toLowerCase() === 'no_proxy' && typeof env[key] === 'string')
+            env[key] = sanitizeNoProxy(env[key]);
+    }
+    return env;
+}
+/** Stop only a child we spawned. POSIX groups and Windows trees include grandchildren. */
+export async function stopOwnedProcess(child) {
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null)
+        return;
+    const exited = new Promise(done => child.once('exit', () => done()));
+    if (process.platform === 'win32') {
+        await new Promise(done => {
+            const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+            killer.once('error', () => { child.kill(); done(); });
+            killer.once('exit', () => done());
+        });
+    }
+    else {
+        try {
+            process.kill(-child.pid, 'SIGTERM');
+        }
+        catch {
+            child.kill('SIGTERM');
+        }
+        await Promise.race([exited, delay(3000)]);
+        if (child.exitCode === null && child.signalCode === null) {
+            try {
+                process.kill(-child.pid, 'SIGKILL');
+            }
+            catch {
+                child.kill('SIGKILL');
+            }
+        }
+    }
+    await exited;
+}
+/** All artifacts and children belong to this instance; author files never enter this tree. */
+export class ManagedRuntime {
+    root;
+    artifacts;
+    state = { phase: 'idle', message: 'The writing environment will be prepared on first use' };
+    pending;
+    controller;
+    child;
+    connection;
+    closed = false;
+    allowRevive = true;
+    cancelEpoch = 0;
+    generation = 0;
+    restartAttempts = 0;
+    recovered = false;
+    spawnFn;
+    wait;
+    restartLimit;
+    backoffMs;
+    pythonPath;
+    pythonModulePaths;
+    hostLlm;
+    hostWeb;
+    constructor(root, artifacts, options = {}) {
+        this.root = root;
+        this.artifacts = artifacts;
+        this.pythonPath = options.pythonPath?.trim() || process.env['OPENWRITE_PYTHON']?.trim() || undefined;
+        this.pythonModulePaths = [...(options.pythonModulePaths ?? [])];
+        this.hostLlm = options.hostLlm;
+        this.hostWeb = options.hostWeb;
+        this.spawnFn = options.spawn ?? spawn;
+        this.wait = options.delay ?? delay;
+        this.restartLimit = options.restartLimit ?? DEFAULT_RESTART_LIMIT;
+        this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
+    }
+    status() { return { ...this.state }; }
+    update(phase, message, extra = {}) {
+        const recoveryError = this.recovered && ['recovering', 'waiting', 'downloading', 'installing'].includes(phase)
+            ? this.state.error : undefined;
+        this.state = { phase, message, ...(recoveryError ? { error: recoveryError } : {}), ...extra };
+    }
+    ensure() {
+        if (this.closed)
+            return Promise.reject(new Error('OpenWrite was removed'));
+        if (this.connection)
+            return this.verifyConnection(this.connection);
+        if (this.pending) {
+            if (['error', 'cancelled', 'stopped'].includes(this.state.phase) || this.controller?.signal.aborted === true) {
+                // A ready child can exit while prepare is still saving active.json.
+                // The terminal state is visible before that promise settles; returning
+                // it would hand a manual retry the dead connection or its old error.
+                const prior = this.pending;
+                const epoch = this.cancelEpoch;
+                const retry = () => {
+                    if (epoch !== this.cancelEpoch)
+                        throw new Error('Setup was cancelled; retry when ready');
+                    if (this.pending === prior)
+                        this.pending = undefined;
+                    return this.ensure();
+                };
+                return prior.then(retry, retry);
+            }
+            return this.pending;
+        }
+        this.allowRevive = true;
+        if (this.state.phase === 'error' || this.state.phase === 'cancelled' || this.state.phase === 'stopped') {
+            this.restartAttempts = 0;
+            this.recovered = false;
+        }
+        this.update('starting', 'Preparing the writing environment');
+        const controller = new AbortController();
+        this.controller = controller;
+        this.pending = this.prepare(controller.signal).catch(error => {
+            this.state = { phase: controller.signal.aborted ? 'cancelled' : 'error',
+                message: controller.signal.aborted ? 'Setup was cancelled; retry when ready' : 'The writing environment is not ready; retry setup',
+                error: controller.signal.aborted ? undefined : sanitizeDiagnostic(String(error instanceof Error ? error.message : error)) };
+            throw error;
+        }).finally(() => { this.pending = undefined; this.controller = undefined; });
+        return this.pending;
+    }
+    /**
+     * The child process can outlive its listening socket (a stuck request thread
+     * during shutdown leaves it alive but refusing connections), and no exit is
+     * ever observed in that state, so the auto-restart logic never fires. Probe
+     * the cached connection before handing it out; a dead backend is torn down
+     * forcefully and pushed through the normal recovery path.
+     */
+    async verifyConnection(connection) {
+        const liveness = await this.probeLiveness(connection);
+        // Only a *confirmed* dead backend justifies tearing it down. A probe that
+        // merely timed out is ambiguous — a backend busy running chapter_write or
+        // review answers /api/health late — and killing it destroys exactly the
+        // in-flight work this recovery path exists to protect.
+        if (liveness === 'alive') {
+            if (this.closed)
+                throw new Error('OpenWrite was removed');
+            const current = this.connection;
+            if (current)
+                return current;
+            return this.queueRestart();
+        }
+        if (liveness === 'unknown') {
+            // Keep serving the cached connection and let the real request decide; a
+            // slow health answer is not a reason to invalidate a working backend.
+            const current = this.connection;
+            if (current)
+                return current;
+            return this.queueRestart();
+        }
+        if (this.connection !== connection)
+            return this.queueRestart();
+        this.connection = undefined;
+        const child = this.child;
+        this.child = undefined;
+        if (child)
+            await stopOwnedProcess(child).catch(() => { });
+        if (this.closed)
+            throw new Error('OpenWrite was removed');
+        if (!this.allowRevive)
+            throw new Error('Setup was cancelled; retry when ready');
+        this.update('recovering', 'The writing backend is unresponsive; recovering');
+        return this.queueRestart();
+    }
+    /**
+     * The host relay coordinates, if the host offers one.
+     *
+     * A relay that cannot be reached is not a startup failure: Core still runs,
+     * it simply has no host models to offer. The failure is silent on purpose —
+     * the relay's own diagnostics belong to the host, not to the backend boot.
+     */
+    async resolveHostLlm() {
+        if (this.hostLlm === undefined)
+            return undefined;
+        try {
+            const resolved = await this.hostLlm();
+            if (resolved === undefined || resolved === null)
+                return undefined;
+            if (typeof resolved.url !== 'string' || resolved.url === '')
+                return undefined;
+            if (typeof resolved.token !== 'string' || resolved.token === '')
+                return undefined;
+            return { url: resolved.url, token: resolved.token };
+        }
+        catch {
+            return undefined;
+        }
+    }
+    async resolveHostWeb() {
+        if (this.hostWeb === undefined)
+            return undefined;
+        try {
+            const resolved = await this.hostWeb();
+            if (resolved === undefined)
+                return undefined;
+            return { url: resolved.url, token: resolved.token };
+        }
+        catch {
+            return undefined;
+        }
+    }
+    /**
+     * Liveness with three outcomes. `dead` is only returned on positive evidence —
+     * the child exited, or the connection was refused, or health answered
+     * non-ok (auth drift). A probe that timed out returns `unknown`, because a
+     * busy backend is indistinguishable from a hung one at a 1.5 s deadline and
+     * killing the former destroys in-flight work.
+     */
+    async probeLiveness(connection) {
+        const child = this.child;
+        if (!child || child.exitCode !== null || child.signalCode !== null)
+            return 'dead';
+        for (const budget of [HEALTH_PROBE_TIMEOUT_MS, HEALTH_PROBE_RETRY_MS]) {
+            try {
+                const response = await fetch(connection.baseUrl + '/api/health', {
+                    headers: { Authorization: `Bearer ${connection.token}` },
+                    signal: AbortSignal.timeout(budget),
+                });
+                return response.ok ? 'alive' : 'dead';
+            }
+            catch (error) {
+                // A refusal or a dead socket is positive evidence; anything else (the
+                // timeout we just imposed, DNS, reset) is not.
+                const code = error.code
+                    ?? error.cause?.code;
+                if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN')
+                    return 'dead';
+                if (error instanceof Error && error.name === 'TimeoutError')
+                    continue;
+                return 'dead';
+            }
+        }
+        return 'unknown';
+    }
+    async cancel() {
+        this.cancelEpoch += 1;
+        this.allowRevive = false;
+        this.controller?.abort();
+        await this.pending?.catch(() => { });
+    }
+    async dispose() {
+        this.closed = true;
+        this.allowRevive = false;
+        this.generation += 1;
+        await this.cancel();
+        if (this.child) {
+            this.child.stdin?.end();
+            await stopOwnedProcess(this.child);
+            this.child = undefined;
+        }
+        this.connection = undefined;
+        this.update('uninstalled', 'OpenWrite was removed; manuscripts and settings were preserved');
+    }
+    exitDiagnostic(code, signalName, stderr = '') {
+        return sanitizeDiagnostic(`exit ${code ?? 'none'} signal ${signalName ?? 'none'}${stderr ? `: ${stderr}` : ''}`);
+    }
+    handleReadyExit(generation, child, code, signalName, stderr) {
+        if (this.generation !== generation)
+            return;
+        if (this.child === child)
+            this.child = undefined;
+        this.connection = undefined;
+        if (this.closed)
+            return;
+        const error = this.exitDiagnostic(code, signalName, stderr);
+        if (!this.allowRevive) {
+            this.update('cancelled', 'Setup was cancelled; retry when ready', { error });
+            return;
+        }
+        this.restartAttempts += 1;
+        if (this.restartAttempts > this.restartLimit) {
+            this.allowRevive = false;
+            this.update('error', 'The writing backend exited repeatedly; automatic recovery stopped. Retry manually', { error });
+            return;
+        }
+        this.recovered = true;
+        this.update('recovering', `The writing backend exited; recovering (${this.restartAttempts}/${this.restartLimit})`, { error });
+        // Auto-recovery has no caller; never let a rejected prepare become an unhandled rejection that kills dsh.
+        void this.queueRestart().catch(() => { });
+    }
+    live() { return Boolean(this.connection && this.child); }
+    queueRestart() {
+        if (this.pending) {
+            const prior = this.pending;
+            let assigned;
+            const chained = prior.then(connection => {
+                if (this.closed)
+                    throw new Error('OpenWrite was removed');
+                if (this.live())
+                    return connection;
+                if (!this.allowRevive)
+                    throw new Error('Setup was cancelled; retry when ready');
+                if (this.pending === assigned)
+                    this.pending = undefined;
+                return this.queueRestart();
+            }, error => {
+                if (this.closed || !this.allowRevive)
+                    throw error;
+                if (this.live())
+                    return this.connection;
+                if (this.pending === assigned)
+                    this.pending = undefined;
+                return this.queueRestart();
+            });
+            assigned = chained.finally(() => {
+                if (this.pending === assigned)
+                    this.pending = undefined;
+            });
+            this.pending = assigned;
+            return assigned;
+        }
+        const task = this.recover();
+        const assigned = task.finally(() => {
+            if (this.pending === assigned) {
+                this.pending = undefined;
+                this.controller = undefined;
+            }
+        });
+        this.pending = assigned;
+        return assigned;
+    }
+    async recover() {
+        let lastError;
+        while (!this.closed && this.allowRevive) {
+            const controller = new AbortController();
+            this.controller = controller;
+            const wait = this.backoffMs[Math.min(Math.max(this.restartAttempts, 1) - 1, this.backoffMs.length - 1)] ?? 1_000;
+            try {
+                await this.wait(wait, undefined, { signal: controller.signal });
+                if (this.closed || !this.allowRevive)
+                    break;
+                return await this.prepare(controller.signal);
+            }
+            catch (error) {
+                lastError = error;
+                if (this.closed || !this.allowRevive || controller.signal.aborted)
+                    break;
+                this.restartAttempts += 1;
+                const diagnostic = sanitizeDiagnostic(String(error instanceof Error ? error.message : error));
+                if (this.restartAttempts > this.restartLimit) {
+                    this.allowRevive = false;
+                    this.update('error', 'The writing backend exited repeatedly; automatic recovery stopped. Retry manually', { error: diagnostic });
+                    throw error;
+                }
+                this.update('recovering', `The writing backend exited; recovering (${this.restartAttempts}/${this.restartLimit})`, { error: diagnostic });
+            }
+        }
+        if (this.closed)
+            throw new Error('OpenWrite was removed');
+        this.update('cancelled', 'Setup was cancelled; retry when ready');
+        throw lastError instanceof Error ? lastError : new Error('Setup was cancelled; retry when ready');
+    }
+    async download(item, signal) {
+        const cache = join(this.root, 'cache');
+        await mkdir(cache, { recursive: true });
+        const destination = join(cache, item.sha256);
+        if (await sha256(destination).catch(() => '') === item.sha256)
+            return destination;
+        // A host killed mid-download leaves .partial fragments that are never
+        // resumed (observed in OpenWrite issue #82); clear them before starting.
+        for (const entry of await readdir(cache))
+            if (entry.endsWith('.partial'))
+                await rm(join(cache, entry), { force: true });
+        const partial = destination + '.' + randomUUID() + '.partial';
+        this.update('downloading', 'Downloading and verifying the writing environment');
+        try {
+            await this.downloadInto(item, partial, signal);
+            await rename(partial, destination);
+            return destination;
+        }
+        finally {
+            await rm(partial, { force: true });
+        }
+    }
+    /**
+     * Restricted networks throttle single connections to GitHub releases to a
+     * few dozen KB/s, so a fixed total timeout can never finish a 23 MB runtime
+     * archive (OpenWrite issue #82). Try the origin first, then optional mirror
+     * prefixes; every candidate is verified against the manifest checksum, so a
+     * mirror cannot substitute content. OPENWRITE_DOWNLOAD_MIRRORS overrides the
+     * prefix list (empty disables mirrors); the slow-start window uses
+     * OPENWRITE_DOWNLOAD_SLOW_MS / OPENWRITE_DOWNLOAD_SLOW_BYTES.
+     */
+    async downloadInto(item, partial, signal) {
+        const grace = Number(process.env['OPENWRITE_DOWNLOAD_SLOW_MS'] ?? 12_000);
+        const threshold = Number(process.env['OPENWRITE_DOWNLOAD_SLOW_BYTES'] ?? 524_288);
+        const prefixes = (process.env['OPENWRITE_DOWNLOAD_MIRRORS'] ?? 'https://gh-proxy.com/')
+            .split(',').map(prefix => prefix.trim()).filter(Boolean);
+        const candidates = [item.url, ...prefixes.map(prefix => prefix + item.url)];
+        const failures = [];
+        for (const candidate of candidates) {
+            signal.throwIfAborted();
+            try {
+                await this.downloadFrom(candidate, partial, signal, grace, threshold);
+                if (await sha256(partial) !== item.sha256)
+                    throw new Error('checksum mismatch');
+                return;
+            }
+            catch (error) {
+                signal.throwIfAborted();
+                let host = candidate;
+                try {
+                    host = new URL(candidate).host;
+                }
+                catch { /* keep the raw candidate */ }
+                failures.push(`${host}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        throw new Error(`Download failed (${failures.join('; ')}); retry`);
+    }
+    /**
+     * One download attempt against a single source. A source that stays below
+     * the byte threshold through the grace window is abandoned for the next
+     * candidate, and a transfer that stops progressing is cut by an idle
+     * timeout — there is deliberately no total-duration cap.
+     */
+    async downloadFrom(url, partial, signal, grace, threshold) {
+        const controller = new AbortController();
+        const started = Date.now();
+        let received = 0;
+        let lastChunkAt = started;
+        const watchdog = setInterval(() => {
+            if (Date.now() - lastChunkAt > DOWNLOAD_IDLE_TIMEOUT_MS)
+                controller.abort(new Error(`stalled (no data for ${DOWNLOAD_IDLE_TIMEOUT_MS}ms)`));
+            else if (received < threshold && Date.now() - started > grace)
+                controller.abort(new Error(`too slow (${received} of ${threshold} bytes within ${grace}ms)`));
+        }, 250);
+        try {
+            const response = await fetch(url, { signal: AbortSignal.any([signal, controller.signal]) });
+            if (!response.ok || !response.body)
+                throw new Error(`HTTP ${response.status}`);
+            const size = Number(response.headers.get('content-length')) || undefined;
+            const file = await open(partial, 'w', 0o600);
+            try {
+                for await (const chunk of response.body) {
+                    signal.throwIfAborted();
+                    received += chunk.length;
+                    lastChunkAt = Date.now();
+                    if (received > 1024 ** 3)
+                        throw new Error('Download exceeds the allowed size');
+                    await file.write(chunk);
+                    this.state = { phase: 'downloading', message: 'Downloading and verifying the writing environment', downloadedBytes: received, totalBytes: size };
+                }
+            }
+            finally {
+                await file.close();
+            }
+        }
+        finally {
+            clearInterval(watchdog);
+        }
+    }
+    async extract(item, signal) {
+        const dir = join(this.root, 'binaries', item.sha256);
+        const executable = join(dir, item.executable);
+        const marker = join(dir, '.complete');
+        if (await readFile(marker, 'utf8').catch(() => '') === item.sha256)
+            return executable;
+        const archive = await this.download(item, signal);
+        await rm(dir, { recursive: true, force: true });
+        await mkdir(dir, { recursive: true });
+        if (item.url.endsWith('.zip')) {
+            for (const [name, bytes] of Object.entries(unzipSync(await readFile(archive)))) {
+                const target = resolve(dir, name);
+                if (isAbsolute(name) || !target.startsWith(dir + sep))
+                    throw new Error('Invalid archive path');
+                if (name.endsWith('/'))
+                    await mkdir(target, { recursive: true });
+                else {
+                    await mkdir(dirname(target), { recursive: true });
+                    await writeFile(target, bytes);
+                }
+            }
+        }
+        else
+            await untar({ file: archive, cwd: dir, strict: true, preservePaths: false });
+        signal.throwIfAborted();
+        if (process.platform !== 'win32')
+            await chmod(executable, 0o755);
+        await writeFile(marker, item.sha256);
+        return executable;
+    }
+    async command(executable, args, signal) {
+        signal.throwIfAborted();
+        const child = this.spawnFn(executable, args, { cwd: this.root, detached: process.platform !== 'win32', windowsHide: true,
+            env: buildChildEnv(process.env, { ...this.pythonLibraryEnv(), UV_CACHE_DIR: join(this.root, 'cache', 'uv'), UV_PYTHON_DOWNLOADS: 'never', UV_NO_CONFIG: '1' }),
+            stdio: ['ignore', 'ignore', 'pipe'] });
+        let failure = '';
+        child.stderr?.on('data', bytes => { failure = (failure + String(bytes)).slice(-2000); });
+        const abort = () => { void stopOwnedProcess(child); };
+        signal.addEventListener('abort', abort, { once: true });
+        try {
+            await new Promise((done, reject) => {
+                child.once('error', reject);
+                child.once('exit', code => code === 0 ? done() : reject(new Error(`Environment setup failed (${code})：${failure}`)));
+            });
+            signal.throwIfAborted();
+        }
+        finally {
+            signal.removeEventListener('abort', abort);
+        }
+    }
+    /** Shared Android/embedded Python may need its host's native-library search paths. */
+    pythonLibraryEnv() {
+        return this.pythonPath ? Object.fromEntries(['LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH'].map(key => [key, process.env[key]])) : {};
+    }
+    async lock(signal) {
+        for (;;) {
+            signal.throwIfAborted();
+            try {
+                return await acquireLock(this.root, {
+                    realpath: false, stale: 30_000, update: 5_000, retries: 0,
+                    onCompromised: () => this.controller?.abort(),
+                });
+            }
+            catch (error) {
+                if (error.code !== 'ELOCKED')
+                    throw error;
+                this.update('waiting', 'Another OpenWrite instance is preparing the environment; waiting');
+                await this.wait(250, undefined, { signal });
+            }
+        }
+    }
+    async prepare(signal) {
+        const manifest = JSON.parse(await readFile(join(this.artifacts, 'runtime-manifest.json'), 'utf8'));
+        const platform = manifest.platforms[`${process.platform}-${process.arch}`];
+        if (this.pythonPath && !isAbsolute(this.pythonPath))
+            throw new Error('pythonPath / OPENWRITE_PYTHON must be an absolute path to a Python executable, without command-line arguments');
+        if (this.pythonModulePaths.length && !this.pythonPath)
+            throw new Error('pythonModulePaths requires pythonPath or OPENWRITE_PYTHON');
+        if (this.pythonModulePaths.some(path => !isAbsolute(path)))
+            throw new Error('pythonModulePaths must contain absolute dependency directory paths');
+        if (!this.pythonPath && !platform)
+            throw new UnsupportedRuntimePlatformError(`${process.platform}/${process.arch}`);
+        if (!manifest.wheel || !manifest.requirements)
+            throw new Error('The package is missing Core or dependency checksums');
+        const wheel = join(this.artifacts, manifest.wheel.file);
+        const requirements = join(this.artifacts, manifest.requirements.file);
+        if (await sha256(wheel) !== manifest.wheel.sha256 || await sha256(requirements) !== manifest.requirements.sha256) {
+            throw new Error('Package verification failed; reinstall OpenWrite');
+        }
+        for (const artifact of manifest.dependency_wheels ?? []) {
+            if (await sha256(join(this.artifacts, artifact.file)) !== artifact.sha256)
+                throw new Error('Platform dependency verification failed; reinstall OpenWrite');
+        }
+        await mkdir(this.root, { recursive: true, mode: 0o700 });
+        const unlock = await this.lock(signal);
+        let python;
+        try {
+            const generation = createHash('sha256').update(JSON.stringify(manifest))
+                .update(this.pythonPath ? JSON.stringify({ pythonPath: this.pythonPath, pythonModulePaths: this.pythonModulePaths }) : '').digest('hex').slice(0, 24);
+            const destination = join(this.root, 'environments', generation);
+            let coreRoot;
+            if (this.pythonPath) {
+                python = this.pythonPath;
+                coreRoot = join(destination, 'core');
+                const complete = await readFile(join(destination, '.complete'), 'utf8').catch(() => '') === generation;
+                try {
+                    if (!complete) {
+                        await rm(destination, { recursive: true, force: true });
+                        await mkdir(coreRoot, { recursive: true });
+                        // Core is a pure-Python wheel. Install only its verified contents in
+                        // our directory: no pip/uv, dependency resolution, or author-site writes.
+                        for (const [name, bytes] of Object.entries(unzipSync(await readFile(wheel)))) {
+                            signal.throwIfAborted();
+                            const target = resolve(coreRoot, name);
+                            if (isAbsolute(name) || !target.startsWith(coreRoot + sep))
+                                throw new Error('Invalid Core wheel path');
+                            if (name.endsWith('/'))
+                                await mkdir(target, { recursive: true });
+                            else {
+                                await mkdir(dirname(target), { recursive: true });
+                                await writeFile(target, bytes);
+                            }
+                        }
+                    }
+                    this.update('installing', 'Checking the supplied Python and its dependencies; no runtime downloads');
+                    await this.command(python, ['-I', '-B', '-X', 'utf8', '-c',
+                        'import json, sys; assert sys.version_info >= (3, 10), "Python >=3.10 is required"; sys.path[:0] = json.loads(sys.argv[1]); from tools.studio_http import health_payload; from tools.studio import create_server; h = health_payload(); assert h["core_version"] == sys.argv[2] and h["contract_version"] == int(sys.argv[3]), "Core version or API mismatch"',
+                        JSON.stringify([coreRoot, ...this.pythonModulePaths]), manifest.core_version, String(manifest.contract_version)], AbortSignal.any([signal, AbortSignal.timeout(120_000)]));
+                    if (!complete)
+                        await writeFile(join(destination, '.complete'), generation);
+                }
+                catch (error) {
+                    if (!complete)
+                        await rm(destination, { recursive: true, force: true });
+                    signal.throwIfAborted();
+                    throw new Error(`Supplied Python is not ready: ${sanitizeDiagnostic(error instanceof Error ? error.message : String(error))}. Prepare its dependencies first; see docs/INSTALL.md#bring-your-own-python. No uv or Python download was attempted.`);
+                }
+            }
+            else {
+                if (!platform)
+                    throw new UnsupportedRuntimePlatformError(`${process.platform}/${process.arch}`);
+                python = join(destination, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+                if (await readFile(join(destination, '.complete'), 'utf8').catch(() => '') !== generation) {
+                    const uv = await this.extract(platform.uv, signal);
+                    const basePython = await this.extract(platform.python, signal);
+                    this.update('installing', 'Installing isolated dependencies; first use may take several minutes');
+                    await rm(destination, { recursive: true, force: true });
+                    try {
+                        await this.command(uv, ['venv', '--python', basePython, destination], signal);
+                        await this.command(uv, ['pip', 'sync', '--python', python, '--require-hashes', '--only-binary', ':all:',
+                            ...(manifest.dependency_wheels?.length ? ['--find-links', join(this.artifacts, 'wheels')] : []), requirements], signal);
+                        await this.command(uv, ['pip', 'install', '--python', python, '--no-deps', wheel], signal);
+                        await this.command(python, ['-I', '-c', 'from tools.studio_http import health_payload; from tools.studio import create_server; assert health_payload()["contract_version"] == 1'], signal);
+                        await writeFile(join(destination, '.complete'), generation);
+                    }
+                    catch (error) {
+                        await rm(destination, { recursive: true, force: true });
+                        throw error;
+                    }
+                }
+            }
+            signal.throwIfAborted();
+            this.update(this.recovered ? 'recovering' : 'starting', this.recovered ? 'Recovering the writing environment' : 'Starting the writing environment');
+            const connection = await this.start(python, manifest, signal, coreRoot);
+            const pending = join(this.root, 'active.' + randomUUID() + '.json');
+            try {
+                await writeFile(pending, JSON.stringify({ generation, coreVersion: manifest.core_version }));
+                await rename(pending, join(this.root, 'active.json'));
+            }
+            catch (error) {
+                this.connection = undefined;
+                if (this.child)
+                    await stopOwnedProcess(this.child);
+                throw error;
+            }
+            finally {
+                await rm(pending, { force: true });
+            }
+            return connection;
+        }
+        finally {
+            await unlock();
+        }
+    }
+    async start(python, manifest, signal, coreRoot) {
+        signal.throwIfAborted();
+        const token = randomBytes(32).toString('hex');
+        const generation = ++this.generation;
+        // Windows defaults redirected stdout to its legacy locale encoding. Core
+        // initialization logs and manuscript paths are Unicode; -I ignores Python
+        // environment options, so set UTF-8 explicitly on the interpreter as well.
+        const launch = coreRoot
+            ? ['-c', 'import json, runpy, sys; sys.path[:0] = json.loads(sys.argv[1]); sys.argv = sys.argv[2:]; runpy.run_module(sys.argv[0], run_name="__main__", alter_sys=True)', JSON.stringify([coreRoot, ...this.pythonModulePaths]), 'tools.managed_runtime']
+            : ['-m', 'tools.managed_runtime'];
+        const child = this.spawnFn(python, ['-I', ...(coreRoot ? ['-B'] : []), '-X', 'utf8', '-u', ...launch], {
+            cwd: this.root, detached: process.platform !== 'win32', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+            env: buildChildEnv(process.env, { ...this.pythonLibraryEnv(), PYTHONNOUSERSITE: '1', PYTHONUTF8: '1' }),
+        });
+        this.child = child;
+        // Mirror stderr to state/logs/backend.log (last 64 KiB): a stuck backend
+        // prints nothing and its in-memory tail dies with the host, leaving no way
+        // to diagnose "alive but not serving" failures after the fact.
+        const stderrLog = new BackendStderrLog(join(this.root, 'state', 'logs', 'backend.log'));
+        let stderrTail = '';
+        child.stderr?.on('data', bytes => {
+            stderrLog.write(String(bytes));
+            stderrTail = stderrLog.tailText().slice(-500);
+        });
+        child.once('exit', () => { void stderrLog.flush(); });
+        const lines = createInterface({ input: child.stdout });
+        let timer;
+        let started = false;
+        child.once('exit', (code, signalName) => {
+            if (!started)
+                return;
+            this.handleReadyExit(generation, child, code, signalName, stderrTail);
+        });
+        try {
+            const ready = new Promise((done, reject) => {
+                child.once('error', reject);
+                child.once('exit', (code, signalName) => {
+                    if (started)
+                        return;
+                    reject(new Error(`The writing backend exited during startup (${code ?? 'none'}/${signalName ?? 'none'})`));
+                });
+                timer = setTimeout(() => reject(new Error('Writing backend startup timed out')), 120_000);
+                lines.on('line', line => {
+                    try {
+                        const message = JSON.parse(line);
+                        if (Number.isInteger(message.port) && message.port > 0 && message.port < 65536)
+                            done(message.port);
+                    }
+                    catch { /* non-protocol startup logging */ }
+                });
+            });
+            const abort = () => { void stopOwnedProcess(child); };
+            signal.addEventListener('abort', abort, { once: true });
+            let port;
+            try {
+                const handshake = { token, state_dir: join(this.root, 'state') };
+                // The relay address is ephemeral, so it is resolved per start and
+                // never cached: a stale URL would point Core at a dead port.
+                const hostLlm = await this.resolveHostLlm();
+                if (hostLlm !== undefined)
+                    handshake['host_llm'] = hostLlm;
+                const hostWeb = await this.resolveHostWeb();
+                if (hostWeb !== undefined)
+                    handshake['host_web'] = hostWeb;
+                child.stdin.write(JSON.stringify(handshake) + '\n');
+                port = await ready;
+            }
+            finally {
+                signal.removeEventListener('abort', abort);
+            }
+            signal.throwIfAborted();
+            const connection = { baseUrl: `http://127.0.0.1:${port}`, token };
+            const health = await fetch(connection.baseUrl + '/api/health', {
+                headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+            });
+            const result = await health.json();
+            if (!health.ok || result.core_version !== manifest.core_version || result.contract_version !== manifest.contract_version) {
+                throw new Error('Writing backend version or API mismatch; reinstall OpenWrite');
+            }
+            this.connection = connection;
+            started = true;
+            if (!this.recovered)
+                this.restartAttempts = 0;
+            this.update('ready', this.recovered
+                ? 'The writing environment recovered; in-progress writing and review tasks require an explicit retry'
+                : 'The writing environment is ready');
+            return connection;
+        }
+        catch (error) {
+            if (this.generation === generation) {
+                this.generation += 1;
+                this.connection = undefined;
+                if (this.child === child)
+                    this.child = undefined;
+            }
+            await stopOwnedProcess(child);
+            throw error;
+        }
+        finally {
+            if (timer)
+                clearTimeout(timer);
+            lines.close();
+            child.stdout?.resume();
+        }
+    }
+}
