@@ -54,8 +54,11 @@ for (const property of ['background-color', 'stroke-color', 'stroke-width']) {
   assert.ok(bundle.includes(`"--xy-minimap-overlay-${property}-props":`), `${property} JS reference`)
 }
 assert.equal(normalizeMinimapProperties('maskColor sk-example --other-mask-color'), 'maskColor sk-example --other-mask-color', 'only scoped CSS properties may be renamed')
-assert.match(bundle, /__ModuleLoader__\.load\(\{[\s\S]*id: "@dsh-novel\/studio-panel"/)
-assert.ok(bundle.includes('dsh-vditor-runtime.mjs') && bundle.includes('vditorModule.exports'), 'Vditor runtime is bundled into the plugin client')
+// The client bundle is minified, so string literals may be emitted as template
+// literals and rolldown's `//#region` markers are gone. Assert the loader
+// handoff shape, not the exact spelling of the pre-minify output.
+assert.match(bundle, /__ModuleLoader__\.load\(\{\s*id:\s*[`'"]@dsh-novel\/studio-panel[`'"]/)
+assert.ok(bundle.includes('installVditorIcons') && bundle.includes('vditorModule.exports'), 'Vditor runtime is bundled into the plugin client')
 assert.ok(bundle.includes('/studio-panel/vendor/vditor') && bundle.includes('lute/lute.min.js'), 'Vditor auxiliary assets use the packaged same-origin route')
 // The turn-tail change summary is a single flex row. Without wrapping it, the
 // row squeezes its Chinese labels down to one character per line, because CJK

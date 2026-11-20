@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction } from 'react';
-import type { OperationsViewProps } from './OperationsView.tsx';
+import type { OperationsViewProps } from './OperationsView.js';
 import type { StudioPanelInjected } from './workspace-context.ts';
 type TransferT = OperationsViewProps['t'];
 type Note = (message: string, bad?: boolean) => void;

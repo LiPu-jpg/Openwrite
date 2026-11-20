@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { CompanionSection, fetchCompanions, type CompanionStatus } from './companions.tsx'
+import { CompanionSection, fetchCompanions, type CompanionStatus } from './companions.js'
 import { ModelView } from './ModelView.tsx'
 import { SearchSettings } from './SearchSettings.tsx'
 import { fetchGlobalStudioApi } from './api.ts'

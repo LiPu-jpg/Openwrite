@@ -14,7 +14,7 @@
  * project — so it is reached through the context-free global API.
  */
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
-import { type CompanionStatus } from './companions.tsx';
+import { type CompanionStatus } from './companions.js';
 import { type HostModelCatalogDto } from './dto.ts';
 import type { StudioPanelKey } from './locales.ts';
 /** The host's default-model selection, as the host's own route reports it. */

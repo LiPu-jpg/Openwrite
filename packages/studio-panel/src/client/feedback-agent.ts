@@ -1,4 +1,4 @@
-import type { FeedbackAgentDispatchResult } from './OpenWriteSettings.tsx'
+import type { FeedbackAgentDispatchResult } from './OpenWriteSettings.js'
 import { sessionOpener, type StudioPanelInjected } from './workspace-context.ts'
 import { displayedSessionId } from './writing-scope.ts'
 

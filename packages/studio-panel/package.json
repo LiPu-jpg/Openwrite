@@ -54,7 +54,6 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
-    "lib/client.js.map",
     "lib/types/**/*.d.ts",
     "vendor/vditor/**/*",
     "cordis.patch.yml"

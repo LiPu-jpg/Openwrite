@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { asRecord, asText, unwrapData } from './dto.ts'
 import { StudioApiError } from './api.ts'
-import type { ModelNavigationGuard } from './ModelView.tsx'
-import type { OperationsViewProps } from './OperationsView.tsx'
+import type { ModelNavigationGuard } from './ModelView.js'
+import type { OperationsViewProps } from './OperationsView.js'
 import css from './SerialWritingView.module.css'
 
 type Row = Record<string, unknown>

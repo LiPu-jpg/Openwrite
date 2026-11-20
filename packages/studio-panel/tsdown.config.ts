@@ -83,13 +83,26 @@ const client: UserConfig = {
     '__OPENWRITE_VERSION__': JSON.stringify(releasePackage.version),
   },
   dts: false,
-  sourcemap: true,
+  // 'hidden' keeps the .map next to the bundle for local debugging but omits the
+  // sourceMappingURL comment: the map is not published to npm, so the browser
+  // must not be told to fetch it.
+  sourcemap: 'hidden',
   clean: false,
   external: [...CLIENT_EXTERNALS],
   // tsdown auto-externalizes package dependencies; anything NOT in the loader
   // module table must inline instead — a require() the table cannot answer is
   // a guaranteed runtime throw.
   noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
+  // Minify without renaming identifiers. The module-loader handoff is emitted
+  // as raw banner/intro/footer text that the host evaluates as-is, so the
+  // `require` parameter and the `module`/`exports` bindings must keep their
+  // names. Property mangling stays off for the same reason.
+  minify: { compress: true, mangle: false },
+  // A CJS output makes the resolver prefer the package `main` entry, which for
+  // lucide-react is a monolithic CJS barrel of every icon — untree-shakeable.
+  // Aliasing to the ESM entry restores per-icon modules so only the 45 icons
+  // actually imported are bundled.
+  alias: { 'lucide-react': 'lucide-react/dist/esm/lucide-react.js' },
   plugins: [{
     name: 'dsh-react-flow-style-inline',
     transform(code: string, id: string) {

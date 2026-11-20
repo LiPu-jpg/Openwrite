@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { OperationsViewProps } from './OperationsView.tsx'
+import type { OperationsViewProps } from './OperationsView.js'
 import css from './Workbench.module.css'
 
 type Props = Pick<OperationsViewProps, 'fetchStudioApi' | 'postStudioApi' | 't'> & { onSaved: () => void }

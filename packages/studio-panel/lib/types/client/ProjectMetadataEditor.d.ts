@@ -1,4 +1,4 @@
-import type { OperationsViewProps } from './OperationsView.tsx';
+import type { OperationsViewProps } from './OperationsView.js';
 type Props = Pick<OperationsViewProps, 'fetchStudioApi' | 'postStudioApi' | 't'> & {
     onSaved: () => void;
 };

@@ -1,4 +1,4 @@
-import type { AssetEditorDraft, AssetEditorSource } from './AssetEditor.tsx';
+import type { AssetEditorDraft, AssetEditorSource } from './AssetEditor.js';
 export interface AssetDraftContext {
     workspaceId: string;
     root: string;

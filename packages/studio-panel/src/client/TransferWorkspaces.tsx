@@ -18,7 +18,7 @@ import {
   type ProjectArchiveSummaryDto,
   type ProjectRestorePreviewDto,
 } from './dto.ts'
-import type { OperationsViewProps } from './OperationsView.tsx'
+import type { OperationsViewProps } from './OperationsView.js'
 import type { StudioPanelInjected } from './workspace-context.ts'
 import { workbenchStore } from './WorkbenchStore.ts'
 import css from './Workbench.module.css'

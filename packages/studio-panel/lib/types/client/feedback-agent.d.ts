@@ -1,4 +1,4 @@
-import type { FeedbackAgentDispatchResult } from './OpenWriteSettings.tsx';
+import type { FeedbackAgentDispatchResult } from './OpenWriteSettings.js';
 import { type StudioPanelInjected } from './workspace-context.ts';
 /**
  * Dispatch a sanitized `/feedback` prompt directly into the host Agent Loop.
