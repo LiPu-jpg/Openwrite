@@ -6,4 +6,4 @@
       config:
         mode: managed
     - id: studio-panel
-      name: ./packages/studio-panel/lib/index.js
+      name: dsh-openwrite/panel

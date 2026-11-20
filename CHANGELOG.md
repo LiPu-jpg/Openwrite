@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.41：Bundle Patch 改用包标识，修复 DSH STORE 固定 Commit 预检拒绝
+
+修 DSH STORE 对本仓库的固定 Commit 自动预检（[AI-Scarlett/DSH-Store#682](https://github.com/AI-Scarlett/DSH-Store/issues/682)、[#1969](https://github.com/AI-Scarlett/DSH-Store/issues/1969)）：
+
+- **根包 `cordis.patch.yml` 的 `studio-panel` 条目 `name` 由文件路径改为包标识 `dsh-openwrite/panel`**：Bundle Patch 的 `name` 必须是 Node 包标识，商店的固定 Commit 校验器只接受 `包名` / `包名/子路径` 形式；此前 `./packages/studio-panel/lib/index.js` 会被判为「包身份不明确」并拒绝入库。根包 `package.json` 的 `exports` 早已包含 `"./panel": "./packages/studio-panel/lib/index.js"`，因此解析目标与运行时装载路径均不变，与已在生产运行的 `dsh-openwrite/bridge` 同一机制。
+- 三个插入的插件 ID（`openwrite-bundle`、`openwrite-bridge`、`studio-panel`）保持不变，宿主侧行为与既有安装一致。
+- 商城安装目标仍为根包 `dsh-openwrite`；`packages/openwrite-bridge`、`packages/studio-panel` 仍是内部开发子包，不单独登记商城条目。
+
 ## 0.2.40：修复 @fuxi-ailabs/dsh-dog 伴生识别与 DoG 协作规范、智能问题反馈助手及稳定性修复
 
 修 [#174](https://github.com/LiPu-jpg/Openwrite/issues/174) 并完成全功能与多插件联动实机审计与修复：
